@@ -17,23 +17,9 @@
 
 namespace at {
 
-static inline void errorHandler(const char * msg, void * data) {
-  throw std::runtime_error(msg);
-}
-static inline void argErrorHandler(int arg, const char * msg, void * data) {
-  std::stringstream new_error;
-  new_error << "invalid argument " << arg << ": " << msg;
-  throw std::runtime_error(new_error.str());
-}
-
 Context::Context()
 : thc_state(nullptr, [](THCState* p){ /* no-op */ } )
-, thh_state(nullptr, [](THHState* p){ /* no-op */ } )
-{
-
-  THSetDefaultErrorHandler(errorHandler,nullptr);
-  THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
-}
+, thh_state(nullptr, [](THHState* p){ /* no-op */ } ) {}
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.

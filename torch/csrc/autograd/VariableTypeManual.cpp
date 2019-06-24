@@ -74,7 +74,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
     if (!t.defined()) {
       continue;
     }
-    if (!t.type().is_variable()) {
+    if (!t.is_variable()) {
       AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }

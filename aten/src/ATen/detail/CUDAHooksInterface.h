@@ -23,8 +23,7 @@ namespace at {
 constexpr const char* CUDA_HELP =
   "PyTorch splits its backend into two shared libraries: a CPU library "
   "and a CUDA library; this error has occurred because you are trying "
-  "to use some CUDA functionality, but the CUDA library does not exist."
-  "PyTorch not compiled with CUDA enabled, or the CUDA library has not been "
+  "to use some CUDA functionality, but the CUDA library has not been "
   "loaded by the dynamic linker for some reason.  The CUDA library MUST "
   "be loaded, EVEN IF you don't directly use any symbols from the CUDA library! "
   "One common culprit is a lack of -Wl,--no-as-needed in your link arguments; many "

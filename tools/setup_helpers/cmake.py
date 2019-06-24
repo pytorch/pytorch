@@ -232,45 +232,64 @@ class CMake:
         _mkdir_p(install_dir)
         _mkdir_p(self.build_dir)
 
+        # Store build options that are directly stored in environment variables
+        build_options = {
+            # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
+            'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
+        }
+        # Options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars
+        additional_options = {
+            'BLAS',
+            'BUILDING_WITH_TORCH_LIBS',
+            'CMAKE_PREFIX_PATH',
+            'ONNX_ML',
+            'ONNX_NAMESPACE',
+            'WERROR'
+        }
+        for var, val in my_env.items():
+            # We currently pass over all environment variables that start with "BUILD_" or "USE_". This is because we
+            # currently have no reliable way to get the list of all build options we have specified in CMakeLists.txt.
+            # (`cmake -L` won't print dependent options when the dependency condition is not met.) We will possibly
+            # change this in the future by parsing CMakeLists.txt ourselves (then additional_options would also not be
+            # needed to be specified here).
+            if var.startswith(('USE_', 'BUILD_')) or var in additional_options:
+                build_options[var] = val
+
+        # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
+        # future, as CMake can detect many of these libraries pretty comfortably. We have them here for now before CMake
+        # integration is completed. They appear here not in the CMake.defines call below because they start with either
+        # "BUILD_" or "USE_" and must be overwritten here.
+        build_options.update({
+            'BUILD_PYTHON': build_python,
+            'BUILD_TEST': build_test,
+            'USE_CUDA': USE_CUDA,
+            'USE_DISTRIBUTED': USE_DISTRIBUTED,
+            'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
+                               check_negative_env_flag('USE_FBGEMM')),
+            'USE_MKLDNN': USE_MKLDNN,
+            'USE_NNPACK': USE_NNPACK,
+            'USE_QNNPACK': USE_QNNPACK,
+            'USE_NCCL': USE_NCCL,
+            'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
+            'USE_NUMPY': USE_NUMPY,
+            'USE_ROCM': USE_ROCM,
+            'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
+        })
+
         CMake.defines(args,
                       PYTHON_EXECUTABLE=escape_path(sys.executable),
                       PYTHON_LIBRARY=escape_path(cmake_python_library),
                       PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
-                      BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
                       TORCH_BUILD_VERSION=version,
                       CMAKE_BUILD_TYPE=self._build_type,
-                      BUILD_PYTHON=build_python,
-                      BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
-                      BUILD_BINARY=check_env_flag('BUILD_BINARY'),
-                      BUILD_TEST=build_test,
                       INSTALL_TEST=build_test,
-                      BUILD_CAFFE2_OPS=not check_negative_env_flag('BUILD_CAFFE2_OPS'),
-                      ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE", "onnx_torch"),
-                      ONNX_ML=not check_negative_env_flag("ONNX_ML"),
-                      USE_CUDA=USE_CUDA,
-                      USE_DISTRIBUTED=USE_DISTRIBUTED,
-                      USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or
-                                      check_negative_env_flag('USE_FBGEMM')),
                       NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or
                                            check_negative_env_flag('NO_NAMEDTENSOR')),
-                      USE_NUMPY=USE_NUMPY,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
-                      USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
                       NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
                       NCCL_ROOT_DIR=NCCL_ROOT_DIR,
                       NCCL_SYSTEM_LIB=NCCL_SYSTEM_LIB,
                       CAFFE2_STATIC_LINK_CUDA=check_env_flag('USE_CUDA_STATIC_LINK'),
-                      USE_ROCM=USE_ROCM,
-                      USE_NNPACK=USE_NNPACK,
-                      USE_LEVELDB=check_env_flag('USE_LEVELDB'),
-                      USE_LMDB=check_env_flag('USE_LMDB'),
-                      USE_OPENCV=check_env_flag('USE_OPENCV'),
-                      USE_QNNPACK=USE_QNNPACK,
-                      USE_TENSORRT=check_env_flag('USE_TENSORRT'),
-                      USE_FFMPEG=check_env_flag('USE_FFMPEG'),
-                      USE_SYSTEM_EIGEN_INSTALL="OFF",
-                      USE_MKLDNN=USE_MKLDNN,
-                      USE_NCCL=USE_NCCL,
                       NCCL_EXTERNAL=USE_NCCL,
                       CMAKE_INSTALL_PREFIX=install_dir,
                       CMAKE_C_FLAGS=cflags,
@@ -278,15 +297,8 @@ class CMake:
                       CMAKE_EXE_LINKER_FLAGS=ldflags,
                       CMAKE_SHARED_LINKER_FLAGS=ldflags,
                       THD_SO_VERSION="1",
-                      CMAKE_PREFIX_PATH=(os.getenv('CMAKE_PREFIX_PATH') or
-                                         distutils.sysconfig.get_python_lib()),
-                      BLAS=os.getenv('BLAS'),
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
-                      USE_REDIS=os.getenv('USE_REDIS'),
-                      USE_GLOG=os.getenv('USE_GLOG'),
-                      USE_GFLAGS=os.getenv('USE_GFLAGS'),
-                      USE_ASAN=check_env_flag('USE_ASAN'),
-                      WERROR=os.getenv('WERROR'))
+                      **build_options)
 
         if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
             CMake.defines(args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))

@@ -286,23 +286,4 @@ static inline bool isSparse(Backend b) {
   }
 }
 
-static inline Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
-  switch (d) {
-    case DeviceType::CPU:
-      return backendToCPU(b);
-    case DeviceType::CUDA:
-      return backendToCUDA(b);
-    case DeviceType::HIP:
-      return backendToHIP(b);
-    case DeviceType::MSNPU:
-      TORCH_CHECK(!isSparse(b), "Sparse not implemented for MSNPU");
-      return Backend::MSNPU;
-    case DeviceType::XLA:
-      TORCH_CHECK(!isSparse(b), "Sparse not implemented for XLA");
-      return Backend::XLA;
-    default:
-      AT_ERROR("Unknown device type");
-  }
-}
-
 } // namespace c10
