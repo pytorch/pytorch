@@ -25,7 +25,6 @@ def _is_jit_enabled():
 # Check if we can safely replicate the module.
 # there are three types of module:
 # 1. python modules
-# 2. weak python modules (nn.Module annotated by @weak_module)
 # 3. ScriptModule
 #
 # currently a module cannot be replicated properly if the descendants of

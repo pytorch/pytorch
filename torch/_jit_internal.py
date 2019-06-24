@@ -4,28 +4,13 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
-import weakref
 import inspect
+import weakref
 from torch._six import builtins
-
-# Tracks standalone weak script functions
-compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Tracks which methods should be converted to strong methods
-weak_script_methods = weakref.WeakSet()  # noqa: T484
-
-# Converted modules and their corresponding WeakScriptModuleProxy objects
-weak_modules = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Types that have been declared as weak modules
-weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
-
-COMPILATION_PENDING = object()
-COMPILED = object()
 
 
 def createResolutionCallback(frames_up=0):
@@ -100,41 +85,12 @@ def createResolutionCallbackFromClosure(fn):
     return env
 
 
-def weak_script(fn, _frames_up=0):
-    """
-    Marks a function as a weak script function. When used in a script function
-    or ScriptModule, the weak script function will be lazily compiled and
-    inlined in the graph. When not used in a script function, the weak script
-    annotation has no effect.
-    """
-    compiled_weak_fns[fn] = {
-        "status": COMPILATION_PENDING,
-        "compiled_fn": None,
-    }
-    return fn
-
-
-def weak_module(cls):
-    weak_types[cls] = {
-        "method_stubs": None
-    }
-    return cls
-
-
-def weak_script_method(fn):
-    weak_script_methods.add(fn)
-    return fn
-
-
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
     """
-    Dispatches to either of 2 weak script functions based on a boolean argument.
+    Dispatches to either of 2 script functions based on a boolean argument.
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
-    if compiled_weak_fns.get(if_true) is None or compiled_weak_fns.get(if_false) is None:
-        raise RuntimeError("both functions must be weak script")
-
     def fn(*args, **kwargs):
         dispatch_flag = False
         if arg_name in kwargs:
