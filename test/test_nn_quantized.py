@@ -28,25 +28,26 @@ class ModuleAPITest(TestCase):
         """test API functionality for nn.quantized.linear"""
         # TODO: create from_float
         # create __init__
-        input_channels = 10
-        output_channels = 20
-        nn_linear = torch.nn.Linear(output_channels, input_channels)
+        in_features = 10
+        out_features = 20
         batch_size = 5
-        W = torch.rand(output_channels, input_channels).float()
+        W = torch.rand(out_features, in_features).float()
         W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
-        X = torch.rand(batch_size, input_channels).float()
+        W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
+        X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
-        B = torch.rand(output_channels).float()
+        B = torch.rand(out_features).float()
         B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32)
         out_scale = 0.5
         out_zero_point = 3
-        q_linear = nnq.Linear(nn_linear, W_q, B_q, out_scale, out_zero_point)
-        self.assertEqual(W_q, q_linear.weight)
-        self.assertEqual(B_q, q_linear.bias)
+        q_linear = nnq.Linear(out_features, in_features)
+        q_linear._packed_weight = W_pack
+        q_linear.bias = B_q
+        q_linear.out_scale = torch.tensor([out_scale])
+        q_linear.out_zero_point = torch.tensor([out_zero_point])
         Z_q = q_linear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
-        W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
         Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, out_scale, out_zero_point)
         self.assertEqual(Z_ref, Z_q)
 
