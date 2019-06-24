@@ -17,7 +17,6 @@ template<class T> class List;
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
-
 namespace detail {
 
 template<class StorageT>
