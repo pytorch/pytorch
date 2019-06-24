@@ -1341,7 +1341,7 @@ struct to_ir {
     }
     // Emit loop information for builtinFunction values like range(), zip(), 
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
-    auto sv = emitSugaredExpr(itrs[0], 1);
+    SugaredValuePtr sv = emitSugaredExpr(itrs[0], 1);
 
     // We will get IterableTree for builtinFunctions zip() and enumerate(),
     // RangeValue for range(), and SimpleValue for types like List/Tensor/Dict/String.
@@ -1352,6 +1352,11 @@ struct to_ir {
     // For SimpleValue(except Tuple) or RanveValue/IterableTree, emit common loop
     if ((siv && !siv->getValue()->type()->cast<TupleType>())
         || range_val || iterable_tree) {
+      // looping over a dict defaults to looping over the keys in python
+      if (siv && siv->getValue()->type()->cast<DictType>()) {
+        sv = std::make_shared<SimpleValue>(
+          graph->insert(aten::keys, {siv->getValue()}, {}, stmt.range()));
+      }
       emitLoopCommon(stmt.range(), body, sv, targets, {}); 
       return;
     }
