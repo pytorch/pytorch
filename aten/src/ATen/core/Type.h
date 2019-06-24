@@ -24,6 +24,10 @@
 #include <limits>
 #include <memory>
 
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/Dimname.h>
+#endif
+
 // To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER
 #ifdef s_addr
@@ -79,10 +83,6 @@ struct CAFFE2_API Type {
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
-  virtual Allocator * allocator() const = 0;
-  virtual Device getDeviceFromPtr(void * data) const = 0;
-  virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
-  virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
   virtual Type & toBackend(Backend b) const = 0;
   virtual Type & toScalarType(ScalarType s) const = 0;

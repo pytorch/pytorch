@@ -16,6 +16,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/ATenDispatch.h>
+#include <ATen/Context.h>
 
 namespace at {
 
@@ -29,7 +30,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  auto device = getType(options).getDeviceFromPtr(data);
+  auto device = globalContext().getDeviceFromPtr(data, options.device().type());
   if (options.device().has_index()) {
     TORCH_CHECK(
         options.device() == device,
