@@ -287,5 +287,27 @@ class TestONNXOpset(TestCase):
         check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
 
 
+
+    def test_layer_norm(self):
+        model = torch.nn.LayerNorm([10, 10])
+
+        ops = [{"op_name" : "ReduceMean"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Pow"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Pow"},
+                 {"op_name" : "ReduceMean"},
+                 {"op_name" : "Sub"},
+                 {"op_name" : "Sub"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Add"},
+                 {"op_name" : "Sqrt"},
+                 {"op_name" : "Div"},
+                 {"op_name" : "Mul"},
+                 {"op_name" : "Add"}]
+        ops = {9 : ops, 10 : ops}
+        x = torch.randn(20, 5, 10, 10)
+        check_onnx_opsets_operator(model, x, ops, opset_versions=[9, 10])
+
 if __name__ == '__main__':
     run_tests()

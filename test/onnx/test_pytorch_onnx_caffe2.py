@@ -1117,6 +1117,12 @@ class TestCaffe2Backend(unittest.TestCase):
         underlying = nn.InstanceNorm2d(3)
         self.run_model_test(underlying, train=False, batch_size=BATCH_SIZE)
 
+    @skipIfEmbed
+    def test_layer_norm(self):
+        layer_norm = nn.LayerNorm([10, 10])
+        x = torch.randn(20, 5, 10, 10)
+        self.run_model_test(layer_norm, train=False, input=(x), batch_size=BATCH_SIZE)
+
     def test_pixel_shuffle(self):
         underlying = nn.PixelShuffle(4)
         shape = (1, 32, 5, 5)
