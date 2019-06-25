@@ -1064,9 +1064,11 @@ def _qualified_name(obj):
 
 def _is_recursive_script_enabled(value):
     # TODO: when recursive script is made the default, remove this method
-    if 'torch.nn' in inspect.getmodule(value).__name__:
-        return True
-    return torch._C._jit_recursive_script()
+    enabled = torch._C._jit_recursive_script()
+    module = inspect.getmodule(value)
+    if module is not None and 'torch.nn' in module.__name__:
+        enabled = True
+    return enabled
 
 @contextlib.contextmanager
 def _enable_recursive_script():
