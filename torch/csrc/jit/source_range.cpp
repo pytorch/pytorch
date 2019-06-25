@@ -13,8 +13,8 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
     return;
   }
 
-  size_t begin_line = start(); // beginning of line to highlight
-  size_t end_line = start(); // end of line to highlight
+  int64_t begin_line = start(); // beginning of line to highlight
+  int64_t end_line = start(); // end of line to highlight
   while (begin_line > 0 && str[begin_line - 1] != '\n')
     --begin_line;
   while (end_line < str.size() && str[end_line] != '\n')
@@ -22,9 +22,9 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   AT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
   AT_ASSERT(end_line == str.size() || str[end_line] == '\n');
 
-  size_t begin_highlight = begin_line; // beginning of context, CONTEXT lines
-                                       // before the highlight line
-  for (size_t i = 0; begin_highlight > 0; --begin_highlight) {
+  int64_t begin_highlight = begin_line; // beginning of context, CONTEXT lines
+                                        // before the highlight line
+  for (int64_t i = 0; begin_highlight > 0; --begin_highlight) {
     if (str[begin_highlight - 1] == '\n')
       ++i;
     if (i >= CONTEXT)
@@ -32,9 +32,9 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   }
   AT_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
 
-  size_t end_highlight =
+  int64_t end_highlight =
       end_line; // end of context, CONTEXT lines after the highlight line
-  for (size_t i = 0; end_highlight < str.size(); ++end_highlight) {
+  for (int64_t i = 0; end_highlight < str.size(); ++end_highlight) {
     if (str[end_highlight] == '\n')
       ++i;
     if (i >= CONTEXT)
@@ -44,13 +44,13 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
 
   if (auto flc = file_line_col()) {
     std::string filename;
-    size_t line, col;
+    int64_t line, col;
     std::tie(filename, line, col) = *flc;
     out << "at " << filename << ":" << line << ":" << col << "\n";
   }
   out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
   out << std::string(start() - begin_line, ' ');
-  size_t len = std::min(size(), end_line - start());
+  int64_t len = std::min(size(), end_line - start());
   out << std::string(len, '~')
       << (len < size() ? "...  <--- HERE" : " <--- HERE");
   out << str.substr(end_line, end_highlight - end_line);
