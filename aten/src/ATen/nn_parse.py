@@ -421,7 +421,7 @@ def run(paths):
             for backend in backends:
                 backend_props = func.get(backend, {})
                 forward_backend_types[backend] = backend_props.get('forward_scalar_types', default_scalar_types)
-                backward_backend_types[backend] = backend_props.get('backward_backend_types', default_scalar_types)
+                backward_backend_types[backend] = backend_props.get('backward_scalar_types', default_scalar_types)
 
             base = base_declaration(func, fwd_function, backends, default_scalar_types)
             declarations.append(forward_declaration(base, fwd_function, forward_backend_types))
