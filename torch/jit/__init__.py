@@ -1007,7 +1007,7 @@ def _make_strong_submodule(field, module, parent):
     return new_strong_submodule
 
 
-def _try_compile_fn(fn):
+def _try_compile_fn(fn, call_site_loc):
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
@@ -1026,7 +1026,16 @@ def _try_compile_fn(fn):
     # extract the necessary info from the closed over variables on the function
     # object
     rcb = createResolutionCallbackFromClosure(fn)
-    return torch.jit.script(fn, _rcb=rcb)
+    try:
+        scripted = torch.jit.script(fn, _rcb=rcb)
+    except Exception as e:
+        new_message = "{old_message}\nCalled {highlight}".format(
+            old_message=e.message,
+            highlight=call_site_loc.highlight()
+        )
+        raise type(e)(new_message)
+    return scripted
+
 
 
 @contextlib.contextmanager

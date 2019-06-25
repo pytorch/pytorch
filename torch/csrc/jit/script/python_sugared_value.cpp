@@ -530,7 +530,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   if (getRecursiveScriptMode() && py::isinstance<py::function>(obj)) {
     auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_fn")(obj);
+        py::module::import("torch.jit").attr("_try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(callee);
     }
