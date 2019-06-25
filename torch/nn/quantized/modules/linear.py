@@ -34,6 +34,7 @@ class Linear(NNLinear):
     def __init__(self, in_features, out_features, bias=True):
         assert bias, 'Quantized Linear module always has bias'
         super(Linear, self).__init__(in_features, out_features, bias)
+        del self.bias
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0,
             dtype=torch.qint8)
