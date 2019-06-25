@@ -1043,7 +1043,8 @@ RegisterOperators reg(
            const auto type = node->output()->type()->expect<ClassType>();
            const size_t numAttrs = type->numAttributes();
            return [type, numAttrs](Stack& stack) {
-             auto userObj = c10::ivalue::Object::create(type, numAttrs);
+             auto userObj =
+                 c10::ivalue::Object::create(type->compilation_unit(), type, numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };

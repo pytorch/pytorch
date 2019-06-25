@@ -148,11 +148,11 @@ struct PythonResolver : public Resolver {
           annotations,
           qualifiedName,
           TupleType::namedTupleSchemaFromNamesAndTypes(qualifiedName, fields, annotations));
-      CompilationUnit::_get_python_cu().register_class(tt);
+      CompilationUnit::_get_python_cu()->register_class(tt);
       return tt;
     }
 
-    return CompilationUnit::_get_python_cu().get_class(qualifiedName);
+    return CompilationUnit::_get_python_cu()->get_class(qualifiedName);
   }
 
  private:
@@ -323,7 +323,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   auto graph = func.function_->graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
-  module.module_object()->type()->compilation_unit()->create_function(
+  module.module_object()->compilation_unit()->create_function(
       "forward", graph);
 }
 
@@ -699,7 +699,7 @@ void initJitScriptBindings(PyObject* module) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
             ClassType::create(c10::QualifiedName(qualifiedName), cu);
-        CompilationUnit::_get_python_cu().register_class(classType);
+        CompilationUnit::_get_python_cu()->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
@@ -753,7 +753,7 @@ void initJitScriptBindings(PyObject* module) {
          const std::vector<at::Tensor>& constant_table,
          const Self& self) {
         import_functions(
-            CompilationUnit::_get_python_cu_const(),
+            *CompilationUnit::_get_python_cu_const(),
             cu,
             std::make_shared<Source>(src),
             constant_table,

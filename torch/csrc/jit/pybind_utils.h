@@ -423,7 +423,8 @@ inline IValue toIValue(
       auto classType = type->expect<ClassType>();
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
-      auto userObj = c10::ivalue::Object::create(classType, numAttrs);
+      auto userObj = c10::ivalue::Object::create(
+          classType->compilation_unit(), classType, numAttrs);
 
       // 2. copy all the contained types
       for (size_t slot = 0; slot < numAttrs; slot++) {
@@ -566,8 +567,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
-    auto& pyCu = script::CompilationUnit::_get_python_cu();
-    const auto classType = pyCu.get_class(c10::QualifiedName(obj->name()));
+    auto pyCu = script::CompilationUnit::_get_python_cu();
+    const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());

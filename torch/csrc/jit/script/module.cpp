@@ -193,6 +193,18 @@ std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_grap
   return std::make_pair(result.first, loadTensors(result.second));
 }
 
+static void clearMethods(c10::ivalue::Object* self) {
+  self->compilation_unit()->drop_all_functions();
+}
+
+Module::Module(std::string class_name) {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create(
+      QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
+  module_value_ = c10::ivalue::Object::create(
+      std::move(cu), std::move(cls), 0, clearMethods);
+}
+
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
   class_compilation_unit()->define(
       src,
@@ -293,7 +305,8 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
   // Create a bare object with correct number of slots
   const size_t numAttrs = classType->numAttributes();
-  auto obj = c10::ivalue::Object::create(classType, numAttrs);
+  auto obj = c10::ivalue::Object::create(
+      class_compilation_unit(), classType, numAttrs);
 
   // Invoke the `__init__()` of the class with the arguments provided.
   Stack stackWithSelf = {obj};
