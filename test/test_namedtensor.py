@@ -119,6 +119,30 @@ class TestNamedTensor(TestCase):
         y = x.select(1, 1)
         self.assertEqual(y.names, ('N', 'H', 'W'))
 
+        y = x.select('C', 1)
+        self.assertEqual(y.names, ('N', 'H', 'W'))
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'Please look up dimensions by name'):
+            y = x.select(None, 1)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'Name \'C.in\' not found in'):
+            y = x.select('C.in', 1)
+
+        x = torch.empty(2, 3, 4, 5, names=('N', 'C.in', 'H', 'W'), device=device)
+        y = x.select('C', 1)
+        self.assertEqual(y.names, ('N', 'H', 'W'))
+
+        x = torch.empty(2, 3, 4, 5, names=('C.out', 'C.in', 'H', 'W'), device=device)
+        y = x.select('C.in', 1)
+        self.assertEqual(y.names, ('C.out', 'H', 'W'))
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'Name \'C\' could refer to multiple dimensions'):
+            y = x.select('C', 1)
+
+
     def test_select(self):
         self._test_select('cpu')
 
