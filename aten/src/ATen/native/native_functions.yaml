@@ -3603,15 +3603,15 @@
     CUDA: _triangular_solve_helper_cuda
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  dispatch:
-    CPU: legacy::cpu::_th_symeig_out
-    CUDA: legacy::cuda::_th_symeig_out
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
+
+- func: _symeig_helper(Tensor self, bool eigenvectors, bool upper) -> (Tensor, Tensor)
+  variants: function
   dispatch:
-    CPU: legacy::cpu::_th_symeig
-    CUDA: legacy::cuda::_th_symeig
+    CPU: _symeig_helper_cpu
+    CUDA: _symeig_helper_cuda
 
 - func: eig(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
