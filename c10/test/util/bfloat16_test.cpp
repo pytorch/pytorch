@@ -1,6 +1,6 @@
 #include <c10/util/BFloat16.h>
 #include <gtest/gtest.h>
-/*
+
 namespace {
   float float_from_bytes(
       uint32_t sign,
@@ -30,8 +30,8 @@ namespace {
     float out[100];
 
     for (int i = 0; i < 100; ++i) {
-      bfloats[i].val_ = c10::detail::bits_from_f32(in[i]);
-      out[i] = c10::detail::f32_from_bits(bfloats[i].val_);
+      bfloats[i] = c10::BFloat16(in[i]);
+      out[i] = bfloats[i].toFloat();
 
       // The relative error should be less than 1/(2^7) since bfloat16
       // has 7 bits mantissa.
@@ -44,7 +44,7 @@ namespace {
     EXPECT_TRUE(std::isnan(inNaN));
 
     c10::BFloat16 a = c10::BFloat16(inNaN);
-    float out = c10::detail::f32_from_bits(a.val_);
+    float out = a.toFloat();
 
     EXPECT_TRUE(std::isnan(out));
   }
@@ -54,7 +54,7 @@ namespace {
     EXPECT_TRUE(std::isinf(inInf));
 
     c10::BFloat16 a = c10::BFloat16(inInf);
-    float out = c10::detail::f32_from_bits(a.val_);
+    float out = a.toFloat();
 
     EXPECT_TRUE(std::isinf(out));
   }
@@ -62,7 +62,7 @@ namespace {
   TEST(BFloat16Conversion, SmallestDenormal) {
     float in =  std::numeric_limits<float>::denorm_min(); // The smallest non-zero subnormal number
     c10::BFloat16 a = c10::BFloat16(in);
-    float out = c10::detail::f32_from_bits(a.val_);
+    float out = a.toFloat();
 
     EXPECT_FLOAT_EQ(in, out);
   }
@@ -70,9 +70,8 @@ namespace {
   TEST(BFloat16Conversion, BiggestDenormal) {
     float in =  float_from_bytes(0, 0, 0x7FFFFF); // The largest subnormal number
     c10::BFloat16 a = c10::BFloat16(in);
-    float out = c10::detail::f32_from_bits(a.val_);
+    float out = a.toFloat();
 
     EXPECT_FLOAT_EQ(1.1663108e-38, out);
   }
 } // namespace
-*/
