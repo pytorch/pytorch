@@ -3,7 +3,6 @@ import torch
 from ...modules.linear import Linear as NNLinear
 from ...._jit_internal import weak_module
 
-
 @weak_module
 class Linear(NNLinear):
     r"""
@@ -15,19 +14,26 @@ class Linear(NNLinear):
         module creation time and will be overwritten later
 
     Attributes:
-        _packed_weight: the weight that is first quantized and then packed using
-            fbgemm_linear_pack function
-        bias:   the quantized bias
+        weight: the non-learnable quantized weights of the
+                module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
+        bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
+                If :attr:`bias` is ``True``, the values are initialized to zero.
         out_scale: `scale` parameter of output Quantized Tensor, type: float
         out_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
+
+    Examples::
+
+        >>> m = nn.quantized.Linear(20, 30)
+        >>> input = torch.randn(128, 20)
+        >>> output = m(input)
+        >>> print(output.size())
+        torch.Size([128, 30])
     """
     __constants__ = ['bias', 'in_features', 'out_features']
 
     def __init__(self, in_features, out_features, bias=True):
         assert bias, 'Quantized Linear module always has bias'
         super(Linear, self).__init__(in_features, out_features, bias)
-        self._parameters.pop('weight')
-        self._parameters.pop('bias')
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0,
             dtype=torch.qint8)
@@ -54,21 +60,3 @@ class Linear(NNLinear):
             self.out_scale,
             self.out_zero_point)
         return Y_q
-
-    @staticmethod
-    def from_float(mod):
-        assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
-        assert hasattr(mod, 'qconfig'), 'Float Module must have qconfig defined'
-        weight_observer = mod.qconfig.weight()
-        weight_observer(mod.weight)
-        wt_qparams = weight_observer.calculate_qparams()
-        bias_qparams = torch.zeros(2)
-        bias_scale = (wt_qparams[0] * mod.qparams[0]).float()
-        qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long(), torch.qint8)
-        qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
-        qlinear = Linear(mod.out_features, mod.in_features)
-        qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
-        qlinear._bias = qbias
-        qlinear.out_scale = torch.tensor([mod.qparams[0]])
-        qlinear.out_zero_point = torch.tensor([mod.qparams[1]])
-        return qlinear

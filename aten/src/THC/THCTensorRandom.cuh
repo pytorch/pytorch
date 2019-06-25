@@ -283,8 +283,10 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
+  
+  // global index formula for 1D grid of 2D blocks
+  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
 
-  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, idx, seeds.second, &state);
 
@@ -330,7 +332,9 @@ sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
 
-  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;
+  // global index formula for 1D grid of 2D blocks
+  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, idx, seeds.second, &state);
 
