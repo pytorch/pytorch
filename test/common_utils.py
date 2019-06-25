@@ -863,11 +863,11 @@ def random_square_matrix_of_rank(l, rank):
     return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
 
 
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
+def random_symmetric_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
     for i in range(l):
         for j in range(i):
-            A[i, j] = A[j, i]
+            A[..., i, j] = A[..., j, i]
     return A
 
 
