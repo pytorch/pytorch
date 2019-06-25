@@ -12,7 +12,7 @@ struct QualifiedName {
   QualifiedName() {}
 
   // `name` can be a dotted string, like "foo.bar.baz", or just a bare name.
-  explicit QualifiedName(std::string name) {
+  /* implicit */ QualifiedName(const std::string& name) {
     AT_ASSERT(!name.empty());
     // split the string into its atoms.
     size_t startSearchFrom = 0;
@@ -34,14 +34,36 @@ struct QualifiedName {
 
     cacheAccessors();
   }
+  // Unnecessary copy. Ideally we'd use somoething like std::string_view.
+  /* implicit */ QualifiedName(const char* name)
+      : QualifiedName(std::string(name)) {}
 
   // `name` must be a bare name (no dots!)
   explicit QualifiedName(const QualifiedName& prefix, std::string name) {
-    AT_ASSERT(!name.empty());
+    TORCH_INTERNAL_ASSERT(!name.empty());
+    TORCH_INTERNAL_ASSERT(name.find(delimiter_) == std::string::npos);
     atoms_.insert(atoms_.begin(), prefix.atoms_.begin(), prefix.atoms_.end());
     atoms_.push_back(std::move(name));
 
     cacheAccessors();
+  }
+
+  // Is `this` a prefix of `other`?
+  // For example, "foo.bar" is a prefix of "foo.bar.baz"
+  bool isPrefixOf(const QualifiedName& other) const {
+    const auto& thisAtoms = atoms_;
+    const auto& otherAtoms = other.atoms_;
+
+    if (thisAtoms.size() > otherAtoms.size()) {
+      // Can't be a prefix if it's bigger
+      return false;
+    }
+    for (size_t i = 0; i < thisAtoms.size(); i++) {
+      if (thisAtoms[i] != otherAtoms[i]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // The fully qualified name, like "foo.bar.baz"
