@@ -84,25 +84,25 @@ void maybe_initialize_cuda(const Device device) {
   }
 }
 
-Tensor dispatch_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
+Tensor dispatch_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
   return torch::zeros(sizes, options(type_id, scalar_type, device));
 }
 
-Tensor dispatch_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
+Tensor dispatch_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
   return torch::ones(sizes, options(type_id, scalar_type, device));
 }
 
-Tensor dispatch_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, Scalar fill_value, optional<Device> device, IntArrayRef sizes) {
+Tensor dispatch_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, Scalar fill_value, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
   return torch::full(sizes, fill_value, options(type_id, scalar_type, device));
 }
 
-Tensor new_with_sizes(c10::TensorTypeId type_id, at::ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
+Tensor new_with_sizes(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
   return torch::empty(sizes, options(type_id, scalar_type, device));

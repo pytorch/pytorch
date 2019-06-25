@@ -2324,33 +2324,6 @@
     - THTensor* A
 ]]
 [[
-  name: _th_symeig
-  cname: syev
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* res1
-      output: True
-    - arg: THTensor* res2
-      output: True
-    - THTensor* self
-    - arg: bool eigenvectors
-      if_true: V
-      if_false: N
-      default: N
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
-]]
-[[
   name: _th_eig
   cname: geev
   types:

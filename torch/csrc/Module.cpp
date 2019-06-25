@@ -536,21 +536,7 @@ void init__THCUNN(PyObject*);
 
 }} // namespace torch::nn
 
-bool THDPDoubleStorage_init(PyObject *module);
-bool THDPFloatStorage_init(PyObject *module);
-//bool THDPHalfStorage_init(PyObject *module);
-bool THDPLongStorage_init(PyObject *module);
-bool THDPIntStorage_init(PyObject *module);
-bool THDPShortStorage_init(PyObject *module);
-bool THDPCharStorage_init(PyObject *module);
-bool THDPByteStorage_init(PyObject *module);
-bool THDPBoolStorage_init(PyObject *module);
-
 static std::vector<PyMethodDef> methods;
-
-#ifdef USE_DISTRIBUTED
-PyMethodDef* THDPModule_methods();
-#endif
 
 // TODO: Refactor this in some less manual way
 #ifdef USE_CUDNN
@@ -624,7 +610,6 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
 #ifdef USE_DISTRIBUTED
-  THPUtils_addPyMethodDefs(methods, THDPModule_methods());
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
