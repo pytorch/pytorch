@@ -218,8 +218,6 @@ void THNN_(Col2Im_updateOutput)(
   c10::raw::intrusive_ptr::decref(input);
 }
 
-#if !defined(TH_REAL_IS_LONG)
-
 void THNN_(Col2Im_updateGradInput)(
            THNNState *state,
            THTensor *gradOutput,
@@ -233,5 +231,4 @@ void THNN_(Col2Im_updateGradInput)(
                              kH, kW, dilationH, dilationW, padH, padW, dH, dW);
 }
 
-#endif
 #endif

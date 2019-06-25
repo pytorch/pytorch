@@ -504,24 +504,6 @@ class TestLongTensor(TestCase):
         d_result = torch.nn.functional.conv2d(d_input, d_filter)
         self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
 
-    def test_longtensor_transpose2d_same_as_doubletensor(self):
-        l_input = torch.LongTensor(1, 4, 5, 5).random_(-1000, 1000).cpu()
-        l_filter = torch.LongTensor(4, 8, 3, 3).random_(-1000, 1000).cpu()
-        l_result = torch.nn.functional.conv_transpose2d(l_input, l_filter)
-        d_input = l_input.clone().double()
-        d_filter = l_filter.clone().double()
-        d_result = torch.nn.functional.conv_transpose2d(d_input, d_filter)
-        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
-
-    def test_longtensor_dilated2d_same_as_doubletensor(self):
-        l_input = torch.LongTensor(1, 3, 32, 32).random_(-1000, 1000).cpu()
-        l_filter = torch.LongTensor(6, 3, 5, 5).random_(-1000, 1000).cpu()
-        l_result = torch.nn.functional.conv2d(l_input, l_filter, dilation=2)
-        d_input = l_input.clone().double()
-        d_filter = l_filter.clone().double()
-        d_result = torch.nn.functional.conv2d(d_input, d_filter, dilation=2)
-        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
-
     def test_longtensor_conv3d_same_as_doubletensor(self):
         l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
         l_filter = torch.LongTensor(33, 16, 3, 3, 3).random_(-1000, 1000).cpu()
@@ -529,24 +511,6 @@ class TestLongTensor(TestCase):
         d_input = l_input.clone().double()
         d_filter = l_filter.clone().double()
         d_result = torch.nn.functional.conv3d(d_input, d_filter)
-        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
-
-    def test_longtensor_transpose3d_same_as_doubletensor(self):
-        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
-        l_filter = torch.LongTensor(16, 33, 3, 3, 3).random_(-1000, 1000).cpu()
-        l_result = torch.nn.functional.conv_transpose3d(l_input, l_filter)
-        d_input = l_input.clone().double()
-        d_filter = l_filter.clone().double()
-        d_result = torch.nn.functional.conv_transpose3d(d_input, d_filter)
-        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
-
-    def test_longtensor_dilated3d_same_as_doubletensor(self):
-        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
-        l_filter = torch.LongTensor(33, 16, 3, 3, 3).random_(-1000, 1000).cpu()
-        l_result = torch.nn.functional.conv3d(l_input, l_filter, dilation=2)
-        d_input = l_input.clone().double()
-        d_filter = l_filter.clone().double()
-        d_result = torch.nn.functional.conv3d(d_input, d_filter, dilation=2)
         self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
 
 class TestNN(NNTestCase):
@@ -8377,6 +8341,43 @@ for test_params in module_tests + new_module_tests:
 
         test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
         test = NewModuleTest(**test_params)
+        add_test(test, decorator)
+    if 'check_with_long_tensor' in test_params:
+        fullname = test_params.get('fullname', None)
+        if fullname:
+            test_params['fullname'] = fullname + '_with_long_tensor'
+        else:
+            desc = test_params.get('desc', None)
+            test_params['desc'] = 'with_long_tensor' if desc is None else desc + '_with_long_tensor'
+
+        def gen_long_tensor(size):
+            return torch.LongTensor(size=size).random_(-1000, 1000).double().cpu()
+
+        def gen_long_tensor_constructor(constructor):
+            def long_tensor_constructor(*args, **kwargs):
+                cons = constructor(*args, **kwargs)
+                cons._apply(lambda t: Parameter(gen_long_tensor(t.size())) if t.is_floating_point() else t)
+                return cons
+            long_tensor_constructor.__name__ = constructor.__name__
+            return long_tensor_constructor
+
+        def gen_long_tensor_input(input_size):
+            def input_func():
+                return gen_long_tensor(input_size)
+            return input_func
+
+        def reference_fn(i, p, m):
+            m._apply(lambda t: t.long())
+            input = i.long()
+            out = m.forward(input)
+            return out
+
+        test_params['constructor'] = gen_long_tensor_constructor(test_params['constructor'])
+        test_params['input_fn'] = gen_long_tensor_input(test_params['input_size'])
+        test_params['reference_fn'] = reference_fn
+        test_params['check_reference_only'] = True
+        test = NewModuleTest(**test_params)
+
         add_test(test, decorator)
 
 for test_params in criterion_tests + new_criterion_tests:
