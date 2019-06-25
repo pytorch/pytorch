@@ -1610,8 +1610,8 @@ def std(g, input, dim=None, unbiased=True, keepdim=None):
                 count = 1
                 for x in input.type().sizes():
                     count *= x
-                mul = g.op("Mul", std, count)
-                std = g.op("Div", mul, count - 1)
+                mul = g.op("Mul", std, g.op("Constant", value_t=torch.LongTensor([count])))
+                std = g.op("Div", mul, g.op("Constant", value_t=torch.LongTensor([count - 1])))
         else:
             if dim < 0:
                 dim = input.type().dim() + dim
@@ -1623,9 +1623,9 @@ def std(g, input, dim=None, unbiased=True, keepdim=None):
             if unbiased:
                 count = 1
                 for x in [dim]:
-                    count *= x
-                mul = g.op("Mul", std, count)
-                std = g.op("Div", mul, count - 1)
+                    count *= input.type().sizes()[x]
+                mul = g.op("Mul", std, g.op("Constant", value_t=torch.LongTensor([count])))
+                std = g.op("Div", mul, g.op("Constant", value_t=torch.LongTensor([count - 1])))
         return std
     else:
         _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")
