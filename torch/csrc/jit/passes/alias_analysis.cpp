@@ -248,13 +248,12 @@ void AliasDb::analyzeImpl(Node* node) {
     if (C10_UNLIKELY(registeredAsSpecialCase && !hasSpecialCase)) {
       TORCH_INTERNAL_ASSERT(false, "Op ", node->kind().toDisplayString(),
           " is registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but doesn't have a special case.");
-    } else if (C10_UNLIKELY(!registeredAsSpecialCase && hasSpecialCase)){
-      // TODO TORCH_INTERNAL_ASSERT(false, "Op ", node->kind().toDisplayString(),
-      //     " has a special case and should be registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but is registered with ", toString(analysis));
+    } else if (C10_UNLIKELY(!registeredAsSpecialCase && hasSpecialCase)) {
+      TORCH_INTERNAL_ASSERT(false, "Op ", node->kind().toDisplayString(),
+           " has a special case and should be registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but is registered with ", toString(analysis));
     }
-
   } else {
-    //TORCH_INTERNAL_ASSERT(false, "We don't have an op for ", node->kind().toDisplayString(), " but it isn't a special case.");
+    TORCH_INTERNAL_ASSERT(hasSpecialCase, "We don't have an op for ", node->kind().toDisplayString(), " but it isn't a special case.");
   }
 
   // These nodes are not schematized, so we need to handle them specially
