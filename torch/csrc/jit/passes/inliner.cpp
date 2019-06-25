@@ -16,8 +16,8 @@ static void replace(
   WithInsertPoint guard(to_replace);
   auto new_output =
       inlineCallTo(*to_replace->owningGraph(), *fn->graph(), inputs).at(0);
-  if (to_replace->output()->hasUniqueName()) {
-    new_output->setUniqueName(to_replace->output()->uniqueName());
+  if (to_replace->output()->hasDebugName()) {
+    new_output->setDebugName(to_replace->output()->debugName());
   }
   to_replace->output()->replaceAllUsesWith(new_output);
 }
