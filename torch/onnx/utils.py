@@ -310,7 +310,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
             param_names = list(state_dict.keys())
             for i, inp in enumerate(graph_inputs):
                 if i >= user_input_num:
-                    inp.setUniqueName(param_names[i - user_input_num])
+                    inp.setDebugName(param_names[i - user_input_num])
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop)
@@ -332,7 +332,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     flatten_args, _ = torch._C._jit_flatten(args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
-    input_and_param_names = [val.uniqueName() for val in graph.inputs()]
+    input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
@@ -462,8 +462,8 @@ def _set_input_and_output_names(graph, input_names, output_names):
                 "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
         for name, node in zip(name_list, node_list):
-            if node.uniqueName() != name:
-                node.setUniqueName(name)
+            if node.debugName() != name:
+                node.setDebugName(name)
     set_names(list(graph.inputs()), input_names, 'input')
     set_names(list(graph.outputs()), output_names, 'output')
 
@@ -775,9 +775,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     if(hasattr(model, 'graph')):
         # Extracting set of valid input/output names that shall be used for dynamic_axes
         if (input_names is None) or len(input_names) == 0:
-            input_names = [x.uniqueName() for x in model.graph.inputs()]
+            input_names = [x.debugName() for x in model.graph.inputs()]
         if (output_names is None) or len(output_names) == 0:
-            output_names = [y.uniqueName() for y in model.graph.outputs()]
+            output_names = [y.debugName() for y in model.graph.outputs()]
 
     valid_names = set()
     if input_names is not None:
