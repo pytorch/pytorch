@@ -11,11 +11,26 @@
 
 #include <c10d/Utils.hpp>
 
-#include <torch/csrc/cuda/nccl.h>
-
 namespace c10d {
 
 namespace {
+
+struct AutoNcclGroup {
+  AutoNcclGroup() {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+    C10D_NCCL_CHECK(ncclGroupStart());
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
+#endif
+  }
+  ~AutoNcclGroup() {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+    C10D_NCCL_CHECK(ncclGroupEnd());
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
+#endif
+  }
+};
 
 // NCCL op mapping
 std::map<ReduceOp, ncclRedOp_t> ncclOp = {
