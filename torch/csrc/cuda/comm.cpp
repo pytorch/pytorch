@@ -88,7 +88,28 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 //
 // We thus re-wrap these Variables after broadcasting (i.e., effetively doing
 // what is equivalent to .data in Python), and give them individual version
-// counters.
+// counters. Note that we set the rewrapped Variables' `allow_tensor_metadata_change`
+// to true, because we want to allow the following use case:
+//
+// ```python
+//
+// class TestModule(torch.nn.Module):
+//
+//   def __init__(self):
+//     super(TestModule, self).__init__()
+//     self.rnn = torch.nn.LSTM(300, 1024, 1, batch_first=True, bidirectional=True)
+//
+//   def forward(self, x):
+//     # `flatten_parameters()` calls `torch._cudnn_rnn_flatten_weight(...)`,
+//     # which changes storage of `rnn`'s weights in-place.
+//     self.rnn.flatten_parameters()
+//     return self.rnn(x)
+//
+// with torch.no_grad():
+//     model_dp = torch.nn.DataParallel(TestModule().to(0))
+//     model_dp(torch.rand(2, 4, 300).to(0))
+//
+// ```
 //
 // NB: For `device[0]` in broadcast_coalesced, the input Variables are always
 //     returned as-is, so **do not** re-wrap them.
