@@ -182,7 +182,7 @@ void List<T>::push_back(T&& value) const {
 }
 
 template<class T>
-void ListPtr<T>::append(ListPtr<T> b) const {
+void List<T>::append(List<T> b) const {
   if (b.use_count() == 1) {
     impl_->list.insert(impl_->list.end(), make_move_iterator(b.impl_->list.begin()), make_move_iterator(b.impl_->list.end()));
   } else {
