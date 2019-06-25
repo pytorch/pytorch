@@ -6,6 +6,7 @@
 #include <c10/macros/Macros.h>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 
 namespace c10 {
 
@@ -25,11 +26,24 @@ struct alignas(2) BFloat16 {
 #endif
 
   constexpr C10_HOST_DEVICE BFloat16(uint16_t bits, from_bits_t) : val_(bits){};
-  inline C10_HOST_DEVICE BFloat16(float value);
-  inline C10_HOST_DEVICE operator float() const;
+
+  inline C10_HOST_DEVICE BFloat16(float value) {
+    uint32_t res;
+    std::memcpy(&res, &value, sizeof(res));
+    val_ = res >> 16;
+  }
+
+  inline C10_HOST_DEVICE float toFloat() const {
+    float res = 0;
+    uint32_t tmp = val_;
+    tmp <<= 16;
+    std::memcpy(&res, &tmp, sizeof(tmp));
+    return res;
+  }
+
+  inline C10_HOST_DEVICE operator float() const {
+    return this->toFloat();
+  }
 };
 
 } // namespace c10
-
-
-#include <c10/util/BFloat16-inl.h>
