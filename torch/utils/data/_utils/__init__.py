@@ -58,4 +58,4 @@ def _set_python_exit_flag():
 atexit.register(_set_python_exit_flag)
 
 
-from . import worker, signal_handling, pin_memory, collate  # noqa: F401
+from . import worker, signal_handling, pin_memory, collate, fetch  # noqa: F401

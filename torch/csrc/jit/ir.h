@@ -175,18 +175,18 @@ struct Value {
   size_t unique() const {
     return unique_;
   }
-  bool hasUniqueName() const {
+  bool hasDebugName() const {
     return !unique_name_.empty();
   }
   static bool isValidName(const std::string& name);
-  TORCH_API Value* setUniqueName(const std::string& name);
-  std::string uniqueName() const {
-    if (hasUniqueName()) {
+  TORCH_API Value* setDebugName(const std::string& name);
+  std::string debugName() const {
+    if (hasDebugName()) {
       return unique_name_;
     }
     return std::to_string(unique());
   }
-  TORCH_API std::string uniqueNameBase() const;
+  TORCH_API std::string debugNameBase() const;
   Node* node() {
     return node_;
   }
@@ -884,12 +884,12 @@ struct Block {
 
   Value* addInput(std::string name = "") {
     Value* v = input_->addOutput();
-    v->setUniqueName(std::move(name));
+    v->setDebugName(std::move(name));
     return v;
   }
   Value* insertInput(size_t i, std::string name = "") {
     Value* v = input_->insertOutput(i);
-    v->setUniqueName(std::move(name));
+    v->setDebugName(std::move(name));
     return v;
   }
   void eraseInput(size_t i) {
@@ -1016,7 +1016,7 @@ struct Graph {
   const Node* return_node() const {
     return block_->return_node();
   }
-  const std::unordered_map<std::string, Value*>& uniqueNames() const {
+  const std::unordered_map<std::string, Value*>& debugNames() const {
     return unique_names_;
   }
 
