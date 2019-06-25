@@ -91,6 +91,10 @@ struct CAFFE2_API CUDAHooksInterface {
     return -1;
   }
 
+  virtual int64_t getDeviceWithPrimaryContext() const {
+    return -1;
+  }
+
   virtual Allocator* getPinnedMemoryAllocator() const {
     AT_ERROR("Pinned memory requires CUDA. ", CUDA_HELP);
   }

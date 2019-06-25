@@ -5,6 +5,7 @@
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
+#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -110,6 +111,28 @@ int64_t CUDAHooks::current_device() const {
   cudaError_t err = cudaGetDevice(&device);
   if (err == cudaSuccess) {
     return device;
+  }
+  return -1;
+}
+
+int64_t CUDAHooks::getDeviceWithPrimaryContext() const {
+  unsigned int ctx_flags;
+  int ctx_is_active;
+  // check current device first
+  int64_t current_device = CUDAHooks::current_device();
+  int64_t device = current_device;
+  if (device >= 0) {
+    AT_CUDA_DRIVER_CHECK(cuDevicePrimaryCtxGetState(device, &ctx_flags, &ctx_is_active));
+    if (ctx_is_active == 1) {
+      return device;
+    }
+  }
+  for (device = 0; device <= at::cuda::device_count(); device++) {
+    if (device == current_device) continue;
+    AT_CUDA_DRIVER_CHECK(cuDevicePrimaryCtxGetState(device, &ctx_flags, &ctx_is_active));
+    if (ctx_is_active == 1) {
+      return device;
+    }
   }
   return -1;
 }
