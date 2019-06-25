@@ -42,15 +42,14 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     throw TypeError("_grad_fn has to be a Function object or None, but got %s",
         Py_TYPE(grad_fn)->tp_name);
   }
-  Tensor tensor;
+  Variable var;
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
     auto scalar_type = torch::tensors::get_default_scalar_type();
-    auto var = at::empty({0}, torch::tensors::get_default_tensor_type().options(scalar_type));
-    tensor = static_cast<Variable&>(var).variable_data();
+    var = at::empty({0}, torch::tensors::get_default_tensor_type().options(scalar_type));
   } else if (THPVariable_Check(data)) {
-    tensor = ((THPVariable*)data)->cdata.variable_data();
+    var = ((THPVariable*)data)->cdata.variable_data();
   } else {
     throw torch::TypeError("Variable data has to be a tensor, but got %s",
         Py_TYPE(data)->tp_name);
@@ -62,9 +61,8 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   // var = Variable(torch.randn(2, 3))
   // var.resize_(4, 5)
   // ```
-  tensor.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
+  var.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
 
-  Variable var = tensor;
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
     Edge edge(grad_fn_, grad_fn_->add_input_metadata(tensor));
