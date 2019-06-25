@@ -115,7 +115,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
-  PyObject* py_tensor = THPVariable_Wrap(as_variable_ref(tensor).variable_data());
+  TORCH_INTERNAL_ASSERT(tensor.is_variable());
+  PyObject* py_tensor = THPVariable_Wrap(tensor);
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return nullptr;
