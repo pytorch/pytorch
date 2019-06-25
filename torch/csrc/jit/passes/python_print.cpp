@@ -198,7 +198,7 @@ struct PythonPrintPass {
       return *this;
     }
     SourceRangeTokenStream& operator<<(const std::vector<TaggedToken>& expr) {
-      stream.insert(stream.cend(), expr.cbegin(), expr.cend());
+      stream.insert(stream.end(), expr.cbegin(), expr.cend());
       return *this;
     }
 
