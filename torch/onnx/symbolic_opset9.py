@@ -1595,3 +1595,37 @@ def gather(g, self, dim, index, sparse_grad=False):
     index = g.op("Cast", g.op("OneHot", index, depth, values, axis_i=dim), to_i=sym_help.cast_pytorch_to_onnx[dtype])
     mul = g.op("Mul", g.op("Unsqueeze", self, axes_i=[dim + 1]), index)
     return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
+
+
+@parse_args('v', 'i', 'i', 'i', 'i')
+def std(g, input, dim=None, unbiased=True, keepdim=None):
+    if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
+        if dim is None or keepdim is None:
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            meansqrd = g.op("MatMul", mean, mean)
+            sqrd = g.op("MatMul", input, input)
+            sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
+            std = g.op("Sub", sqrdmean, meansqrd)
+            if unbiased:
+                count = 1
+                for x in input.type().sizes():
+                    count *= x
+                mul = g.op("Mul", std, count)
+                std = g.op("Div", mul, count - 1)
+        else:
+            if dim < 0:
+                dim = input.type().dim() + dim
+            mean = g.op("ReduceMean", input, axes_i=[dim], keepdims_i=keepdim)
+            meansqrd = g.op("MatMul", mean, mean)
+            sqrd = g.op("MatMul", input, input)
+            sqrdmean = g.op("ReduceMean", sqrd, axes_i=[dim], keepdims_i=keepdim)
+            std = g.op("Sub", sqrdmean, meansqrd)
+            if unbiased:
+                count = 1
+                for x in [dim]:
+                    count *= x
+                mul = g.op("Mul", std, count)
+                std = g.op("Div", mul, count - 1)
+        return std
+    else:
+        _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")

@@ -133,7 +133,7 @@ class TestONNXOpset(TestCase):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                return x[1:x.size(0)] 
+                return x[1:x.size(0)]
 
         ops_9 = [{"op_name" : "Constant"},
                  {"op_name" : "Constant"},
@@ -285,6 +285,21 @@ class TestONNXOpset(TestCase):
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
+
+    def test_std(self):
+        class MyModule(Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=False)
+
+        ops = [{"op_name": "ReduceMean", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
+               {"op_name": "MatMul"},
+               {"op_name": "MatMul"},
+               {"op_name": "ReduceMean", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
+               {"op_name": "Sub"}
+               ]
+        ops = {9: ops, 10: ops}
+        x = torch.randn(1, 16, 3, 3)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
 
 if __name__ == '__main__':
