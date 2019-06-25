@@ -353,6 +353,11 @@ def _model_to_graph(model, args, verbose=False, training=False,
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
+    # if a opset version is less than 9 check if model has a constant int node
+    # and if so add a cast to it
+    if _export_onnx_opset_version < 9:
+        torch._C._jit_pass_onnx_cast_constant(graph)
+
     if verbose:
         print(graph)
 
