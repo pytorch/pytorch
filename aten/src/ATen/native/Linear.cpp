@@ -240,7 +240,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis in the right hand side");
         TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
         int64_t letter_num = c-'a';
-        TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, "occurs twice in output");
+        TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, " occurs twice in output");
         idxes_to_preprocessed_dims[letter_mapping[letter_num]] = num_output_dims;
         num_output_dims++;
       }
