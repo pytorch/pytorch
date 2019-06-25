@@ -6944,7 +6944,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
 
-    def test_script_module_list_sequential_error(self):
+    def test_script_module_list_sequential(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, mod_list):
                 super(M, self).__init__(False)
@@ -6956,25 +6956,21 @@ a")
                     v = m(v)
                 return v
 
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.ModuleList([nn.ReLU()]))
+        m = M(nn.Sequential(nn.ReLU()))
+        self.assertExportImportModule(m, (torch.randn(2, 2),))
 
-    def test_attr_module_constants_error(self):
+    def test_attr_module_constants(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self, mod_list):
                 super(M2, self).__init__(False)
                 self.mods = mod_list
 
             @torch.jit.script_method
-            def forward(self, v):
+            def forward(self, x):
                 return self.mods.forward(x)
 
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            M2(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            M2(nn.ModuleList([nn.ReLU()]))
+        m = M2(nn.Sequential(nn.ReLU()))
+        self.assertExportImportModule(m, (torch.randn(2, 2),))
 
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
@@ -12008,8 +12004,6 @@ a")
             def forward(self, input):
                 # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
                 return self.x(input)
-
-        print(S().graph)
 
         eager_out = self.runAndSaveRNG(lambda x: torch.nn.LSTM(5, 5)(x), (input,))[0]
         script_out = self.runAndSaveRNG(lambda x: S()(x), (input,))[0]

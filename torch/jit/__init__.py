@@ -926,6 +926,7 @@ def _create_constant_iterable_module(module):
             modules[key] = _create_constant_iterable_module(submodule)
         else:
             modules[key] = _convert_to_script_module(submodule)
+            x = _convert_to_script_module(submodule)
 
     if isinstance(module, Sequential):
         return _ConstSequential(Sequential(modules))
@@ -1044,6 +1045,24 @@ def _qualified_name(obj):
     return module_name + "." + name
 
 
+def _is_recursive_script_enabled(value):
+    # TODO: when recursive script is made the default, remove this method
+
+    # torch.nn.functional/init functions
+    if hasattr(value, '__name__'):
+        name = value.__name__
+        if getattr(torch.nn.functional, name, None) == value:
+            return True
+        if getattr(torch.nn.init, name, None) == value:
+            return True
+
+    # torch.nn modules
+    if 'torch.nn.modules' in str(value.__class__):
+        # Special case to allow nn.Modules to be compiled even though @weak_script
+        # has been deleted
+        return True
+    return torch._C._jit_recursive_script()
+
 @contextlib.contextmanager
 def _enable_recursive_script():
     torch._C._jit_recursive_script(True)
@@ -1057,8 +1076,8 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
 
-    if torch._C._jit_recursive_script():
-        if isinstance(obj, torch.nn.Module):
+    if isinstance(obj, torch.nn.Module):
+        if _is_recursive_script_enabled(obj):
             return _convert_to_script_module(obj)
 
     if inspect.isclass(obj):
@@ -1471,7 +1490,7 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if isinstance(value, Module) and torch._C._jit_recursive_script():
+                if isinstance(value, Module) and _is_recursive_script_enabled(value):
                     # Compile weak script module
                     value = _convert_to_script_module(value)
                 if attr == 'training':
@@ -1586,7 +1605,7 @@ if _enabled:
                     if isinstance(item, (ModuleList, Sequential)):
                         # These are in __constants__, so ignore them here
 
-                        if not torch._C._jit_recursive_script():
+                        if not _is_recursive_script_enabled(item):
                             # For recursive script, these are constantified after
                             # they are used, so they don't need to be in constants.
                             # The `continue` here should be deleted along with
@@ -1687,8 +1706,15 @@ def _convert_to_script_module(mod, methods=None):
         # Create constant versions for the iterable modules
         return _create_constant_iterable_module(mod)
 
+    # methods = ()
     if methods is None:
-        methods = ('forward',)
+        if mod.forward.__func__ == torch.nn.Module.forward:
+            # forward was not overrided
+            raise RuntimeError("No forward (TODO: delete this error)")
+        if not _jit_internal.is_ignored_fn(mod.forward):
+            methods = ('forward',)
+        else:
+            methods = ()
     exported = []
     for name in dir(mod):
         item = getattr(mod, name)
@@ -1800,12 +1826,12 @@ class _ConstModuleList(ScriptModule):
 
         if isinstance(modules, OrderedDict):
             for key, module in modules.items():
-                if isinstance(module, torch.nn.Module) and torch._C._jit_recursive_script():
+                if isinstance(module, torch.nn.Module) and _is_recursive_script_enabled(module):
                     module = _convert_to_script_module(module)
                 self.add_module(key, module)
         else:
             for i, module in enumerate(modules):
-                if isinstance(module, torch.nn.Module) and torch._C._jit_recursive_script():
+                if isinstance(module, torch.nn.Module) and _is_recursive_script_enabled(module):
                     module = _convert_to_script_module(module)
                 self.add_module(str(i), module)
 
