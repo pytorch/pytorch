@@ -218,7 +218,7 @@ class TestOperators(TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                assert False
+                raise AssertionError()
 
             @staticmethod
             def forward(ctx, x, y):

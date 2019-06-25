@@ -7354,7 +7354,7 @@ class TestNN(NNTestCase):
                             [[3.4500, 6.0000000000, 5.0000, 4.8340, 9.0000],
                              [2.2500, 6.3332500450, 5.0000, 5.1000, 7.7500]]).view(1, 1, 2, 5)
                     else:
-                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                        raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
                 elif mode == 'nearest':
                     if padding_mode == 'zeros':
                         groundtruth = torch.tensor(
@@ -7369,9 +7369,9 @@ class TestNN(NNTestCase):
                             [[1., 8., 5., 7., 9.],
                              [1., 8., 5., 8., 9.]]).view(1, 1, 2, 5)
                     else:
-                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                        raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
                 else:
-                    assert False, "missing groundtruth test for interpolation mode '{}'".format(mode)
+                    raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
                 output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode)
                 self.assertEqual(output, groundtruth,
                                  "groundtruth comparison failed for mode={}, "
