@@ -1896,6 +1896,15 @@ class TestCaffe2Backend(unittest.TestCase):
         inputs = torch.randn(3, 2, 1)
         self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
 
+    def test_std(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=False)
+
+        model = StandardDeviation()
+        inputs = torch.randn(1, 16, 3, 3)
+        self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
+
 # a bit of metaprogramming to set up all the rnn tests
 
 
