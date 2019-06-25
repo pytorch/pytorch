@@ -397,7 +397,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using NCCL')
         if cmake_cache_vars['USE_DISTRIBUTED']:
-            report('-- Building with THD distributed package ')
             if IS_LINUX:
                 report('-- Building with c10d distributed package ')
             else:
