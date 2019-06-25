@@ -109,7 +109,7 @@ typename List<T>::value_type List<T>::get(size_type pos) const {
 
 template<class T>
 typename List<T>::internal_reference_type List<T>::operator[](size_type pos) const {
-  impl_->list.at(pos); // Throw the exception if it is out of range.
+  static_cast<void>(impl_->list.at(pos)); // Throw the exception if it is out of range.
   return {impl_->list.begin() + pos};
 }
 

@@ -198,9 +198,6 @@ struct CAFFE2_API IValue final {
   // IntList
   IValue(c10::List<int64_t> v);
   IValue(c10::ArrayRef<int64_t> v);
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
   IValue(std::vector<int64_t> v);
   bool isIntList() const { return Tag::IntList == tag; }
   c10::List<int64_t> toIntList() &&;
@@ -218,9 +215,6 @@ struct CAFFE2_API IValue final {
 
   // DoubleList
   IValue(c10::List<double> v);
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
   IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
   c10::List<double> toDoubleList() &&;
@@ -229,9 +223,6 @@ struct CAFFE2_API IValue final {
 
   // BoolList
   IValue(c10::List<bool> v);
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
   IValue(std::vector<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
   c10::List<bool> toBoolList() &&;
@@ -246,9 +237,6 @@ struct CAFFE2_API IValue final {
   c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
   IValue(std::vector<IValue> v);
   IValue(c10::List<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
@@ -259,9 +247,6 @@ struct CAFFE2_API IValue final {
   template<class T>
   IValue(c10::List<T> v);
   template<class T>
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
   IValue(std::vector<T> v);
 
   // GenericDict
@@ -274,9 +259,6 @@ struct CAFFE2_API IValue final {
   IValue(c10::Dict<Key, Value> v);
 
   template<class Key, class Value>
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
-  /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
   template<class T>

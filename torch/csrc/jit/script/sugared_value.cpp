@@ -265,6 +265,7 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
   if (val_type->cast<ListType>() ||
+      val_type->cast<StringType>() ||
       val_type->isSubtypeOf(TensorType::get())) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
@@ -280,6 +281,8 @@ Value* SimpleValue::getelem(const SourceRange&loc, Function& m, Value* i) {
   Value* cur_elem = nullptr;
   if (val_type->cast<ListType>()) {
     cur_elem = g.insert(aten::select, {val, i}, {}, loc);
+  } else if (val_type->cast<StringType>()) {
+    cur_elem = g.insert(prim::StringIndex, {val, i}, {}, loc);
   } else if (val_type->isSubtypeOf(TensorType::get())) {
     cur_elem = g.insert(aten::select, {val, 0, i}, {}, loc);
   } else {
