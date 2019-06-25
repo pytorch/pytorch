@@ -15,7 +15,7 @@ using SourceRangeRecords = std::vector<SourceRangeRecord>;
 
 // Class that keeps track of a serialized debug info table and lazily
 // unpacks it on query.
-class DebugInfo {
+class CAFFE2_API DebugInfo {
  public:
   using SerializedDebugInfo = std::tuple<at::DataPtr, size_t>;
 
