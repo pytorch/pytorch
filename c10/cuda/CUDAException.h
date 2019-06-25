@@ -20,13 +20,3 @@
       AT_ERROR("CUDA error: ", cudaGetErrorString(__err)); \
     }                                                      \
   } while (0)
-
-// For CUDA Driver API
-#define C10_CUDA_DRIVER_CHECK(EXPR)                                \
-  do {                                                             \
-    CUresult __err = EXPR;                                         \
-    if (__err != CUDA_SUCCESS) {                                   \
-      const char* err_str;                                         \
-      AT_ERROR("CUDA error: ", cuGetErrorString(__err, &err_str)); \
-    }                                                              \
-  } while (0)

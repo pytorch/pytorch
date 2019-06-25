@@ -64,7 +64,7 @@ torch.manual_seed(SEED)
 def shell(command, cwd=None):
     sys.stdout.flush()
     sys.stderr.flush()
-    # The folloing cool snippet is copied from Py3 core library subprocess.call
+    # The following cool snippet is copied from Py3 core library subprocess.call
     # only the with
     #   1. `except KeyboardInterrupt` block added for SIGINT handling.
     #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do

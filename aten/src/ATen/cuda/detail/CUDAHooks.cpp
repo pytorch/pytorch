@@ -122,14 +122,14 @@ int64_t CUDAHooks::getDeviceWithPrimaryContext() const {
   int64_t current_device = CUDAHooks::current_device();
   int64_t device = current_device;
   if (device >= 0) {
-    AT_CUDA_DRIVER_CHECK(cuDevicePrimaryCtxGetState(device, &ctx_flags, &ctx_is_active));
+    AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device, &ctx_flags, &ctx_is_active));
     if (ctx_is_active == 1) {
       return device;
     }
   }
-  for (device = 0; device <= at::cuda::device_count(); device++) {
+  for (device = 0; device < at::cuda::device_count(); device++) {
     if (device == current_device) continue;
-    AT_CUDA_DRIVER_CHECK(cuDevicePrimaryCtxGetState(device, &ctx_flags, &ctx_is_active));
+    AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device, &ctx_flags, &ctx_is_active));
     if (ctx_is_active == 1) {
       return device;
     }
