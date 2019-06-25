@@ -42,7 +42,6 @@ time python tools/clang_tidy.py                  \
   --verbose                                      \
   --paths torch/csrc/                            \
   --diff "$BASE_BRANCH"                          \
-  -g"-torch/csrc/distributed/Module.cpp"         \
   -g"-torch/csrc/jit/export.cpp"                 \
   -g"-torch/csrc/jit/import.cpp"                 \
   -g"-torch/csrc/jit/netdef_converter.cpp"       \
