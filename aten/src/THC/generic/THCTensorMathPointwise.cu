@@ -175,15 +175,14 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
 
 #if !defined(THC_REAL_IS_BOOL)
 
+static void propagate_names(THCTensor* result, THCTensor* src) {
 #ifdef NAMEDTENSOR_ENABLED
-#define PERFORM_NAME_INFERENCE                                          \
-    if (at::impl::internal_is_named(src)) {                             \
-      const auto names = at::impl::internal_get_names(src);             \
-      at::impl::internal_set_names_inplace(self_, names);               \
-    }
-#else
-#define PERFORM_NAME_INFERENCE
+  if (at::impl::internal_is_named(src)) {
+    const auto names = at::impl::internal_get_names(src);
+    at::impl::internal_set_names_inplace(result, names);
+  }
 #endif
+}
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \
   struct Tensor_##NAME##_##REAL##_Op {                                  \
@@ -212,7 +211,7 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
     }                                                                   \
                                                                         \
     THCudaCheck(cudaGetLastError());                                    \
-    PERFORM_NAME_INFERENCE;                                             \
+    propagate_names(self_, src);                                        \
   }
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC, REAL) \
@@ -256,7 +255,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  abs, THCNumerics<scalar_t>::abs,   Real)
 
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC
-#undef PERFORM_NAME_INFERENCE
 
 void THCTensor_(clamp)(THCState *state, THCTensor *self_, THCTensor *src, scalar_t min_value,
   scalar_t max_value)
