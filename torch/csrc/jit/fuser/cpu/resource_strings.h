@@ -66,8 +66,14 @@ static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
     }
 }
 
+#ifdef _WIN32
+#define JIT_API __declspec(dllexport)
+#else
+#define JIT_API
+#endif
+
 extern "C"
-void ${kernelName}(IndexType totalElements, void ** args) {
+JIT_API void ${kernelName}(IndexType totalElements, void ** args) {
   ${kernelName}_kernel(totalElements ${,argument_loads});
 }
 )");

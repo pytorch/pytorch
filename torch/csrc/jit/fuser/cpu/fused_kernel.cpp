@@ -16,9 +16,31 @@ namespace jit {
 namespace fuser {
 namespace cpu {
 
+#ifdef _MSC_VER
+static const std::string getTempPath() {
+  char lpTempPathBuffer[MAX_PATH];
+
+  DWORD dwRetVal = GetTempPath(
+      MAX_PATH, // length of the buffer
+      lpTempPathBuffer); // buffer for path
+
+  TORCH_CHECK(dwRetVal < MAX_PATH && dwRetVal != 0, "GetTempPath failed.");
+
+  return std::string(lpTempPathBuffer);
+}
+static const std::string temp_dir = getTempPath();
+static const std::string so_template = temp_dir + "pytorch_fuserXXXXXX.dll";
+static const std::string cpp_template = temp_dir + "pytorch_fuserXXXXXX.cpp";
+static const std::string check_exists_string = "where \"${program}\" > nul 2> nul";
+constexpr int so_suffix_len = 4;
+constexpr int cpp_suffix_len = 4;
+#else
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 static const std::string check_exists_string = "which '${program}' > /dev/null";
+constexpr int so_suffix_len = 3;
+constexpr int cpp_suffix_len = 4;
+#endif
 
 static bool programExists(const std::string& program) {
   TemplateEnv env;
@@ -38,13 +60,34 @@ struct CompilerConfig {
     }
 
     if (!programExists(cxx)) {
-      cxx = "";
+      #ifdef _MSC_VER
+        // First check whether vswhere exists.
+        int rc = system("if not exist \"%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe\" exit /b 1");
+        if (rc == 0) {
+          // Second check whether a valid MSVC installation exists.
+          rc = system("@echo off && for /f \"usebackq tokens=*\" %i in (`\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe\" -version [15^,17^) -products * -latest -prerelease -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call \"%i\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 > NUL && where cl > NUL 2> NUL");
+        }
+        if (rc == 0) {
+          // Append enviornment activation scripts to the compiler.
+          cxx = "@echo off && for /f \"usebackq tokens=*\" %i in (`\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe\" -version [15^,17^) -products * -latest -prerelease -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call \"%i\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 > NUL && cl";
+        } else {
+          cxx = "";
+        }
+      #else
+        cxx = "";
+      #endif
     }
   }
 
   ~CompilerConfig() = default;
 
-  std::string cxx = "g++"; // compiler location
+  #ifdef _MSC_VER
+    std::string cxx = "cl";
+    const std::string openmp_flags = "/openmp";
+  #else
+    std::string cxx = "g++";
+    const std::string openmp_flags = "-fopenmp";
+  #endif
   bool openmp = true;
 };
 
@@ -63,20 +106,26 @@ static CompilerConfig& getConfig() {
 // understand for AVX512. When we need better CPU performance this
 // optimization can be re-enabled by tracking down the platforms where
 // this error occurs and only selectively disabling it.
+#ifdef _MSC_VER
+static const std::string compile_string =
+    "cd /D \"" + temp_dir + "\" && "
+    "${cxx} /MD /Ox /LD /EHsc "
+    "${fopenmp} \"${cpp_file}\" /link /out:\"${so_file}\"";
+#else
 static const std::string compile_string =
     "\"${cxx}\" -O3 -g "
 #ifndef __PPC64__
 //  "-march=native "
 #endif
     "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
-
+#endif
 static void runCompiler(
     const std::string& cpp_file,
     const std::string& so_file) {
   auto& config = getConfig();
   TemplateEnv env;
   env.s("cxx", config.cxx);
-  env.s("fopenmp", config.openmp ? "-fopenmp" : "");
+  env.s("fopenmp", config.openmp ? config.openmp_flags : "");
   env.s("cpp_file", cpp_file);
   env.s("so_file", so_file);
   std::string result = format(compile_string, env);
@@ -90,7 +139,11 @@ static void runCompiler(
   TORCH_CHECK(r == 0, "Failed to compile a fused CPU kernel");
 }
 
+#ifdef _MSC_VER
+static const std::string disas_string = "dumpbin /DISASM:NOBYTES \"${so_file}\"";
+#else
 static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";
+#endif
 static void disas(const std::string& so_file) {
   TemplateEnv env;
   env.s("so_file", so_file);
@@ -115,10 +168,14 @@ FusedKernelCPU::FusedKernelCPU(
           std::move(chunk_desc),
           std::move(concat_desc),
           has_random) {
-  TempFile so_file(so_template, 3);
-  TempFile cpp_file(cpp_template, 4);
+  TempFile so_file(so_template, so_suffix_len);
+  TempFile cpp_file(cpp_template, cpp_suffix_len);
   cpp_file.write(code_);
   cpp_file.sync();
+#ifdef _MSC_VER
+  so_file.close();
+  cpp_file.close();
+#endif
   runCompiler(cpp_file.name(), so_file.name());
   if (debugFuser() >= 2)
     disas(so_file.name());
