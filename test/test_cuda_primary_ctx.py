@@ -35,22 +35,38 @@ def get_is_primary_context_created(device):
 
 
 class TestCudaPrimaryCtx(TestCase):
+    CTX_ALREADY_CREATED_ERR_MSG = (
+        "Tests defined in test_cuda_primary_ctx.py must be run in a process "
+        "where CUDA contexts are never created. Use either run_test.py or add "
+        "--subprocess to run each test in a different subprocess.")
+
+    def setUp(self):
+        for device in range(torch.cuda.device_count()):
+            # Ensure context has not been created beforehand
+            self.assertFalse(get_is_primary_context_created(device), TestCudaPrimaryCtx.CTX_ALREADY_CREATED_ERR_MSG)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
-    def test_cuda_primary_ctx(self):
-        # Ensure context has not been created beforehand
-        self.assertFalse(get_is_primary_context_created(0))
-        self.assertFalse(get_is_primary_context_created(1))
-
+    def test_str_repr(self):
         x = torch.randn(1, device='cuda:1')
 
         # We should have only created context on 'cuda:1'
         self.assertFalse(get_is_primary_context_created(0))
         self.assertTrue(get_is_primary_context_created(1))
 
-        print(x)
+        str(x)
+        repr(x)
 
         # We should still have only created context on 'cuda:1'
+        self.assertFalse(get_is_primary_context_created(0))
+        self.assertTrue(get_is_primary_context_created(1))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
+    def test_copy(self):
+        x = torch.randn(1, device='cuda:1')
+
+        # We should have only created context on 'cuda:1'
         self.assertFalse(get_is_primary_context_created(0))
         self.assertTrue(get_is_primary_context_created(1))
 
@@ -61,7 +77,20 @@ class TestCudaPrimaryCtx(TestCase):
         self.assertFalse(get_is_primary_context_created(0))
         self.assertTrue(get_is_primary_context_created(1))
 
-    # DO NOT ADD ANY OTHER TESTS HERE!  ABOVE TEST REQUIRES FRESH PROCESS
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
+    def test_pin_memory(self):
+        x = torch.randn(1, device='cuda:1')
+
+        # We should have only created context on 'cuda:1'
+        self.assertFalse(get_is_primary_context_created(0))
+        self.assertTrue(get_is_primary_context_created(1))
+
+        torch.randn(3, device='cpu').pin_memory()
+
+        # We should still have only created context on 'cuda:1'
+        self.assertFalse(get_is_primary_context_created(0))
+        self.assertTrue(get_is_primary_context_created(1))
 
 if __name__ == '__main__':
     run_tests()
