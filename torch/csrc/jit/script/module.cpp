@@ -34,13 +34,12 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) {
+void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
   ExportModule(*this, out, extra_files);
 }
 
-void Module::save(
-    const std::string& filename,
-    const ExtraFilesMap& extra_files) {
+void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
+    const {
   ExportModule(*this, filename, extra_files);
 }
 
@@ -64,8 +63,8 @@ void Module::to_impl(
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // First call `to()` on every child module.
-  for (auto& child : get_modules()) {
-    child->to_impl(device, dtype, non_blocking);
+  for (Module child : get_modules()) {
+    child.to_impl(device, dtype, non_blocking);
   }
   // Then convert every of our parameters.
   for (Slot parameter : get_parameters()) {
@@ -197,14 +196,6 @@ static void clearMethods(c10::ivalue::Object* self) {
   self->compilation_unit()->drop_all_functions();
 }
 
-Module::Module(std::string class_name) {
-  auto cu = std::make_shared<CompilationUnit>();
-  auto cls = ClassType::create(
-      QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
-  module_value_ = c10::ivalue::Object::create(
-      std::move(cu), std::move(cls), 0, clearMethods);
-}
-
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
   const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
@@ -218,9 +209,9 @@ void Module::copy_into(
     std::unordered_map<TypePtr, TypePtr>& type_remap,
     std::vector<std::string> names) const {
   auto curr = module_lookup(names);
-  type_remap[module_object()->type()] = curr->module_object()->type();
+  type_remap[module_object()->type()] = curr.module_object()->type();
 
-  for (Slot s : curr->get_slots()) {
+  for (Slot s : curr.get_slots()) {
     if (s.is_module()) {
       names.push_back(s.name());
       // Submodules must be translated first, otherwise parameter_remap entries
@@ -228,12 +219,12 @@ void Module::copy_into(
       s.to_module().copy_into(module_lookup, type_remap, names);
       names.pop_back();
     } else {
-      curr->set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+      curr.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
     }
   }
 
   for (auto& fn : class_compilation_unit()->get_functions()) {
-    curr->clone_method(*this, fn->qualname(), type_remap);
+    curr.clone_method(*this, fn->qualname(), type_remap);
   }
 }
 
@@ -274,7 +265,7 @@ void Module::clone_method(const Module& orig, const std::string& name) {
     type_remap[entry.first.module_object()->type()] =
         entry.second.module_object()->type();
     for (Slot s : entry.first.get_module_slots()) {
-      to_scan.emplace_back(s.to_module(), *entry.second.get_module(s.name()));
+      to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
     }
   }
   const auto qualname = getNameForMethod(name);
@@ -282,8 +273,8 @@ void Module::clone_method(const Module& orig, const std::string& name) {
 }
 
 void Module::train(bool on) {
-  for (auto& submod : get_modules()) {
-    submod->train(on);
+  for (auto submod : get_modules()) {
+    submod.train(on);
   }
   if (auto slot = find_attribute("training")) {
     slot->setValue(on);
@@ -340,14 +331,15 @@ Module Slot::to_module() const {
   return Module(value().toObject());
 }
 
-std::vector<std::shared_ptr<Module>> Module::get_modules() const {
-  std::vector<std::shared_ptr<Module>> result;
-  for (Slot s : get_slots()) {
-    if (s.is_module()) {
-      result.push_back(std::make_shared<Module>(s.to_module()));
-    }
+module_list Module::get_modules() const {
+  return module_list(*this, EntityType::MODULE);
+}
+
+void Module::apply(const std::function<void(Module&)>& fn) {
+  for (auto submod : get_modules()) {
+    submod.apply(fn);
   }
-  return result;
+  fn(*this);
 }
 
 } // namespace script

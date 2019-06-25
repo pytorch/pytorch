@@ -48,6 +48,11 @@ struct TORCH_API CompilationUnit {
   explicit CompilationUnit(const std::string& source);
   CompilationUnit() = default;
 
+  CompilationUnit& operator=(CompilationUnit&&) = default;
+  CompilationUnit(CompilationUnit&&) = default;
+  CompilationUnit& operator=(const CompilationUnit&) = delete;
+  CompilationUnit(const CompilationUnit&) = delete;
+
   Function* find_function(const c10::QualifiedName& name) const {
     auto it = dict_.find(name);
     if (it == dict_.end()) {
