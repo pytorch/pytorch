@@ -241,7 +241,7 @@ class CMake:
         additional_options = {
             # Key: environment variable name. Value: Corresponding variable name to be passed to CMake.
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
-            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA',
+            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
         }
         additional_options.update({
             var: var for var in
