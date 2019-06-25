@@ -128,7 +128,7 @@ struct CAFFE2_API SourceRange {
     return std::make_tuple<std::string, size_t, size_t>(
         source_->filename().value_or(""),
         source_->lineno_to_source_lineno(lineno),
-        col_offset);
+        (size_t)col_offset);
   }
 
  private:
