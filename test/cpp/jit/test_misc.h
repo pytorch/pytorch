@@ -909,17 +909,7 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-std::vector<std::size_t> values_to_value_ids(
-    const std::vector<Value*>& values) {
-  std::vector<std::size_t> result;
-  for (auto v : values) {
-    result.push_back(v->unique());
-  }
-  return result;
-};
-
 void testInsertAndEliminateRedundantGuards() {
-
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y

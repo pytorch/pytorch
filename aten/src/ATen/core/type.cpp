@@ -470,10 +470,13 @@ const char * typeKindToString(TypeKind kind) {
 }
 
 bool Type::isSubtypeOf(const TypePtr rhs) const {
+  if (*this == *rhs) {
+    return true;
+  }
   if(auto rhs_ = rhs->cast<OptionalType>()) {
     return this->isSubtypeOf(rhs_->getElementType());
   }
-  return *this == *rhs;
+  return false;
 }
 
 std::string ProfiledTensorType::str() const {
