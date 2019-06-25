@@ -46,6 +46,7 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
+#include <torch/csrc/api/include/torch/data/init.h>
 
 #ifdef USE_CUDNN
 #include <cudnn.h>
@@ -662,6 +663,7 @@ PyObject* initModule() {
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
+  torch::data::initDataBindings(module);
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif

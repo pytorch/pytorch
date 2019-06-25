@@ -58,6 +58,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/Size.cpp
     ${TORCH_SRC_DIR}/csrc/Storage.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/python/init.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/data/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_anomaly_mode.cpp
