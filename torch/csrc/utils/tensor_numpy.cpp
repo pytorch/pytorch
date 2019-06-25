@@ -85,6 +85,11 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (tensor.type().backend() != Backend::CPU) {
     throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString().c_str());
   }
+  if (tensor.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call numpy() on Variable that requires grad. "
+        "Use var.detach().numpy() instead.");
+  }
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
@@ -110,7 +115,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
-  PyObject* py_tensor = THPVariable_Wrap(tensor);
+  PyObject* py_tensor = THPVariable_Wrap(as_variable_ref(tensor).variable_data());
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return nullptr;
