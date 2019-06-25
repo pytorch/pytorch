@@ -55,6 +55,10 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     throw torch::TypeError("Variable data has to be a tensor, but got %s",
         Py_TYPE(data)->tp_name);
   }
+  // We set `tensor`'s `allow_tensor_metadata_change` to true here, because we want to
+  // allow the following use case for backward compatibility:
+  // >>> var = Variable(torch.randn(2, 3))
+  // >>> var.resize_(4, 5)
   tensor.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
 
   Variable var = tensor;

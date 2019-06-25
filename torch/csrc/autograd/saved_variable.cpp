@@ -79,6 +79,9 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
   Variable var = as_variable_ref(data_).variable_data();
+  // We set `var`'s `allow_tensor_metadata_change` to true here, because we
+  // should not restrict any resizing / restriding ops on the reconstructed
+  // Variable.
   var.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   if (grad_fn) {
     var.set_gradient_edge(Edge(std::move(grad_fn), output_nr_));

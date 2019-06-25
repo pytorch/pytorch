@@ -151,6 +151,12 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   auto data = as_variable_ref(r.tensor(1)).variable_data();
+  // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
+  // allow the following use case for backward compatibility:
+  // >>> rnn = torch.nn.RNN(100, 100, 2)
+  // >>> # The following calls `torch._cudnn_rnn_flatten_weight(rnn._flat_weights, ...)`,
+  // >>> # which changes storage of `rnn`'s weights in-place
+  // >>> rnn.flatten_parameters()
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   auto var = data.set_requires_grad(r.toBool(2));
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
