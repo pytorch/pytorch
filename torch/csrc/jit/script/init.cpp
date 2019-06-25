@@ -682,14 +682,13 @@ void initJitScriptBindings(PyObject* module) {
          ResolutionCallback rcb,
          FunctionDefaults defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
-        // TODO this should be the global python CU
         const auto name = c10::QualifiedName(qualname);
-        auto cu = std::make_shared<CompilationUnit>();
+        auto cu = CompilationUnit::_get_python_cu();
         cu->define({name}, {def}, {pythonResolver(std::move(rcb))}, nullptr);
-        auto defined = cu->get_functions().at(0);
-        defined->setSchema(getSchemaWithNameAndDefaults(
-            def.range(), defined->getSchema(), def.name().name(), defaults));
-        StrongFunctionPtr ret(std::move(cu), defined);
+        auto& defined = cu->get_function(name);
+        defined.setSchema(getSchemaWithNameAndDefaults(
+            def.range(), defined.getSchema(), def.name().name(), defaults));
+        StrongFunctionPtr ret(std::move(cu), &defined);
         didFinishEmitFunction(ret);
         return ret;
       });

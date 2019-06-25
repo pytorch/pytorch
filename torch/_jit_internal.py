@@ -107,6 +107,16 @@ def weak_script_method(fn):
     return fn
 
 
+# For tests, ensure we get a fresh compile of all weak functions each time
+def _clear_weak_cache():
+    for method in compiled_weak_fns.values():
+        method["status"] = COMPILATION_PENDING
+        method["compiled_fn"] = None
+    for t in weak_types.values():
+        method["method_stubs"] = None
+    weak_modules.clear()
+
+
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
     """
     Dispatches to either of 2 weak script functions based on a boolean argument.

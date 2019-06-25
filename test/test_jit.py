@@ -9383,16 +9383,6 @@ a")
                 return x
             ''')
 
-    def test_duplicate(self):
-        with self.assertRaisesRegex(RuntimeError, 'method \'test\' already defined'):
-            cu = torch.jit.CompilationUnit('''
-            def test():
-                return 1
-
-            def test():
-                return 2
-            ''')
-
     def test_call_ge(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected at most 1 arguments but found 3'):
             @_trace(torch.zeros(1, 2, 3))

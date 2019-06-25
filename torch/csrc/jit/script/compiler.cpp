@@ -3064,8 +3064,13 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     to_ir(def, _resolver, self, method);
   };
-  return torch::make_unique<Function>(
+  auto fn = torch::make_unique<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);
+  if (self) {
+    // Register this as a method on `self`'s type
+    self->getClassType()->registerMethod(fn.get());
+  }
+  return fn;
 }
 
 void CompilationUnit::define(

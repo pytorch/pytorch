@@ -63,18 +63,8 @@ size_t ClassType::addAttribute(
   return slot;
 }
 
-std::vector<Function*> ClassType::methods() const {
-  // TODO: this needs to be made more efficient!
-  // This grabs all the functions in the CU and filters them by qualified name.
-  auto cuFunctions = compilation_unit()->get_functions();
-  const auto& classname = *qualified_name_obj();
-  cuFunctions.erase(
-      std::remove_if(
-          cuFunctions.begin(),
-          cuFunctions.end(),
-          [&](Function* fn) { return !classname.isPrefixOf(fn->qualname()); }),
-      cuFunctions.end());
-  return cuFunctions;
+const std::vector<Function*>& ClassType::methods() const {
+  return methods_;
 }
 
 ClassType::ClassType(

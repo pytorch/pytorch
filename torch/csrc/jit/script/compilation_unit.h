@@ -84,7 +84,7 @@ struct TORCH_API CompilationUnit {
   // same as above but parse the definitions from source
   void define(
       // prefix namespace to put all the defined functions into
-      // If null,
+      // If null, TODO
       const c10::optional<c10::QualifiedName>& prefix,
       const std::string& source,
       const ResolverPtr& resolver,
@@ -132,17 +132,27 @@ struct TORCH_API CompilationUnit {
   /**
    * Register a class as being owned by this compilation unit.
    */
-  void register_class(c10::NamedTypePtr classType) {
-    classes_.push_back(std::move(classType));
+  void register_class(c10::NamedTypePtr namedType) {
+    if (auto classType = namedType->cast<c10::ClassType>()) {
+      // TODO: class types cannot be redefined because we have no way right now
+      // of invalidating their methods. NamedTuples are fine though, since they
+      // don't have methods.
+      TORCH_CHECK(
+          0 == classDict_.count(*classType->qualified_name_obj()),
+          "class '",
+          classType->qualname(),
+          "' already defined.");
+    }
+    classes_.push_back(std::move(namedType));
+    classDict_[*classes_.back()->qualified_name_obj()] = classes_.size() - 1;
   };
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
-    for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
-        return cls->expect<ClassType>();
-      }
+    auto it = classDict_.find(name);
+    if (it == classDict_.end()) {
+      return nullptr;
     }
-    return nullptr;
+    return classes_[it->second]->cast<c10::ClassType>();
   }
 
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
@@ -155,12 +165,11 @@ struct TORCH_API CompilationUnit {
   }
 
   c10::NamedTypePtr get_type(const c10::QualifiedName& name) const {
-    for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
-        return cls;
-      }
+    auto it = classDict_.find(name);
+    if (it == classDict_.end()) {
+      return nullptr;
     }
-    return nullptr;
+    return classes_[it->second];
   }
 
   /**
@@ -180,8 +189,7 @@ struct TORCH_API CompilationUnit {
   // have isolation.
   static void _clear_python_cu() {
     _get_python_cu()->classes_.clear();
-    _get_python_cu()->functions_.clear();
-    _get_python_cu()->dict_.clear();
+    _get_python_cu()->classDict_.clear();
   }
 
  private:
@@ -193,11 +201,6 @@ struct TORCH_API CompilationUnit {
       const std::unordered_map<std::string, Function*>& function_table) const;
 
   Function& register_function(std::unique_ptr<Function> fn) {
-    TORCH_CHECK(
-        0 == dict_.count(fn->qualname()),
-        "method '",
-        fn->qualname().qualifiedName(),
-        "' already defined.");
     functions_.emplace_back(std::move(fn));
     dict_[functions_.back()->qualname()] = functions_.size() - 1;
     return *functions_.back();
@@ -205,6 +208,7 @@ struct TORCH_API CompilationUnit {
   std::vector<std::unique_ptr<Function>> functions_;
   // for fast lookup
   std::unordered_map<c10::QualifiedName, size_t> dict_;
+  std::unordered_map<c10::QualifiedName, size_t> classDict_;
   bool optimized_ = true;
 
   // [class owernship] Right now there aree two relationships between classes
