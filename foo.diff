@@ -1,0 +1,95 @@
+diff --git b/aten/src/ATen/core/interned_strings.h a/aten/src/ATen/core/interned_strings.h
+index e9ba5007d..df36822f3 100644
+--- b/aten/src/ATen/core/interned_strings.h
++++ a/aten/src/ATen/core/interned_strings.h
+@@ -150,6 +150,7 @@ namespace c10 {
+   _(aten, bin)                     \
+   _(prim, unchecked_unwrap_optional)\
+   _(aten, __contains__)            \
++  _(prim, GraphHolder)             \
+   FORALL_ATEN_BASE_SYMBOLS(_)      \
+   _(onnx, Add)                     \
+   _(onnx, Concat)                  \
+diff --git b/test/cpp/jit/test_misc.h a/test/cpp/jit/test_misc.h
+index 7233a1a1f..3fbbf5313 100644
+--- b/test/cpp/jit/test_misc.h
++++ a/test/cpp/jit/test_misc.h
+@@ -995,8 +995,7 @@ void testInsertBailOuts() {
+   std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
+ 
+   for (auto blo : bailouts) {
+-    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
+-    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
++    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::GraphHolder);
+   }
+ }
+ 
+diff --git b/torch/csrc/jit/interpreter.cpp a/torch/csrc/jit/interpreter.cpp
+index 9dbe2ae0c..005669917 100644
+--- b/torch/csrc/jit/interpreter.cpp
++++ a/torch/csrc/jit/interpreter.cpp
+@@ -642,12 +642,7 @@ struct CodeImpl {
+ 
+   void emitBailOut(Node* node) {
+     auto jf_index = emitGuard(node);
+-    auto unoptimized_graph = node->inputs()
+-                                 .at(0)
+-                                 ->type()
+-                                 ->expect<FunctionType>()
+-                                 ->function()
+-                                 ->graph();
++    auto unoptimized_graph = node->inputs().at(0)->node()->g(attr::Subgraph);
+     // note, guaded input is already loaded onto the stack
+     // for GUARD instruction
+     emitLoadInputs(node->inputs().slice(2));
+diff --git b/torch/csrc/jit/passes/bailout_graph.cpp a/torch/csrc/jit/passes/bailout_graph.cpp
+index d3ca542cf..020d1c1e2 100644
+--- b/torch/csrc/jit/passes/bailout_graph.cpp
++++ a/torch/csrc/jit/passes/bailout_graph.cpp
+@@ -146,11 +146,12 @@ struct BailOutInserter {
+ 
+   void addUnoptimizedFuncToBailouts() {
+     auto unoptimized_graph = graph_->copy();
+-    auto func = std::make_shared<Function>(
+-        std::string{"bailout"}, false, unoptimized_graph, nullptr);
+-    auto unopt_func = graph_->create(prim::Constant);
+-    unopt_func->output()->setType(FunctionType::create(std::move(func)));
+-    unopt_func->insertBefore(*graph_->block()->nodes().begin());
++    auto unopt_func =
++        graph_->create(prim::GraphHolder)->insertAfter(graph_->param_node());
++
++    // Returns an int so that we have an easy way to do graph traversal
++    unopt_func->output()->setType(IntType::get());
++    unopt_func->g_(attr::Subgraph, unoptimized_graph);
+     for (auto bn : bailouts_) {
+       bn->insertInput(0, unopt_func->output());
+     }
+diff --git b/torch/csrc/jit/register_prim_ops.cpp a/torch/csrc/jit/register_prim_ops.cpp
+index af9204e5f..370e5b5e8 100644
+--- b/torch/csrc/jit/register_prim_ops.cpp
++++ a/torch/csrc/jit/register_prim_ops.cpp
+@@ -239,6 +239,15 @@ RegisterOperators reg(
+              return 0;
+            };
+          }),
++     Operator(
++         "prim::GraphHolder() -> ()",
++         [](const Node* /* node */) {
++           return [](Stack& stack) {
++             // Returns an int so that we have an easy way to do graph traversal
++             push(stack, 1);
++             return 0;
++           };
++         }),
+      Operator(
+          "prim::rangelist(int n) -> int[]",
+          [](Stack& stack) {
+@@ -2068,7 +2077,7 @@ RegisterOperators reg2({
+         "prim::min(int[] x) -> int",
+         [](Stack& stack) {
+           c10::List<int64_t> int_list = pop(stack).toIntList();
+-          int64_t min_element = std::numeric_limits<int64_t>::max(); 
++          int64_t min_element = std::numeric_limits<int64_t>::max();
+ 
+           for(int64_t ele: int_list) {
+             if(ele < min_element) {

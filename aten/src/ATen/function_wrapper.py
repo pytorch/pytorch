@@ -29,6 +29,8 @@ if sys.version_info[0] == 3:
 else:
     string_type = basestring
 
+from env import NAMEDTENSOR_ENABLED
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
 # what has to be done to add a Operation ...
@@ -190,6 +192,11 @@ if (${name}.defined()) {
 }""")
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
+
+NAMEDTENSOR_CHECK = CodeTemplate("""\
+#ifdef NAMEDTENSOR_ENABLED
+${code}
+#endif""")
 
 # scalar_name, c_type, accreal, is_floating_type
 scalar_types = [
@@ -1042,6 +1049,20 @@ def create_generic(top_env, declarations):
                     return formal
             return None
 
+        def has_named_tensor_formals(formals):
+            return any(['Dimname' in formal['dynamic_type'] for formal in formals])
+
+        # Emit #ifdef NAMEDTENSOR_ENABLED macros for any code generated here
+        # that is sent to top_env. This is because some of this code (Type.h,
+        # Tensor.h, TensorMethods.h) is checked into the repo and must be
+        # the same regardless of NAMEDTENSOR_ENABLED status.
+        is_named_tensor_only = has_named_tensor_formals(formals)
+
+        def check_namedtensor_enabled(code):
+            if is_named_tensor_only:
+                return NAMEDTENSOR_CHECK.substitute(code=code)
+            return code
+
         assert find_formal('Type', formals) is None, \
             "Found Type argument in {}({}). Use TensorOptions instead.".format(
                 option['name'], ", ".join(option['method_formals_with_defaults']))
@@ -1080,8 +1101,9 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        top_env['registration_declarations'].append(
-            REGISTRATION_DECLARATION.substitute(env))
+        if NAMEDTENSOR_ENABLED or not is_named_tensor_only:
+            top_env['registration_declarations'].append(
+                REGISTRATION_DECLARATION.substitute(env))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1097,12 +1119,11 @@ def create_generic(top_env, declarations):
             abstract = True
         else:
             top_env['type_method_declarations'].append(
-                NATIVE_DISPATCH_DECLARATION.substitute(env))
+                check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(env)))
             top_env['type_method_definitions'].append(
-                NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(env))
+                check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(env)))
             top_env['function_registrations'].append(
-                DEFAULT_FUNCTION_REGISTRATION.substitute(env))
-
+                check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(env)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1115,18 +1136,20 @@ def create_generic(top_env, declarations):
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(
-                        NATIVE_DECLARATION.substitute(env))
+                        check_namedtensor_enabled(NATIVE_DECLARATION.substitute(env)))
                     generated_native_functions.append(value)
         else:
             top_env['native_function_declarations'].append(
-                NATIVE_DECLARATION.substitute(env))
+                check_namedtensor_enabled(NATIVE_DECLARATION.substitute(env)))
 
         method_of = ['Type']
         if is_method:
             top_env['tensor_method_declarations'].append(
-                TENSOR_METHOD_DECLARATION.substitute(env))
+                check_namedtensor_enabled(
+                    TENSOR_METHOD_DECLARATION.substitute(env)))
             top_env['tensor_method_definitions'].append(
-                TENSOR_METHOD_DEFINITION.substitute(env))
+                check_namedtensor_enabled(
+                    TENSOR_METHOD_DEFINITION.substitute(env)))
             method_of.append('Tensor')
 
         if is_namespace_function:
@@ -1141,15 +1164,18 @@ def create_generic(top_env, declarations):
                 option['inferred_backend'] = 'Backend::CPU'
                 option['inferred_is_variable'] = 'false'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
-            top_env['function_declarations'].append(declaration.substitute(env))
+            top_env['function_declarations'].append(
+                check_namedtensor_enabled(declaration.substitute(env)))
             if is_factory_method:
                 top_env['function_definitions'].append(
-                    FACTORY_DEFINITION.substitute(env))
+                    check_namedtensor_enabled(FACTORY_DEFINITION.substitute(env)))
             else:
                 top_env['function_definitions'].append(
-                    FUNCTION_DEFINITION.substitute(env))
+                    check_namedtensor_enabled(FUNCTION_DEFINITION.substitute(env)))
             method_of.append('namespace')
 
+        if not NAMEDTENSOR_ENABLED and is_named_tensor_only:
+            return
         output_options.append(OutputDeclaration(
             name=option['api_name'],
             matches_jit_signature=option["matches_jit_signature"],
