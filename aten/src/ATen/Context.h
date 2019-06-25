@@ -67,8 +67,19 @@ class CAFFE2_API Context {
     } else if (device_type == at::kCUDA) {
       return *at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
     } else {
-      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
-    }  
+      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+    }
+  }
+  Device getDeviceFromPtr(void* data, DeviceType device_type) {
+    initCUDAIfNeeded(device_type);
+    initHIPIfNeeded(device_type);
+    if (device_type == at::kCPU) {
+      return DeviceType::CPU;
+    } else if (device_type == at::kCUDA) {
+      return at::detail::getCUDAHooks().getDeviceFromPtr(data);
+    } else {
+      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+    }
   }
   bool hasOpenMP() const;
   bool hasMKL() const;
