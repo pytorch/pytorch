@@ -143,7 +143,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
 static void propagate_names(Tensor& result, const Tensor& src) {
 #ifdef NAMEDTENSOR_ENABLED
   if (src.is_named()) {
-    at::internal_set_names_inplace(result, src.names())
+    at::internal_set_names_inplace(result, src.names());
   }
 #endif
 }
