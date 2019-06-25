@@ -13,7 +13,7 @@
 
 include(FindPackageHandleStandardArgs)
 
-set(MIOPEN_ROOT_DIR "${ROCM_PATH}/miopen" CACHE PATH "Folder contains MIOpen")
+set(MIOPEN_ROOT_DIR "${MIOPEN_PATH}" CACHE PATH "Folder contains MIOpen")
 
 if($ENV{MIOPEN_INCLUDE_DIR})
   SET(MIOPEN_INCLUDE_DIR $ENV{MIOPEN_INCLUDE_DIR})
