@@ -3364,7 +3364,6 @@ def foo(xyz):
                 return torch.mm(x, w.t())
 
         ft = FooTest()
-        ft.save('foo.zip')
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
