@@ -659,8 +659,11 @@ void ScriptModuleSerializer::convertClass(
 
   std::vector<c10::NamedTypePtr> class_deps;
   std::ostringstream class_stream;
+  // TODO
+  SourceRangeRecords source_ranges;
   PythonPrint(
       class_stream,
+      source_ranges,
       class_type,
       tensor_table_,
       class_deps,
@@ -905,9 +908,12 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.class_compilation_unit()->get_functions().size() > 0) {
     std::ostringstream methods;
+    // TODO
+    SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
+        source_ranges,
         *module.class_compilation_unit(),
         /*is_method=*/true,
         tensor_table_,
@@ -921,6 +927,25 @@ void ScriptModuleSerializer::convertModule(
     writer_.writeRecord(
         filename.str(), methods_str.c_str(), methods_str.size());
     record->set_key(filename.str());
+
+    // Write out debug records
+    torch::RecordRef* debug_record =
+        module_def->mutable_torchscript_debug_arena();
+    Pickler p;
+    p.start();
+    p.startTuple();
+    for (const auto& range : source_ranges) {
+      std::vector<c10::IValue> row_elems{(int64_t)std::get<0>(range),
+                                         *std::get<1>(range)->__getstate__()};
+      p.addIValue(c10::ivalue::Tuple::create(row_elems));
+    }
+    p.endTuple();
+    p.finish();
+    std::stringstream debug_filename;
+    debug_filename << "debug/" << module_name.str() << ".pkl";
+    writer_.writeRecord(
+        debug_filename.str(), p.stack().data(), p.stack().size());
+    debug_record->set_key(debug_filename.str());
   }
 
   for (script::Slot s : module.get_module_slots()) {

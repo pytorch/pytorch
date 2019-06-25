@@ -167,7 +167,58 @@ const static std::unordered_set<std::string> reserved_names = {
 };
 
 struct PythonPrintPass {
-  std::ostringstream body_;
+  struct TaggedToken {
+    std::string tok;
+    std::shared_ptr<SourceRange> sr;
+  };
+
+  using SourceRangeStack = std::vector<std::shared_ptr<SourceRange>>;
+  SourceRangeStack source_range_stack_ = {nullptr};
+
+  struct SourceRangeCtxMgr {
+    explicit SourceRangeCtxMgr(
+        SourceRangeStack* stack,
+        std::shared_ptr<SourceRange> sr)
+        : stack(stack) {
+      TORCH_INTERNAL_ASSERT(stack);
+      stack->push_back(std::move(sr));
+    }
+    ~SourceRangeCtxMgr() {
+      stack->pop_back();
+    }
+    SourceRangeStack* stack;
+  };
+
+  struct SourceRangeTokenStream {
+    SourceRangeTokenStream(const SourceRangeStack* srs) : srs(srs) {}
+    std::vector<TaggedToken> stream;
+
+    SourceRangeTokenStream& operator<<(const std::string& s) {
+      stream.push_back({s, srs->back()});
+      return *this;
+    }
+    SourceRangeTokenStream& operator<<(const std::vector<TaggedToken>& expr) {
+      stream.insert(stream.cend(), expr.cbegin(), expr.cend());
+      return *this;
+    }
+
+    template <typename T>
+    SourceRangeTokenStream& operator<<(const T& t) {
+      std::stringstream ss;
+      ss << t;
+      stream.push_back({ss.str(), srs->back()});
+      return *this;
+    }
+
+    std::vector<TaggedToken> vec() const {
+      return stream;
+    }
+
+   private:
+    const SourceRangeStack* srs;
+  };
+
+  SourceRangeTokenStream body_;
 
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
@@ -177,7 +228,7 @@ struct PythonPrintPass {
   // dependencies.
   std::vector<c10::NamedTypePtr>& class_table_;
   std::vector<c10::NamedTypePtr> class_deps_;
-  // Helper to avoid duplicating class types
+  // Helper to avoid duplicating class typesf
   void addToClassTable(const c10::NamedTypePtr& type) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
@@ -402,13 +453,16 @@ struct PythonPrintPass {
   }
 
   // map from Value to how it should be printed at each use
-  std::unordered_map<Value*, std::string> value_names_;
+  std::unordered_map<Value*, std::vector<TaggedToken>> value_to_tagged_tok_;
 
-  std::string useOf(Value* v) const {
-    return value_names_.at(v);
+  std::vector<TaggedToken> useOf(Value* v) const {
+    return value_to_tagged_tok_.at(v);
+  }
+  void assignValue(Value* v, const std::vector<TaggedToken>& n) {
+    value_to_tagged_tok_[v] = n;
   }
   void assignValue(Value* v, const std::string& s) {
-    value_names_[v] = s;
+    value_to_tagged_tok_[v] = {TaggedToken{s, source_range_stack_.back()}};
   }
   void assignValue(Value* v, Value* w) {
     assignValue(v, useOf(w));
@@ -421,7 +475,7 @@ struct PythonPrintPass {
 
   size_t level = 0;
   // indent to the current indent level
-  std::ostream& indent() {
+  SourceRangeTokenStream& indent() {
     for (size_t i = 0; i < level; ++i) {
       body_ << "  ";
     }
@@ -449,7 +503,7 @@ struct PythonPrintPass {
   }
 
   void printValueList(
-      std::ostream& stmt,
+      SourceRangeTokenStream& stmt,
       at::ArrayRef<Value*> list,
       const char* begin = "",
       const char* end = "") {
@@ -464,7 +518,7 @@ struct PythonPrintPass {
   }
 
   void printDict(
-      std::ostream& stmt,
+      SourceRangeTokenStream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
       const char* begin = "{",
       const char* end = "}") {
@@ -590,8 +644,12 @@ struct PythonPrintPass {
     }
   }
 
-  bool isLongLine(const std::string& str) {
-    return str.size() + level * 2 >= 40;
+  bool isLongLine(const std::vector<TaggedToken>& expr) {
+    size_t s = 0;
+    for (const auto& tt : expr) {
+      s += tt.tok.size();
+    }
+    return s + level * 2 >= 40;
   }
 
   bool isLongInline(Node* node) {
@@ -634,7 +692,7 @@ struct PythonPrintPass {
     }
   }
 
-  void printOutputDefinition(Node* node, const std::string& str) {
+  void printOutputDefinition(Node* node, const std::vector<TaggedToken>& expr) {
     assignValuesToTheirUniqueNames(node->outputs());
     indent();
     // Print outputs
@@ -642,7 +700,7 @@ struct PythonPrintPass {
       printValueList(body_, node->outputs());
       body_ << " = ";
     }
-    body_ << str << "\n";
+    body_ << expr << "\n";
   }
 
   // Recursively check contained types for any class dependencies
@@ -660,6 +718,9 @@ struct PythonPrintPass {
   }
 
   void printNode(Node* node, bool print_const) {
+    SourceRangeCtxMgr guard(
+        &source_range_stack_,
+        std::make_shared<SourceRange>(node->sourceRange()));
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -724,9 +785,9 @@ struct PythonPrintPass {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
-        std::stringstream ss;
+        SourceRangeTokenStream ss(&source_range_stack_);
         ss << "fork(" << name << ")";
-        printOutputDefinition(node, ss.str());
+        printOutputDefinition(node, ss.vec());
       } break;
       case prim::Function: {
         if (enforce_importable_) {
@@ -750,19 +811,19 @@ struct PythonPrintPass {
         printBody(graph->block());
       } break;
       default:
-        std::stringstream ss;
+        SourceRangeTokenStream ss(&source_range_stack_);
         printRHS(ss, node);
 
         // we prevent long constants from inlining here.
         // it is not safe to do the same thing for non-constants here
         // because of [reordering of inlines]
         if (output_inline_.count(node) == 0 ||
-            (node->kind() == prim::Constant && isLongLine(ss.str()))) {
-          printOutputDefinition(node, ss.str());
+            (node->kind() == prim::Constant && isLongLine(ss.vec()))) {
+          printOutputDefinition(node, ss.vec());
         } else {
           // this node is safe to inline, so assign the output value
           // to that expression directly
-          assignValue(node->output(), ss.str());
+          assignValue(node->output(), ss.vec());
         }
     }
   }
@@ -775,43 +836,46 @@ struct PythonPrintPass {
     if (list_size == 0) {
       stmt << "annotate(List[" << the_type << "], [])";
     } else {
-      stmt << the_list;
+      std::stringstream ss;
+      ss << the_list;
+      stmt << ss.str();
     }
   }
 
-  void printConstant(std::ostream& stmt, const IValue& v) {
+  void printConstant(SourceRangeTokenStream& stmt, const IValue& v) {
+    std::stringstream ss;
     if (v.isTensor()) {
-      stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+      ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if (v.isString()) {
-      printQuotedString(stmt, v.toStringRef());
+      printQuotedString(ss, v.toStringRef());
     } else if (v.isDevice()) {
-      std::stringstream ss;
-      ss << v.toDevice();
-      stmt << "torch.device(";
-      printQuotedString(stmt, ss.str());
-      stmt << ")";
+      std::stringstream device_stream;
+      device_stream << v.toDevice();
+      ss << "torch.device(";
+      printQuotedString(ss, device_stream.str());
+      ss << ")";
     } else if (v.isTensorList()) {
-      stmt << "[";
+      ss << "[";
       const char* delim = "";
       for (const at::Tensor& t : v.toTensorListRef()) {
-        stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
+        ss << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
-      stmt << "]";
+      ss << "]";
     } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(
-          stmt, "bool", v.toBoolList().size(), v);
+      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
     } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
+      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
-          stmt, "float", v.toDoubleListRef().size(), v);
+          ss, "float", v.toDoubleListRef().size(), v);
     } else {
-      stmt << v;
+      ss << v;
     }
+    stmt << ss.str();
   }
 
-  void printNone(std::ostream& stmt, const Node* node) {
+  void printNone(SourceRangeTokenStream& stmt, const Node* node) {
     if (node->output()->type()->isSubtypeOf(NoneType::get())) {
       stmt << "None";
       return;
@@ -842,7 +906,7 @@ struct PythonPrintPass {
   }
 
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
-  void printRHS(std::ostream& stmt, Node* node) {
+  void printRHS(SourceRangeTokenStream& stmt, Node* node) {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
@@ -858,7 +922,9 @@ struct PythonPrintPass {
           stmt << "ops.prim.IgnoredPythonOp";
         } else {
           stmt << "^" << value->name();
-          value->writeScalars(stmt);
+          std::stringstream scalars_stream;
+          value->writeScalars(scalars_stream);
+          stmt << scalars_stream.str();
         }
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
@@ -951,7 +1017,9 @@ struct PythonPrintPass {
           stmt << useOf(obj) << "." << field;
         } else {
           stmt << "getattr(" << useOf(obj) << ", ";
-          printQuotedString(stmt, field);
+          std::stringstream field_stream;
+          printQuotedString(field_stream, field);
+          stmt << field_stream.str();
           stmt << ")";
         }
       } break;
@@ -989,7 +1057,9 @@ struct PythonPrintPass {
     }
   }
 
-  std::ostream& printBlock(Block* root, bool block_has_other_statements) {
+  SourceRangeTokenStream& printBlock(
+      Block* root,
+      bool block_has_other_statements) {
     // pythons weird 'pass' syntax creates a bunch of places where we have to
     // check if this block would be empty. But not everything in a block is a
     // node. Sometimes if, loop, and return statements will follow this block
@@ -1007,7 +1077,7 @@ struct PythonPrintPass {
 
   void printDefaultValue(
       const TypePtr& typ,
-      std::ostream& stmt,
+      SourceRangeTokenStream& stmt,
       const IValue& value) {
     // xxx - many weak script modules store default values for broadcasting
     // lists that are not actually the same type as the argument. We can only
@@ -1047,6 +1117,10 @@ struct PythonPrintPass {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
+
+    SourceRangeCtxMgr guard(
+        &source_range_stack_,
+        std::make_shared<SourceRange>(graph.param_node()->sourceRange()));
 
     indent();
     body_ << "def " << func.name() << "(";
@@ -1091,7 +1165,8 @@ struct PythonPrintPass {
       std::vector<c10::NamedTypePtr>& class_table,
       bool enforce_importable,
       bool is_method)
-      : tensor_table_(tensor_table),
+      : body_(&source_range_stack_),
+        tensor_table_(tensor_table),
         class_table_(class_table),
         enforce_importable_(enforce_importable),
         is_method_(is_method) {}
@@ -1144,13 +1219,22 @@ struct PythonPrintPass {
         class_deps_.end());
   }
 
-  void print(std::ostream& out) {
-    out << getImports() << body_.str();
+  void print(std::ostream& out, SourceRangeRecords& source_ranges) {
+    out << getImports();
+    std::shared_ptr<SourceRange> last = nullptr;
+    for (const auto& tok : body_.vec()) {
+      if (tok.sr != last) {
+        last = tok.sr;
+        source_ranges.emplace_back(out.tellp(), tok.sr);
+      }
+      out << tok.tok;
+    }
   }
 };
 
 void PythonPrint(
     std::ostream& out,
+    SourceRangeRecords& source_ranges,
     const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
@@ -1158,11 +1242,12 @@ void PythonPrint(
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printFunction(func);
-  pp.print(out);
+  pp.print(out, source_ranges);
 }
 
 void PythonPrint(
     std::ostream& out,
+    SourceRangeRecords& source_ranges,
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
@@ -1170,18 +1255,19 @@ void PythonPrint(
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printCompilationUnit(cu);
-  pp.print(out);
+  pp.print(out, source_ranges);
 }
 
 void PythonPrint(
     std::ostream& out,
+    SourceRangeRecords& source_ranges,
     const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);
-  pp.print(out);
+  pp.print(out, source_ranges);
 }
 
 bool printerHasSpecialCaseFor(Symbol sym) {
