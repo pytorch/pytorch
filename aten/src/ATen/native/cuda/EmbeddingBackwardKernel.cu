@@ -148,10 +148,11 @@ __global__ void compute_grad_weight(
 
   accscalar_t weight = 0;
   for (int idx=idx_begin; idx < idx_end; ++idx) {
-    const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
-    const int gradOutputRow = indices[idx] * stride;
-
-    weight += gradOutput[gradOutputRow + startFeature] * scale;
+    const int64_t target_row = indices[idx];
+    if (target_row != padding_idx) {
+      const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
+      weight += gradOutput[target_row * stride + startFeature] * scale;
+    }
   }
   grad_weight_per_segment[id * stride + startFeature] = weight;
 }
