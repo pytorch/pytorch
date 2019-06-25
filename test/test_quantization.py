@@ -56,6 +56,11 @@ default_options = {
     'qscheme': torch.per_tensor_affine
 }
 
+custome_options1 = {
+    'dtype': torch.quint8,
+    'qscheme': torch.per_tensor_affine
+}
+
 class ModelQuantizeAPITest(TestCase):
     def test_quantize1(self):
         '''
@@ -72,7 +77,7 @@ class ModelQuantizeAPITest(TestCase):
         eval_args = [calib_data]
         model = tq.quantize(model, qConfigDict, eval_fn, *eval_args)
         self.assertTrue(type(model) == QuantWrapper)
-        print(model)
+        print('running model:', model)
         self.assertTrue(hasattr(model, 'quant'))
         self.assertEqual(hasattr(model, 'dequant'), True)
         self.assertEqual(hasattr(model, 'observer'), False)
@@ -152,7 +157,7 @@ class ModelQuantizeAPITest(TestCase):
         # self.assertEqual(type(myModel.fc2), nnq.Linear)
         myModel(calib_data)
 
-    def test_nested(self):
+    def test_nested1(self):
         myModel = NestedModel()
         config = QConfig(weight=observer(WeightObserver, default_options),
                          activation=observer(Observer, default_options))
@@ -176,6 +181,7 @@ class ModelQuantizeAPITest(TestCase):
         eval_fn(myModel, *eval_args)
 
         tq.convert_to_quantized(myModel)
+        print('nested:', myModel)
         # self.assertEqual(hasattr(myModel, 'quant'), False)
         # self.assertEqual(hasattr(myModel.sub1, 'quant'), False)
         # self.assertEqual(hasattr(myModel.sub1.fc, 'quant'), False)
@@ -190,6 +196,79 @@ class ModelQuantizeAPITest(TestCase):
         # self.assertEqual(type(myModel.sub2.fc2), nnq.Linear)
         # self.assertEqual(type(myModel.fc3), nnq.Linear)
         myModel(calib_data)
+
+    def test_nested2(self):
+        """
+        If we add quant dequant for the whole module then we can eliminate
+        extra quant dequant between modules. This is what current implementation
+        supports.
+        However, a more complete support would make test_nested3 work as well,
+        but still keep the current behavior. That is to say, when user provides
+        configurations for finer grained modules, we operate on that level, e.g.
+        if user have a key 'sub2.fc2', then we don't treat 'sub2' as a terminal
+        module, instead we'll operate on the same level as 'sub2.fc2'.
+        """
+        myModel = NestedModel()
+        config = QConfig(weight=observer(WeightObserver, default_options),
+                         activation=observer(Observer, default_options))
+        qConfigDict = {
+            'fc3': config,
+            'sub2': config
+        }
+        calib_data = torch.rand(20, 5, dtype=torch.float)
+        eval_args = [calib_data]
+        myModel = tq.prepare(myModel, qConfigDict)
+        # self.assertEqual(hasattr(myModel, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub1, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub1.fc, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub2, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub2.fc1, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub2.fc2, 'quant'), True)
+        # self.assertEqual(hasattr(myModel.sub2.fc2, 'observer'), True)
+        # self.assertEqual(hasattr(myModel.fc3, 'quant'), True)
+        # self.assertEqual(hasattr(myModel.fc3, 'observer'), True)
+
+        eval_fn(myModel, *eval_args)
+
+        tq.convert_to_quantized(myModel)
+        print('nested:', myModel)
+        # self.assertEqual(hasattr(myModel, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub1, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub1.fc, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub2, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub2.fc1, 'quant'), False)
+        # self.assertEqual(hasattr(myModel.sub2.fc2, 'quant'), True)
+        # self.assertEqual(hasattr(myModel.sub2.fc2, 'observer'), False)
+        # self.assertEqual(hasattr(myModel.fc3, 'quant'), True)
+        # self.assertEqual(hasattr(myModel.fc3, 'observer'), False)
+        # self.assertEqual(type(myModel.sub1.fc), torch.nn.Linear)
+        # self.assertEqual(type(myModel.sub2.fc1), torch.nn.Linear)
+        # self.assertEqual(type(myModel.sub2.fc2), nnq.Linear)
+        # self.assertEqual(type(myModel.fc3), nnq.Linear)
+        myModel(calib_data)
+
+    # def test_nested3(self):
+    #     """
+    #     More complicated nested test case with fallbacks
+    #     this does not work with current implementation
+    #     """
+    #     myModel = NestedModel()
+    #     config1 = QConfig(weight=observer(WeightObserver, default_options),
+    #                       activation=observer(Observer, default_options))
+    #     config2 = QConfig(weight=observer(WeightObserver, default_options),
+    #                       activation=observer(Observer, custome_options1))
+    #     qConfigDict = {
+    #         'fc3': config1,
+    #         'sub2': config1,
+    #         'sub2.fc1': config2
+    #     }
+    #     calib_data = torch.rand(20, 5, dtype=torch.float)
+    #     eval_args = [calib_data]
+    #     myModel = tq.prepare(myModel, qConfigDict)
+    #
+    #     eval_fn(myModel, *eval_args)
+    #     tq.convert_to_quantized(myModel)
+    #     myModel(calib_data)
 
 
 

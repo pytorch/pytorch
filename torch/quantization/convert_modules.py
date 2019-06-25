@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch
 from .observer import *
+import heapq
 
 def _forward_hook(self, input, output):
     for module in self.children():
@@ -73,9 +74,10 @@ class QuantWrapper(nn.Module):
         self.module = module
 
     def forward(self, X):
-        self.quant(X)
+        X = self.quant(X)
         self.module.forward(X)
-        self.dequant(X)
+        X = self.dequant(X)
+        return X
 
 def get_config_key(name, qconfig_dict):
     if name in qconfig_dict:
@@ -95,26 +97,35 @@ def get_module(mod, name):
     return mod
 
 def add_quant_dequant_module(module, qconfig_dict, name):
+    assert name != ''
     qconfig = qconfig_dict[name]
     splits = name.split('.')
-    parent_mododule = module
+    print('splits:', splits)
     for split in splits:
         parent_module = module
         module = module._modules[split]
-    parent_module._modules[split[-1]] = QuantWrapper(module, qconfig)
-    return module
+    assert parent_module is not module
+    parent_module._modules[splits[-1]] = QuantWrapper(module, qconfig)
 
 def add_quant_dequant(module, qconfig_dict):
-    r"""Add QuantStub and DeQuantStub module and modify forward function
-    to call quant dequant accordign to qconfig_dict
+    r"""Add QuantStub and DeQuantStub module and Wrap the module in QuantWrapper
+    according to qconfig_dict
     """
-    mod_key_list = []
+    mod_key_set = set()
     for name, _ in module.named_modules():
+        print('name', name)
         dict_key = get_config_key(name, qconfig_dict)
         if dict_key is not None:
-            mod_key_list.append(dict_key)
+            mod_key_set.add(dict_key)
 
-    for name in set(mod_key_list):
+    # We need to update the modules from inner most
+    # module to outer modules(in decreasing order of number of '.')
+    print('mod_key_set', mod_key_set)
+    mod_key_heap = []
+    for name in mod_key_set:
+        heapq.heappush(mod_key_heap, (-name.count('.'), name))
+    while mod_key_heap:
+        _, name = heapq.heappop(mod_key_heap)
         if name == '':
             module = QuantWrapper(module, qconfig_dict[name])
         else:
@@ -208,6 +219,4 @@ def swap_module(mod, mapping=DEFAULT_MODULE_MAPPING):
     if type(mod) in STUB_MODULE_MAPPING:
         new_mod = STUB_MODULE_MAPPING[type(mod)].from_float(mod)
 
-    # keep the modification to forward
-    new_mod.forward = mod.forward
     return new_mod
