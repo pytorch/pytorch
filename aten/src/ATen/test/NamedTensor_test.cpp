@@ -146,9 +146,6 @@ static void check_unify(
     DimnameList other_names,
     DimnameList expected) {
   const auto result = at::unify_from_right(names, other_names);
-  if (!dimnames_equal(result.value(), expected)) {
-    std::cout << result.value() << std::endl;
-  }
   ASSERT_TRUE(dimnames_equal(result.value(), expected));
 }
 
