@@ -3,6 +3,7 @@ from torch._six import inf, istuple
 from functools import reduce
 from operator import mul, itemgetter
 import collections
+from torch.autograd import Variable
 from torch.testing import make_non_contiguous
 from common_utils import (skipIfNoLapack,
                           prod_single_zero, random_square_matrix_of_rank,
@@ -856,7 +857,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
             var.requires_grad = requires_grad
             return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], torch.Tensor):
-            return maybe_non_contig(torch.randn(*arg, dtype=torch.double)).requires_grad_(requires_grad)
+            return Variable(maybe_non_contig(torch.randn(*arg, dtype=torch.double)), requires_grad=requires_grad)
         elif isinstance(arg, non_differentiable):
             if isinstance(arg.tensor, torch.Tensor):
                 return maybe_non_contig(arg.tensor)
