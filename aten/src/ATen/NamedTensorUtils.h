@@ -3,6 +3,7 @@
 
 #include <ATen/NamedTensor.h>
 #include <ATen/core/Tensor.h>
+#include <functional>
 
 namespace at {
 
@@ -17,6 +18,9 @@ CAFFE2_API void internal_set_names_inplace(Tensor& tensor, optional<DimnameList>
 // Converts dim to an positional index. Errors if `dim` cannot be used to
 // refer to any dimension of tensor.
 CAFFE2_API int64_t dimname_to_position(const Tensor& tensor, Dimname dim);
+
+CAFFE2_API optional<std::vector<Dimname>>
+unify_from_right(optional<DimnameList> names, optional<DimnameList> other);
 
 namespace namedinference {
 
