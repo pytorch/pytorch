@@ -22,6 +22,11 @@ List<T>::List(ArrayRef<T> values)
 }
 
 template<class T>
+List<T>::List(std::initializer_list<T> initial_values)
+: List(ArrayRef<T>(initial_values)) {
+}
+
+template<class T>
 List<T>::List(List&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
   rhs.impl_ = make_intrusive<detail::ListImpl<StorageT>>();
 }
