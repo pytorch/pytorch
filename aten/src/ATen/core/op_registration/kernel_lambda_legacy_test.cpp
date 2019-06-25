@@ -614,11 +614,11 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfListO
   ASSERT_TRUE(op.has_value());
 
   c10::Dict<string, c10::List<c10::Dict<int64_t, string>>> dict;
-  auto dict1;
+  c10::Dict<int64_t, string> dict1;
   dict1.insert(10, "10");
   dict1.insert(20, "20");
   dict.insert("key1", c10::List<c10::Dict<int64_t, string>>({dict1}));
-  auto dict2;
+  c10::Dict<int64_t, string> dict2;
   dict2.insert(30, "30");
   dict2.insert(40, "40");
   dict.insert("key2", c10::List<c10::Dict<int64_t, string>>({dict2}));

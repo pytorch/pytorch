@@ -244,6 +244,18 @@ public:
   explicit List(std::initializer_list<T> initial_values);
   explicit List(ArrayRef<T> initial_values);
 
+  /**
+   * Create a generic list with runtime type information.
+   * This only works for c10::impl::GenericList and is not part of the public API
+   * but only supposed to be used internally by PyTorch.
+   */
+  template<class _T = T>
+  explicit List(
+    // enable_if: Only allow for List<IValue>
+    guts::enable_if_t<
+        std::is_same<_T, T>::value && std::is_same<_T, IValue>::value,
+    TypePtr> elementType);
+
   List(const List&) = default;
   List& operator=(const List&) = default;
   List(List&&) noexcept;

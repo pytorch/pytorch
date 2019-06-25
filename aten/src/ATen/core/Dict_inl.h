@@ -83,6 +83,20 @@ inline Dict<IValue, IValue>::Dict()
 }
 
 template<class Key, class Value>
+template<class _Key, class _Value>
+Dict<Key, Value>::Dict(
+  // enable_if: Only allow for Dict<IValue, IValue>
+  guts::enable_if_t<
+      std::is_same<_Key, Key>::value && std::is_same<_Key, IValue>::value &&
+      std::is_same<_Value, Value>::value && std::is_same<_Value, IValue>::value,
+  TypePtr> keyType,
+  TypePtr valueType)
+: Dict(make_intrusive<detail::DictImpl>(
+    typename detail::DictImpl::dict_map_type(),
+    detail::DictImpl::DictElementTypes {std::move(keyType), std::move(valueType)})) {
+}
+
+template<class Key, class Value>
 Dict<Key, Value>::Dict(Dict&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
   rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
 }

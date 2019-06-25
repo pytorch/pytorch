@@ -46,6 +46,17 @@ List<T>::List(std::initializer_list<T> initial_values)
 : List(ArrayRef<T>(initial_values)) {
 }
 
+template<class T>
+template<class _T>
+List<T>::List(
+  // enable_if: Only allow for List<IValue>
+  guts::enable_if_t<std::is_same<_T, T>::value && std::is_same<_T, IValue>::value,
+  TypePtr> elementType)
+: List(make_intrusive<detail::ListImpl<IValue>>(
+    typename detail::ListImpl<IValue>::list_type(),
+    std::move(elementType))) {
+}
+
 namespace impl {
 template<class T>
 List<T> toTypedList(impl::GenericList list) {
