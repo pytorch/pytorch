@@ -180,8 +180,8 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     //                       "empty_like for quantized Tensor only works for
     //                        PerTensorAffine scheme right now");
     return at::_empty_affine_quantized(self.sizes(), self.options(),
-                                       self.q_scale().toDouble(),
-                                       self.q_zero_point().toLong());
+                                       self.q_scale(),
+                                       self.q_zero_point());
   }
   return at::empty(self.sizes(), options);
 }
