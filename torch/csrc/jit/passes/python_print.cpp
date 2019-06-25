@@ -718,9 +718,14 @@ struct PythonPrintPass {
   }
 
   void printNode(Node* node, bool print_const) {
-    SourceRangeCtxMgr guard(
-        &source_range_stack_,
-        std::make_shared<SourceRange>(node->sourceRange()));
+    std::shared_ptr<SourceRange> debug_range;
+    if (auto orig_range = node->sourceRange().orig_range()) {
+      debug_range = orig_range;
+    } else {
+      debug_range = std::make_shared<SourceRange>(node->sourceRange());
+    }
+
+    SourceRangeCtxMgr guard(&source_range_stack_, debug_range);
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -1118,9 +1123,15 @@ struct PythonPrintPass {
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
 
-    SourceRangeCtxMgr guard(
-        &source_range_stack_,
-        std::make_shared<SourceRange>(graph.param_node()->sourceRange()));
+    std::shared_ptr<SourceRange> debug_range;
+    if (auto orig_range = graph.param_node()->sourceRange().orig_range()) {
+      debug_range = orig_range;
+    } else {
+      debug_range =
+          std::make_shared<SourceRange>(graph.param_node()->sourceRange());
+    }
+
+    SourceRangeCtxMgr guard(&source_range_stack_, debug_range);
 
     indent();
     body_ << "def " << func.name() << "(";

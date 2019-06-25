@@ -9,6 +9,29 @@
 namespace torch {
 namespace jit {
 
+struct SourceRange;
+using SourceRangeRecord = std::tuple<size_t, std::shared_ptr<SourceRange>>;
+using SourceRangeRecords = std::vector<SourceRangeRecord>;
+
+// Class that keeps track of a serialized debug info table and lazily
+// unpacks it on query.
+class DebugInfo {
+ public:
+  using SerializedDebugInfo = std::tuple<at::DataPtr, size_t>;
+
+  DebugInfo() = default;
+
+  DebugInfo(SerializedDebugInfo info) : info_(std::move(info)) {}
+
+  std::shared_ptr<SourceRange> query(const SourceRange& q);
+
+ private:
+  void deserialize();
+
+  SerializedDebugInfo info_;
+  c10::optional<SourceRangeRecords> deserialized_records_;
+};
+
 // Source represents a code segment. It keeps track of:
 //  - text : the text of the code segment
 //  - filename (optional) : if present, represents the name of the file from
@@ -16,18 +39,24 @@ namespace jit {
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
 struct Source {
-  explicit Source(std::string text)
-      : text_(std::move(text)), filename_(c10::nullopt) {
+  explicit Source(
+      std::string text,
+      std::shared_ptr<DebugInfo> debug_info = nullptr)
+      : text_(std::move(text)),
+        filename_(c10::nullopt),
+        debug_info_(std::move(debug_info)) {
     calc_line_start_offsets();
   }
 
   Source(
       std::string text,
       c10::optional<std::string> filename,
-      size_t starting_line_no)
+      size_t starting_line_no,
+      std::shared_ptr<DebugInfo> debug_info = nullptr)
       : text_(std::move(text)),
         filename_(std::move(filename)),
-        starting_line_no_(starting_line_no) {
+        starting_line_no_(starting_line_no),
+        debug_info_(std::move(debug_info)) {
     calc_line_start_offsets();
   }
 
@@ -79,6 +108,25 @@ struct Source {
     return serialized_;
   }
 
+  static std::shared_ptr<Source> __setstate__(const c10::IValue& iv) {
+    auto tup_elems = iv.toTuple()->elements();
+    TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
+    std::string text_ = tup_elems[0].toString()->string();
+    c10::optional<std::string> filename_ =
+        tup_elems[1].toOptional<std::string>();
+    int64_t starting_line_no_ = tup_elems[2].toInt();
+
+    return std::make_shared<Source>(
+        std::move(text_), std::move(filename_), starting_line_no_);
+  }
+
+  std::shared_ptr<SourceRange> query_debug_info(const SourceRange& sr) const {
+    if (!debug_info_) {
+      return nullptr;
+    }
+    return debug_info_->query(sr);
+  }
+
  private:
   void calc_line_start_offsets() {
     size_t pos = 0;
@@ -100,6 +148,8 @@ struct Source {
   // NB: if you introduce methods that mutate a Source object, you *must*
   // adjust this caching mechanism accordingly.
   std::shared_ptr<c10::IValue> serialized_ = nullptr;
+
+  std::shared_ptr<DebugInfo> debug_info_;
 };
 
 // A SourceRange is a view into a Source, that points to a subset of the source,
@@ -170,6 +220,26 @@ struct CAFFE2_API SourceRange {
     return serialized_;
   }
 
+  static std::shared_ptr<SourceRange> __setstate__(const c10::IValue& iv) {
+    auto tup_elems = iv.toTuple()->elements();
+    TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
+    std::shared_ptr<Source> source_ = Source::__setstate__(tup_elems[0]);
+    int64_t start_ = tup_elems[1].toInt();
+    int64_t end_ = tup_elems[2].toInt();
+    return std::make_shared<SourceRange>(source_, start_, end_);
+  }
+
+  std::shared_ptr<SourceRange> orig_range() const {
+    // Cache this to prevent log(n) lookup every time.
+    if (orig_range_) {
+      return orig_range_;
+    }
+    if (auto orig = source_->query_debug_info(*this)) {
+      orig_range_ = orig;
+    }
+    return orig_range_;
+  }
+
  private:
   std::shared_ptr<Source> source_;
   int64_t start_;
@@ -180,6 +250,9 @@ struct CAFFE2_API SourceRange {
   // NB: if you introduce methods that mutate a Source object, you *must*
   // adjust this caching mechanism accordingly.
   std::shared_ptr<c10::IValue> serialized_ = nullptr;
+
+  // Cached original source range from DebugInfo
+  mutable std::shared_ptr<SourceRange> orig_range_ = nullptr;
 };
 
 inline std::ostream& operator<<(std::ostream& out, const SourceRange& range) {
