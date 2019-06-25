@@ -9,7 +9,7 @@ from ..utils.rnn import PackedSequence, get_packed_sequence
 from .. import init
 from .. import _VF
 from ..._jit_internal import weak_module, weak_script_method, weak_script, \
-    _parameter_list
+    _parameter_list, delayed_script
 
 _rnn_impls = {
     'GRU': _VF.gru,
@@ -22,6 +22,16 @@ _rnn_impls = {
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
+
+
+@delayed_script
+def get_max_batch_size(batch_sizes):
+    # HACK: to support this call in the tracer, script it when called while
+    # tracing
+    print(
+    "getting batck size"
+    )
+    return batch_sizes[0]
 
 
 class RNNBase(Module):
@@ -186,7 +196,9 @@ class RNNBase(Module):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
             input, batch_sizes, sorted_indices, unsorted_indices = input
+            # max_batch_size = get_max_batch_size(batch_sizes)
             max_batch_size = batch_sizes[0]
+            # max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
