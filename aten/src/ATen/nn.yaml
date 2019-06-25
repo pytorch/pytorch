@@ -5,9 +5,9 @@
   scalar_check:
     output: 'false'
     grad_input: 'false'
-  # This section provides scalar types to be generated for each backend
-  # If backend is not specified, ['Float', 'Double', 'Half'] will be used
-  # If forward_scalar_types or backward_scalar_types is not specified, ['Float', 'Double', 'Half'] will be used
+  # Using this section you can specify what scalar types should be used for each backend
+  # to generate backward and forward methods
+  # If not specified, ['Float', 'Double', 'Half'] will be used
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Half']
     backward_scalar_types: ['Float', 'Double', 'Half']
