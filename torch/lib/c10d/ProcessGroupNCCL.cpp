@@ -11,6 +11,8 @@
 
 #include <c10d/Utils.hpp>
 
+#include <torch/csrc/cuda/nccl.h>
+
 namespace c10d {
 
 namespace {
