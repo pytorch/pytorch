@@ -8332,7 +8332,7 @@ for test_params in module_tests + new_module_tests:
             test_params['desc'] = 'with_long_tensor' if desc is None else desc + '_with_long_tensor'
 
         def gen_long_tensor(size):
-            return torch.LongTensor(size=size).random_(-1000, 1000).double().cpu()
+            return torch.randint(-1000, 1000, size=size).double().cpu()
 
         def gen_long_tensor_constructor(constructor):
             def long_tensor_constructor(*args, **kwargs):
