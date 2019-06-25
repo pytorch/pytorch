@@ -252,23 +252,23 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // it adds a buffer 'training' to the model if one doesn't exist
   // and then loads that parameter, casting it to bool
   if (field == "training") {
-    c10::optional<Slot> v = module_->find_attribute(field);
+    c10::optional<Slot> v = module_.find_attribute(field);
     if (!v) {
       bool training = py::cast<bool>(py::getattr(py_module_, "training"));
-      module_->register_attribute(
+      module_.register_attribute(
           "training", BoolType::get(), std::move(training));
-      v = module_->find_attribute(field);
+      v = module_.find_attribute(field);
     }
     Value* the_bool = m.graph()->insertGetAttr(self_, "training");
     return std::make_shared<SimpleValue>(the_bool);
   }
 
-  if (std::shared_ptr<Module> v = module_->find_module(field)) {
+  if (auto v = module_.find_module(field)) {
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field),
-        v,
+        *v,
         py_module_.attr(field.c_str()));
-  } else if (auto kind = module_->kind_of(field)) {
+  } else if (auto kind = module_.kind_of(field)) {
     // methods, parameters, attributes, and buffers are all first class
     return SimpleValue(self_).attr(loc, m, field);
   }
@@ -323,10 +323,10 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
             "was not a ScriptModule");
         // The module was a submodule of the nn.Module, so register it here
         // and return the submodule.
-        module_->register_module(field, submodule);
-        auto v = module_->find_module(field);
+        module_.register_module(field, *submodule);
+        auto v = module_.find_module(field);
         return std::make_shared<ModuleValue>(
-            m.graph()->insertGetAttr(self_, field), v, result);
+            m.graph()->insertGetAttr(self_, field), *v, result);
       }
     } else if (py::isinstance<py::function>(attr)) {
       auto stub = py::module::import("torch.jit")
@@ -364,7 +364,7 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   // and script Modules. If we need to load a Module, we need its field
   // name so we can emit 'self.field_name'.
   std::unordered_map<at::ivalue::Object*, std::string> obj_to_field;
-  for (Slot s : module_->get_module_slots()) {
+  for (Slot s : module_.get_module_slots()) {
     obj_to_field[s.value().toObject().get()] = s.name();
   }
 
@@ -375,7 +375,7 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
       Value* module_v = m.graph()->insertGetAttr(
           self_, obj_to_field.at(sub_module->module_object().get()));
       result.emplace_back(
-          std::make_shared<ModuleValue>(module_v, sub_module, obj));
+          std::make_shared<ModuleValue>(module_v, *sub_module, obj));
     } else {
       result.push_back(toSugaredValue(
           obj,
