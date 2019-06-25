@@ -390,6 +390,8 @@ class DistributedDataParallel(Module):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
+        self.__dict__.setdefault('require_forward_param_sync', True)
+        self.__dict__.setdefault('require_backward_grad_sync', True)
         self._ddp_init_helper()
 
     def _check_default_group(self):
@@ -425,8 +427,10 @@ class DistributedDataParallel(Module):
         """
         old_require_backward_grad_sync = self.require_backward_grad_sync
         self.require_backward_grad_sync = False
-        yield
-        self.require_backward_grad_sync = old_require_backward_grad_sync
+        try:
+            yield
+        finally:
+            self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
         if self.require_forward_param_sync:
