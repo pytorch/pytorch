@@ -111,10 +111,10 @@ Value* TracingState::getValue(const IValue& var) {
       if (it == value_map.end()) {
         continue;
       }
-      if (!it->second->hasUniqueName()) {
+      if (!it->second->hasDebugName()) {
         auto unique_name = getTracingState()->lookup_var_name_fn(ten);
         if (!unique_name.empty()) {
-          it->second->setUniqueName(unique_name);
+          it->second->setDebugName(unique_name);
         }
       }
       return it->second;
@@ -218,7 +218,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     if (state->hasValue(input)) {
       input_tensor = input_tensor.view(input_tensor.sizes());
     }
-    value->setUniqueName(name);
+    value->setDebugName(name);
     state->setValue(input_tensor, value);
     return input_tensor;
   } else if (auto tuple_type = type->cast<TupleType>()) {
@@ -302,7 +302,9 @@ static void gatherParametersAndBuffers(
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self) {
+std::pair<std::shared_ptr<TracingState>, Stack> enter(
+    TypedStack inputs,
+    script::Module* self) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }

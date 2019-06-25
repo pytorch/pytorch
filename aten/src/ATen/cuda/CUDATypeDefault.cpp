@@ -5,11 +5,4 @@
 
 namespace at {
 
-Allocator* CUDATypeDefault::allocator() const {
-  return cuda::getCUDADeviceAllocator();
-}
-Device CUDATypeDefault::getDeviceFromPtr(void * data) const {
-  return cuda::getDeviceFromPtr(data);
-}
-
 } // namespace at

@@ -26,8 +26,8 @@ SKIP_PYTHON_BINDINGS = [
     '_indexCopy_', 'max_values', 'min_values',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
-    'arange.*', 'range.*', '_solve.*', '_getri.*', '_inverse.*',
-    '_cholesky.*', '_triangular_solve.*', '_qr.*',
+    'arange.*', 'range.*', '_solve.*', '_inverse.*',
+    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
@@ -152,7 +152,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
-    'QScheme',
+    'QScheme', 'double',
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
