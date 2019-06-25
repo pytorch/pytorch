@@ -1,4 +1,3 @@
-#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/cuda/python_nccl.h>
 
 #include <torch/csrc/cuda/nccl.h>
