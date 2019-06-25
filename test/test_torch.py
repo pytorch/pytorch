@@ -1765,17 +1765,18 @@ class _TestTorchMixin(object):
             self.assertEqual(res_reciprocal, res_div)
 
     def test_mul(self):
-        m1 = torch.randn(10, 10)
-        res1 = m1.clone()
-        res1[:, 3].mul_(2)
-        res2 = m1.clone()
-        for i in range(res1.size(0)):
-            res2[i, 3] = res2[i, 3] * 2
-        self.assertEqual(res1, res2)
+        for device in torch.testing.get_all_device_types():
+            m1 = torch.randn(10, 10, device=device)
+            res1 = m1.clone()
+            res1[:, 3].mul_(2)
+            res2 = m1.clone()
+            for i in range(res1.size(0)):
+                res2[i, 3] = res2[i, 3] * 2
+            self.assertEqual(res1, res2)
 
-        a1 = torch.tensor([True, False, False, True], dtype=torch.bool)
-        a2 = torch.tensor([True, False, True, False], dtype=torch.bool)
-        self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool))
+            a1 = torch.tensor([True, False, False, True], dtype=torch.bool, device=device)
+            a2 = torch.tensor([True, False, True, False], dtype=torch.bool, device=device)
+            self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool, device=device))
 
     def test_div(self):
         m1 = torch.randn(10, 10)

@@ -588,7 +588,7 @@ def emit_body(declaration):
                 if arg['name'] == derivative_var_name:
                     break
             else:
-                assert False
+                raise AssertionError()
 
             return 'grad_fn->should_compute_output({})'.format(edge_off)
 
