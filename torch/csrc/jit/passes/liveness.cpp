@@ -22,12 +22,11 @@ struct LivenessAnalyzer {
     return result;
   }
 
-  void dump(
-      const std::unordered_map<Node*, std::vector<Value*>>& liveness_sets) {
+  void dump(const std::map<Node*, std::vector<Value*>>& liveness_sets) {
     std::cout << "Liveness info:\n";
     for (auto e : liveness_sets) {
       if (e.first->outputs().size() > 0) {
-        std::cout << e.first->outputs()[0]->debugName();
+        std::cout << e.first->outputs()[0]->uniqueName();
       }
 
       std::cout << " " << e.first->kind().toQualString();
@@ -48,7 +47,7 @@ struct LivenessAnalyzer {
       } else {
         std::cout << ", ";
       }
-      std::cout << el->debugName() << "(" << el->unique() << ")";
+      std::cout << el->uniqueName() << "(" << el->unique() << ")";
     }
     std::cout << "]";
   }

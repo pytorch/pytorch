@@ -21,12 +21,11 @@ logger = logging.getLogger(__name__)
 
 class BucketWeighted(ModelLayer):
     def __init__(self, model, input_record, max_score=0, bucket_boundaries=None,
-                 hash_buckets=False, weight_optim=None, name="bucket_weighted"):
+                 weight_optim=None, name="bucket_weighted"):
         super(BucketWeighted, self).__init__(model, name, input_record)
 
         assert isinstance(input_record, schema.List), "Incorrect input type"
         self.bucket_boundaries = bucket_boundaries
-        self.hash_buckets = hash_buckets
         if bucket_boundaries is not None:
             self.shape = len(bucket_boundaries) + 1
         elif max_score > 0:
@@ -64,10 +63,6 @@ class BucketWeighted(ModelLayer):
             "buckets_int",
             to=core.DataType.INT32
         )
-        if self.hash_buckets:
-            buckets_int = net.IndexHash(
-                buckets_int, "hashed_buckets_int", seed=0, modulo=self.shape
-            )
         net.Gather(
             [self.bucket_w, buckets_int],
             self.output_schema.bucket_weights.field_blobs())

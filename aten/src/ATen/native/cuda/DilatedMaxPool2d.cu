@@ -146,8 +146,9 @@ void max_pool2d_with_indices_out_cuda_template(
   checkAllSameGPU("max_pool2d_with_indices_out_cuda",
                   {output_arg, indices_arg, input_arg});
 
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+  // XXX JIT: Pooling.cpp allows stride.empty().
+  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
+  TORCH_CHECK(kernel_size.size() == 2 &&
               (stride.empty() || stride.size() == 2) &&
               (padding.size() == 1 || padding.size() == 2) &&
               (dilation.size() == 1 || dilation.size() == 2),
@@ -157,7 +158,7 @@ void max_pool2d_with_indices_out_cuda_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
@@ -236,8 +237,9 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   checkAllSameGPU("max_pool2d_with_indices_out_cuda",
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
 
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+  // XXX JIT: Pooling.cpp allows stride.empty().
+  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
+  TORCH_CHECK(kernel_size.size() == 2 &&
               (stride.empty() || stride.size() == 2) &&
               (padding.size() == 1 || padding.size() == 2) &&
               (dilation.size() == 1 || dilation.size() == 2),
@@ -247,7 +249,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);

@@ -521,9 +521,6 @@ class CAFFE2_API Tensor {
   Tensor hardshrink_backward(const Tensor & grad_out, Scalar lambd) const;
   Tensor rsqrt() const;
   Tensor & rsqrt_();
-  #ifdef NAMEDTENSOR_ENABLED
-  Tensor select(Dimname dim, int64_t index) const;
-  #endif
   Tensor select(int64_t dim, int64_t index) const;
   Tensor sigmoid() const;
   Tensor & sigmoid_();
@@ -619,8 +616,8 @@ class CAFFE2_API Tensor {
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
   Tensor dequantize() const;
-  double q_scale() const;
-  int64_t q_zero_point() const;
+  Scalar q_scale() const;
+  Scalar q_zero_point() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;

@@ -126,7 +126,6 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
-        'Dimname': 'Union[str, None]',
         'DimnameList': 'List[Union[str, None]]',
         'QScheme': '_qscheme',
     }[typename]

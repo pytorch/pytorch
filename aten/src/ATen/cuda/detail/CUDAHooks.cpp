@@ -4,7 +4,6 @@
 #include <ATen/Context.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
@@ -56,10 +55,6 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
 
 Generator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
-}
-
-Device CUDAHooks::getDeviceFromPtr(void* data) const {
-  return at::cuda::getDeviceFromPtr(data);
 }
 
 bool CUDAHooks::hasCUDA() const {

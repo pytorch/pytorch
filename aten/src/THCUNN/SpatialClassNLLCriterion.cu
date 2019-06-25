@@ -1,6 +1,6 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THC/THCNumerics.cuh>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCAtomics.cuh>
 #include <THCUNN/common.h>
 #include <THC/THCDeviceTensor.cuh>

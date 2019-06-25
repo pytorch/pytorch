@@ -479,12 +479,6 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   return result;
 }
 
-#ifdef NAMEDTENSOR_ENABLED
-Tensor select(const Tensor& self, Dimname dim, int64_t index) {
-  return at::select(self, dimname_to_position(self, dim), index);
-}
-#endif
-
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
@@ -630,10 +624,6 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self, dim0, dim1);
   }
 
-  if (self.is_mkldnn()) {
-    return at::mkldnn_transpose_(self, dim0, dim1);
-  }
-
   auto strides = self.strides().vec();
   auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
@@ -652,10 +642,6 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   if (self.is_sparse()) {
     Tensor self_clone = self.clone();  // yes, this is what THS does
     return sparse_transpose_(self_clone, dim0, dim1);
-  }
-
-  if (self.is_mkldnn()) {
-    return at::mkldnn_transpose(self, dim0, dim1);
   }
 
   auto strides = self.strides().vec();

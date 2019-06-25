@@ -2,14 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import unittest
 
-try:
-    import torchvision
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-
-skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-
 import torch
 import torch.jit
 from torch.utils import mkldnn as mkldnn_utils
@@ -287,13 +279,6 @@ class TestMkldnn(TestCase):
             x.reshape(size),
             x.to_mkldnn().reshape(size).to_dense(),
         )
-        # test whether share same memory for plain format tensor
-        y = x.to_mkldnn()
-        z = y.reshape(size).add_(y.reshape(size))
-        self.assertEqual(
-            y.reshape(size).to_dense(),
-            z.to_dense(),
-        )
 
     def test_clone(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
@@ -308,15 +293,6 @@ class TestMkldnn(TestCase):
             y.to_dense(),
             z.to_dense(),
         )
-
-    def test_transpose(self):
-        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
-        for dim1 in range(x.ndim):
-            for dim2 in range(x.ndim):
-                self.assertEqual(
-                    x.transpose(dim1, dim2),
-                    x.to_mkldnn().transpose(dim1, dim2).to_dense(),
-                )
 
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -388,26 +364,6 @@ class TestMkldnn(TestCase):
             x1.zero_(),
             x2.zero_().to_dense(),
         )
-
-    def _test_imagenet_model(self, model):
-        model = model.train(False).float()
-        mkldnn_model = mkldnn_utils.to_mkldnn(copy.deepcopy(model))
-        x = torch.randn(1, 3, 224, 224, dtype=torch.float32)
-        with torch.no_grad():
-            self.assertEqual(
-                model(x),
-                mkldnn_model(x.to_mkldnn()).to_dense(),
-            )
-
-    @skipIfNoTorchVision
-    def test_resnet18(self):
-        model = torchvision.models.resnet.resnet18(pretrained=False)
-        self._test_imagenet_model(model)
-
-    @skipIfNoTorchVision
-    def test_resnext50_32x4d(self):
-        model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
-        self._test_imagenet_model(model)
 
 
 if __name__ == '__main__':

@@ -6,12 +6,6 @@
 #include "caffe2/operators/segment_reduction_op.h"
 #include "caffe2/utils/math.h"
 
-#ifdef __HIP_PLATFORM_HCC__
-#define SEGREDUCE_MINBLOCKS 8
-#else
-#define SEGREDUCE_MINBLOCKS 16
-#endif
-
 namespace caffe2 {
 
 namespace {
@@ -47,9 +41,6 @@ void inclusive_scan_wrapper(
 }
 
 template <typename T, bool ExactBlock = false, bool Average = false>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
-#endif
 __global__ void length_sum_kernel(
     const T* __restrict__ in,
     T* __restrict__ out,
@@ -91,9 +82,6 @@ __global__ void length_sum_kernel(
 }
 
 template <typename T, bool ExactBlock = false, bool Average = false>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
-#endif
 __global__ void length_sum_gradient_kernel(
     const T* __restrict__ grad_in,
     T* __restrict__ grad_out,
@@ -132,9 +120,6 @@ __global__ void length_sum_gradient_kernel(
 }
 
 template <typename T, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
-#endif
 __global__ void length_max_kernel(
     const T* __restrict__ in,
     T* __restrict__ out,
@@ -178,9 +163,6 @@ __global__ void length_max_kernel(
 }
 
 template <typename T, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
-#endif
 __global__ void length_weighted_sum_gradient_kernel(
     const T* __restrict__ grad_in,
     const T* __restrict__ weights_in,
@@ -215,9 +197,6 @@ __global__ void length_weighted_sum_gradient_kernel(
 }
 
 template <typename T, typename IndexType, int NumThreads>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
-#endif
 __global__ void length_weighted_sum_with_main_input_gradient_kernel(
     const T* __restrict__ grad_in,
     const T* __restrict__ weights_in,
@@ -262,9 +241,6 @@ template <
     typename IndexType,
     bool ExactBlock = false,
     bool Average = false>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
-#endif
 __global__ void sparse_length_sum_kernel(
     const T* __restrict__ in,
     T* __restrict__ out,
@@ -321,9 +297,6 @@ __global__ void sparse_length_sum_kernel(
 }
 
 template <typename T, typename IndexType, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
-#endif
 __global__ void sparse_length_max_kernel(
     const T* __restrict__ in,
     T* __restrict__ out,
@@ -382,9 +355,6 @@ __global__ void sparse_length_max_kernel(
 }
 
 template <typename T, typename IndexType, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024,SEGREDUCE_MINBLOCKS)
-#endif
 __global__ void sparse_length_weighted_sum_kernel(
     const T* __restrict__ in,
     const T* __restrict__ in_weights,
@@ -509,7 +479,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
         GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
     if (SparseFused) {
       if (post <= maxThreads) {
-        int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
+        int multiple = std::min(maxThreads / post, 16);
         dim3 block(post, multiple);
         size_t smem = sizeof(T) * post * multiple;
 
@@ -631,7 +601,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
         GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
     if (SparseFused) {
       if (post <= maxThreads) {
-        int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
+        int multiple = std::min(maxThreads / post, 16);
         dim3 block(post, multiple);
         size_t smem = sizeof(T) * post * multiple;
         // calling cuda kernel with ExactBlock = true, Average = true
@@ -755,7 +725,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     T numeric_min = std::numeric_limits<T>::min();
     if (SparseFused) {
       if (post <= maxThreads) {
-        int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
+        int multiple = std::min(maxThreads / post, 16);
         dim3 block(post, multiple);
         size_t smem = sizeof(T) * post * multiple;
 
@@ -877,7 +847,7 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     auto maxThreads =
         GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
     if (post <= maxThreads) {
-      int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
+      int multiple = std::min(maxThreads / post, 16);
       dim3 block(post, multiple);
       size_t smem = sizeof(T) * post * multiple;
 
@@ -1373,7 +1343,7 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
         GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
 
     if (post <= maxThreads) {
-      int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
+      int multiple = std::min(maxThreads / post, 16);
       dim3 block(post, multiple);
 
       // calling cuda kernel with ExactBlock = true, Average = false
@@ -1452,7 +1422,7 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
         GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
 
     if (post <= maxThreads) {
-      int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
+      int multiple = std::min(maxThreads / post, 16);
       dim3 block(post, multiple);
 
       // calling cuda kernel with ExactBlock = true, Average = true
@@ -1532,7 +1502,7 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
         GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
 
     if (post < maxThreads) {
-      int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
+      int multiple = std::min(maxThreads / post, 16);
       dim3 block(post, multiple);
 
       length_weighted_sum_gradient_kernel<T, true>
@@ -1667,7 +1637,7 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
         GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
 
     if (post <= maxThreads) {
-      int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
+      int multiple = std::min(maxThreads / post, 16);
       dim3 block(post, multiple);
 
       length_max_gradient_kernel<T, true>
@@ -1873,5 +1843,3 @@ using LengthsMaxCUDAOp =
 C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(LengthsSum, LengthsSumCUDAOp);
 C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(LengthsMean, LengthsMeanCUDAOp);
 C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(LengthsMax, LengthsMaxCUDAOp);
-
-#undef SEGREDUCE_MINBLOCKS

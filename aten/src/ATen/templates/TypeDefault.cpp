@@ -15,7 +15,6 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/core/ATenDispatch.h>
 
 namespace at {
 
@@ -38,8 +37,20 @@ Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);
 }
 
+Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
+  auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(static_cast<TensorImpl*>(th_pointer));
+  if (retain && tensor_impl.get() != UndefinedTensorImpl::singleton()) {
+    c10::raw::intrusive_ptr::incref(tensor_impl.get());
+  }
+  return Tensor(std::move(tensor_impl));
+}
+Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  if (retain && th_pointer) {
+    c10::raw::intrusive_ptr::incref(static_cast<StorageImpl*>(th_pointer));
+  }
+  return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
+}
+
 ${type_method_definitions}
 
-static auto& registerer = globalATenDispatch()
-  ${function_registrations};
 }

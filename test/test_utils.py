@@ -534,8 +534,7 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'pytorch/vision',
             'resnet18',
-            pretrained=True,
-            progress=False)
+            pretrained=True)
         self.assertEqual(sum_of_model_parameters(hub_model),
                          SUM_OF_PRETRAINED_RESNET18_PARAMS)
 
@@ -545,8 +544,7 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'pytorch/vision',
             'resnet18',
-            pretrained=True,
-            progress=False)
+            pretrained=True)
         self.assertEqual(sum_of_model_parameters(hub_model),
                          SUM_OF_PRETRAINED_RESNET18_PARAMS)
         assert os.path.exists(temp_dir + '/pytorch_vision_master')

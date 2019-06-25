@@ -34,19 +34,18 @@ SET(INTEL_COMPILER_DIR "/opt/intel" CACHE STRING
   "Root directory of the Intel Compiler Suite (contains ipp, mkl, etc.)")
 SET(INTEL_MKL_DIR "/opt/intel/mkl" CACHE STRING
   "Root directory of the Intel MKL (standalone)")
-SET(MKL_THREADING "OMP" CACHE STRING "MKL flavor: SEQ, TBB or OMP (default)")
+SET(INTEL_MKL_SEQUENTIAL OFF CACHE BOOL
+  "Force using the sequential (non threaded) libraries")
+SET(INTEL_MKL_TBB OFF CACHE BOOL
+  "Force using TBB library")
 
-IF (NOT "${MKL_THREADING}" STREQUAL "SEQ" AND
-    NOT "${MKL_THREADING}" STREQUAL "TBB" AND
-    NOT "${MKL_THREADING}" STREQUAL "OMP")
-  MESSAGE(FATAL_ERROR "Invalid MKL_THREADING (${MKL_THREADING}), should be one of: SEQ, TBB, OMP")
+IF (INTEL_MKL_TBB)
+  IF (USE_TBB)
+    message(STATUS "MKL is using TBB")
+  ELSE()
+    message(FATAL_ERROR "INTEL_MKL_TBB is set to true but TBB is not used")
+  ENDIF()
 ENDIF()
-
-IF ("${MKL_THREADING}" STREQUAL "TBB" AND NOT USE_TBB)
-  MESSAGE(FATAL_ERROR "MKL_THREADING is TBB but USE_TBB is turned off")
-ENDIF()
-
-MESSAGE(STATUS "MKL_THREADING = ${MKL_THREADING}")
 
 # Checks
 CHECK_TYPE_SIZE("void*" SIZE_OF_VOIDP)
@@ -60,7 +59,7 @@ ELSE ("${SIZE_OF_VOIDP}" EQUAL 8)
   SET(mkl64s)
 ENDIF ("${SIZE_OF_VOIDP}" EQUAL 8)
 IF(CMAKE_COMPILER_IS_GNUCC)
-  IF ("${MKL_THREADING}" STREQUAL "TBB")
+  IF (INTEL_MKL_TBB)
     SET(mklthreads "mkl_tbb_thread")
     SET(mklrtls "tbb")
   ELSE()
@@ -69,7 +68,7 @@ IF(CMAKE_COMPILER_IS_GNUCC)
   ENDIF()
   SET(mklifaces  "intel" "gf")
 ELSE(CMAKE_COMPILER_IS_GNUCC)
-  IF ("${MKL_THREADING}" STREQUAL "TBB")
+  IF (INTEL_MKL_TBB)
     SET(mklthreads "mkl_tbb_thread")
     SET(mklrtls "tbb")
   ELSE()
@@ -256,7 +255,7 @@ IF (NOT MKL_LIBRARIES)
 ENDIF (NOT MKL_LIBRARIES)
 
 # First: search for parallelized ones with intel thread lib
-IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
+IF (NOT INTEL_MKL_SEQUENTIAL)
   FOREACH(mklrtl ${mklrtls} "")
     FOREACH(mkliface ${mklifaces})
       FOREACH(mkl64 ${mkl64s} "")
@@ -269,7 +268,7 @@ IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
       ENDFOREACH(mkl64)
     ENDFOREACH(mkliface)
   ENDFOREACH(mklrtl)
-ENDIF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
+ENDIF (NOT INTEL_MKL_SEQUENTIAL)
 
 # Second: search for sequential ones
 FOREACH(mkliface ${mklifaces})

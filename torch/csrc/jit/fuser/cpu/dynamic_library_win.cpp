@@ -1,4 +1,3 @@
-#include <Windows.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
 #include <torch/csrc/utils/disallow_copy.h>
@@ -8,32 +7,16 @@ namespace jit {
 namespace fuser {
 namespace cpu {
 
-
 DynamicLibrary::DynamicLibrary(const char* name) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
-  HMODULE theModule = LoadLibraryA(name);
-  if (theModule) {
-    handle = theModule;
-  } else {
-    AT_ERROR("error in LoadLibraryA");
-  }
+  AT_ERROR("NYI: DynamicLibrary on Windows");
 }
 
 void* DynamicLibrary::sym(const char* name) {
-  AT_ASSERT(handle);
-  FARPROC procAddress = GetProcAddress((HMODULE)handle, name);
-  if (!procAddress) {
-    AT_ERROR("error in GetProcAddress");
-  }
-  return (void*)procAddress;
+  AT_ERROR("NYI: DynamicLibrary on Windows");
 }
 
-DynamicLibrary::~DynamicLibrary() {
-  if (!handle) {
-    return;
-  }
-  FreeLibrary((HMODULE)handle);
-}
+DynamicLibrary::~DynamicLibrary() {}
 
 } // namespace cpu
 } // namespace fuser
