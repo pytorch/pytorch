@@ -73,7 +73,7 @@ struct TORCH_API Method {
     return function_->graph();
   }
 
-  const std::string& name() const {
+  std::string name() const {
     return function_->name();
   }
 
@@ -110,6 +110,10 @@ struct TORCH_API Module {
   Module() : Module("$Module") {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
+
+  const c10::QualifiedName& name() const {
+    return *module_object()->type()->qualified_name_obj();
+  }
 
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
@@ -220,8 +224,9 @@ struct TORCH_API Module {
     }
     return nullptr;
   }
-  c10::optional<Method> find_method(const std::string& name) const {
-    if (const auto fn = class_compilation_unit()->find_function(name)) {
+  c10::optional<Method> find_method(const std::string& basename) const {
+    if (const auto fn = class_compilation_unit()->find_function(
+            getNameForMethod(basename))) {
       return Method(module_object(), fn);
     }
     return c10::nullopt;
@@ -308,7 +313,8 @@ struct TORCH_API Module {
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    if (auto fn = class_compilation_unit()->find_function(name)) {
+    if (auto fn =
+            class_compilation_unit()->find_function(getNameForMethod(name))) {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
@@ -350,8 +356,12 @@ struct TORCH_API Module {
  private:
   void clone_method(
       const Module& orig,
-      const std::string& name,
+      const QualifiedName& name,
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
+
+  c10::QualifiedName getNameForMethod(std::string basename) const {
+    return QualifiedName(name(), basename);
+  }
   static const char* toString(EntityType t) {
     switch (t) {
       case EntityType::MODULE:

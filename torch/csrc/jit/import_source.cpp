@@ -187,19 +187,23 @@ struct SourceImporter {
     while (L.cur().kind != TK_EOF) {
       parseImportsAndDoCallback();
 
-      std::vector<Def> definitions;
-      std::vector<ResolverPtr> resolvers;
       auto parsed_treeref = p_.parseClassLike();
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
+        auto cu = std::make_shared<CompilationUnit>();
+        const auto qualified_classname = QualifiedName(
+            QualifiedName(class_qualifier), class_def.name().name());
+
+        std::vector<Def> definitions;
+        std::vector<ResolverPtr> resolvers;
+        std::vector<c10::QualifiedName> names;
         for (const auto& method_def : class_def.defs()) {
           definitions.emplace_back(method_def);
           resolvers.emplace_back(resolver_);
+          names.emplace_back(
+              QualifiedName(qualified_classname, method_def.name().name()));
         }
 
-        auto cu = std::make_shared<CompilationUnit>();
-        const auto qualified_classname =
-            class_qualifier + "." + class_def.name().name();
         auto class_type =
             ClassType::create(c10::QualifiedName(qualified_classname), cu);
         owner.register_class(class_type);
@@ -207,7 +211,7 @@ struct SourceImporter {
           v->setType(class_type);
           return std::make_shared<SimpleValue>(v);
         };
-        cu->define(definitions, resolvers, self);
+        cu->define(names, definitions, resolvers, self);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
         auto named_tuple_def = NamedTupleDef(parsed_treeref);
 
@@ -245,18 +249,25 @@ struct SourceImporter {
     }
   }
 
-  void importFunctions(CompilationUnit& cu, const Self& self) {
+  void importFunctions(
+      const c10::optional<c10::QualifiedName>& prefix,
+      CompilationUnit& cu,
+      const Self& self) {
     checkVersionNumber();
     parseImportsAndDoCallback();
 
     std::vector<Def> definitions;
     std::vector<ResolverPtr> resolvers;
+    std::vector<c10::QualifiedName> names;
     while (p_.lexer().cur().kind != TK_EOF) {
       auto def = Def(p_.parseFunction(/*is_method=*/bool(self)));
       definitions.emplace_back(def);
       resolvers.emplace_back(resolver_);
+      auto name = prefix ? QualifiedName(*prefix, def.name().name())
+                         : QualifiedName(def.name().name());
+      names.push_back(std::move(name));
     }
-    cu.define(definitions, resolvers, self);
+    cu.define(names, definitions, resolvers, self);
   }
 
   size_t parseVersionNumber() {
@@ -309,6 +320,7 @@ struct SourceImporter {
 };
 
 void import_functions(
+    const c10::optional<c10::QualifiedName>& prefix,
     const CompilationUnit& lib_cu,
     CompilationUnit& cu,
     const std::shared_ptr<Source>& src,
@@ -316,7 +328,7 @@ void import_functions(
     const Self& self,
     const std::function<void(const std::string&)>& import_callback) {
   SourceImporter importer(lib_cu, src, constant_table, import_callback);
-  importer.importFunctions(cu, self);
+  importer.importFunctions(prefix, cu, self);
 }
 
 void import_methods(
@@ -330,6 +342,7 @@ void import_methods(
     return std::make_shared<SimpleValue>(v);
   };
   import_functions(
+      mod->name(),
       lib_cu,
       *mod->module_object()->type()->compilation_unit(),
       src,
