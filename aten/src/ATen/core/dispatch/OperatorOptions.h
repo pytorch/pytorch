@@ -21,8 +21,10 @@ constexpr inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
     ? "FROM_SCHEMA"
     : ((aliasAnalysisKind == AliasAnalysisKind::PURE)
     ? "PURE"
+    : ((aliasAnalysisKind == AliasAnalysisKind::INTERNAL_SPECIAL_CASE)
+    ? "INTERNAL_SPECIAL_CASE"
     : "UNKNOWN"
-  ));
+  )));
 }
 
 struct OperatorOptions final {
