@@ -7,7 +7,7 @@ namespace c10 {
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
 
-std::shared_ptr<Function> ClassType::getMethod(const std::string& name) const {
+Function* ClassType::getMethod(const std::string& name) const {
   return compilation_unit_->find_function(name);
 }
 
@@ -63,11 +63,7 @@ size_t ClassType::addAttribute(
 }
 
 std::vector<Function*> ClassType::methods() const {
-  std::vector<Function*> ret;
-  for (const auto& pr : compilation_unit()->get_functions()) {
-    ret.push_back(pr.get());
-  }
-  return ret;
+  return compilation_unit()->get_functions();
 }
 
 ClassType::ClassType(

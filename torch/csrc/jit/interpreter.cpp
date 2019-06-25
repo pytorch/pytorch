@@ -408,7 +408,7 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
-  std::vector<std::shared_ptr<Function>> function_table_;
+  std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
   int register_size_ = 0;
   size_t n_outputs;
@@ -437,6 +437,7 @@ struct CodeImpl {
 
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
+  std::vector<std::unique_ptr<Function>> bailout_functions_;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
@@ -601,7 +602,7 @@ struct CodeImpl {
   }
 
   void emitCall(
-      std::shared_ptr<Function> func,
+      Function* func,
       at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
@@ -641,8 +642,11 @@ struct CodeImpl {
     size_t jf_index = instructions_.size() - 1;
     emitLoadInputs(node->inputs().slice(1));
     insertInstruction(TAIL_CALL, function_table_.size());
-    auto func = std::make_shared<Function>("bailout", /*optimize=*/true, node->g(attr::Subgraph), nullptr);
-    function_table_.emplace_back(func);
+
+    auto func = torch::make_unique<Function>(
+        "bailout", /*optimize=*/true, node->g(attr::Subgraph), nullptr);
+    function_table_.emplace_back(func.get());
+    bailout_functions_.emplace_back(std::move(func));
     createBailoutBlock(jf_index);
   }
 
@@ -787,7 +791,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Instruction* instructions;
     IValue* constants;
     Operation* operators;
-    std::shared_ptr<Function>* functions;
+    Function** functions;
     TypePtr* types;
 
     ActiveFrame(const Frame& frame)

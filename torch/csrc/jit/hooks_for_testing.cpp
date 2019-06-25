@@ -11,7 +11,7 @@ void didFinishEmitModule(std::shared_ptr<script::Module> module) {
   }
 }
 static FunctionHook emit_function_callback;
-void didFinishEmitFunction(std::shared_ptr<Function> fn) {
+void didFinishEmitFunction(StrongFunctionPtr fn) {
   if (emit_function_callback) {
     emit_function_callback(fn);
   }
