@@ -154,9 +154,6 @@ static PyObject *THPSize_reduce(THPSize *self)
   auto ret = THPObjectPtr{PyTuple_New(2)};
   if (!ret) throw python_error();
 
-  auto module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!module) throw python_error();
-
   auto obj = (PyObject*)(&THPSizeType);
   Py_INCREF(&THPSizeType);
   PyTuple_SET_ITEM(ret.get(), 0, obj);
