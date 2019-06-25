@@ -10441,11 +10441,11 @@ tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([123])''')
 
-            # test tensor on a different gpu than current one.
+            # test printing a tensor on a different gpu than current one.
             if torch.cuda.device_count() >= 2:
-                torch.cuda.set_device(1)
-                self.assertEqual(x.__repr__(), str(x))
-                self.assertExpectedInline(str(x), '''tensor([123], device='cuda:0')''')
+                with torch.cuda.device(1):
+                    self.assertEqual(x.__repr__(), str(x))
+                    self.assertExpectedInline(str(x), '''tensor([123], device='cuda:0')''')
 
             # test printing cpu tensor when default device is cuda
             y = torch.tensor([123], device='cpu')
