@@ -222,6 +222,20 @@ public:
       const std::unordered_map<std::string, IValue>& kwargs) const;
 
   void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
+
+  bool hasAnyAliasInfo() const {
+    for (const auto& arg : arguments_) {
+      if (arg.alias_info().has_value()) {
+        return true;
+      }
+    }
+    for (const auto& ret : returns_) {
+      if (ret.alias_info().has_value()) {
+        return true;
+      }
+    }
+    return false;
+  }
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {

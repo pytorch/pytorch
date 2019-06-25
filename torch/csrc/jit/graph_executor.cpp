@@ -48,6 +48,14 @@
 namespace torch {
 namespace jit {
 
+namespace {
+c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
+}
+}
+
 // for debugging it is helpful to be able to force autodiff subgraphs
 // to be created, to check their correctness, even when the
 // size of the of the subgraph is too small to be profitable.
@@ -449,7 +457,7 @@ Gradient getGradient(const Node* n) {
 RegisterOperators reg_graph_executor_ops(
     {Operator(prim::DifferentiableGraph, [](const Node* n) -> Operation {
       return DifferentiableGraphOp(getGradient(n));
-    })});
+    }, aliasAnalysisInternalSpecialCase())});
 
 namespace detail {
 

@@ -134,6 +134,15 @@ class LearningRateOp final : public Operator<Context> {
           this->template GetSingleArgument<int>(arg_prefix + "num_iter", 0);
       DCHECK_GT(multiplier, 0);
       return new ConstantWarmupLearningRate<T>(multiplier, num_iter);
+    } else if (policy == "pieceWarmup") {
+      T m1 = this->template GetSingleArgument<float>(arg_prefix + "m1", 0.5);
+      int64_t n1 =
+          this->template GetSingleArgument<int64_t>(arg_prefix + "n1", 0);
+      T m2 = this->template GetSingleArgument<float>(arg_prefix + "m2", 0.5);
+      int64_t n2 =
+          this->template GetSingleArgument<int64_t>(arg_prefix + "n1", 0);
+      T m3 = this->template GetSingleArgument<float>(arg_prefix + "m3", 0.5);
+      return new PieceWarmupLearningRate<T>(m1, n1, m2, n2, m3);
     } else if (policy == "composite") {
       std::vector<int> sub_policy_num_iters =
           this->template GetRepeatedArgument<int>("sub_policy_num_iters");

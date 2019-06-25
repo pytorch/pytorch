@@ -5,8 +5,6 @@
 
 TH_EXTERNC void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
 TH_EXTERNC void sgels_(char *trans, int *m, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, float *work, int *lwork, int *info);
-TH_EXTERNC void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
-TH_EXTERNC void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
 TH_EXTERNC void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
 TH_EXTERNC void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
 TH_EXTERNC void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda, double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
@@ -37,21 +35,6 @@ void THLapack_(gels)(char trans, int m, int n, int nrhs, scalar_t *a, int lda, s
 #endif
 #else
   THError("gels : Lapack library not found in compile time\n");
-#endif
-}
-
-/* Compute all eigenvalues and, optionally, eigenvectors of a real symmetric
-matrix A */
-void THLapack_(syev)(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info)
-{
-#ifdef USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dsyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
-#else
-  ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
-#endif
-#else
-  THError("syev : Lapack library not found in compile time\n");
 #endif
 }
 
