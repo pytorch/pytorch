@@ -330,16 +330,16 @@ void import_functions(
 
 void import_methods(
     const CompilationUnit& lib_cu,
-    const std::shared_ptr<Module>& mod,
+    const Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
 
-  auto self = SimpleSelf(mod->type());
+  auto self = SimpleSelf(mod.type());
   import_functions(
-      mod->name(),
+      mod.name(),
       lib_cu,
-      *mod->module_object()->type()->compilation_unit(),
+      *mod.module_object()->type()->compilation_unit(),
       src,
       constant_table,
       &self,

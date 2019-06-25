@@ -134,7 +134,7 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& methodName,
              py::function pyObserverFunction) {
             // Create a new node that would be used in the insert observer pass:
@@ -162,7 +162,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& methodName,
              py::dict& pyQParamDict) {
             if (!pyQParamDict.size()) {
@@ -176,7 +176,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant_for_weight_bias",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& method_name,
              const std::string& param_name,
              py::function pyGetQParamFunc) {
@@ -211,14 +211,12 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
           "_jit_pass_pattern_based_rewrite",
-          [](std::shared_ptr<script::Module>& m) {
-            return PatternBasedRewrite(m);
-          })
+          [](const script::Module& m) { return PatternBasedRewrite(m); })
       .def(
           "_jit_pass_custom_pattern_based_rewrite",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             std::shared_ptr<script::Module> m) {
+             const script::Module& m) {
             SubgraphRewriter subgraph_rewriter;
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnModule(m);
