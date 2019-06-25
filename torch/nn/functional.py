@@ -12,7 +12,7 @@ from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from . import _VF
-from .._jit_internal import boolean_dispatch
+from .._jit_internal import boolean_dispatch, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""

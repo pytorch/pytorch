@@ -6,6 +6,7 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple
+from ..._jit_internal import List
 
 
 class _ConvNd(Module):
