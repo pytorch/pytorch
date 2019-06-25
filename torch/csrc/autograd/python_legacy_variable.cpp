@@ -55,13 +55,6 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     throw torch::TypeError("Variable data has to be a tensor, but got %s",
         Py_TYPE(data)->tp_name);
   }
-  // yf225 TODO: This is the same issue as the ".data should not allow tensor metadata change"
-  // and here's what we should do:
-  // 1. Try to not set this flag to true, and then fix all call site errors in our test suite
-  // 2. Evaluate whether keeping this flag false is actually that important (since we already
-  // have a release where this breaks (i.e. a = torch.randn(3, 4); x = Variable(a); a.resize_(4, 5); x.shape is not changed!)
-  // and people are not complaining about it, so it's probably fine to just set this flag to true.
-  tensor.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(false); // yf225 TODO: change this to false, and then try test_nn again!
 
   Variable var = tensor;
   if (grad_fn) {

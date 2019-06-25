@@ -857,7 +857,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
             var.requires_grad = requires_grad
             return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], torch.Tensor):
-            return maybe_non_contig(torch.randn(*arg, dtype=torch.double)).requires_grad_(requires_grad)  # yf225 TODO: this fixes test errors such as `TestAutograd.test_resize_as_`
+            return maybe_non_contig(torch.randn(*arg, dtype=torch.double)).requires_grad_(requires_grad)
         elif isinstance(arg, non_differentiable):
             if isinstance(arg.tensor, torch.Tensor):
                 return maybe_non_contig(arg.tensor)

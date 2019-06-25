@@ -28,7 +28,10 @@ using caffe2::int8::Int8TensorCPU;
 namespace {
 
 caffe2::Tensor from_at_tensor(const c10::IValue& v) {
-  return caffe2::Tensor(autograd::Variable(std::move(v).toTensor())._tensor_data_deprecated());  // yf225 TODO: write comment why we can't change this to `variable_data()` (because Caffe2 can't handle Variable yet, and we plan to change it after the Variable/Tensor merge)
+  // We use `._tensor_data_deprecated()` here, because Caffe2 can't handle Variables yet.
+  // After the Variable/Tensor merge, Caffe2 will be able to handle non-requires-grad Variables,
+  // and we will remove `._tensor_data_deprecated()` here.
+  return caffe2::Tensor(autograd::Variable(std::move(v).toTensor())._tensor_data_deprecated());
 }
 
 Int8TensorCPU from_proxy(const c10::IValue& proxy) {
