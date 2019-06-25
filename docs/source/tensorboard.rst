@@ -97,3 +97,4 @@ Expected result:
    .. automethod:: add_embedding
    .. automethod:: add_pr_curve
    .. automethod:: add_custom_scalars
+   .. automethod:: add_mesh

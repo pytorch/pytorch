@@ -183,41 +183,64 @@ public:
   // make it happen
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
-  // 1. the AutogradMeta pointer, because it is unique for each Variable.
-  // 2. the version counter, because it is set to the passed in `version_counter`.
-  //    See NOTE [ Version Counter Sharing ] for details.
-  //
-  // NOTE: `allow_tensor_metadata_change` determines whether the TensorImpl shallow-copy
-  // allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
-  // See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
-    // TensorImpl general fields
-    // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
-    impl->sizes_ = sizes_;
-    impl->strides_ = strides_;
-    impl->storage_offset_ = storage_offset_;
-    impl->is_contiguous_ = is_contiguous_;
-    impl->is_wrapped_number_ = is_wrapped_number_;
-    impl->reserved_ = reserved_;
-    impl->set_version_counter(version_counter);
-    impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-
-    // Sparse-specific fields
-    impl->sparse_dim_ = sparse_dim();
-    impl->dense_dim_ = dense_dim();
-    impl->indices_ = indices();
-    impl->values_ = values();
-    impl->device_opt_ = device();
-    impl->coalesced_ = coalesced();
+    copy_tensor_data(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/version_counter,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
     return impl;
   }
+
+  /**
+   * Shallow-copies data from another TensorImpl into this TensorImpl.
+   *
+   * For why this function doesn't check this TensorImpl's `allow_tensor_metadata_change_`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
+    AT_ASSERT(typeid(*(impl.get())) == typeid(SparseTensorImpl));
+    auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
+    copy_tensor_data(
+      /*src_impl=*/sparse_impl,
+      /*dest_impl=*/this,
+      /*version_counter=*/version_counter(),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+    refresh_numel();
+  }
 private:
     explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
+
+  /**
+   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_data(
+      const SparseTensorImpl* src_sparse_impl,
+      SparseTensorImpl* dest_sparse_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) {
+    TensorImpl::copy_tensor_data(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);
+
+    // Sparse-specific fields
+    dest_sparse_impl->sparse_dim_ = src_sparse_impl->sparse_dim();
+    dest_sparse_impl->dense_dim_ = src_sparse_impl->dense_dim();
+    dest_sparse_impl->indices_ = src_sparse_impl->indices();
+    dest_sparse_impl->values_ = src_sparse_impl->values();
+    dest_sparse_impl->coalesced_ = src_sparse_impl->coalesced();
+  }
 };
 
 } // namespace at

@@ -1,9 +1,12 @@
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/ATen.h>
+#include <ATen/quantized/Quantizer.h>
+#include <c10/core/Allocator.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Type.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <ATen/core/Tensor.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
@@ -15,40 +18,44 @@ void checkFloatCPUTensor(std::string fn_name, Tensor t) {
   TORCH_CHECK(
       t.scalar_type() == kFloat,
       fn_name,
-      "expects a Float Tensor.");
+      " expects a Float Tensor.");
   TORCH_CHECK(
       t.device() == kCPU,
       fn_name,
-      "expects a CPU Tensor.");
+      " expects a CPU Tensor.");
 }
 
 template <typename T>
 void checkQuantizedCPUTensor(std::string fn_name, Tensor t) {
   TORCH_CHECK(t.is_quantized(),
            fn_name,
-           "expects a quantized Tensor.");
+           " expects a quantized Tensor.");
   TORCH_CHECK(t.scalar_type() == caffe2::TypeMeta::Make<T>(),
            fn_name,
-           "expects a ",
+           " expects a ",
            caffe2::TypeMeta::Make<T>(),
-           "Tensor");
+           " Tensor");
   TORCH_CHECK(t.device() == kCPU,
            fn_name,
-           "expects a CPU quantized Tensor");
+           " expects a CPU quantized Tensor");
 }
 
 template <typename T>
-void checkZeroPoint(std::string fn_name, int32_t zero_point) {
+void checkZeroPoint(std::string fn_name, int64_t zero_point) {
   TORCH_CHECK(zero_point <= std::numeric_limits<T>::max(),
-           fn_name,
-           "zero_point is out of range.");
+              fn_name,
+              " zero_point ",
+              zero_point,
+              " is out of range.");
   TORCH_CHECK(zero_point >= std::numeric_limits<T>::min(),
-           fn_name,
-           "zero_point is out of range.");
+              fn_name,
+              " zero_point ",
+              zero_point,
+              " is out of range.");
 }
 
 template <typename T>
-void checkZeroPoints(std::string fn_name, std::vector<int32_t> zero_points) {
+void checkZeroPoints(std::string fn_name, std::vector<int64_t> zero_points) {
   for (int i = 0; i < zero_points.size(); ++i) {
     TORCH_CHECK(zero_points[i] <= std::numeric_limits<T>::max(),
                 fn_name,
@@ -66,7 +73,7 @@ void checkZeroPoints(std::string fn_name, std::vector<int32_t> zero_points) {
 #ifdef USE_FBGEMM
 // Note: quantize_val is only explicitly used in test outside of this file
 template <typename T>
-T quantize_val(float scale, int32_t zero_point, float value) {
+T quantize_val(double scale, int64_t zero_point, float value) {
   // Internally, fbgemm::Quantize uses std::nearbyint.
   // std::nearbyint results in nearest integer value according to the current
   // rounding mode and the default rounding mode is rounds to even in half-way
@@ -78,8 +85,8 @@ T quantize_val(float scale, int32_t zero_point, float value) {
   int32_t qvalue;
   qvalue = fbgemm::Quantize<typename T::underlying>(
       value,
-      zero_point,
-      scale,
+      static_cast<int32_t>(zero_point),
+      static_cast<double>(scale),
       /*result_precision=*/CHAR_BIT * sizeof(typename T::underlying));
   return static_cast<T>(qvalue);
 }
@@ -87,7 +94,7 @@ T quantize_val(float scale, int32_t zero_point, float value) {
 // TODO: dequantize_val?
 
 template <typename T>
-Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
+Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
   auto fn_name = "quantize_tensor";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -106,7 +113,7 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero
 }
 
 template <typename T>
-Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
+Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
   auto fn_name = "dequantize_tensor";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -126,7 +133,7 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t ze
 #else
 
 template <typename T>
-T quantize_val(float scale, int32_t zero_point, float value) {
+T quantize_val(double scale, int64_t zero_point, float value) {
   // std::nearbyint results in nearest integer value according to the current
   // rounding mode and the default rounding mode is rounds to even in half-way
   // cases in most popular processor architectures like x86 and ARM. This is
@@ -134,18 +141,18 @@ T quantize_val(float scale, int32_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  int32_t qvalue;
-  constexpr int32_t qmin = std::numeric_limits<typename T::underlying>::min();
-  constexpr int32_t qmax = std::numeric_limits<typename T::underlying>::max();
+  int64_t qvalue;
+  constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
+  constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
   checkZeroPoint<typename T::underlying>("quantize_val", zero_point);
-  qvalue = static_cast<int32_t>(std::nearbyint(value / scale + zero_point));
-  qvalue = std::max(qvalue, qmin);
-  qvalue = std::min(qvalue, qmax);
+  qvalue = static_cast<int64_t>(std::nearbyint(value / scale + zero_point));
+  qvalue = std::max<int64_t>(qvalue, qmin);
+  qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
 }
 
 template <typename T>
-Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
+Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
   auto fn_name = "quantize_tensor";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -159,7 +166,7 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero
 }
 
 template <typename T>
-Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
+Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
   auto fn_name = "dequantize_tensor";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -174,24 +181,24 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t ze
   return rtensor;
 }
 #endif
-template CAFFE2_API qint8 quantize_val<qint8>(float scale, int32_t zero_point, float value);
-template CAFFE2_API quint8 quantize_val<quint8>(float scale, int32_t zero_point, float value);
-template CAFFE2_API qint32 quantize_val<qint32>(float scale, int32_t zero_point, float value);
-template CAFFE2_API Tensor quantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
-template CAFFE2_API Tensor quantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
-template CAFFE2_API Tensor quantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
-template CAFFE2_API Tensor dequantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
-template CAFFE2_API Tensor dequantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
-template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
+template CAFFE2_API qint8 quantize_val<qint8>(double scale, int64_t zero_point, float value);
+template CAFFE2_API quint8 quantize_val<quint8>(double scale, int64_t zero_point, float value);
+template CAFFE2_API qint32 quantize_val<qint32>(double scale, int64_t zero_point, float value);
+template CAFFE2_API Tensor quantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor quantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor quantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor dequantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor dequantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 
 
 // TODO: add fbgemm for per channel
 template <typename T>
 Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
                                           Tensor qtensor,
-                                          std::vector<float> scales,
-                                          std::vector<int32_t> zero_points,
-                                          std::vector<int64_t> axis) {
+                                          const std::vector<double>& scales,
+                                          const std::vector<int64_t>& zero_points,
+                                          IntArrayRef axis) {
   auto fn_name = "quantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -221,9 +228,9 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
 template <typename T>
 Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
                                             Tensor rtensor,
-                                            std::vector<float> scales,
-                                            std::vector<int32_t> zero_points,
-                                            std::vector<int64_t> axis) {
+                                            const std::vector<double>& scales,
+                                            const std::vector<int64_t>& zero_points,
+                                            IntArrayRef axis) {
   auto fn_name = "dequantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -258,13 +265,13 @@ QuantizerPtr make_per_tensor_affine_quantizer(
     int64_t zero_point,
     ScalarType scalar_type) {
   return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type,
-      static_cast<float>(scale), static_cast<int32_t>(zero_point));
+      scale, zero_point);
 }
 
 QuantizerPtr make_per_channel_affine_quantizer(
-    std::vector<float> scales,
-    std::vector<int32_t> zero_points,
-    std::vector<int64_t> axis,
+    const std::vector<double>& scales,
+    const std::vector<int64_t>& zero_points,
+    IntArrayRef axis,
     ScalarType scalar_type) {
   return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
                                                         scales, zero_points, axis);
@@ -272,12 +279,10 @@ QuantizerPtr make_per_channel_affine_quantizer(
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
   // TODO: remove this when Variable and Tensor are merged
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       !self.is_variable(),
       "_internal_get_QTensorImpl: should not be a variable");
-  // TODO: uncomment after is_quantized() is implemented
-  // AT_ASSERTM(self.is_quantized(), "_internal_get_QTensorImpl: not a quantized
-  // tensor");
+  TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 

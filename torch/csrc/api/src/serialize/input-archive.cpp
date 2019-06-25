@@ -25,7 +25,7 @@ bool InputArchive::try_read(
     bool is_buffer) {
   auto param = module_->find_parameter(key);
   auto buffer = module_->find_buffer(key);
-  if (param == nullptr && buffer == nullptr) return false;
+  if (!param && !buffer) return false;
 
   // clang-format off
   auto read_param = is_buffer ? buffer : param;
@@ -38,7 +38,7 @@ bool InputArchive::try_read(
   if (tensor.defined()) {
     torch::NoGradGuard guard;
     if (tensor.device() != read_tensor.device()) {
-      tensor.set_data(autograd::Variable(read_tensor).data());
+      tensor.set_data(read_tensor);
     } else {
       tensor.set_(read_tensor);
     }

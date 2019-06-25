@@ -5,7 +5,8 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset
+import torch.onnx.symbolic_helper as sym_help
+from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
 
 
@@ -17,22 +18,6 @@ import torch.onnx.symbolic_opset9
 # release on 04/24/19
 
 
-# Blacklist operators for this opset version.
-# These operators have been updated in ONNX but not re-implemented here.
-# It is very important to blacklist these operators to avoid exporting
-# models with mixed versions of operators.
-# TODO : add support for the blacklisted operators in black_listed_operators
-black_listed_operators = ["flip",
-                          "slice",
-                          "upsample_nearest2d", "upsample_bilinear2d",
-                          "dropout", "feature_dropout", "alpha_dropout", "feature_alpha_dropout",
-                          "dropout_", "feature_dropout_", "alpha_dropout_", "feature_alpha_dropout_"]
-
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
-
-
-# Add new operator here
 @parse_args('v', 'i', 'i', 'i', 'i')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
@@ -120,3 +105,72 @@ def _avg_pool(name, tuple_fn):
 avg_pool1d = _avg_pool('avg_pool1d', _single)
 avg_pool2d = _avg_pool('avg_pool2d', _pair)
 avg_pool3d = _avg_pool('avg_pool3d', _triple)
+
+
+def _interpolate(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, align_corners=None):
+        if align_corners:
+            return _unimplemented(name, "align_corners == True")
+
+        output_size = sym_help._maybe_get_const(output_size, 'is')
+        if sym_help._is_value(output_size):
+            offset = 2
+            offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+            dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+            divisor = sym_help._slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
+            divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+            scale_dims = g.op("Div", dividend, divisor)
+            scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+        else:
+            scales_constant = [1. if i < 2 else
+                               float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
+                               for i in range(0, dim)]
+            scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+        return g.op("Resize", input, scales, mode_s=interpolate_mode)
+    return symbolic_fn
+
+upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
+upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
+upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
+
+
+def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
+    if dynamic_slice:
+        starts = g.op("Unsqueeze", starts, axes_i=[0])
+        ends = g.op("Unsqueeze", ends, axes_i=[0])
+        axes = g.op("Unsqueeze", axes, axes_i=[0])
+    else:
+        assert len(starts) == len(ends)
+        assert len(starts) == len(axes)
+        assert steps is None or len(starts) == len(steps)
+        if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807 \
+           and (steps is None or (len(steps) == 1 and steps[0] == 1)):
+            return input    
+        axes = g.op("Constant", value_t=torch.tensor(axes))
+        starts = g.op("Constant", value_t=torch.tensor(starts))
+        ends = g.op("Constant", value_t=torch.tensor(ends))
+    if steps is None:
+        return g.op("Slice", input, starts, ends, axes)
+    steps = g.op("Constant", value_t=torch.tensor(steps))
+    return g.op("Slice", input, starts, ends, axes, steps)
+
+
+@parse_args('v', 'v', 'v', 'v', 'i')
+def slice(g, self, dim, start, end, step):
+    if (start.node().kind() != 'onnx::Constant' or
+       end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant'):
+        dynamic_slice = True
+    else:
+        start = [sym_help._parse_arg(start, 'i')]
+        end = [sym_help._parse_arg(end, 'i')]
+        dim = [sym_help._parse_arg(dim, 'i')]
+        dynamic_slice = False
+    return sym_help._slice_helper(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
+
+
+@parse_args('v', 'is')
+def flip(g, input, dims):
+    return sym_help._slice_helper(g, input, axes=dims,
+                                  starts=[-1] * len(dims),
+                                  ends=[-9223372036854775807] * len(dims),
+                                  steps=[-1] * len(dims))

@@ -1,9 +1,11 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
 
 #include <cmath>
 #include <memory>
@@ -13,8 +15,10 @@
 
 namespace at {
 
+class Tensor;
 struct QTensorImpl;
 struct Quantizer;
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 
 /**
@@ -126,9 +130,9 @@ struct CAFFE2_API SymmetricQuantizer : public UniformQuantizer {
  * used for quantizing all the values in the given Tensor
  */
 struct CAFFE2_API PerTensorSymmetricQuantizer : public SymmetricQuantizer {
-  explicit PerTensorSymmetricQuantizer(ScalarType scalar_type, float scale)
+  explicit PerTensorSymmetricQuantizer(ScalarType scalar_type, double scale)
     : SymmetricQuantizer(kPerTensorSymmetric, scalar_type), scale_(scale) {}
-  float scale_{1.0};
+  double scale_{1.0};
 };
 
 /**
@@ -144,25 +148,25 @@ struct CAFFE2_API PerTensorSymmetricQuantizer : public SymmetricQuantizer {
 struct CAFFE2_API PerChannelSymmetricQuantizer : public SymmetricQuantizer {
   explicit PerChannelSymmetricQuantizer(
       ScalarType scalar_type,
-      const std::vector<float>& scales,
-      const std::vector<int64_t>& axis)
-    : SymmetricQuantizer(kPerChannelSymmetric, scalar_type), scales_(scales), axis_(axis) {
+      const std::vector<double>& scales,
+      IntArrayRef axis)
+    : SymmetricQuantizer(kPerChannelSymmetric, scalar_type), scales_(scales), axis_(axis.vec()) {
     TORCH_CHECK(
         axis_.size() == 1,
         "Per channel symmetric quantization in multiple axis is not supported yet.");
   }
 
-  std::vector<float> scales() const {
+  std::vector<double> scales() const {
     return scales_;
   }
 
-  std::vector<int64_t> axis() const {
+  IntArrayRef axis() const {
     return axis_;
   }
 
  private:
-  const std::vector<float> scales_;
-  const std::vector<int64_t> axis_;
+  const std::vector<double> scales_;
+  const SmallVector<int64_t, 1> axis_;
 };
 
 /**
@@ -170,7 +174,7 @@ struct CAFFE2_API PerChannelSymmetricQuantizer : public SymmetricQuantizer {
  * all the values in the Tensor.
  */
 struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
-  explicit PerTensorAffineQuantizer(ScalarType scalar_type, float scale, int32_t zero_point)
+  explicit PerTensorAffineQuantizer(ScalarType scalar_type, double scale, int64_t zero_point)
     : AffineQuantizer(kPerTensorAffine, scalar_type),
         scale_(scale),
         zero_point_(zero_point) {}
@@ -178,18 +182,18 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
   Tensor quantize(Tensor tensor) override;
   Tensor dequantize(Tensor tensor) override;
 
-  float scale() const {
+  double scale() const {
     return scale_;
   }
 
-  int32_t zero_point() const {
+  int64_t zero_point() const {
     return zero_point_;
   }
 
  private:
-  const float scale_;
-  // We use int32_t to support both uint8_t and int32_t data types
-  const int32_t zero_point_;
+  const double scale_;
+  // We use int64_t for consistency with Python
+  const int64_t zero_point_;
 };
 
 /**
@@ -200,27 +204,27 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
 struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   explicit PerChannelAffineQuantizer(
       ScalarType scalar_type,
-      const std::vector<float>& scales,
-      const std::vector<int32_t>& zero_points,
-      const std::vector<int64_t>& axis)
+      const std::vector<double>& scales,
+      const std::vector<int64_t>& zero_points,
+      IntArrayRef axis)
     : AffineQuantizer(kPerChannelAffine, scalar_type),
     scales_(scales),
     zero_points_(zero_points),
-    axis_(axis) {
+    axis_(axis.vec()) {
     TORCH_CHECK(
         axis_.size() == 1,
         "Per channel affine quantization in multiple axis is not supported yet.");
   }
 
-  std::vector<float> scales() const {
+  std::vector<double> scales() const {
     return scales_;
   }
 
-  std::vector<int32_t> zero_points() const {
+  std::vector<int64_t> zero_points() const {
     return zero_points_;
   }
 
-  std::vector<int64_t> axis() const {
+  IntArrayRef axis() const {
     return axis_;
   }
 
@@ -228,9 +232,9 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   Tensor dequantize(Tensor tensor) override;
 
  private:
-  const std::vector<float> scales_;
-  const std::vector<int32_t> zero_points_;
-  const std::vector<int64_t> axis_;
+  const std::vector<double> scales_;
+  const std::vector<int64_t> zero_points_;
+  const SmallVector<int64_t, 1> axis_;
 };
 
 // This is an internal utility function for getting at the QTensorImpl,
@@ -242,19 +246,22 @@ CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
 // Quantize a float value into a uint value given scale and zero_point
 template <typename T>
-CAFFE2_API T quantize_val(float scale, int32_t zero_point, float value);
+CAFFE2_API T quantize_val(double scale, int64_t zero_point, float value);
 template <typename T>
-CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
+CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template <typename T>
-CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point);
+CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr
-make_per_tensor_affine_quantizer(double scale, int64_t zero_point, ScalarType scalar_type);
+make_per_tensor_affine_quantizer(
+    double scale, int64_t zero_point, ScalarType scalar_type);
 
 CAFFE2_API QuantizerPtr
-make_per_channel_affine_quantizer(std::vector<float> scales, std::vector<int32_t> zero_points, std::vector<int64_t> axis, ScalarType scalar_type);
+make_per_channel_affine_quantizer(
+    const std::vector<double>& scales, const std::vector<int64_t>& zero_points,
+    IntArrayRef axis, ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
 CAFFE2_API Tensor new_qtensor_cpu(

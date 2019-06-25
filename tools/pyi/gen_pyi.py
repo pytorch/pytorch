@@ -56,6 +56,7 @@ blacklist = [
     # defined in functional
     'einsum',
     # reduction argument; these bindings don't make sense
+    'binary_cross_entropy_with_logits',
     'ctc_loss',
     'cosine_embedding_loss',
     'hinge_embedding_loss',
@@ -112,7 +113,6 @@ def type_to_python(typename, size=None):
         'Storage': 'Storage',
         'BoolTensor': 'Tensor',
         'IndexTensor': 'Tensor',
-        'SparseTensorRef': 'Tensor',
         'Tensor': 'Tensor',
         'IntArrayRef': '_size',
         'IntArrayRef[]': 'Union[_int, _size]',
@@ -126,6 +126,9 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
+        'Dimname': 'Union[str, None]',
+        'DimnameList': 'List[Union[str, None]]',
+        'QScheme': '_qscheme',
     }[typename]
 
     return typename
@@ -156,6 +159,8 @@ def arg_to_type_hint(arg):
                 default = '(' + default[1:-1] + ')'
             else:
                 raise Exception("Unexpected default constructor argument of type {}".format(arg['dynamic_type']))
+        elif default == 'QScheme::PER_TENSOR_AFFINE':
+            default = 'per_tensor_affine'
         default = '={}'.format(default)
     else:
         default = ''
@@ -431,9 +436,10 @@ def gen_pyi(declarations_path, out):
         'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: bool=False)'
                  ' -> Union[str, Tensor]: ...'],
         'get_device': ['def get_device(self) -> _int: ...'],
+        'contiguous': ['def contiguous(self) -> Tensor: ...'],
         'is_contiguous': ['def is_contiguous(self) -> bool: ...'],
-        'is_cuda': ['def is_cuda(self) -> bool: ...'],
-        'is_leaf': ['def is_leaf(self) -> bool: ...'],
+        'is_cuda': ['is_cuda: bool'],
+        'is_leaf': ['is_leaf: bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '
@@ -498,7 +504,7 @@ def gen_pyi(declarations_path, out):
                          for n in
                          ['float32', 'float', 'float64', 'double', 'float16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
-                          'complex32', 'complex64', 'complex128']]
+                          'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32']]
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~

@@ -651,6 +651,7 @@ BAD_EXAMPLES = [
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = False
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -1780,6 +1781,11 @@ class TestDistributions(TestCase):
         multivariate_normal_log_prob_gradcheck(mean_no_batch, None, prec_batched)
         multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
         multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
+
+    def test_multivariate_normal_stable_with_precision_matrix(self):
+        x = torch.randn(10)
+        P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
+        MultivariateNormal(x.new_zeros(10), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
@@ -3463,7 +3469,7 @@ class TestKL(TestCase):
 
 
 class TestConstraints(TestCase):
-    def test_params_contains(self):
+    def test_params_constraints(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -3486,7 +3492,7 @@ class TestConstraints(TestCase):
                         Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
-    def test_support_contains(self):
+    def test_support_constraints(self):
         for Dist, params in EXAMPLES:
             self.assertIsInstance(Dist.support, Constraint)
             for i, param in enumerate(params):

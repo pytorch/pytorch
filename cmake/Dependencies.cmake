@@ -73,6 +73,27 @@ else()
       "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
+if (USE_TBB)
+  message(STATUS "Compiling TBB from source")
+  # Unset our restrictive C++ flags here and reset them later.
+  # Remove this once we use proper target_compile_options.
+  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  set(CMAKE_CXX_FLAGS)
+
+  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
+  set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+  set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+
+  install(TARGETS tbb EXPORT Caffe2Targets DESTINATION lib)
+
+  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+endif()
+
 # ---[ protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
@@ -150,6 +171,9 @@ if (NOT INTERN_BUILD_MOBILE)
 
   if (MKL_FOUND)
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    if ("${MKL_THREADING}" STREQUAL "SEQ")
+      ADD_DEFINITIONS(-DTH_BLAS_MKL_SEQ=1)
+    endif()
     if (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
       set(AT_MKL_MT 1)
@@ -653,8 +677,11 @@ if(BUILD_PYTHON)
   # don't want to overwrite it because we trust python more than cmake
   if (NUMPY_INCLUDE_DIR)
     set(NUMPY_FOUND ON)
-  else()
+  elseif(USE_NUMPY)
     find_package(NumPy)
+    if(NOT NUMPY_FOUND)
+      message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
+    endif()
   endif()
 
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
@@ -781,7 +808,7 @@ if(USE_CUDA)
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
-    # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
+    # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
     if(CAFFE2_USE_NVRTC)
@@ -1028,11 +1055,11 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Set the ONNX_ML flag for ONNX submodule
   if (DEFINED ENV{ONNX_ML})
     set(ONNX_ML $ENV{ONNX_ML})
-    if (ONNX_ML)
-      add_definitions(-DONNX_ML=1)
-    endif()
   else()
-    set(ONNX_ML OFF)
+    set(ONNX_ML ON)
+  endif()
+  if (ONNX_ML)
+    add_definitions(-DONNX_ML=1)
   endif()
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")

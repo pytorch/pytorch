@@ -2,97 +2,12 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorRandom.cu"
 #else
 
-#include "ATen/cuda/CUDAContext.h"
-
-#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/CUDAGenerator.h>
+#include <ATen/Utils.h>
+#include <utility>
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-
-void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, double stdv)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generate_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, mean, stdv);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
-void THCTensor_(normal_means)(THCState *state, THCTensor *self, THCTensor *means, double stddev) {
-  THCTensor_(resizeAs)(state, self, means);
-  THCTensor_(normal)(state, self, 0, stddev);
-  THCTensor_(cadd)(state, self, self, ScalarConvert<int, scalar_t>::to(1), means);
-}
-
-void THCTensor_(normal_stddevs)(THCState *state, THCTensor *self, double mean, THCTensor *stddevs)
-{
-  THCTensor_(resizeAs)(state, self, stddevs);
-  THCTensor_(normal)(state, self, 0, 1);
-  THCTensor_(cmul)(state, self, self, stddevs);
-  THCTensor_(add)(state, self, self, ScalarConvert<double, scalar_t>::to(mean));
-}
-
-void THCTensor_(normal_means_stddevs)(THCState *state, THCTensor *self, THCTensor *means, THCTensor *stddevs)
-{
-  THCTensor_(resizeAs)(state, self, means);
-  THCTensor_(normal)(state, self, 0, 1);
-  THCTensor_(cmul)(state, self, self, stddevs);
-  THCTensor_(cadd)(state, self, self, ScalarConvert<int, scalar_t>::to(1), means);
-}
-
-void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mean, double stdv)
-{
-
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generateLogNormal<scalar_t><<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, mean, stdv);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
-void THCTensor_(exponential)(THCState* state, THCTensor *self_, double lambda)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generate_exponential<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, lambda);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
-void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median, double sigma)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generate_cauchy<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, median, sigma);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
 
 void THCTensor_(renormRows)(struct THCState* state,
                              THCTensor* t) {
@@ -117,13 +32,13 @@ void THCTensor_(renormRows)(struct THCState* state,
 
 void THCTensor_(multinomial)(struct THCState *state,
                               THCudaLongTensor *self,
+                              at::Generator* gen_,
                               THCTensor *prob_dist,
                               int n_sample,
                               int with_replacement)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, prob_dist));
-  THCGenerator* gen = THCRandom_getGenerator(state);
-
+  auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int inputSize = THCTensor_(nDimensionLegacyAll)(state, prob_dist);
   THArgCheck(inputSize > 0 && inputSize <= 2, 2,
              "prob_dist must be 1 or 2 dim");
@@ -177,7 +92,7 @@ void THCTensor_(multinomial)(struct THCState *state,
     // temporarily allocated memory. The device RNG is thread-limited
     THCTensor *sampled = THCTensor_(newWithSize2d)(state, numDist, n_sample);
     auto out = THTensor_wrap(sampled);
-    at::native::uniform_cuda_(out, 0.0, 1.0);
+    at::native::uniform_cuda_(out, 0.0, 1.0, gen);
 
     dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
     dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
@@ -215,7 +130,17 @@ void THCTensor_(multinomial)(struct THCState *state,
 
     // Prefix sum along rows
     THCTensor_(cumsum)(state, prefixSum, normDist, 1);
+ 
+    std::pair<uint64_t, uint64_t> rng_engine_inputs;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen->mutex_);
 
+      // each thread will utilize one random, however, since we have to use
+      // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
+      // offset is 4.
+      rng_engine_inputs = gen->philox_engine_inputs(4);
+    }
     if (with_replacement) {
       // Sample with replacement
 
@@ -230,7 +155,7 @@ void THCTensor_(multinomial)(struct THCState *state,
 
       sampleMultinomialWithReplacement
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          gen->state.gen_states,
+          rng_engine_inputs,
           n_sample,
           THCudaLongTensor_data(state, self),
           numDist, numCategories,
@@ -264,7 +189,7 @@ void THCTensor_(multinomial)(struct THCState *state,
         // recalculate our distribution
         sampleMultinomialWithoutReplacement
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-            gen->state.gen_states,
+            rng_engine_inputs,
             n_sample,
             sample,
             THCudaLongTensor_data(state, self),
@@ -348,7 +273,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   THCTensor_free(state, probs);
 }
 
-void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample){
+void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, at::Generator* gen_, THCTensor *_q, THCudaLongTensor *_J, int n_sample){
   THArgCheck(_q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
              _q->dim());
@@ -358,7 +283,7 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
   THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
-  THCGenerator* gen = THCRandom_getGenerator(state);
+  auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int64_t K = THCudaLongTensor_nElement(state, _J);
   THCudaLongTensor_resize1d(state, self, n_sample);
   ptrdiff_t size = THCudaLongTensor_nElement(state, self);
@@ -368,8 +293,8 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
 
   auto out_uniform = THTensor_wrap(uniform);
   auto out_bernoulli = THTensor_wrap(bernoulli);
-  at::native::uniform_cuda_(out_uniform, 0, K);
-  at::native::uniform_cuda_(out_bernoulli, 0, 1);
+  at::native::uniform_cuda_(out_uniform, 0, K, gen);
+  at::native::uniform_cuda_(out_bernoulli, 0, 1, gen);
 
   multinomialAliasDrawKernel
     <<<THCCeilDiv((int)n_sample+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -386,109 +311,4 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
 }
 
 #endif
-
-#if defined(THC_REAL_IS_DOUBLE)
-GENERATE_KERNEL1(generate_geometric, double, double p, double, curand_uniform_double, ceil(log(x) / log(1-p)))
-#else
-GENERATE_KERNEL1(generate_geometric, scalar_t, double p, float, curand_uniform, (ScalarConvert<float, scalar_t>::to(ceilf(logf(x) / log(1-p)))))
-#endif
-
-#if defined(THC_REAL_IS_LONG) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_FLOAT)
-#define CURAND64(STATE) (((uint64_t)curand(STATE)) << 32) | (uint64_t)curand(STATE)
-GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, curand, \
-    static_cast<scalar_t>(static_cast<int32_t>((x % range) + base)))
-GENERATE_KERNEL2(generate_random_64, scalar_t, int64_t base, uint64_t range, uint64_t, CURAND64, \
-    static_cast<scalar_t>(static_cast<int64_t>((x % range) + base)))
-#elif defined(THC_REAL_IS_HALF)
-GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, curand,
-    (ScalarConvert<int32_t, scalar_t>::to(static_cast<int32_t>(x % range + base))))
-#else
-GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, curand,
-    static_cast<scalar_t>(static_cast<int32_t>(x % range + base)))
-#endif
-
-void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generate_geometric<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, p);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
-void THCTensor_(clampedRandom)(THCState* state, THCTensor *self_, int64_t min_val, int64_t max_val)
-{
-  THArgCheck(min_val < max_val, 2,
-             "max must be greater than min, but got: min = %lld, max = %lld", min_val, max_val);
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  uint64_t range = max_val - min_val;
-
-#if defined(THC_REAL_IS_LONG) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_FLOAT)
-  if (range > 1ULL << 32) {
-    generate_random_64<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        gen->state.gen_states, static_cast<int>(size), data, min_val, range);
-  } else {
-#endif
-    generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(min_val), static_cast<uint32_t>(range));
-#if defined(THC_REAL_IS_LONG) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_FLOAT)
-  }
-#endif
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
-void THCTensor_(cappedRandom)(THCState* state, THCTensor *self_, int64_t max_val)
-{
-  THCTensor_(clampedRandom)(state, self_, 0LL, max_val);
-};
-
-#define HLF_MANT_DIG 11
-
-void THCTensor_(random)(THCState* state, THCTensor *self_)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-#if defined(THC_REAL_IS_HALF)
-  generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(0UL), static_cast<uint32_t>((1UL << HLF_MANT_DIG) + 1));
-#elif defined(THC_REAL_IS_FLOAT)
-  generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(0UL), static_cast<uint32_t>((1UL << FLT_MANT_DIG) + 1));
-#elif defined(THC_REAL_IS_DOUBLE)
-  generate_random_64<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, static_cast<int>(size), data, static_cast<int64_t>(0ULL), static_cast<uint64_t>((1ULL << DBL_MANT_DIG) + 1));
-#elif defined(THC_REAL_IS_LONG)
-  generate_random_64<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, static_cast<int>(size), data, static_cast<int64_t>(0ULL), static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1);
-#else
-  generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(0UL), static_cast<uint32_t>(std::numeric_limits<scalar_t>::max()) + 1);
-#endif
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
-#undef HLF_MANT_DIG
-#undef CURAND64
-#undef NUM_BLOCKS
-
 #endif

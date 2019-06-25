@@ -1,5 +1,5 @@
 #include <ATen/core/op_registration/op_registration.h>
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
@@ -7,7 +7,6 @@ using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorCPU;
 using std::vector;
-using c10::ivalue::TensorList;
 
 namespace caffe2 {
 namespace {
@@ -149,49 +148,44 @@ static auto registry =
             c10::RegisterOperators::options()
               .kernel<
                 decltype(constant_fill_op_cpu_impl),
-                &constant_fill_op_cpu_impl>()
-              .dispatchKey(CPUTensorId()))
+                &constant_fill_op_cpu_impl>(CPUTensorId()))
         .op("_c10_experimental::UniformFill",
             c10::RegisterOperators::options()
               .kernel<
                 decltype(uniform_fill_op_cpu_impl),
-                &uniform_fill_op_cpu_impl>()
-              .dispatchKey(CPUTensorId()))
+                &uniform_fill_op_cpu_impl>(CPUTensorId()))
         .op("_c10_experimental::GivenTensorFill",
             c10::RegisterOperators::options()
               .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<float, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<float, CPUContext>>()
-              .dispatchKey(CPUTensorId()))
+                &given_tensor_fill_op_cpu_impl<float, CPUContext>>(CPUTensorId()))
         .op("_c10_experimental::GivenTensorIntFill",
             c10::RegisterOperators::options()
               .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<int, CPUContext>>()
-              .dispatchKey(CPUTensorId()))
+                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(CPUTensorId()))
         .op("_c10_experimental::GivenTensorInt64Fill",
             c10::RegisterOperators::options()
               .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<int, CPUContext>>()
-              .dispatchKey(CPUTensorId()));
+                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(CPUTensorId()));
 
 } // namespace
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::ConstantFill",
     C10ConstantFill_DontUseThisOpYet)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::UniformFill",
     C10UniformFill_DontUseThisOpYet)
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::GivenTensorFill",
     C10GivenTensorFill_DontUseThisOpYet)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::GivenTensorIntFill",
     C10GivenTensorIntFill_DontUseThisOpYet)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::GivenTensorInt64Fill",
     C10GivenTensorInt64Fill_DontUseThisOpYet)
 

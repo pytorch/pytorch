@@ -150,7 +150,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto& data = as_variable_ref(r.tensor(1)).data();
+  auto data = as_variable_ref(r.tensor(1)).tensor_data();
   auto var = make_variable(data, r.toBool(2));
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
   END_HANDLE_TH_ERRORS
@@ -159,11 +159,19 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
 
+PyObject *THPVariable_get_T(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  auto& var = self->cdata;
+  return THPVariable_Wrap(var.numpy_T());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_get_cdata(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  return PyLong_FromVoidPtr(var.data().unsafeGetTensorImpl());
+  return PyLong_FromVoidPtr(var.unsafeGetTensorImpl());
   END_HANDLE_TH_ERRORS
 }
 
@@ -206,15 +214,7 @@ static PyObject *THPVariable_is_leaf(THPVariable *self)
 static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
-  /// storage / storage_offset) of a tensor created from `.data`, those metadata
-  /// in the original tensor will also be updated. However, the new behavior is that
-  /// those metadata changes to the `.data` tensor will not update the original tensor
-  /// anymore, and here we need to set `allow_tensor_metadata_change_` to false to
-  /// make such changes explicitly illegal, in order to prevent users from changing
-  /// metadata of the `.data` tensor and expecting the original tensor to also
-  /// be updated.
-  auto var = make_variable(self->cdata.data(), /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+  auto var = self->cdata.variable_data();
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
@@ -227,7 +227,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
     throw torch::TypeError("Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
   }
 
-  self->cdata.set_data(THPVariable_UnpackData(data));
+  self->cdata.set_data(THPVariable_Unpack(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -310,6 +310,37 @@ PyObject *THPVariable_get_ndim(THPVariable *self)
   return PyInt_FromLong(self->cdata.dim());
   END_HANDLE_TH_ERRORS
 }
+
+#ifdef NAMEDTENSOR_ENABLED
+PyObject *THPVariable_get_names(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  // The long-term plan is to return a list of (python) torch.Dimname.
+  // However, for now, return a list of string.
+  size_t size = self->cdata.dim();
+  THPObjectPtr tuple(PyTuple_New(size));
+  if (!tuple) throw python_error();
+
+  if (!self->cdata.is_named()) {
+    for (size_t i = 0; i < size; ++i) {
+      PyTuple_SET_ITEM(tuple.get(), i, Py_None);
+    }
+    return tuple.release();
+  }
+
+  const auto dimnames = self->cdata.names().value();
+  for (size_t i = 0; i < size; ++i) {
+    PyObject* str = Py_None;
+    if (dimnames[i].type() != at::NameType::WILDCARD) {
+      str = THPUtils_packString(dimnames[i].full_name().toUnqualString());
+      if (!str) throw python_error();
+    }
+    PyTuple_SET_ITEM(tuple.get(), i, str);
+  }
+  return tuple.release();
+  END_HANDLE_TH_ERRORS
+}
+#endif
 
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
@@ -429,6 +460,7 @@ static PyObject * THPVariable_device(THPVariable* self) {
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {
+  {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
   {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
   {"grad_fn", (getter)THPVariable_get_grad_fn, nullptr, nullptr, nullptr},
@@ -451,6 +483,9 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
+#ifdef NAMEDTENSOR_ENABLED
+  {"names", (getter)THPVariable_get_names, nullptr, nullptr, nullptr},
+#endif
   {nullptr}
 };
 
@@ -524,10 +559,9 @@ void initTensorImplConversion(PyObject* module) {
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions
   m.def("_tensor_impl_raw_handle", [](torch::autograd::Variable* t) -> void* {
-    auto p = t->data().getIntrusivePtr();
     // We return a raw non-owning pointer here, we rely on surrounding
     // code to keep the original tensor alive
-    return p.get();
+    return t->getIntrusivePtr().get();
   });
 }
 }}

@@ -101,6 +101,11 @@ fi
 # NB: Warnings are disabled because they make it harder to see what
 # the actual erroring test is
 echo "Running Python tests.."
+if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
+  # locale setting is required by click package with py3
+  export LC_ALL=C.UTF-8
+  export LANG=C.UTF-8
+fi
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
@@ -120,5 +125,6 @@ pip install --user pytest-sugar
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
+  pip install -q --user git+https://github.com/pytorch/vision.git
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

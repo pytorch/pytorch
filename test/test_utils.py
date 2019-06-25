@@ -6,7 +6,6 @@ import shutil
 import random
 import tempfile
 import unittest
-import contextlib
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -20,15 +19,6 @@ from common_utils import skipIfRocm, load_tests
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-try:
-    import torchvision.models as models
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-
-
-skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -196,6 +186,34 @@ class TestCheckpoint(TestCase):
             2,
             torch.randn(1, 100, requires_grad=True),
             torch.randn(1, 60, requires_grad=True)
+        )
+
+    def test_checkpoint_sequential_deprecated_multiple_args(self):
+        class Two(nn.Module):
+            def forward(self, a, b):
+                return a, b
+
+        model = nn.Sequential(Two())
+        a = torch.randn(1, 100, requires_grad=True)
+        b = torch.randn(1, 100, requires_grad=True)
+
+        self.assertWarnsRegex(
+            lambda: checkpoint_sequential(model, 1, a, b),
+            'deprecated',
+            'checkpoint_sequential with multiple args should be deprecated',
+        )
+
+    def test_checkpoint_sequential_deprecated_no_args(self):
+        class Noop(nn.Module):
+            def forward(self):
+                pass
+
+        model = nn.Sequential(Noop())
+
+        self.assertWarnsRegex(
+            lambda: checkpoint_sequential(model, 1),
+            'deprecated',
+            'checkpoint_sequential with no args should be deprecated',
         )
 
     def test_checkpoint_rng_cpu(self):
@@ -493,44 +511,44 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
-# Errors will still be raised and reported
-@contextlib.contextmanager
-def suppress_stderr():
-    original = sys.stderr
-    sys.stderr = open(os.devnull, 'w')
-    yield
-    sys.stderr = original
+def sum_of_model_parameters(model):
+    s = 0
+    for p in model.parameters():
+        s += p.sum()
+    return s
 
+SUM_OF_PRETRAINED_RESNET18_PARAMS = -12703.992365
 
 class TestHub(TestCase):
     @classmethod
-    @skipIfNoTorchVision
     def setUpClass(cls):
-        # The current torchvision code does not provide a way to disable tqdm
-        # progress bar, leading this download printing a huge number of lines
-        # in CI.
-        # TODO: remove this context manager when torchvision provides a way.
-        #       See pytorch/torchvision#862
-        with suppress_stderr():
-            cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
+        # Only run this check ONCE before all tests start.
+        # - If torchvision is imported before all tests start, e.g. we might find _C.so
+        #   which doesn't exist in downloaded zip but in the installed wheel.
+        # - After the first test is run, torchvision is already in sys.modules due to
+        #   Python cache as we run all hub tests in the same python process.
+        if 'torchvision' in sys.modules:
+            raise RuntimeError('TestHub must start without torchvision imported')
 
-    @skipIfNoTorchVision
     def test_load_from_github(self):
         hub_model = hub.load(
             'pytorch/vision',
             'resnet18',
-            pretrained=True)
-        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
+            pretrained=True,
+            progress=False)
+        self.assertEqual(sum_of_model_parameters(hub_model),
+                         SUM_OF_PRETRAINED_RESNET18_PARAMS)
 
-    @skipIfNoTorchVision
     def test_set_dir(self):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
         hub_model = hub.load(
             'pytorch/vision',
             'resnet18',
-            pretrained=True)
-        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
+            pretrained=True,
+            progress=False)
+        self.assertEqual(sum_of_model_parameters(hub_model),
+                         SUM_OF_PRETRAINED_RESNET18_PARAMS)
         assert os.path.exists(temp_dir + '/pytorch_vision_master')
         shutil.rmtree(temp_dir + '/pytorch_vision_master')
 

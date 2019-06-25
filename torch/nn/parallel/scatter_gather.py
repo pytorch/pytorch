@@ -25,9 +25,10 @@ def scatter(inputs, target_gpus, dim=0):
     # fn is recursive). To avoid this reference cycle, we set the function to
     # None, clearing the cell
     try:
-        return scatter_map(inputs)
+        res = scatter_map(inputs)
     finally:
         scatter_map = None
+    return res
 
 
 def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
@@ -64,6 +65,7 @@ def gather(outputs, target_device, dim=0):
     # Recursive function calls like this create reference cycles.
     # Setting the function to None clears the refcycle.
     try:
-        return gather_map(outputs)
+        res = gather_map(outputs)
     finally:
         gather_map = None
+    return res

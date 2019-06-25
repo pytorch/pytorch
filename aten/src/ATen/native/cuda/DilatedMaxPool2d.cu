@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/native/DilatedMaxPool.h>
+#include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
@@ -158,7 +158,7 @@ void max_pool2d_with_indices_out_cuda_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = safe_downcast<int, int64_t>(stride[0]);
   const int dW = safe_downcast<int, int64_t>(stride[1]);
@@ -177,7 +177,7 @@ void max_pool2d_with_indices_out_cuda_template(
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
 
-  max_pool2d_with_indices_shape_check(
+  pool2d_shape_check(
     input_,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
@@ -237,9 +237,8 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   checkAllSameGPU("max_pool2d_with_indices_out_cuda",
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
 
-  // XXX JIT: Pooling.cpp allows stride.empty().
-  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 2 &&
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
               (stride.empty() || stride.size() == 2) &&
               (padding.size() == 1 || padding.size() == 2) &&
               (dilation.size() == 1 || dilation.size() == 2),
@@ -249,7 +248,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = safe_downcast<int, int64_t>(stride[0]);
   const int dW = safe_downcast<int, int64_t>(stride[1]);
@@ -270,7 +269,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  max_pool2d_with_indices_shape_check(
+  max_pool2d_backward_shape_check(
     input_,
     gradOutput_,
     indices,
@@ -324,7 +323,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor& ,Tensor&> max_pool2d_with_indices_out_cuda(
+std::tuple<Tensor&, Tensor&> max_pool2d_with_indices_out_cuda(
   Tensor& output,
   Tensor& indices,
   const Tensor& input,
@@ -346,7 +345,7 @@ std::tuple<Tensor& ,Tensor&> max_pool2d_with_indices_out_cuda(
   return std::tuple<Tensor&, Tensor&>(output, indices);
 }
 
-std::tuple<Tensor ,Tensor> max_pool2d_with_indices_cuda(
+std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
@@ -365,7 +364,7 @@ std::tuple<Tensor ,Tensor> max_pool2d_with_indices_cuda(
     padding,
     dilation,
     ceil_mode);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
+  return std::tuple<Tensor, Tensor>(output, indices);
 }
 
 Tensor& max_pool2d_with_indices_backward_out_cuda(
