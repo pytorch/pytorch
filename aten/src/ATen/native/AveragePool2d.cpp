@@ -90,18 +90,17 @@ void avg_pool2d_out_cpu_template(
           bool ceil_mode,
           bool count_include_pad)
 {
-  // #20866 [JIT] stride.empty() is passed through
-  // #20866 [LIBTORCH] IntegrationTest.MNIST: padding.size() == 1
-  TORCH_INTERNAL_ASSERT(kernel_size.size() == 2 &&
-                        (stride.empty() || stride.size() == 2) &&
-                        (padding.size() == 1 || padding.size() == 2),
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+              (stride.empty() || stride.size() == 2) &&
+              (padding.size() == 1 || padding.size() == 2),
     "avg_pool2d: all IntArrayRef sizes must be 2");
 
   TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
     "non-empty 2D or 3D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
@@ -236,11 +235,10 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   bool ceil_mode,
   bool count_include_pad)
 {
-  // #20866 [JIT] stride.empty() is passed through
-  // #20866 [LIBTORCH] IntegrationTest.MNIST: padding.size() == 1
-  TORCH_INTERNAL_ASSERT(kernel_size.size() == 2 &&
-                        (stride.empty() || stride.size() == 2) &&
-                        (padding.size() == 1 || padding.size() == 2),
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+              (stride.empty() || stride.size() == 2) &&
+              (padding.size() == 1 || padding.size() == 2),
     "avg_pool2d: all IntArrayRef sizes must be 2");
 
   const int64_t ndim = input.ndimension();
@@ -249,7 +247,7 @@ Tensor& avg_pool2d_backward_out_cpu_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
