@@ -56,6 +56,10 @@ inline PyObject* wrap(at::Tensor tensor) {
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
+inline PyObject* wrap(PyTypeObject *type, at::Tensor tensor) {
+  return THPVariable_Wrap_Subclass(Variable(std::move(tensor)), type);
+}
+
 inline PyObject* wrap(at::Scalar scalar) {
   return wrap(make_variable(scalar_to_tensor(scalar)));
 }

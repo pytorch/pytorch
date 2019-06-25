@@ -55,6 +55,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  ${declare_dynamic_return_type}
   ${declare_namedtuple_return_types}
   ${dispatch}
   Py_RETURN_NONE;
@@ -66,9 +67,10 @@ PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
+  ${declare_dynamic_return_type}
   ${declare_namedtuple_return_types}
   ${unpack_self}
-  return wrap(${namedtuple_return_type}${dispatch_name}(${actuals}));
+  return wrap(${dynamic_return_type}${dispatch_name}(${actuals}));
   END_HANDLE_TH_ERRORS
 }
 """)
@@ -104,7 +106,7 @@ PY_VARIABLE_SET_REQUIRES_GRAD = CodeTemplate("""\
 ${call_dispatch}.set_requires_grad(${requires_grad})""")
 
 PY_VARIABLE_WRAP = CodeTemplate("""\
-return wrap(${namedtuple_return_type}${call_dispatch});""")
+return wrap(${dynamic_return_type}${call_dispatch});""")
 
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
@@ -116,6 +118,10 @@ inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
 
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 {"${name}", (PyCFunction)${pycname}, ${flags}, NULL},""")
+
+PY_RETURN_DYNAMIC_DEF = CodeTemplate("""\
+auto *ptype = THPVariable_result_ptype(self_, args);
+""")
 
 PY_RETURN_NAMEDTUPLE_DEF = CodeTemplate("""\
 static PyStructSequence_Field fields${namedtuple_type_index}[] = {
@@ -653,7 +659,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
     def emit_namedtuple_return_type_def(declaration, next_index):
         returns = declaration['returns']
         if len(returns) <= 1 or all(['field_name' not in x for x in returns]):
-            declaration['namedtuple_return_type'] = ''
+            declaration['dynamic_return_type'] = ''
             return '', next_index
         declaration['namedtuple_type_index'] = next_index
         declaration['namedtuple_fields'] = ''
@@ -673,7 +679,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             else:
                 declaration['namedtuple_fields'] += '{"' + x['field_name'] + '", ""}, '
         declaration['namedtuple_size'] = len(returns)
-        declaration['namedtuple_return_type'] = '&type{}, '.format(next_index)
+        declaration['dynamic_return_type'] = '&type{}, '.format(next_index)
         return PY_RETURN_NAMEDTUPLE_DEF.substitute(declaration), next_index + 1
 
     def process_function(name, declarations):
@@ -688,6 +694,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             'max_args': max(len(o['arguments']) + len(o['python_binding_arguments']) for o in declarations),
             'unpack_self': [],
             'dispatch': [],
+            'declare_dynamic_return_type': '',
             'declare_namedtuple_return_types': '',
         }
 
@@ -696,9 +703,18 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         # generate namedtuple type declare
         next_index = 0
+        ptype_declared = False
         for declaration in declarations:
-            typedef, next_index = emit_namedtuple_return_type_def(declaration, next_index)
-            env['declare_namedtuple_return_types'] += typedef
+            returns = declaration['returns']
+            if len(returns) <= 1 and returns[0]['dynamic_type'] == 'Tensor':
+                declaration['dynamic_return_type'] = 'ptype, '
+                if ptype_declared is False:
+                    env['declare_dynamic_return_type'] += PY_RETURN_DYNAMIC_DEF.substitute(declaration)
+                next_index += 1
+                ptype_declared = True
+            else:
+                typedef, next_index = emit_namedtuple_return_type_def(declaration, next_index)
+                env['declare_namedtuple_return_types'] += typedef
 
         # emit dispatch
         grouped = group_declarations(declarations)
@@ -723,7 +739,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             tmpl = PY_VARIABLE_METHOD_NOARGS
             env['actuals'] = ['self']
             env['flags'] = 'METH_NOARGS'
-            env['namedtuple_return_type'] = declarations[0]['namedtuple_return_type']
+            env['dynamic_return_type'] = declarations[0]['dynamic_return_type']
         else:
             tmpl = PY_VARIABLE_METHOD_VARARGS
             env['flags'] = 'METH_VARARGS | METH_KEYWORDS'

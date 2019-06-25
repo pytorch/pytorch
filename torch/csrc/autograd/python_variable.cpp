@@ -79,6 +79,20 @@ PyObject * THPVariable_Wrap(Variable var)
   return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
 }
 
+PyObject * THPVariable_Wrap_Subclass(Variable var, PyTypeObject *type)
+{
+    if (!var.defined()) {
+        Py_RETURN_NONE;
+    }
+
+    if (auto obj = var.pyobj()) {
+        Py_INCREF(obj);
+        return obj;
+    }
+
+    return THPVariable_NewWithVar(type, std::move(var));
+}
+
 static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->backward_hooks);
@@ -142,16 +156,16 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False)",
+    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, bool allow_tensor_metadata_change=True)",
   });
-  ParsedArgs<3> parsed_args{};
+  ParsedArgs<4> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   auto data = as_variable_ref(r.tensor(1)).tensor_data();
-  auto var = make_variable(data, r.toBool(2));
+  auto var = make_variable(data, r.toBool(2), r.toBool(3));
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
   END_HANDLE_TH_ERRORS
 }
@@ -457,6 +471,42 @@ static PyObject * THPVariable_device(THPVariable* self) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
   END_HANDLE_TH_ERRORS
+}
+
+// Returns the type object of the most derived subclass of torch._C._TensorBase that is not an instance of torch.nn.Parameter.
+PyTypeObject *THPVariable_result_ptype(PyObject *self, PyObject *args) {
+    HANDLE_TH_ERRORS
+    PyTypeObject *ptype;
+    PyObject *obj;
+
+    //Initialize on First Call
+    bool initialized = false;
+    static PyObject *base, *parameter;
+    if (!initialized){
+        base = THPVariableClass;
+        parameter = PyObject_GetAttrString(PyImport_ImportModule("torch.nn.parameter"), "Parameter");
+        if (parameter == nullptr)
+            return nullptr;
+        initialized = true;
+    }
+
+    ptype = (PyTypeObject*)base;
+    Py_INCREF(ptype);
+    // torch.nn.Parameter explicitly do not perform ptype propagation so this should not effect torch.nn modules.
+    if (self != nullptr && PyObject_IsInstance(self, base) && !PyObject_IsInstance(self, parameter) && PyObject_IsInstance(self, (PyObject*)ptype)){
+        ptype = self->ob_type;
+    }
+    if (args != nullptr && PyTuple_Check(args)){
+        for (int i = 0; i < PyTuple_GET_SIZE(args); ++i){
+            obj = PyTuple_GET_ITEM(args, i);
+            if (PyObject_IsInstance(obj, base) && !PyObject_IsInstance(obj, parameter) && PyObject_IsInstance(obj, (PyObject*)ptype)){
+                ptype = obj->ob_type;
+            }
+        }
+    }
+    /* obj are borrowed references */
+    return ptype;
+    END_HANDLE_TH_ERRORS
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {

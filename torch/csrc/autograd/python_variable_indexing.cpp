@@ -276,18 +276,19 @@ static THPObjectPtr wrapTuple(PyObject* index) {
 
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
+  auto *ptype = THPVariable_result_ptype(self, NULL);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
 
   // handle simple types: integers, slices, ellipsis
   if (index == Py_None) {
-    return wrap(self_.unsqueeze(0));
+    return wrap(ptype, self_.unsqueeze(0));
   } else if (index == Py_Ellipsis) {
-    return wrap(at::alias(self_));
+    return wrap(ptype, at::alias(self_));
   } else if (THPUtils_checkLong(index)) {
-    return wrap(applySelect(self_, 0, THPUtils_unpackLong(index)));
+    return wrap(ptype, applySelect(self_, 0, THPUtils_unpackLong(index)));
   } else if (PySlice_Check(index)) {
-    return wrap(applySlice(self_, 0, index, true));
+    return wrap(ptype, applySlice(self_, 0, index, true));
   }
 
   // wrap index in a tuple if it's not already one
@@ -300,11 +301,11 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       // ensure we return a shallow copy for things like x[...]
       sliced = at::alias(sliced);
     }
-    return wrap(sliced);
+    return wrap(ptype, sliced);
   }
 
   // indexing by tensors ("advanced" indexing)
-  return wrap(dispatch_index(sliced, variableIndices));
+  return wrap(ptype, dispatch_index(sliced, variableIndices));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
