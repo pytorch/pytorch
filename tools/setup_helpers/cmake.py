@@ -309,7 +309,6 @@ class CMake:
                       CMAKE_CXX_FLAGS=cflags,
                       CMAKE_EXE_LINKER_FLAGS=ldflags,
                       CMAKE_SHARED_LINKER_FLAGS=ldflags,
-                      THD_SO_VERSION="1",
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
                       **build_options)
 

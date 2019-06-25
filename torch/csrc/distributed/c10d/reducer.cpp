@@ -57,7 +57,8 @@ Reducer::Reducer(
   // If `expect_sparse_gradients` is not specified, initialize it such that
   // we do not expect sparse gradients for any parameter.
   if (expect_sparse_gradients_.empty()) {
-    expect_sparse_gradients_ = std::vector<std::vector<bool>>(replicas_.size(), std::vector<bool>(replicas_[0].size(), false));
+    expect_sparse_gradients_ = std::vector<std::vector<bool>>(
+        replicas_.size(), std::vector<bool>(replicas_[0].size(), false));
   }
   AT_ASSERT(expect_sparse_gradients_.size() == replicas_.size());
 
@@ -127,14 +128,13 @@ Reducer::Reducer(
         hooks_.emplace_back(
             grad_accumulator->add_post_hook(
                 torch::make_unique<LambdaPostHook>([=] {
-                    std::lock_guard<std::mutex> lock(this->mutex_);
-                    this->mark_variable_ready(
-                        replica_index,
-                        variable_index,
-                        /* called_from_autograd= */ true);
+                  std::lock_guard<std::mutex> lock(this->mutex_);
+                  this->mark_variable_ready(
+                      replica_index,
+                      variable_index,
+                      /* called_from_autograd= */ true);
                 })),
-            grad_accumulator
-        );
+            grad_accumulator);
 
         // Map raw function pointer to replica index and parameter index.
         // This is used later on when the autograd graph is traversed
@@ -171,7 +171,8 @@ Reducer::~Reducer() noexcept(false) {
   for (auto& hook : hooks_) {
     auto& key = hook.first;
     auto& grad_accumulator = hook.second;
-    AT_ASSERTM(grad_accumulator->del_post_hook(key),
+    AT_ASSERTM(
+        grad_accumulator->del_post_hook(key),
         "Reducer attempts to delete a non-existing hook.");
   }
 }
@@ -660,7 +661,9 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<bool>& expect_sparse_gradient) {
   // Either expect_sparse_gradient is not specified or it has as many elements
   // as the vector with tensors.
-  AT_ASSERT(expect_sparse_gradient.empty() || (tensors.size() == expect_sparse_gradient.size()));
+  AT_ASSERT(
+      expect_sparse_gradient.empty() ||
+      (tensors.size() == expect_sparse_gradient.size()));
   AT_ASSERT(tensors.size() > 0);
 
   std::vector<std::vector<size_t>> result;
