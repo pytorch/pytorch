@@ -130,16 +130,10 @@
 #include <THNN/generic/SpatialConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/VolumetricConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricFullDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialClassNLLCriterion.c>

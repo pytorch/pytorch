@@ -9363,15 +9363,66 @@ a")
                 return x
             ''')
 
+    def test_for_in_string(self):
+        def test_strings(x):
+            # type: (str) -> str
+            reverse = ""
+            for c in x:
+                reverse = c + reverse
+            return reverse
+
+        self.checkScript(test_strings, ("hello",))
+        self.checkScript(test_strings, ("",))
+
+        def test_list_strings(x):
+            # type: (List[str]) -> str
+            result = ""
+            for sub_str in x:
+                result += sub_str
+            return result
+
+        self.checkScript(test_list_strings, (["hello", "world"],))
+        self.checkScript(test_list_strings, (["hello", " ", "world", ""],))
+
+    def test_for_in_dict(self):
+        def test_dicts(x):
+            # type: (Dict[str, int]) -> int
+            sum = 0
+            for key in x:
+                sum += x[key]
+            return sum
+
+        self.checkScript(test_dicts, ({"a": 1, "b": 2, "c": 3},))
+
+        def test_dict_keys_values(x):
+            # type: (Dict[str, int]) -> Tuple[str, int]
+            key_str = ""
+            sum = 0
+            for key in x.keys():
+                key_str += key
+            for val in x.values():
+                sum += val
+            return key_str, sum
+
+        self.checkScript(test_dicts, ({"a": 1, "b": 2, "c": 3},))
+
     def test_for_tuple_unpack(self):
-        with self.assertRaisesRegex(RuntimeError, 'Iteration variable unpacking is not supported'):
-            cu = torch.jit.CompilationUnit('''
-            def for_tuple_unpack(x, y):
-                for i, j in [[3, 4], [5, 6], [7, 8]]:
-                    x += i
-                    y += j
-                return x, y
-            ''')
+        def for_tuple_unpack(x, y):
+            for i, j in [[3, 4], [5, 6], [7, 8]]:
+                x += i
+                y += j
+            return x, y
+
+        self.checkScript(for_tuple_unpack, (torch.tensor(3), torch.tensor(5)))
+
+        def nested_tuple_unpack(x, y):
+            # type: (List[int], List[int]) -> int
+            sum = 0
+            for i, (j, k), v in zip(x, enumerate(x), y):
+                sum += i + j + k + v
+            return sum
+
+        self.checkScript(nested_tuple_unpack, ([1, 3, 5], [2, 4, 6]))
 
     def test_for_tuple_assign(self):
         def test_simple_assign(x):
