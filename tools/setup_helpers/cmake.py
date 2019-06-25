@@ -239,20 +239,34 @@ class CMake:
         }
         # Options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars
         additional_options = {
-            'BLAS',
-            'BUILDING_WITH_TORCH_LIBS',
-            'CMAKE_PREFIX_PATH',
-            'ONNX_ML',
-            'ONNX_NAMESPACE',
-            'WERROR'
+            # Key: environment variable name. Value: Corresponding variable name to be passed to CMake.
+            '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
+            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
         }
+        additional_options.update({
+            var: var for var in
+            ('BLAS',
+             'BUILDING_WITH_TORCH_LIBS',
+             'CMAKE_PREFIX_PATH',
+             'EXPERIMENTAL_SINGLE_THREAD_POOL',
+             'MKL_THREADING',
+             'MKLDNN_THREADING',
+             'ONNX_ML',
+             'ONNX_NAMESPACE',
+             'PARALLEL_BACKEND',
+             'WERROR')
+        })
+
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_" or "USE_". This is because we
             # currently have no reliable way to get the list of all build options we have specified in CMakeLists.txt.
             # (`cmake -L` won't print dependent options when the dependency condition is not met.) We will possibly
             # change this in the future by parsing CMakeLists.txt ourselves (then additional_options would also not be
             # needed to be specified here).
-            if var.startswith(('USE_', 'BUILD_')) or var in additional_options:
+            true_var = additional_options.get(var)
+            if true_var is not None:
+                build_options[true_var] = val
+            elif var.startswith(('USE_', 'BUILD_')):
                 build_options[var] = val
 
         # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
@@ -289,7 +303,6 @@ class CMake:
                       NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
                       NCCL_ROOT_DIR=NCCL_ROOT_DIR,
                       NCCL_SYSTEM_LIB=NCCL_SYSTEM_LIB,
-                      CAFFE2_STATIC_LINK_CUDA=check_env_flag('USE_CUDA_STATIC_LINK'),
                       NCCL_EXTERNAL=USE_NCCL,
                       CMAKE_INSTALL_PREFIX=install_dir,
                       CMAKE_C_FLAGS=cflags,
@@ -299,32 +312,6 @@ class CMake:
                       THD_SO_VERSION="1",
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
                       **build_options)
-
-        if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
-            CMake.defines(args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
-
-        if os.getenv('USE_OPENMP'):
-            CMake.defines(args, USE_OPENMP=check_env_flag('USE_OPENMP'))
-
-        if os.getenv('USE_TBB'):
-            CMake.defines(args, USE_TBB=check_env_flag('USE_TBB'))
-
-        if os.getenv('MKL_SEQ'):
-            CMake.defines(args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
-
-        if os.getenv('MKL_TBB'):
-            CMake.defines(args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
-
-        mkldnn_threading = os.getenv('MKLDNN_THREADING')
-        if mkldnn_threading:
-            CMake.defines(args, MKLDNN_THREADING=mkldnn_threading)
-
-        parallel_backend = os.getenv('PARALLEL_BACKEND')
-        if parallel_backend:
-            CMake.defines(args, PARALLEL_BACKEND=parallel_backend)
-        single_thread_pool = os.getenv('EXPERIMENTAL_SINGLE_THREAD_POOL')
-        if single_thread_pool:
-            CMake.defines(args, EXPERIMENTAL_SINGLE_THREAD_POOL=single_thread_pool)
 
         if USE_GLOO_IBVERBS:
             CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
