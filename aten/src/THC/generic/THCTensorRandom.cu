@@ -132,16 +132,16 @@ void THCTensor_(multinomial)(struct THCState *state,
     THCTensor_(cumsum)(state, prefixSum, normDist, 1);
  
     std::pair<uint64_t, uint64_t> rng_engine_inputs;
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(gen->mutex_);
-
-      // each thread will utilize one random, however, since we have to use
-      // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
-      // offset is 4.
-      rng_engine_inputs = gen->philox_engine_inputs(4);
-    }
     if (with_replacement) {
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+
+        // each thread will utilize one random, however, since we have to use
+        // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
+        // offset is 4.
+        rng_engine_inputs = gen->philox_engine_inputs(4);
+      }
       // Sample with replacement
 
       // Binary search is warp divergent (so effectively we're running
@@ -183,6 +183,15 @@ void THCTensor_(multinomial)(struct THCState *state,
 
           // Prefix sum along rows
           THCTensor_(cumsum)(state, prefixSum, normDist, 1);
+        }
+        {
+          // See Note [Acquire lock when using random generators]
+          std::lock_guard<std::mutex> lock(gen->mutex_);
+  
+          // each thread will utilize one random, however, since we have to use
+          // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
+          // offset is 4.
+          rng_engine_inputs = gen->philox_engine_inputs(4);
         }
 
         // The kernel can only draw one sample before we have to
