@@ -242,8 +242,12 @@ class CMake:
             'BLAS',
             'BUILDING_WITH_TORCH_LIBS',
             'CMAKE_PREFIX_PATH',
+            'EXPERIMENTAL_SINGLE_THREAD_POOL',
+            'MKL_THREADING',
+            'MKLDNN_THREADING',
             'ONNX_ML',
             'ONNX_NAMESPACE',
+            'PARALLEL_BACKEND',
             'WERROR'
         }
         for var, val in my_env.items():
@@ -302,27 +306,6 @@ class CMake:
 
         if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
             CMake.defines(args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
-
-        if os.getenv('USE_OPENMP'):
-            CMake.defines(args, USE_OPENMP=check_env_flag('USE_OPENMP'))
-
-        if os.getenv('USE_TBB'):
-            CMake.defines(args, USE_TBB=check_env_flag('USE_TBB'))
-
-        mkl_threading = os.getenv('MKL_THREADING')
-        if mkl_threading:
-            CMake.defines(args, MKL_THREADING=mkl_threading)
-
-        mkldnn_threading = os.getenv('MKLDNN_THREADING')
-        if mkldnn_threading:
-            CMake.defines(args, MKLDNN_THREADING=mkldnn_threading)
-
-        parallel_backend = os.getenv('PARALLEL_BACKEND')
-        if parallel_backend:
-            CMake.defines(args, PARALLEL_BACKEND=parallel_backend)
-        single_thread_pool = os.getenv('EXPERIMENTAL_SINGLE_THREAD_POOL')
-        if single_thread_pool:
-            CMake.defines(args, EXPERIMENTAL_SINGLE_THREAD_POOL=single_thread_pool)
 
         if USE_GLOO_IBVERBS:
             CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
