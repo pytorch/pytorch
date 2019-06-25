@@ -15,7 +15,7 @@ SmallVector<int64_t, 4> convOutputShape(
     int H, // input height
     int W, // input width
     int K, // output channels
-    const torch::List<int64_t>& kernel,
+    const std::vector<int64_t>& kernel,
     const torch::List<int64_t>& stride,
     const torch::List<int64_t>& padding,
     const torch::List<int64_t>& dilation) {
