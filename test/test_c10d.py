@@ -2592,15 +2592,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
-    @skip_if_not_nccl
-    @skip_if_not_multigpu
     def test_ignored_output(self):
         """
-        Note: this test can be sped up by only running it on a CPU module
-        once DistributedDataParallel supports them.
+        Test that the output of a model can be ignored and that there is no
+        implicit requirement that `backward` gets called.
         """
         store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         class IgnoredOutput(nn.Module):
             def __init__(self):
@@ -2614,17 +2612,59 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 x = self.relu(self.fc2(x))
                 return F.softmax(x, dim=1)
 
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
-            IgnoredOutput().float().to(device_id),
-            device_ids=[device_id],
+            IgnoredOutput().float(),
             process_group=process_group,
         )
 
         batch_size = 4
         criterion = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.float)
-        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+
+        # Run a few iterations where we ignore the output.
+        for _ in range(4):
+            output = model(input)
+            del output
+
+        # Run a few iterations where we use the output.
+        for _ in range(4):
+            output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+    def test_ignored_output_with_unused_parameters(self):
+        """
+        Test that the output of a model can be ignored and that there is no
+        implicit requirement that `backward` gets called, if not all model
+        parameters participated in computing the model output.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        class IgnoredOutputWithUnusedParameters(nn.Module):
+            def __init__(self):
+                super(IgnoredOutputWithUnusedParameters, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.fc3 = nn.Linear(4, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        model = DistributedDataParallel(
+            IgnoredOutputWithUnusedParameters().float(),
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
 
         # Run a few iterations where we ignore the output.
         for _ in range(4):
