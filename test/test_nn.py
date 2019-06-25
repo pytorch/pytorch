@@ -494,25 +494,6 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def extra_args(self):
         return self._get_arg('extra_args', False)
 
-class TestLongTensor(TestCase):
-    def test_longtensor_conv2d_same_as_doubletensor(self):
-        l_input = torch.LongTensor(1, 3, 32, 32).random_(-1000, 1000).cpu()
-        l_filter = torch.LongTensor(6, 3, 5, 5).random_(-1000, 1000).cpu()
-        l_result = torch.nn.functional.conv2d(l_input, l_filter)
-        d_input = l_input.clone().double()
-        d_filter = l_filter.clone().double()
-        d_result = torch.nn.functional.conv2d(d_input, d_filter)
-        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
-
-    def test_longtensor_conv3d_same_as_doubletensor(self):
-        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
-        l_filter = torch.LongTensor(33, 16, 3, 3, 3).random_(-1000, 1000).cpu()
-        l_result = torch.nn.functional.conv3d(l_input, l_filter)
-        d_input = l_input.clone().double()
-        d_filter = l_filter.clone().double()
-        d_result = torch.nn.functional.conv3d(d_input, d_filter)
-        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
-
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
 
