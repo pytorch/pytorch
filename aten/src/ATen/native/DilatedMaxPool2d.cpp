@@ -129,12 +129,11 @@ void max_pool2d_with_indices_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX JIT: Pooling.cpp allows stride.empty().
-  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 2 &&
-              stride.size() == 2 &&
-              padding.size() == 2 &&
-              dilation.size() == 2,
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+              (stride.empty() || stride.size() == 2) &&
+              (padding.size() == 1 || padding.size() == 2) &&
+              (dilation.size() == 1 || dilation.size() == 2),
     "max_pool2d_with_indices: internal error: all IntArrayRef sizes must be 2");
 
   TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
@@ -143,14 +142,14 @@ void max_pool2d_with_indices_out_cpu_template(
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
-  const int dH = safe_downcast<int, int64_t>(stride[0]);
-  const int dW = safe_downcast<int, int64_t>(stride[1]);
+  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
 
   const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = safe_downcast<int, int64_t>(padding[1]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = safe_downcast<int, int64_t>(dilation[1]);
+  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
   /* sizes */
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
@@ -316,14 +315,14 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
-  const int dH = safe_downcast<int, int64_t>(stride[0]);
-  const int dW = safe_downcast<int, int64_t>(stride[1]);
+  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
 
   const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = safe_downcast<int, int64_t>(padding[1]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = safe_downcast<int, int64_t>(dilation[1]);
+  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
   /* get contiguous gradOutput */
   const Tensor gradOutput = gradOutput_.contiguous();
