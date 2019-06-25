@@ -41,6 +41,11 @@ inline List<IValue>::List(ArrayRef<IValue> values)
     c10::nullopt)) {
 }
 
+template<class T>
+List<T>::List(std::initializer_list<T> initial_values)
+: List(ArrayRef<T>(initial_values)) {
+}
+
 namespace impl {
 template<class T>
 List<T> toTypedList(impl::GenericList list) {

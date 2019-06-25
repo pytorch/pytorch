@@ -545,7 +545,7 @@ TEST(ListTest_IValueBasedList, givenDifferentLists_thenIsNotEqual) {
 static_assert(std::is_same<int64_t, typename List<int64_t>::internal_value_type_test_only>::value, "If this fails, then it seems we changed List<int64_t> to store it as std::vector<IValue> instead of std::vector<int64_t>. We need to change ListTest_NonIValueBasedList test cases to use a different type that is still not based on IValue.");
 
 TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
-    List<int64_t> list();
+    List<int64_t> list;
     EXPECT_TRUE(list.empty());
 }
 
@@ -555,7 +555,7 @@ TEST(ListTest_NonIValueBasedList, givenNonemptyList_whenCallingEmpty_thenReturns
 }
 
 TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingSize_thenReturnsZero) {
-    List<int64_t> list();
+    List<int64_t> list;
     EXPECT_EQ(0, list.size());
 }
 
@@ -709,7 +709,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithConstructorArg_thenInser
 }
 
 TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithLValue_ThenInsertsElement) {
-  List<int64_t> list();
+  List<int64_t> list;
   int64_t v = 5;
   list.push_back(v);
   EXPECT_EQ(1, list.size());
@@ -717,7 +717,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithLValue_ThenInsertsEleme
 }
 
 TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithRValue_ThenInsertsElement) {
-  List<int64_t> list();
+  List<int64_t> list;
   int64_t v = 5;
   list.push_back(std::move(v));
   EXPECT_EQ(1, list.size());
@@ -725,7 +725,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithRValue_ThenInsertsEleme
 }
 
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithLValue_ThenInsertsElement) {
-  List<int64_t> list();
+  List<int64_t> list;
   int64_t v = 5;
   list.emplace_back(v);
   EXPECT_EQ(1, list.size());
@@ -733,7 +733,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithLValue_ThenInsertsEl
 }
 
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithRValue_ThenInsertsElement) {
-  List<int64_t> list();
+  List<int64_t> list;
   int64_t v = 5;
   list.emplace_back(std::move(v));
   EXPECT_EQ(1, list.size());
@@ -741,15 +741,15 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithRValue_ThenInsertsEl
 }
 
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithConstructorArg_ThenInsertsElement) {
-  List<int64_t> list();
+  List<int64_t> list;
   list.emplace_back(5);  // const char* is a constructor arg to std::int64_t
   EXPECT_EQ(1, list.size());
   EXPECT_EQ(5, list.get(0));
 }
 
 TEST(ListTest_NonIValueBasedList, givenEmptyList_whenIterating_thenBeginIsEnd) {
-  List<int64_t> list();
-  const List<int64_t> clist();
+  List<int64_t> list;
+  const List<int64_t> clist;
   EXPECT_EQ(list.begin(), list.end());
   EXPECT_EQ(list.begin(), list.end());
   EXPECT_EQ(clist.begin(), clist.end());
@@ -813,7 +813,7 @@ TEST(ListTest_NonIValueBasedList, givenList_whenErasingFullRange_thenIsEmpty) {
 }
 
 TEST(ListTest_NonIValueBasedList, whenCallingReserve_thenDoesntCrash) {
-  List<int64_t> list();
+  List<int64_t> list;
   list.reserve(100);
 }
 
@@ -830,7 +830,7 @@ TEST(ListTest_NonIValueBasedList, whenCopyConstructingList_thenAreEqual) {
 TEST(ListTest_NonIValueBasedList, whenCopyAssigningList_thenAreEqual) {
   List<int64_t> list1({3, 4});
 
-  List<int64_t> list2();
+  List<int64_t> list2;
   list2 = list1;
 
   EXPECT_EQ(2, list2.size());
@@ -861,7 +861,7 @@ TEST(ListTest_NonIValueBasedList, whenMoveConstructingList_thenNewIsCorrect) {
 TEST(ListTest_NonIValueBasedList, whenMoveAssigningList_thenNewIsCorrect) {
   List<int64_t> list1({3, 4});
 
-  List<int64_t> list2();
+  List<int64_t> list2;
   list2 = std::move(list1);
 
   EXPECT_EQ(2, list2.size());
@@ -879,7 +879,7 @@ TEST(ListTest_NonIValueBasedList, whenMoveConstructingList_thenOldIsEmpty) {
 TEST(ListTest_NonIValueBasedList, whenMoveAssigningList_thenOldIsEmpty) {
   List<int64_t> list1({3, 4});
 
-  List<int64_t> list2();
+  List<int64_t> list2;
   list2 = std::move(list1);
   EXPECT_TRUE(list1.empty());
 }
@@ -1021,7 +1021,7 @@ TEST(ListTest_NonIValueBasedList, givenOneElementList_whenCallingPopBack_thenIsE
 }
 
 TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResize_thenResizesAndSetsEmptyValue) {
-  List<int64_t> list();
+  List<int64_t> list;
   list.resize(2);
   EXPECT_EQ(2, list.size());
   EXPECT_EQ(0, list.get(0));
@@ -1029,7 +1029,7 @@ TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResize_thenResizesAn
 }
 
 TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResizeWithValue_thenResizesAndSetsValue) {
-  List<int64_t> list();
+  List<int64_t> list;
   list.resize(2, 5);
   EXPECT_EQ(2, list.size());
   EXPECT_EQ(5, list.get(0));
@@ -1037,9 +1037,9 @@ TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResizeWithValue_then
 }
 
 TEST(ListTest_NonIValueBasedList, isReferenceType) {
-  List<int64_t> list1();
+  List<int64_t> list1;
   List<int64_t> list2(list1);
-  List<int64_t> list3();
+  List<int64_t> list3;
   list3 = list1;
 
   list1.push_back(3);
@@ -1049,9 +1049,9 @@ TEST(ListTest_NonIValueBasedList, isReferenceType) {
 }
 
 TEST(ListTest_NonIValueBasedList, copyHasSeparateStorage) {
-  List<int64_t> list1();
+  List<int64_t> list1;
   List<int64_t> list2(list1.copy());
-  List<int64_t> list3();
+  List<int64_t> list3;
   list3 = list1.copy();
 
   list1.push_back(3);

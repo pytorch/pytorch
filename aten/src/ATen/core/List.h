@@ -241,6 +241,7 @@ public:
    * Example:
    *   List<int> a({2, 3, 4});
    */
+  explicit List(std::initializer_list<T> initial_values);
   explicit List(ArrayRef<T> initial_values);
 
   List(const List&) = default;
