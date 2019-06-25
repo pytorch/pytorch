@@ -97,7 +97,7 @@ class ModelQuantizeAPITest(TestCase):
                            activation=observer(Observer, default_options))
         }
         eval_args = [calib_data]
-        tq.quantize(myModel, qConfigDict, eval_fn, *eval_args)
+        myModel = tq.quantize(myModel, qConfigDict, eval_fn, *eval_args)
         # self.assertEqual(hasattr(myModel, 'quant'), False)
         # self.assertEqual(hasattr(myModel, 'observer'), False)
         # self.assertEqual(hasattr(myModel.fc2, 'quant'), True)
@@ -115,7 +115,7 @@ class ModelQuantizeAPITest(TestCase):
                         activation=observer(Observer, default_options))
         }
         eval_args = [calib_data]
-        tq.prepare(myModel, qConfigDict)
+        myModel = tq.prepare(myModel, qConfigDict)
         # Check if observers and quant/dequant nodes are inserted
         # self.assertEqual(hasattr(myModel, 'quant'), True)
         # self.assertEqual(hasattr(myModel, 'dequant'), True)
@@ -138,7 +138,7 @@ class ModelQuantizeAPITest(TestCase):
                            activation=observer(Observer, default_options))
         }
         eval_args = [calib_data]
-        tq.prepare(myModel, qConfigDict)
+        myModel = tq.prepare(myModel, qConfigDict)
         # self.assertEqual(hasattr(myModel, 'quant'), False)
         # self.assertEqual(hasattr(myModel.fc1, 'quant'), False)
         # self.assertEqual(hasattr(myModel.fc2, 'quant'), True)
@@ -162,7 +162,7 @@ class ModelQuantizeAPITest(TestCase):
         }
         calib_data = torch.rand(20, 5, dtype=torch.float)
         eval_args = [calib_data]
-        tq.prepare(myModel, qConfigDict)
+        myModel = tq.prepare(myModel, qConfigDict)
         # self.assertEqual(hasattr(myModel, 'quant'), False)
         # self.assertEqual(hasattr(myModel.sub1, 'quant'), False)
         # self.assertEqual(hasattr(myModel.sub1.fc, 'quant'), False)
