@@ -264,7 +264,7 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
       return true;
     }
     if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return getElementType()->isSubtypeOf(rhs_->getElementType());	
+      return getElementType()->isSubtypeOf(rhs_->getElementType());
     }
     return false;
   }
