@@ -213,11 +213,9 @@ FunctionSchema getSchemaWithNameAndDefaults(
       schema.is_varret());
 }
 
-static Self moduleSelf(
-    const std::shared_ptr<Module>& m,
-    const py::object& py_m) {
+static Self moduleSelf(const Module& m, const py::object& py_m) {
   return [m, py_m](Value* v) {
-    v->setType(m->module_object()->type());
+    v->setType(m.module_object()->type());
     return std::make_shared<ModuleValue>(v, m, py_m);
   };
 }
@@ -337,41 +335,40 @@ void initJitScriptBindings(PyObject* module) {
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
-  py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
+  py::class_<Module>(m, "ScriptModule")
       .def(py::init<std::string>())
       .def(
           "save",
-          [](std::shared_ptr<Module> m,
+          [](Module& m,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            m->save(filename, _extra_files);
+            m.save(filename, _extra_files);
           },
           py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap())
       .def(
           "save_to_buffer",
-          [](std::shared_ptr<Module> m,
-             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+          [](Module& m, const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
-            m->save(buf, _extra_files);
+            m.save(buf, _extra_files);
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
-          [](std::shared_ptr<Module> m,
+          [](Module& m,
              py::object py_m,
              const std::string& script,
              ResolutionCallback rcb) {
             c10::optional<Self> self;
-            m->class_compilation_unit()->define(
-                m->name(), script, pythonResolver(rcb), moduleSelf(m, py_m));
+            m.class_compilation_unit()->define(
+                m.name(), script, pythonResolver(rcb), moduleSelf(m, py_m));
             didFinishEmitModule(m);
           })
       .def(
           "_create_methods",
-          [](std::shared_ptr<Module> m,
+          [](Module& m,
              py::object py_m,
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,
@@ -384,19 +381,19 @@ void initJitScriptBindings(PyObject* module) {
             }
             std::vector<QualifiedName> names;
             for (const auto& def : defs) {
-              auto method_name = QualifiedName(m->name(), def.name().name());
+              auto method_name = QualifiedName(m.name(), def.name().name());
               names.emplace_back(std::move(method_name));
             }
-            m->class_compilation_unit()->define(
+            m.class_compilation_unit()->define(
                 names, defs, resolvers, moduleSelf(m, py_m));
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
             while (defs_it != defs.end()) {
               const auto method_name =
-                  QualifiedName(m->name(), (*defs_it).name().name());
+                  QualifiedName(m.name(), (*defs_it).name().name());
               auto& method =
-                  m->class_compilation_unit()->get_function(method_name);
+                  m.class_compilation_unit()->get_function(method_name);
               method.setSchema(getSchemaWithNameAndDefaults(
                   defs_it->range(),
                   method.getSchema(),
@@ -509,7 +506,7 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "_create_method_from_trace",
-          [](std::shared_ptr<Module> self,
+          [](Module& self,
              const std::string& name,
              py::function func,
              py::tuple input_tuple,
@@ -519,9 +516,9 @@ void initJitScriptBindings(PyObject* module) {
             // this was ensured in python before calling this function
             auto typed_inputs = toTypedStack(input_tuple);
             auto graph = tracer::createGraphByTracing(
-                func, typed_inputs, var_lookup_fn, force_outplace, self);
-            const auto method_name = QualifiedName(self->name(), name);
-            self->module_object()->compilation_unit()->create_function(
+                func, typed_inputs, var_lookup_fn, force_outplace, &self);
+            const auto method_name = QualifiedName(self.name(), name);
+            self.module_object()->compilation_unit()->create_function(
                 method_name, graph);
             didFinishEmitModule(self);
           })
@@ -552,10 +549,9 @@ void initJitScriptBindings(PyObject* module) {
       .def("apply", &Module::apply)
       .def("_copy_into", &Module::copy_into)
       .def(
-          "clone_method",
-          [](std::shared_ptr<Module> m,
-             std::shared_ptr<Module> orig,
-             const std::string& name) { m->clone_method(*orig, name); });
+          "clone_method", [](Module& m, Module& orig, const std::string& name) {
+            m.clone_method(orig, name);
+          });
 
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
       m, "CompilationUnit")
@@ -598,7 +594,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            Module module;
+            Module module("__main__");
             addFunctionToModule(module, self);
             module.save(filename, _extra_files);
           },
@@ -609,7 +605,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
-            Module module;
+            Module module("__main__");
             addFunctionToModule(module, self);
             return py::bytes(buf.str());
           },
