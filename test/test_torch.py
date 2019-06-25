@@ -5751,41 +5751,45 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_symeig(self, conv_fn):
-        xval = conv_fn(torch.rand(100, 3))
-        cov = torch.mm(xval.t(), xval)
-        rese = conv_fn(torch.zeros(3))
-        resv = conv_fn(torch.zeros(3, 3))
+        from common_utils import random_symmetric_matrix
 
-        # First call to symeig
-        self.assertTrue(resv.is_contiguous(), 'resv is not contiguous')
-        torch.symeig(cov.clone(), True, out=(rese, resv))
-        ahat = torch.mm(torch.mm(resv, torch.diag(rese)), resv.t())
-        self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
+        def run_test(dims, eigenvectors, upper):
+            print(dims, eigenvectors, upper)
+            x = conv_fn(random_symmetric_matrix(*dims))
+            oute = conv_fn(torch.empty(dims[1:] + dims[:1]))
+            outv = conv_fn(torch.empty(dims[1:] + dims[:1] * 2))
+            torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
 
-        # Second call to symeig
-        self.assertFalse(resv.is_contiguous(), 'resv is contiguous')
-        torch.symeig(cov.clone(), True, out=(rese, resv))
-        ahat = torch.mm(torch.mm(resv, torch.diag(rese)), resv.t())
-        self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
+            if eigenvectors:
+                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute)), outv.transpose(-2, -1))
+                self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using V @ diag(e) @ V.T')
+            else:
+                eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
+                self.assertEqual(eigvals, oute, 'Eigenvalues mismatch')
+                self.assertEqual(torch.zeros_like(outv), outv, 'Eigenvector matrix not zero')
 
-        # test eigenvectors=False
-        rese2 = conv_fn(torch.zeros(3))
-        resv2 = conv_fn(torch.randn(3, 3))
-        expected_resv2 = conv_fn(torch.zeros(3, 3))
-        torch.symeig(cov.clone(), False, out=(rese2, resv2))
-        self.assertEqual(rese, rese2)
-        self.assertEqual(resv2, expected_resv2)
+            rese, resv = x.symeig(eigenvectors=eigenvectors, upper=upper)
+            self.assertEqual(rese, oute, "outputs of symeig and symeig with out don't match")
+            self.assertEqual(resv, outv, "outputs of symeig and symeig with out don't match")
 
-        # test non-contiguous
-        X = conv_fn(torch.rand(5, 5))
-        X = X.t() * X
-        e = conv_fn(torch.zeros(4, 2)).select(1, 1)
-        v = conv_fn(torch.zeros(4, 2, 4))[:, 1]
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
-        self.assertFalse(e.is_contiguous(), 'E is contiguous')
-        torch.symeig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e)), v.t())
-        self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
+            # test non-contiguous
+            x = conv_fn(random_symmetric_matrix(*dims))
+            n_dim = len(dims) + 1
+            # Reverse the batch dimensions and the matrix dimensions and then concat them
+            x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
+            assert not x.is_contiguous(), "x is intentionally non-contiguous"
+            rese, resv = torch.symeig(x, eigenvectors=eigenvectors, upper=upper)
+            if eigenvectors:
+                x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese)), resv.transpose(-2, -1))
+                self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using V @ diag(e) @ V.T')
+            else:
+                eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
+                self.assertEqual(eigvals, rese, 'Eigenvalues mismatch')
+                self.assertEqual(torch.zeros_like(resv), resv, 'Eigenvector matrix not zero')
+
+        batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
+        for batch_dims, eigenvectors, upper in product(batch_dims_set, (True, False), (True, False)):
+            run_test((5,) + batch_dims, eigenvectors, upper)
 
     @skipIfNoLapack
     def test_symeig(self):
