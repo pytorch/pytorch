@@ -517,7 +517,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  if (getRecursiveScriptMode() && py::isinstance<py::function>(obj)) {
+  bool should_recurse =
+      py::cast<bool>(py::module::import("torch.jit")
+                         .attr("_is_recursive_script_enabled")(obj));
+  if (should_recurse && py::isinstance<py::function>(obj)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {
