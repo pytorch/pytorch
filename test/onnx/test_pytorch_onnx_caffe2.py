@@ -877,20 +877,6 @@ class TestCaffe2Backend(unittest.TestCase):
             x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
-    def test_layer_norm(self):
-        shape = (20, 5, 10, 10)
-
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-                self.ln = torch.nn.LayerNorm([5, 10, 10])
-
-            def forward(self, x):
-                return self.ln(x)
-
-        x = torch.randn(*shape)
-        self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
-
     def test_cosine_similarity(self):
         shape = (100, 128)
         x = torch.randn(*shape)
@@ -1116,12 +1102,6 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_instance_norm(self):
         underlying = nn.InstanceNorm2d(3)
         self.run_model_test(underlying, train=False, batch_size=BATCH_SIZE)
-
-    @skipIfEmbed
-    def test_layer_norm(self):
-        layer_norm = nn.LayerNorm([10, 10])
-        x = torch.randn(20, 5, 10, 10)
-        self.run_model_test(layer_norm, train=False, input=(x), batch_size=BATCH_SIZE)
 
     def test_pixel_shuffle(self):
         underlying = nn.PixelShuffle(4)
