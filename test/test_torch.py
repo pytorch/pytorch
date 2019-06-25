@@ -9412,6 +9412,13 @@ class _TestTorchMixin(object):
         self.assertTrue(isinstance(b, torch.dtype))
         self.assertEqual(id(b), id(t))
 
+    def test_pickle_size(self):
+        a = torch.rand(10).size()
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertTrue(isinstance(b, torch.Size))
+        self.assertEqual(a, b)
+
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
 
