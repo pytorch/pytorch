@@ -336,7 +336,7 @@ class RNN(RNNBase):
     Attributes:
         weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
             of shape `(hidden_size, input_size)` for `k = 0`. Otherwise, the shape is
-            `(hidden_size, num_directions * hidden_size)`
+            `(hidden_size, hidden_size)`
         weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer,
             of shape `(hidden_size, hidden_size)`
         bias_ih_l[k]: the learnable input-hidden bias of the k-th layer,
@@ -457,7 +457,7 @@ class LSTM(RNNBase):
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
             `(W_ii|W_if|W_ig|W_io)`, of shape `(4*hidden_size, input_size)` for `k = 0`.
-            Otherwise, the shape is `(4*hidden_size, num_directions * hidden_size)`
+            Otherwise, the shape is `(4*hidden_size, hidden_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the :math:`\text{k}^{th}` layer
             `(W_hi|W_hf|W_hg|W_ho)`, of shape `(4*hidden_size, hidden_size)`
         bias_ih_l[k] : the learnable input-hidden bias of the :math:`\text{k}^{th}` layer
@@ -642,7 +642,7 @@ class GRU(RNNBase):
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
             (W_ir|W_iz|W_in), of shape `(3*hidden_size, input_size)` for `k = 0`.
-            Otherwise, the shape is `(3*hidden_size, num_directions * hidden_size)`
+            Otherwise, the shape is `(3*hidden_size, hidden_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the :math:`\text{k}^{th}` layer
             (W_hr|W_hz|W_hn), of shape `(3*hidden_size, hidden_size)`
         bias_ih_l[k] : the learnable input-hidden bias of the :math:`\text{k}^{th}` layer
