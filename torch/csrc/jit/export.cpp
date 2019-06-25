@@ -659,7 +659,7 @@ void ScriptModuleSerializer::convertClass(
 
   std::vector<c10::NamedTypePtr> class_deps;
   std::ostringstream class_stream;
-  // TODO
+  // TODO: serialize for classes
   SourceRangeRecords source_ranges;
   PythonPrint(
       class_stream,
@@ -908,7 +908,6 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.class_compilation_unit()->get_functions().size() > 0) {
     std::ostringstream methods;
-    // TODO
     SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(

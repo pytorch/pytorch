@@ -228,7 +228,7 @@ struct PythonPrintPass {
   // dependencies.
   std::vector<c10::NamedTypePtr>& class_table_;
   std::vector<c10::NamedTypePtr> class_deps_;
-  // Helper to avoid duplicating class typesf
+  // Helper to avoid duplicating class types
   void addToClassTable(const c10::NamedTypePtr& type) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
