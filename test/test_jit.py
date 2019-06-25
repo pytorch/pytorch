@@ -3,7 +3,7 @@ from __future__ import division
 # Torch
 from torch import Tensor
 from torch._C import TensorType, parse_ir, _propagate_shapes, _jit_python_print
-from torch._six import inf, PY2, PY37, builtins, StringIO
+from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.jit.frontend import NotSupportedError
@@ -2838,45 +2838,20 @@ graph(%Ra, %Rb):
 
 
 class TestScript(JitTestCase):
-    @contextmanager
-    def capture_stdout(self):
-        # No idea how to capture stdout from C++ on Windows
-        if WINDOWS:
-            yield ['']
-            return
-        import os
-        import fcntl
-        import errno
-        sys.stdout.flush()
-        stdout_fd = os.dup(1)
-        r, w = os.pipe()
-        try:
-            # Override stdout with r - dup is guaranteed to return the lowest free fd
-            os.close(1)
-            os.dup(w)
+    class capture_stdout(list):
+        """
+        Replace sys.stdout with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stdout = sys.stdout
+            self.stringio = StringIO()
+            sys.stdout = self.stringio
+            return self
 
-            captured_stdout = ['']
-            yield captured_stdout
-            sys.stdout.flush()  # Make sure that Python hasn't buffered anything
-
-            # Do the ugly dance to read all the data that was written into the pipe
-            fcntl.fcntl(r, fcntl.F_SETFL, os.O_NONBLOCK)
-            total_stdout = ''
-            while True:
-                try:
-                    total_stdout += os.read(r, 1000).decode('ascii')
-                except OSError as e:
-                    if e.errno != errno.EAGAIN:
-                        raise
-                    break
-            captured_stdout[0] = total_stdout
-        finally:
-            # Revert the change, and clean up all fds
-            os.close(1)
-            os.dup(stdout_fd)
-            os.close(stdout_fd)
-            os.close(r)
-            os.close(w)
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stdout = self.sys_stdout
 
     def test_sequence_parsing(self):
         tests = [
@@ -5467,9 +5442,6 @@ a")
         self.checkScript(func3, (torch.tensor([-5, 10, -20]),))
 
     def test_number_div(self):
-        def div_int_future():
-            return 1 / 2
-
         self.assertEqual(div_int_future(), torch.jit.script(div_int_future)())
         self.checkScript(div_float_future, ())
 
@@ -9470,14 +9442,15 @@ a")
         self.checkScript(subscript_tuple_assign, ([12, 7, 9, 11], torch.tensor((3, 13, 17)), 0))
 
         # python 2 does not support star assignments so we use compilation unit to test instead
-        star_code = dedent('''
-        def star_tuple_assign():
-            # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
-            a, (b, *c), *d = 1, (2, 3, 4), 5, 6
-            return a, b, c, d
-        ''')
+        if not PY2:
+            star_code = dedent('''
+            def star_tuple_assign():
+                # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
+                a, (b, *c), *d = 1, (2, 3, 4), 5, 6
+                return a, b, c, d
+            ''')
 
-        self.checkScript(star_code, (), name='star_tuple_assign')
+            self.checkScript(star_code, (), name='star_tuple_assign')
 
 
     def test_multi_reduction(self):
