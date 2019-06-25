@@ -25,3 +25,4 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/ATenDispatch.h>
+#include <ATen/core/UnsafeFromTH.h>

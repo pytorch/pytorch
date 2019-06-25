@@ -26,6 +26,7 @@ struct Variable;
 using at::Context;
 using at::Device;
 #ifdef NAMEDTENSOR_ENABLED
+using at::Dimname;
 using at::DimnameList;
 #endif
 using at::Generator;
@@ -49,14 +50,10 @@ using c10::optional;
 struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::TypeExtendedInterface* baseType);
   at::Backend backend() const override;
-  at::Allocator* allocator() const override;
-  at::Device getDeviceFromPtr(void * data) const override;
   const char * toString() const override;
   at::TypeID ID() const override;
   at::Type & toBackend(at::Backend b) const override;
   at::Type & toScalarType(at::ScalarType s) const override;
-  Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
-  at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
   static at::TypeExtendedInterface* getVariableTypeFromBaseType(const at::Type& baseType);
   static bool isVariableType(const at::Type& type);
