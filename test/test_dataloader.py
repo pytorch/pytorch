@@ -1249,11 +1249,11 @@ class TestDataLoader(TestCase):
                     fail_msg = desc + ': loader process failed to setup within given time'
                     if loader_p.exception is not None:
                         fail_msg += ', and had exception {}'.format(loader_p.exception)
-                    elif not loader_p.is_alive():
+                    elif not loader_psutil_p.is_running():
                         fail_msg += ', and exited with code {} but had no exception'.format(loader_p.exitcode)
                     else:
                         fail_msg += ', and is still alive.'
-                    if loader_p.is_alive():
+                    if loader_psutil_p.is_running():
                         # this may kill the process, needs to run after the above lines
                         loader_p.print_traces_of_all_threads()
                     self.fail(fail_msg)
@@ -1293,7 +1293,7 @@ class TestDataLoader(TestCase):
 
                 try:
                     loader_p.join(JOIN_TIMEOUT + MP_STATUS_CHECK_INTERVAL)
-                    if loader_p.is_alive():
+                    if loader_psutil_p.is_running():
                         fail_reason = 'loader process did not terminate'
                         if loader_p.exception is not None:
                             fail(fail_reason + ', and had exception {}'.format(loader_p.exception))
