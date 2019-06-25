@@ -17,7 +17,18 @@ using SourceRangeRecords = std::vector<SourceRangeRecord>;
 // unpacks it on query.
 class CAFFE2_API DebugInfo {
  public:
-  using SerializedDebugInfo = std::tuple<at::DataPtr, size_t>;
+  // I would use a tuple here but it seems like some C++ compilers have issues
+  // std::move'ing tuples where an element has a deleted assignment operator...
+  struct SerializedDebugInfo {
+    SerializedDebugInfo(at::DataPtr&& data, size_t size)
+        : data(std::move(data)), size(size) {}
+
+    SerializedDebugInfo(SerializedDebugInfo&& rhs)
+        : SerializedDebugInfo(std::move(rhs.data), rhs.size) {}
+
+    at::DataPtr data;
+    size_t size;
+  };
 
   DebugInfo() = default;
 

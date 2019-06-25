@@ -320,9 +320,13 @@ void ScriptModuleDeserializer::convertModule(
 
   std::shared_ptr<DebugInfo> debug_info = nullptr;
   if (module_def.has_torchscript_debug_arena()) {
-    auto debug_tup =
+    at::DataPtr data;
+    size_t size;
+    std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_debug_arena().key());
-    debug_info = std::make_shared<DebugInfo>(std::move(debug_tup));
+
+    debug_info = std::make_shared<DebugInfo>(
+        DebugInfo::SerializedDebugInfo(std::move(data), size));
   }
 
   if (module_def.has_torchscript_arena()) {

@@ -29,7 +29,7 @@ void DebugInfo::deserialize() {
     return;
   }
 
-  Unpickler up(std::get<0>(info_).get(), std::get<1>(info_), nullptr);
+  Unpickler up(info_.data.get(), info_.size, nullptr);
   auto ivalues = up.parse_ivalue_list();
 
   deserialized_records_ = SourceRangeRecords();
