@@ -34,9 +34,6 @@ _eval_env = {
     'List': List,
     'Dict': Dict,
     'Optional': Optional,
-    # 'BroadcastingList1': BroadcastingList1,
-    # 'BroadcastingList2': BroadcastingList2,
-    # 'BroadcastingList3': BroadcastingList3,
 }
 
 
