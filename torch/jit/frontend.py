@@ -339,14 +339,8 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
-        target = stmt.target.id
-        target_range = ctx.make_range(
-            stmt.target.lineno,
-            stmt.target.col_offset,
-            stmt.target.col_offset + len(target)
-        )
         return For(
-            r, [Ident(target_range, target)],
+            r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
 
     @staticmethod
@@ -658,15 +652,10 @@ class ExprBuilder(Builder):
             raise NotSupportedError(r, "comprehension ifs not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
+        target_expr = build_expr(ctx, stmt.generators[0].target)
 
-        target = stmt.generators[0].target
-        target_range = ctx.make_range(
-            target.lineno,
-            target.col_offset,
-            target.col_offset + len(target.id)
-        )
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
-        return ListComp(r, elt_expr, Ident(target_range, target.id), iter_expr)
+        return ListComp(r, elt_expr, target_expr, iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

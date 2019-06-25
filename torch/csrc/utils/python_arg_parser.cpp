@@ -160,7 +160,10 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
+#ifdef NAMEDTENSOR_ENABLED
+    case ParameterType::DIMNAME: return obj == Py_None || THPUtils_checkString(obj);
     case ParameterType::DIMNAME_LIST:
+#endif
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -203,6 +206,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
 #ifdef NAMEDTENSOR_ENABLED
+    case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
 #endif
     default: throw std::runtime_error("unknown parameter type");
