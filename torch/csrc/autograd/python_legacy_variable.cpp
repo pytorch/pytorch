@@ -65,7 +65,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
 
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    Edge edge(grad_fn_, grad_fn_->add_input_metadata(tensor));
+    Edge edge(grad_fn_, grad_fn_->add_input_metadata(var));
     var.set_gradient_edge(std::move(edge));
   } else {
     var.set_requires_grad(requires_grad);
