@@ -8357,6 +8357,7 @@ for test_params in module_tests + new_module_tests:
         test_params['input_fn'] = gen_long_tensor_input(test_params['input_size'])
         test_params['reference_fn'] = reference_fn
         test_params['check_reference_only'] = True
+        test_params['test_cuda'] = False
         test = NewModuleTest(**test_params)
 
         add_test(test, decorator)
