@@ -157,7 +157,6 @@ struct CAFFE2_API SourceRange {
         col_offset);
   }
 
-
   // Serialize as Tuple[SourceType, int, int]
   // where SourceType = Tuple[str, Optional[str], int, List[int]],
   // the serialized form of Source
