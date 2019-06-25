@@ -8,9 +8,22 @@ class OperatorEntry;
 }
 
 enum class AliasAnalysisKind : uint8_t {
-  DEFAULT, // The most conservative alias analysis type, assumes side-effects
+  INTERNAL_SPECIAL_CASE,
+  CONSERVATIVE, // The most conservative alias analysis type, assumes side-effects
+  FROM_SCHEMA,
   PURE
 };
+
+constexpr inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
+  return (aliasAnalysisKind == AliasAnalysisKind::CONSERVATIVE)
+    ? "CONSERVATIVE"
+    : ((aliasAnalysisKind == AliasAnalysisKind::FROM_SCHEMA)
+    ? "FROM_SCHEMA"
+    : ((aliasAnalysisKind == AliasAnalysisKind::PURE)
+    ? "PURE"
+    : "UNKNOWN"
+  ));
+}
 
 struct OperatorOptions final {
 public:
@@ -31,7 +44,7 @@ public:
   }
 
 private:
-  AliasAnalysisKind aliasAnalysisKind_ = AliasAnalysisKind::DEFAULT;
+  AliasAnalysisKind aliasAnalysisKind_ = AliasAnalysisKind::CONSERVATIVE;
 };
 
 } // namespace c10

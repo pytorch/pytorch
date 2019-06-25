@@ -182,11 +182,7 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    // see [custom operator aliasing]
-    const auto kind = Symbol::fromQualString(name_.name);
-    const auto is_custom_op = !kind.is_aten() && !kind.is_prim();
-    return is_custom_op ||
-        std::any_of(
+    return std::any_of(
             arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
               const auto& aliasInfo = arg.alias_info();
               return aliasInfo && aliasInfo.value().isWrite();

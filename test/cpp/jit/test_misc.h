@@ -68,6 +68,7 @@
 
 namespace torch {
 namespace jit {
+c10::OperatorOptions aliasAnalysisFromSchema();
 namespace test {
 
 using Var = SymbolicVariable;
@@ -807,7 +808,7 @@ void testNoneSchemaMatch() {
               push(stack, IValue());
               return 0;
             };
-          }),
+          }, aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
           [](const Node* node) {
@@ -820,7 +821,7 @@ void testNoneSchemaMatch() {
               }
               return 0;
             };
-          }),
+          }, aliasAnalysisFromSchema()),
   });
 
   // Constant propagation will run test_none and produce a None,

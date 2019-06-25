@@ -79,6 +79,12 @@ std::array<bool, N> as_bool_array(const c10::List<bool>& list) {
   return res;
 }
 
+c10::OperatorOptions atenOperatorOptions() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+
 RegisterOperators reg({
   Operator(
       "aten::get_device(Tensor self) -> int",
@@ -90,7 +96,8 @@ RegisterOperators reg({
           drop(stack, 1);
           pack(stack, std::move(result));
           return 0;
-      }
+      },
+      atenOperatorOptions()
   ),
   Operator(
       "aten::storage_offset(Tensor self) -> int",
@@ -100,7 +107,8 @@ RegisterOperators reg({
           drop(stack, 1);
           pack(stack, std::move(result));
           return 0;
-      }
+      },
+      atenOperatorOptions()
   ),
   Operator(
       "aten::is_contiguous(Tensor self) -> bool",
@@ -110,7 +118,8 @@ RegisterOperators reg({
           drop(stack, 1);
           pack(stack, std::move(result));
           return 0;
-      }
+      },
+      atenOperatorOptions()
   ),
 
   // Generated operators

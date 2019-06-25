@@ -895,14 +895,20 @@ bool Node::hasSideEffects() const {
     case prim::CallMethod:
       return true;
   }
-  // All other builtin ops are known to be safe.
-  // see [custom operator aliasing]
-  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+
+  auto op = findOperatorFor(this);
+  if (!op) {
+    TORCH_INTERNAL_ASSERT(kind_.is_prim(), "Only prim ops are allowed to not have a registered operator. Otherwise we wouldn't know how to handle aliasing analysis here.");
     return false;
   }
-
-  // Custom ops may have arbitrary side effects
-  return true;
+  switch (op->aliasAnalysisKind()) {
+    case AliasAnalysisKind::PURE: return false;
+    case AliasAnalysisKind::FROM_SCHEMA: return false;
+    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE: return false;
+    case AliasAnalysisKind::CONSERVATIVE: return true;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
+  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and

@@ -226,12 +226,9 @@ void AliasDb::analyze(Node* node) {
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
   const Operator& op = getOperatorFor(node);
   auto analysis = op.aliasAnalysisKind();
-  switch (analysis) {
-    case AliasAnalysisKind::PURE:
-      analyzeCreator(node);
-      return true;
-    case AliasAnalysisKind::DEFAULT:
-      return false;
+  if (AliasAnalysisKind::PURE == analysis) {
+    analyzeCreator(node);
+    return true;
   }
   return false;
 }
@@ -242,6 +239,23 @@ bool AliasDb::tryRegisteredAnalysis(Node* node) {
 //      information to the outputs. For unschematized nodes, a special analyzer
 //      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
+  auto op = findOperatorFor(node);
+  const bool hasSpecialCase = aliasAnalysisHasSpecialCaseFor(node->kind());
+  if (op) {
+    const auto analysis = op->aliasAnalysisKind();
+    const bool registeredAsSpecialCase = analysis == AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+    if (C10_UNLIKELY(registeredAsSpecialCase && !hasSpecialCase)) {
+      TORCH_INTERNAL_ASSERT(false, "Op ", node->kind().toDisplayString(),
+          " is registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but doesn't have a special case.");
+    } else if (C10_UNLIKELY(!registeredAsSpecialCase && hasSpecialCase)){
+      // TODO TORCH_INTERNAL_ASSERT(false, "Op ", node->kind().toDisplayString(),
+      //     " has a special case and should be registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but is registered with ", toString(analysis));
+    }
+
+  } else {
+    //TORCH_INTERNAL_ASSERT(false, "We don't have an op for ", node->kind().toDisplayString(), " but it isn't a special case.");
+  }
+
   // These nodes are not schematized, so we need to handle them specially
   switch (node->kind()) {
     case prim::If:
@@ -307,14 +321,22 @@ void AliasDb::analyzeImpl(Node* node) {
       if (tryRegisteredAnalysis(node)) {
         return;
       }
-      TORCH_INTERNAL_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
-  const auto& schema = node->schema();
-  // see [custom operator aliasing]
-  if (!node->kind().is_aten() && !node->kind().is_prim()) {
+  TORCH_INTERNAL_ASSERT(op, "We should have an op schema if we get to here");
+  const AliasAnalysisKind analysis = op->aliasAnalysisKind();
+  TORCH_INTERNAL_ASSERT(analysis != AliasAnalysisKind::INTERNAL_SPECIAL_CASE && !aliasAnalysisHasSpecialCaseFor(node->kind()), "Special cases should be handled already if we're here.");
+
+  if (analysis == AliasAnalysisKind::CONSERVATIVE) {
+    TORCH_INTERNAL_ASSERT(!node->kind().is_aten() && !node->kind().is_prim(), "aten:: and prim:: operators should not use AliasAnalysisKind::CONSERVATIVE but ", node->kind().toDisplayString(), " does.");
     return analyzeConservative(node);
   }
+
+  TORCH_INTERNAL_ASSERT(analysis == AliasAnalysisKind::FROM_SCHEMA, "AliasAnalysisKind::CONSERVATIVE/PURE/INTERNAL_SPECIAL_CASE should already have been handled above");
+  const auto& schema = node->schema();
+
+  // TODO Remove this assert, we want to open this up to all ops
+  TORCH_INTERNAL_ASSERT(node->kind().is_prim() || node->kind().is_aten(), "The current code base should only have AliasAnalysisKind::FROM_SCHEMA for aten:: and prim:: ops but we found it for ", node->kind().toDisplayString(), ". We want to open this up though.");
 
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
