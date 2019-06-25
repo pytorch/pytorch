@@ -142,6 +142,7 @@ namespace c10 {
   _(aten, list)                    \
   _(aten, wait)                    \
   _(aten, save)                    \
+  _(aten, keys)                     \
   _(aten, ord)                     \
   _(aten, chr)                     \
   _(aten, hex)                     \
