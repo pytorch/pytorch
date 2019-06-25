@@ -36,7 +36,8 @@ class Quantize(Module):
 
     @staticmethod
     def from_float(mod):
-        return Quantize(mod.qparams[0].item(), mod.qparams[1].item(), torch.quint8)
+        qparams = mod.observer.calculate_qparams()
+        return Quantize(qparams[0].item(), qparams[1].item(), torch.quint8)
 
 @weak_module
 class DeQuantize(Module):
@@ -160,13 +161,22 @@ class Linear(Module):
                                       missing_keys, unexpected_keys, error_msgs)
         return
 
-    def set_state(self, state):
-        r"""
-        This is just used in convert_modules right now, we'll add ser/deser
-        using torch.save/torch.load later.
-        """
-        pack = torch.ops.quantized.fbgemm_linear_prepack
-        self._packed_wegiht = pack(state['weight'])
-        self.bias = state['bias']
-        self.output_scale = state['output_scale']
-        self.output_zero_point = state['output_zero_point']
+    @staticmethod
+    def from_float(mod):
+        assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
+        assert hasattr(mod, 'qconfig'), 'Float Module must have qconfig defined'
+        activation_observer = mod.qconfig.activation()
+        act_qparams = activation_observer.calculate_qparams()
+        weight_observer = mod.qconfig.weight()
+        weight_observer(mod.weight)
+        wt_qparams = weight_observer.calculate_qparams()
+        bias_qparams = torch.zeros(2)
+        bias_scale = (wt_qparams[0] * act_qparams[0]).float()
+        qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long(), torch.qint8)
+        qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
+        qlinear = Linear(mod.out_features, mod.in_features)
+        qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
+        qlinear._bias = qbias
+        qlinear.out_scale = torch.tensor([act_qparams[0]])
+        qlinear.out_zero_point = torch.tensor([act_qparams[1]])
+        return qlinear

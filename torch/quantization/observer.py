@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
 import torch
+from functools import partial
 
 class Observer(nn.Module):
     r"""Default Observer Module
@@ -14,15 +15,15 @@ class Observer(nn.Module):
     arguments after that. and it should provide a calculate_qparam function.
     TODO: Maybe add an abstract Observer class?
     """
-    def __init__(self, qoptions, avg_constant=0.9):
+    def __init__(self, **kwargs):
         super(Observer, self).__init__()
-        assert qoptions.qscheme == torch.per_tensor_affine, \
+        self.dtype = kwargs.get('dtype', torch.qint8)
+        self.qscheme = kwargs.get('qscheme', torch.per_tensor_affine)
+        assert self.qscheme == torch.per_tensor_affine, \
             'Default Observer only works for per_tensor_affine quantization scheme'
-        self.dtype = qoptions.dtype
-        self.qscheme = qoptions.qscheme
         self.stats = torch.tensor([-1, 1], dtype=torch.float)
         # Symmetric range for initialization
-        self.avg_constant = avg_constant
+        self.avg_constant = kwargs.get('avg_constant', 0.9)
 
     def forward(self, x):
         self.stats = (1 - self.avg_constant) * self.stats + \
@@ -48,15 +49,13 @@ class WeightObserver(Observer):
      for use later.
     """
 
-    def __init__(self, qoptions):
-        super(WeightObserver, self).__init__(qoptions)
+    def __init__(self, **kwargs):
+        super(WeightObserver, self).__init__(**kwargs)
         self.stats = torch.tensor([-2, 2], dtype=torch.float)
 
     def forward(self, x):
         self.stats = torch.tensor([torch.min(x), torch.max(x)], dtype=torch.float)
         return x
 
-def observer(observer_cls, qoptions):
-    def get_instance():
-        return observer_cls(qoptions)
-    return get_instance
+def observer(observer_cls, kwargs):
+    return partial(observer_cls, **kwargs)

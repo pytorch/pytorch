@@ -8,42 +8,44 @@ def _forward_hook(self, input, output):
     for module in self.children():
         module.forward(output)
 
-def addObserver(myMod, qConfigDict, qConfigParent=None, prefix=''):
-    r"""Transform a module to a quantized module according to qConfigDict
+def add_observer(module, qconfig_dict, qconfig_parent=None, prefix=''):
+    r"""Transform a module to a quantized module according to qconfig_dict
 
     This function insert observer module to all leaf child module of a given
-    module based on qConfigDict.
+    module based on qconfig_dict.
 
     Args:
-        myMod: instance of the module we want to transform
-        qCofnigDict: dictionary that maps from name of submodule to quantization
+        module: instance of the module we want to transform
+        qconfig_dict: dictionary that maps from name of submodule to quantization
                      configuration
-        qConfigParent: quantization config of parent module, we will fallback to
+        qconfig_parent: quantization config of parent module, we will fallback to
                        this config when there is no specified config for current
                        module
         prefix: corresponding prefix of the current module, used as key in
-                qConfigDict
+                qconfig_dict
     """
-    myMod.qConfig = None
-    if prefix in qConfigDict:
-        myMod.qConfig = qConfigDict[prefix]
+    assert not hasattr(module, 'qconfig'), 'Original module should not have \
+        qconfig object already'
+    module.qconfig = None
+    if prefix in qconfig_dict:
+        module.qconfig = qconfig_dict[prefix]
     else:
-        if qConfigParent is not None:
-            myMod.qConfig = qConfigParent
-    # Insert observers only for leaf nodes
-    if myMod.qConfig is not None and len(myMod._modules) == 0:
-        myMod.add_module('observer', myMod.qConfig.activation())
-        myMod.register_forward_hook(_forward_hook)
+        module.qconfig = qconfig_parent
 
-    for name, child in myMod.named_children():
-        if name is not 'observer':
-            if prefix:
-                module_prefix = prefix + '.' + name
-            else:
-                module_prefix = name
-            addObserver(child, qConfigDict, myMod.qConfig, module_prefix)
+    # Insert observers only for leaf nodes, note that this observer is for
+    # the output of the module, for input QuantStub will observe them
+    if module.qconfig is not None and len(module._modules) == 0:
+        # observer will be when we swap the module
+        module.add_module('observer', module.qconfig.activation())
+        # when do we remove hooks?
+        module.observer_hook_handle = module.register_forward_hook(_forward_hook)
 
-def addQuantDeQuantCall(base_fn):
+    for name, child in module.named_children():
+        if name != 'observer':
+            module_prefix = prefix + '.' + name if prefix else name
+            add_observer(child, qconfig_dict, module.qconfig, module_prefix)
+
+def add_quant_dequant_call(base_fn):
     r"""Insert calls to quant and dequant around base_fn calls
 
     Given a `base_fn` function, insert a call to `quant` before the function
@@ -63,130 +65,120 @@ def addQuantDeQuantCall(base_fn):
         return x
     return new_fn
 
-def addQuantDeQuantModule(mod, qConfig):
-    r"""Add Quantize and DeQuantize to the input module and modify forward function
+class QuantWrapper(nn.Module):
+    def __init__(self, module, qconfig):
+        super(QuantWrapper, self).__init__()
+        self.quant = QuantStub(qconfig)
+        self.dequant = DeQuantStub()
+        self.module = module
 
-    Args:
-        mod: module to be changed
-        qConfig: quantization configuration
+    def forward(self, X):
+        self.quant(X)
+        self.module.forward(X)
+        self.dequant(X)
 
-    """
-    mod.add_module('quant', AbstractQuant(qConfig))
-    mod.add_module('dequant', AbstractDeQuant())
-    mod.forward = addQuantDeQuantCall(mod.forward)
-
-def get_config_key(name, qConfigDict):
-    if name in qConfigDict:
+def get_config_key(name, qconfig_dict):
+    if name in qconfig_dict:
         return name
     elif name:
         parent = '.'.join(name.split('.')[:-1])
-        return get_config_key(parent, qConfigDict)
+        return get_config_key(parent, qconfig_dict)
     else:
-        return '' if '' in qConfigDict else None
+        return '' if '' in qconfig_dict else None
 
-def getModule(modInstance, name):
+def get_module(mod, name):
+    if name == '':
+        return mod
     splits = name.split('.')
-    mod = modInstance._modules[splits[0]]
-    for i in range(1, len(splits)):
-        mod = mod._modules[splits[i]]
+    for split in splits:
+        mod = mod._modules[split]
     return mod
 
-def addQuantDeQuant(modInstance, qConfigDict):
-    r"""Add AbstractQuant and AbstractDeQuant module and modify forward function
-    to call quant dequant accordign to qConfigDict
+def add_quant_dequant_module(module, qconfig_dict, name):
+    qconfig = qconfig_dict[name]
+    splits = name.split('.')
+    parent_mododule = module
+    for split in splits:
+        parent_module = module
+        module = module._modules[split]
+    parent_module._modules[split[-1]] = QuantWrapper(module, qconfig)
+    return module
+
+def add_quant_dequant(module, qconfig_dict):
+    r"""Add QuantStub and DeQuantStub module and modify forward function
+    to call quant dequant accordign to qconfig_dict
     """
     mod_key_list = []
-    for name, mod in modInstance.named_modules():
-        dict_key = get_config_key(name, qConfigDict)
+    for name, _ in module.named_modules():
+        dict_key = get_config_key(name, qconfig_dict)
         if dict_key is not None:
             mod_key_list.append(dict_key)
 
     for name in set(mod_key_list):
-        if name is not '':
-            addQuantDeQuantModule(getModule(modInstance, name), qConfigDict[name])
+        if name == '':
+            module = QuantWrapper(module, qconfig_dict[name])
         else:
-            addQuantDeQuantModule(modInstance, qConfigDict[name])
+            add_quant_dequant_module(module, qconfig_dict, name)
+    return module
 
-def prepare(modInstance, qConfigDict):
-    r"""Transform a module to a quantized module according to qConfigDict,
-    it adds observer and abstract quant dequant modules to the module. and
+def prepare(module, qconfig_dict):
+    r"""Transform a module to a quantized module according to qconfig_dict,
+    it adds observer and quant dequant stub modules to the module. and
     changes the forward method to invoke them
 
     Args:
-        modInstance: instance of the module we want to transform
-        qCofnigDict: dictionary that maps from name of submodule to quantization
+        mod: instance of the module we want to transform
+        qconfig_dict: dictionary that maps from name of submodule to quantization
                      configuration
     """
-    addObserver(modInstance, qConfigDict)
-    addQuantDeQuant(modInstance, qConfigDict)
+    add_observer(module, qconfig_dict)
+    return add_quant_dequant(module, qconfig_dict)
 
-class AbstractQuant(nn.Module):
-    r"""Abstract quantize module which will be replace to actual Quantize module
-    in swapModule function
+class QuantStub(nn.Module):
+    r"""Quantize stub module which will be replace to actual Quantize module
+    in swap_module function
     """
     def __init__(self, qconfig):
-        super(AbstractQuant, self).__init__()
+        super(QuantStub, self).__init__()
         self.add_module('observer', qconfig.activation())
 
     def forward(self, x):
         self.observer(x)
         return x
 
-class AbstractDeQuant(nn.Module):
-    r"""Abstract dequantize module which will be replace to actual DeQuantize module
-    in swapModule function
+class DeQuantStub(nn.Module):
+    r"""Dequantize stub module which will be replace to actual DeQuantize module
+    in swap_module function
     """
     def __init__(self):
-        super(AbstractDeQuant, self).__init__()
+        super(DeQuantStub, self).__init__()
 
     def forward(self, x):
         return x
 
-def calculateQParams(MyModule):
-    r""" Calculates Quantizer parameters for activation tensors based on observer statistics
-    Updates the qparams parameter for each module with the quantizer params.
+def quantize(module, qconfig_dict, eval_fn, *eval_args):
+    r"""Given a float module and qconfig_dict, convert it to a quantized module
 
-    Args:
-        MyModule: Model with observer stats
-    """
-    if hasattr(MyModule, 'observer'):
-        if isinstance(MyModule.observer, Observer):
-            # Simple symmetric quantization over entire observed range
-            MyModule.qparams = MyModule.observer.calculate_qparams()
-    for Module in MyModule.children():
-        calculateQParams(Module)
-
-def quantize(module, qConfigDict, eval_fn, *eval_args):
-    r"""Given a float module and qConfigDict, convert it to a quantized module
-
-    First it will prepare the module to add observer and abstract quant
-    deqaunt modules, then it calls `eval_fn` which will run the calibration
+    First it will prepare the module to add observer and quant
+    deqaunt stub modules, then it calls `eval_fn` which will run the calibration
     step and observers will record the stats of the tensors, after that we will
     call `convert` which will convert the module to a quantized module.
     """
-    prepare(module, qConfigDict)
+    module = prepare(module, qconfig_dict)
     eval_fn(module, *eval_args)
-    convert(module)
-    return
+    convert_to_quantized(module)
+    return module
 
-def convert(module):
-    r""" Utility function to traverse module tree and swap modules marked with
-         AbstractQuant and AbstractDeQuant with
-         quantized versions.
-    """
-    calculateQParams(module)
-    return convertToQuantized(module)
-
-def convertToQuantized(module):
+def convert_to_quantized(module):
     r"""Convert a module with qparams to a quantized version of the module
     """
-    module_swapped = swapModule(module)
+    module_swapped = swap_module(module)
     if len(list(module.named_children())) == 0:
         return module_swapped
 
     reassign = {}
     for name, mod in module.named_children():
-        new_mod = convertToQuantized(mod)
+        new_mod = convert_to_quantized(mod)
         if new_mod is not mod:
             reassign[name] = new_mod
 
@@ -200,12 +192,12 @@ DEFAULT_MODULE_MAPPING = {
     torch.nn.ReLU: nnq.ReLU,
 }
 
-ABSTRACT_MODULE_MAPPING = {
-    AbstractQuant: nnq.Quantize,
-    AbstractDeQuant: nnq.DeQuantize
+STUB_MODULE_MAPPING = {
+    QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize
 }
 
-def swapModule(mod, mapping=DEFAULT_MODULE_MAPPING):
+def swap_module(mod, mapping=DEFAULT_MODULE_MAPPING):
     r""" Check if a module has a quantized counterpart and swap it.
     """
     new_mod = mod
@@ -213,8 +205,8 @@ def swapModule(mod, mapping=DEFAULT_MODULE_MAPPING):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
 
-    if type(mod) in ABSTRACT_MODULE_MAPPING:
-        new_mod = ABSTRACT_MODULE_MAPPING[type(mod)].from_float(mod)
+    if type(mod) in STUB_MODULE_MAPPING:
+        new_mod = STUB_MODULE_MAPPING[type(mod)].from_float(mod)
 
     # keep the modification to forward
     new_mod.forward = mod.forward
