@@ -7979,13 +7979,17 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             x = torch.tensor([[True, True, True], [True, True, True]], device=device)
             res = torch.zeros(3, 3, dtype=torch.bool, device=device).scatter_(0, torch.tensor([[0, 1, 2], [0, 1, 2]], device=device), x)
-            self.assertEqual(res, torch.tensor([[True, False, False], [False, True, False], [False, False, True]], device=device))
+            self.assertEqual(res, torch.tensor([[True, False, False], 
+                                                [False, True, False], 
+                                                [False, False, True]], device=device))
 
     def test_scatter_add_bool(self):
         for device in torch.testing.get_all_device_types():
             x = torch.tensor([[True, True, True, True, True], [True, True, True, True, True]], device=device)
             res = torch.zeros(3, 5, dtype=torch.bool, device=device).scatter_add_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]], device=device), x)
-            self.assertEqual(res, torch.tensor([[True, True, True, True, True], [False, True, False, True, False], [True, False, True, False, True]], device=device))
+            self.assertEqual(res, torch.tensor([[True, True, True, True, True], 
+                                                [False, True, False, True, False], 
+                                                [True, False, True, False, True]], device=device))
 
     def test_masked_scatter(self):
         for dtype in [torch.uint8, torch.bool]:
