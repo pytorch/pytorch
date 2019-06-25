@@ -431,7 +431,7 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
                     # that is a bug in verify
                     errs.requireEqual(proto, alt_proto)
                     errs.requireEqual(proto_bytes.getvalue(), alt_proto_bytes.getvalue())
-                    assert False
+                    raise AssertionError()
 
             # TODO: test that the traced model also returns the same thing...
             run_helper(torch_out, args)
