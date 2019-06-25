@@ -232,7 +232,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
     for (i=0; i<numel; i++) {
       if (index_data[i] < 0 || index_data[i] > max) {
         THLongTensor_free(index);
-        THError("index out of range");
+        THError("index out of range: Tried to access index %d out of table with %d rows.", index_data[i], max);
       }
     }
 
