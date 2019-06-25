@@ -211,7 +211,8 @@ Tensor embedding_backward_cuda_kernel(
   // Compute the number of segments and their start position so that we do not have to
   // spawn a warp per index. In this context, a segment is a number of rows that should
   // be summarized.
-  thrust::device_vector<int64_t> segment_offsets(numel); // Unit: index in `sorted_indices`
+  // Unit: index in `sorted_indices` and `orig_indices`
+  thrust::device_vector<int64_t> segment_offsets(numel);
   int64_t num_of_segments;
   {
     auto sorted_indices_dev = thrust::device_ptr<int64_t>(sorted_indices.data<int64_t>());
@@ -255,7 +256,7 @@ Tensor embedding_backward_cuda_kernel(
           partials_per_segment_offset[num_of_segments-1];
 
   // Now we can compute the start position of each partial-segment
-  // Unit: index in `sorted_indices`
+  // Unit: index in `sorted_indices` and `orig_indices`
   thrust::device_vector<int64_t> partial_segment_offset(num_of_partial_segments);
   {
     krn_partial_segment_offset<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
