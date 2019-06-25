@@ -206,11 +206,9 @@ Module::Module(std::string class_name) {
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
+  const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
-      name(),
-      src,
-      resolver ? resolver : script::nativeResolver(),
-      simpleSelf(module_object()->type()));
+      name(), src, resolver ? resolver : script::nativeResolver(), &self);
 }
 
 void Module::copy_into(
