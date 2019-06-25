@@ -305,7 +305,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  c10::ListPtr<IValue> elems = c10::make_list<IValue>();
+  c10::List<IValue> elems = c10::make_list<IValue>();
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
@@ -316,7 +316,7 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
+  c10::impl::GenericDict elems = c10::impl::make_generic_dict();
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(
@@ -543,10 +543,15 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
-    if (tuple->type && tuple->type->hasNames() && tuple->type->unqualName()) {
+    if (tuple->type && tuple->type->schema() &&
+        tuple->type->schema()->name() != "") {
+      auto unqualName = tuple->type->basename();
+      auto fieldNames = fmap(tuple->type->schema()->arguments(), [](const Argument& arg) {
+        return arg.name();
+      });
       return py::module::import("torch.jit")
           .attr("_create_named_tuple")(
-              t, tuple->type->names(), tuple->type->unqualName().value());
+              t, unqualName, fieldNames);
     } else {
       return std::move(t);
     }
