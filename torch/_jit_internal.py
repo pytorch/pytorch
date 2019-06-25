@@ -12,7 +12,7 @@ from torch._six import builtins
 compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Tracks which methods should be converted to strong methods
-weak_script_methods = weakref.WeakKeyDictionary()  # noqa: T484
+weak_script_methods = weakref.WeakSet()  # noqa: T484
 
 # Converted modules and their corresponding WeakScriptModuleProxy objects
 weak_modules = weakref.WeakKeyDictionary()  # noqa: T484
@@ -71,8 +71,31 @@ def createResolutionCallback(frames_up=0):
             return f_globals[key]
         elif hasattr(builtins, key):
             return getattr(builtins, key)
+
+    return env
+
+
+def createResolutionCallbackFromClosure(fn):
+    """
+    Create a resolutionCallback by introspecting the function instead of
+    looking up the stack for the enclosing scope
+    """
+    var_names = fn.__code__.co_freevars
+
+    # map of captured name -> value
+    free_vars = {}
+
+    for index, name in enumerate(var_names):
+        free_vars[name] = fn.__closure__[index].cell_contents
+    f_globals = fn.__globals__
+
+    def env(key):
+        if key in free_vars:
+            return free_vars[key]
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
         else:
-            return None
+            return f_globals.get(key)
 
     return env
 
@@ -87,7 +110,6 @@ def weak_script(fn, _frames_up=0):
     compiled_weak_fns[fn] = {
         "status": COMPILATION_PENDING,
         "compiled_fn": None,
-        "rcb": createResolutionCallback(_frames_up + 1)
     }
     return fn
 
@@ -100,10 +122,7 @@ def weak_module(cls):
 
 
 def weak_script_method(fn):
-    weak_script_methods[fn] = {
-        "rcb": createResolutionCallback(frames_up=2),
-        "original_method": fn
-    }
+    weak_script_methods.add(fn)
     return fn
 
 
