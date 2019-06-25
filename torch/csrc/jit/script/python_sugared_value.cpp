@@ -471,11 +471,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  auto weak_obj =
-      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
-  if (!weak_obj.is_none()) {
-    obj = weak_obj;
-  }
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee);
   } else if (py::isinstance<py::module>(obj)) {
@@ -503,12 +498,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           << "You are calling a python builtin_function_or_method "
           << "which is currently not supported in Torchscript."
           << "Please open a feature request to add it.";
-    }
-
-    auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
-    if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<FunctionValue>(callee);
     }
   }
 
