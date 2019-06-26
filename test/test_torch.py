@@ -10451,6 +10451,17 @@ tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
             torch.set_default_tensor_type(torch.cuda.FloatTensor)
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([123])''')
+
+            # test printing a tensor on a different gpu than current one.
+            if torch.cuda.device_count() >= 2:
+                with torch.cuda.device(1):
+                    self.assertEqual(x.__repr__(), str(x))
+                    self.assertExpectedInline(str(x), '''tensor([123], device='cuda:0')''')
+
+            # test printing cpu tensor when default device is cuda
+            y = torch.tensor([123], device='cpu')
+            self.assertEqual(y.__repr__(), str(y))
+            self.assertExpectedInline(str(y), '''tensor([123], device='cpu')''')
         torch.set_default_tensor_type(default_type)
 
         # test integral floats and requires_grad
