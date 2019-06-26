@@ -463,6 +463,13 @@ struct PythonPrintPass {
     stmt << end;
   }
 
+  void printValueIndex(std::ostream& stmt, at::ArrayRef<Value*> inputs) {
+    stmt << useOf(inputs[0]);
+    stmt << "[";
+    stmt << useOf(inputs[1]);
+    stmt << "]";
+  }
+
   void printDict(
       std::ostream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
@@ -888,6 +895,9 @@ struct PythonPrintPass {
       } break;
       case aten::Str: {
         printValueList(stmt, node->inputs(), "str(", ")");
+      } break;
+      case aten::__getitem__: {
+        printValueIndex(stmt, node->inputs());
       } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");

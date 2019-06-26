@@ -274,15 +274,13 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-Value* SimpleValue::getelem(const SourceRange&loc, Function& m, Value* i) {
+Value* SimpleValue::getitem(const SourceRange&loc, Function& m, Value* i) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
   Value* cur_elem = nullptr;
-  if (val_type->cast<ListType>()) {
-    cur_elem = g.insert(aten::select, {val, i}, {}, loc);
-  } else if (val_type->cast<StringType>()) {
-    cur_elem = g.insert(prim::StringIndex, {val, i}, {}, loc);
+  if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
+    cur_elem = g.insert(aten::__getitem__, {val, i}, {}, loc);
   } else if (val_type->isSubtypeOf(TensorType::get())) {
     cur_elem = g.insert(aten::select, {val, 0, i}, {}, loc);
   } else {
@@ -326,7 +324,7 @@ Value* RangeValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-Value* RangeValue::getelem(const SourceRange&loc, Function& m, Value* i)  {
+Value* RangeValue::getitem(const SourceRange&loc, Function& m, Value* i)  {
   if (has_only_end_) {
     return i;
   } else {
@@ -367,12 +365,12 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
   return g.insert(prim::min, {list_node->output()}, {}, loc);
 }
 
-Value* IterableTree::getelem(const SourceRange&loc, Function& m, Value* i)  {
+Value* IterableTree::getitem(const SourceRange&loc, Function& m, Value* i)  {
   std::vector<Value*> child_items;
   for(const SugaredValuePtr& child: children_) {
-    child_items.emplace_back(child->getelem(loc, m, i));
+    child_items.emplace_back(child->getitem(loc, m, i));
   }
-  // If you call getelem() on a IterableTree sugared value, we will create Tuple
+  // If you call getitem() on a IterableTree sugared value, we will create Tuple
   // from the children items, and make the Tuple value as the element
   Graph& g = *m.graph();
   return g.insertNode(g.createTuple(child_items))->output();

@@ -100,7 +100,7 @@ struct TORCH_API SugaredValue
                            << " object is not iterable";
   }
   // expression for ith elemement for iterable value
-  virtual Value* getelem(const SourceRange&loc, Function& m, Value* i) {
+  virtual Value* getitem(const SourceRange&loc, Function& m, Value* i) {
     throw ErrorReport(loc) << " cannot get the element of value " << kind();
   }
 
@@ -153,7 +153,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   }
 
   Value* len(const SourceRange& loc, Function& m) override;
-  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+  Value* getitem(const SourceRange&loc, Function& m, Value* i) override;
 
  private:
   Value* value_;
@@ -444,7 +444,7 @@ struct TORCH_API RangeValue : SugaredValue {
     return "range";
   }
   Value* len(const SourceRange& loc, Function& m) override;
-  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+  Value* getitem(const SourceRange&loc, Function& m, Value* i) override;
 
   private:
     Value* start_;
@@ -492,11 +492,11 @@ struct TORCH_API IterableTree : SugaredValue {
   // given a IterableTree node, get all the base iterables/leaves under the
   // IterableTree node, which are either SimpleValue or RangeValue. This enable
   // us to get all the basic SugaredValues that contains valid loop information
-  // with len() and getelem()
+  // with len() and getitem()
   std::vector<SugaredValuePtr> get_base_iterables();
 
   Value* len(const SourceRange& loc, Function& m) override;
-  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+  Value* getitem(const SourceRange&loc, Function& m, Value* i) override;
 
   private:
     std::vector<SugaredValuePtr> children_;

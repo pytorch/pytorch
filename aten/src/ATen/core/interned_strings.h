@@ -132,6 +132,7 @@ namespace c10 {
   _(aten, ne_)                     \
   _(aten, transpose_)              \
   _(aten, unsqueeze_)              \
+  _(aten, __getitem__)             \
   _(aten, _set_item)               \
   _(aten, manual_seed)             \
   _(aten, set_)                    \
@@ -142,7 +143,7 @@ namespace c10 {
   _(aten, list)                    \
   _(aten, wait)                    \
   _(aten, save)                    \
-  _(aten, keys)                     \
+  _(aten, keys)                    \
   _(aten, ord)                     \
   _(aten, chr)                     \
   _(aten, hex)                     \

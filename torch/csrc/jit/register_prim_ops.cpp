@@ -1791,6 +1791,15 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
+        "aten::__getitem__(str s, int index) -> str",
+        [](Stack& stack) {
+          auto index = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+          char c = string.at(index);
+          push(stack, std::string(&c, 1));
+          return 0;
+        }),
+    Operator(
         "aten::list(str t) -> str[]",
         [](Stack& stack) {
           auto str = pop(stack).toStringRef();
@@ -1803,42 +1812,45 @@ RegisterOperators reg2({
           return 0;
         }),
 // Mutable ops for lists containing mutable types.
-#define CREATE_MUTABLE_LIST_OPS(decl_type, value_type)                      \
-  Operator(                                                                 \
-      "aten::select(" decl_type "[](a) list, int idx) -> " decl_type "(*)", \
-      listSelect<value_type>),                                              \
-      Operator(                                                             \
-          "aten::append( " decl_type "[](a!) self, " decl_type              \
-          "(c -> *) el) -> " decl_type "[](a!)",                            \
-          listAppend<value_type>),                                          \
-      Operator(                                                             \
-          "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
-          listReverse<value_type>),                                         \
-      Operator(                                                             \
-          "aten::extend(" decl_type "[](a!) self, " decl_type               \
-          " [] other) -> ()",                                               \
-          listExtend<value_type>),                                          \
-      Operator(                                                             \
-          "aten::copy(" decl_type                                           \
-          "[](a) self)"                                                     \
-          " -> " decl_type "[]",                                            \
-          listCopy<value_type>),                                            \
-      Operator(                                                             \
-          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
-          "(b -> *) el) -> " decl_type "[](a!)",                            \
-          listSetItem<value_type>),                                         \
-      Operator(                                                             \
-          "aten::clear( " decl_type "[](a!) self) -> ()",                   \
-          listClear<value_type>),                                           \
-      Operator(                                                             \
-          "aten::insert( " decl_type                                        \
-          "[](a!) self, int idx,                                            \
-          " decl_type "(b -> *) el) -> ()",                                 \
-          listInsert<value_type>),                                          \
-      Operator(                                                             \
-          "aten::pop(" decl_type                                            \
-          "[](a!) self, int idx=-1)                                         \
-        -> " decl_type "(*)",                                               \
+#define CREATE_MUTABLE_LIST_OPS(decl_type, value_type)                              \
+  Operator(                                                                         \
+      "aten::select(" decl_type "[](a) list, int idx) -> " decl_type "(*)",         \
+      listSelect<value_type>),                                                      \
+  Operator(                                                                         \
+      "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type "(*)",    \
+      listSelect<value_type>),                                                      \
+      Operator(                                                                     \
+          "aten::append( " decl_type "[](a!) self, " decl_type                      \
+          "(c -> *) el) -> " decl_type "[](a!)",                                    \
+          listAppend<value_type>),                                                  \
+      Operator(                                                                     \
+          "aten::reverse( " decl_type "[](a!) self) -> ()",                         \
+          listReverse<value_type>),                                                 \
+      Operator(                                                                     \
+          "aten::extend(" decl_type "[](a!) self, " decl_type                       \
+          " [] other) -> ()",                                                       \
+          listExtend<value_type>),                                                  \
+      Operator(                                                                     \
+          "aten::copy(" decl_type                                                   \
+          "[](a) self)"                                                             \
+          " -> " decl_type "[]",                                                    \
+          listCopy<value_type>),                                                    \
+      Operator(                                                                     \
+          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type              \
+          "(b -> *) el) -> " decl_type "[](a!)",                                    \
+          listSetItem<value_type>),                                                 \
+      Operator(                                                                     \
+          "aten::clear( " decl_type "[](a!) self) -> ()",                           \
+          listClear<value_type>),                                                   \
+      Operator(                                                                     \
+          "aten::insert( " decl_type                                                \
+          "[](a!) self, int idx,                                                    \
+          " decl_type "(b -> *) el) -> ()",                                         \
+          listInsert<value_type>),                                                  \
+      Operator(                                                                     \
+          "aten::pop(" decl_type                                                    \
+          "[](a!) self, int idx=-1)                                                 \
+        -> " decl_type "(*)",                                                       \
           listPop<value_type>)
 
     CREATE_MUTABLE_LIST_OPS("Tensor", at::Tensor),
@@ -1854,57 +1866,60 @@ RegisterOperators reg2({
         listCount<at::Tensor>),
 
 // Mutable ops for lists containing immutable types.
-#define CREATE_IMMUTABLE_LIST_OPS(decl_type, value_type)               \
-  Operator(                                                            \
-      "aten::select(" decl_type "[] a, int b) -> " decl_type,          \
-      listSelect<value_type>),                                         \
-      Operator(                                                        \
-          "aten::append(" decl_type "[](a!) self, " decl_type          \
-          " el) -> " decl_type "[](a!)",                               \
-          listAppend<value_type>),                                     \
-      Operator(                                                        \
-          "aten::reverse(" decl_type "[](a!) self) -> ()",             \
-          listReverse<value_type>),                                    \
-      Operator(                                                        \
-          "aten::extend(" decl_type "[](a!) self, " decl_type          \
-          " [] other) -> ()",                                          \
-          listExtend<value_type>),                                     \
-      Operator(                                                        \
-          "aten::copy(" decl_type                                      \
-          "[](a) self)"                                                \
-          " -> " decl_type "[]",                                       \
-          listCopy<value_type>),                                       \
-      Operator(                                                        \
-          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type \
-          " el) -> " decl_type "[](a!)",                               \
-          listSetItem<value_type>),                                    \
-      Operator(                                                        \
-          "aten::clear( " decl_type "[](a!) self) -> ()",              \
-          listClear<value_type>),                                      \
-      Operator(                                                        \
-          "aten::insert( " decl_type                                   \
-          "[](a!) self, int idx,                                       \
-          " decl_type " el) -> ()",                                    \
-          listInsert<value_type>),                                     \
-      Operator(                                                        \
-          "aten::remove(" decl_type                                    \
-          "[](a!) self,                                                \
-          " decl_type " el) -> ()",                                    \
-          listRemove<value_type>),                                     \
-      Operator(                                                        \
-          "aten::index(" decl_type                                     \
-          "[] self,                                                    \
-          " decl_type " el) -> int",                                   \
-          listIndex<value_type>),                                      \
-      Operator(                                                        \
-          "aten::count(" decl_type                                     \
-          "[] self,                                                    \
-          " decl_type " el) -> int",                                   \
-          listCount<value_type>),                                      \
-      Operator(                                                        \
-          "aten::pop(" decl_type                                       \
-          "[](a!) self, int idx=-1)                                    \
-          -> " decl_type,                                              \
+#define CREATE_IMMUTABLE_LIST_OPS(decl_type, value_type)                          \
+  Operator(                                                                       \
+      "aten::select(" decl_type "[] a, int b) -> " decl_type,                     \
+      listSelect<value_type>),                                                    \
+  Operator(                                                                       \
+      "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type,        \
+      listSelect<value_type>),                                                    \
+      Operator(                                                                   \
+          "aten::append(" decl_type "[](a!) self, " decl_type                     \
+          " el) -> " decl_type "[](a!)",                                          \
+          listAppend<value_type>),                                                \
+      Operator(                                                                   \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",                        \
+          listReverse<value_type>),                                               \
+      Operator(                                                                   \
+          "aten::extend(" decl_type "[](a!) self, " decl_type                     \
+          " [] other) -> ()",                                                     \
+          listExtend<value_type>),                                                \
+      Operator(                                                                   \
+          "aten::copy(" decl_type                                                 \
+          "[](a) self)"                                                           \
+          " -> " decl_type "[]",                                                  \
+          listCopy<value_type>),                                                  \
+      Operator(                                                                   \
+          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type            \
+          " el) -> " decl_type "[](a!)",                                          \
+          listSetItem<value_type>),                                               \
+      Operator(                                                                   \
+          "aten::clear( " decl_type "[](a!) self) -> ()",                         \
+          listClear<value_type>),                                                 \
+      Operator(                                                                   \
+          "aten::insert( " decl_type                                              \
+          "[](a!) self, int idx,                                                  \
+          " decl_type " el) -> ()",                                               \
+          listInsert<value_type>),                                                \
+      Operator(                                                                   \
+          "aten::remove(" decl_type                                               \
+          "[](a!) self,                                                           \
+          " decl_type " el) -> ()",                                               \
+          listRemove<value_type>),                                                \
+      Operator(                                                                   \
+          "aten::index(" decl_type                                                \
+          "[] self,                                                               \
+          " decl_type " el) -> int",                                              \
+          listIndex<value_type>),                                                 \
+      Operator(                                                                   \
+          "aten::count(" decl_type                                                \
+          "[] self,                                                               \
+          " decl_type " el) -> int",                                              \
+          listCount<value_type>),                                                 \
+      Operator(                                                                   \
+          "aten::pop(" decl_type                                                  \
+          "[](a!) self, int idx=-1)                                               \
+          -> " decl_type,                                                         \
           listPop<value_type>)
 
     CREATE_IMMUTABLE_LIST_OPS("int", int64_t),
@@ -1991,6 +2006,7 @@ RegisterOperators reg2({
           }
           return 0;
         }),
+    // TODO: deprecate this in favor of aten::getelem
     Operator(
         "prim::StringIndex(str string, int index) -> str",
         [](Stack& stack) {
@@ -2290,6 +2306,7 @@ RegisterOperators reg2({
           push(stack, std::move(t));
           return 0;
         }),
+// TODO: deprecate prim::DictIndex in favor of aten::__getitem__
 #define CREATE_DICT_OPS(key_type)                                             \
   Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),          \
       Operator(                                                               \
@@ -2297,6 +2314,10 @@ RegisterOperators reg2({
           dictKeys),                                                          \
       Operator(                                                               \
           "aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues),  \
+      Operator(                                                               \
+          "aten::__getitem__(Dict(" key_type ", t) self, " key_type               \
+          " key) -> t(*)",                                                    \
+          dictIndex),                                                         \
       Operator(                                                               \
           "prim::DictIndex(Dict(" key_type ", t) self, " key_type             \
           " key) -> t(*)",                                                    \

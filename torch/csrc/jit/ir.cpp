@@ -1394,7 +1394,7 @@ Node* Graph::createDictIndex(Value* dict, Value* index) {
   auto dict_type = dict->type()->expect<DictType>();
   AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
 
-  auto n = create(prim::DictIndex, {dict, index});
+  auto n = create(aten::__getitem__, {dict, index});
   n->output()->setType(dict_type->getValueType());
   return n;
 }
