@@ -37,6 +37,7 @@ RootFolder = C.root_folder
 Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 BenchmarkNetOnce = C.benchmark_net_once
+BenchmarkCacheWipe = C.BenchmarkCacheWipe
 GetStats = C.get_stats
 
 operator_tracebacks = defaultdict(dict)

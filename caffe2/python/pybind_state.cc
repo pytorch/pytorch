@@ -1057,6 +1057,12 @@ void addGlobalMethods(py::module& m) {
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
   );
 
+  py::enum_<BenchmarkCacheWipe>(m, "BenchmarkCacheWipe")
+      .value("NONE", BenchmarkCacheWipe::NONE)
+      .value("OP", BenchmarkCacheWipe::OP)
+      .value("BENCH", BenchmarkCacheWipe::BENCH)
+      .export_values();
+
   m.def("set_per_op_engine_pref", [](const PerOpEnginePrefType& pref) -> void {
     caffe2::SetPerOpEnginePref(pref);
   });
@@ -1276,15 +1282,21 @@ void addGlobalMethods(py::module& m) {
       [](const std::string& name,
          size_t warmup_runs,
          size_t main_runs,
-         bool run_individual) {
+         bool run_individual,
+         BenchmarkCacheWipe wipe_cache = BenchmarkCacheWipe::NONE) {
         CAFFE_ENFORCE(gWorkspace);
         auto* net = gWorkspace->GetNet(name);
         CAFFE_ENFORCE(net, "Didn't find net: ", name);
         py::gil_scoped_release g;
-        vector<float> stat =
-            net->TEST_Benchmark(warmup_runs, main_runs, run_individual);
+        vector<float> stat = net->TEST_Benchmark(
+            warmup_runs, main_runs, run_individual, wipe_cache);
         return stat;
-      });
+      },
+      py::arg("name"),
+      py::arg("warmup_runs"),
+      py::arg("main_runs"),
+      py::arg("run_individual"),
+      py::arg("wipe_cache") = BenchmarkCacheWipe::NONE);
   m.def("benchmark_net_once", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     auto* net = gWorkspace->GetNet(name);

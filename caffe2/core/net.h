@@ -32,6 +32,13 @@ typedef std::function<std::unique_ptr<NetObserver>(NetBase*)>
 class OperatorBase;
 class Workspace;
 
+/* During benchmarking, options for wiping the cache
+ * NONE -> No wiping cache
+ * OP -> Wipe before each operator profiling main run
+ * BENCH -> Wipe before each benchmark main run
+ */
+enum BenchmarkCacheWipe { NONE, OP, BENCH };
+
 // Net is a thin struct that owns all the operators together with the operator
 // contexts.
 class CAFFE2_API NetBase : public Observable<NetBase> {
@@ -81,7 +88,8 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
   virtual vector<float> TEST_Benchmark(
       const int /*warmup_runs*/,
       const int /*main_runs*/,
-      const bool /*run_individual*/);
+      const bool /*run_individual*/,
+      const BenchmarkCacheWipe /*wipe_cache*/);
 
   inline const vector<string>& external_output() const {
     return external_output_;

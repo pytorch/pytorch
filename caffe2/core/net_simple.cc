@@ -10,6 +10,7 @@
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/utils/bench_utils.h"
 #include "caffe2/utils/proto_utils.h"
 
 C10_DEFINE_bool(
@@ -87,7 +88,8 @@ bool PairLargerThan(const std::pair<A, B>& x, const std::pair<A, B>& y) {
 vector<float> SimpleNet::TEST_Benchmark(
     const int warmup_runs,
     const int main_runs,
-    const bool run_individual) {
+    const bool run_individual,
+    const BenchmarkCacheWipe wipe_cache /*=NONE*/) {
   /* Use std::cout because logging may be disabled */
   std::cout << "Starting benchmark." << std::endl;
   std::cout << "Running warmup runs." << std::endl;
@@ -110,6 +112,9 @@ vector<float> SimpleNet::TEST_Benchmark(
   auto millis = timer.MilliSeconds();
   if (FLAGS_caffe2_simple_net_benchmark_run_whole_net) {
     for (int i = 0; i < main_runs; ++i) {
+      if (wipe_cache == BenchmarkCacheWipe::BENCH) {
+        caffe2::wipe_cache();
+      }
       CAFFE_ENFORCE(Run(), "Main run ", i, " has failed.");
     }
     millis = timer.MilliSeconds();
@@ -130,6 +135,9 @@ vector<float> SimpleNet::TEST_Benchmark(
   CaffeMap<string, float> param_bytes_per_op_type;
   if (run_individual) {
     for (int i = 0; i < main_runs; ++i) {
+      if (wipe_cache == BenchmarkCacheWipe::OP) {
+        caffe2::wipe_cache();
+      }
       for (auto& op : operators_) {
         op->ResetEvent();
       }

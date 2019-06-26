@@ -203,7 +203,8 @@ float NetBase::TEST_Benchmark_One_Run() {
 std::vector<float> NetBase::TEST_Benchmark(
     const int warmup_runs,
     const int main_runs,
-    const bool run_individual) {
+    const bool run_individual,
+    const BenchmarkCacheWipe wipe_cache = BenchmarkCacheWipe::NONE) {
   LOG(INFO) << "Starting benchmark, running warmup runs";
   CAFFE_ENFORCE(
       warmup_runs >= 0,
@@ -228,7 +229,7 @@ std::vector<float> NetBase::TEST_Benchmark(
             << millis / main_runs
             << ". Iters per second: " << 1000.0 * main_runs / millis;
 
-  if (run_individual) {
+  if (run_individual || wipe_cache) {
     LOG(INFO) << "Net does not support per-op benchmark; "
                  "to run it, switch to a simple net type";
   }
