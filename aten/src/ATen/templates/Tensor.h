@@ -175,12 +175,7 @@ class CAFFE2_API Tensor {
   }
 #ifdef NAMEDTENSOR_ENABLED
   optional<DimnameList> names() const {
-    const auto* meta = get_named_tensor_meta();
-    if (meta == nullptr) {
-      return nullopt;
-    } else {
-      return meta->names();
-    }
+    return impl::internal_get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
