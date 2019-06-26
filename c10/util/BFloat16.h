@@ -29,7 +29,12 @@ struct alignas(2) BFloat16 {
 
   inline C10_HOST_DEVICE BFloat16(float value) {
     uint32_t res;
+  // TEST
+  #ifdef __HIP_PLATFORM_HCC__
     std::memcpy(&res, &value, sizeof(res));
+  #else
+    std::memcpy(&res, &value, sizeof(res));
+  #endif
     val_ = res >> 16;
   }
 
