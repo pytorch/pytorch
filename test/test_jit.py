@@ -6478,6 +6478,73 @@ a")
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
 
+    def _dtype_to_expect(self, dtype, dim=0):
+        param = ', '.join(['*'] * dim)
+        param = '(' + param + ')'
+        if(dtype == torch.float32):
+            return "Float" + param
+        if(dtype == torch.float64):
+            return "Double" + param
+        if(dtype == torch.int64):
+            return "Long" + param
+        if(dtype == torch.int32):
+            return "Int" + param
+
+    def _test_dtype_op_shape(self, ops, args, input_dims=1):
+        if input_dims < 1:
+            raise 'input dims must be at least 1'
+        dtypes = [torch.float32, torch.float64, torch.int64, torch.int32]
+        str_args = ', '.join([str(arg) for arg in args]) + (', ' if len(args) else '')
+        tensor_data = ('[' * input_dims) + '1, 2, 3' + (input_dims * ']')
+        template = dedent('''
+        def func():
+            return {return_line}
+        ''')
+
+        for op in ops:
+            for dtype in (dtypes + [None]):
+                for tensor_type in dtypes:
+                    # a couple of ops aren't implemented for non-floating types
+                    if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
+                        if op in ['mean', 'softmax', 'log_softmax']:
+                            continue
+                    return_line = "torch.tensor({}, dtype={}).{}({}dtype={})".format(tensor_data, tensor_type, op, str_args, dtype)
+                    # uncomment for debugging a failed test:
+                    # print("testing {}".format(return_line))
+                    code = template.format(return_line=return_line)
+                    scope = {}
+                    exec(code, globals(), scope)
+                    cu = torch.jit.CompilationUnit(code)
+                    graph = cu.func.graph
+                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
+                    input_array = [1, 2, 3]
+                    for _ in range(1, input_dims):
+                        input_array = [input_array]
+                    t = torch.tensor(input_array, dtype=tensor_type)
+                    attr = getattr(t, op)
+                    kwargs = {'dtype': dtype}
+                    result = attr(*args, **kwargs)
+                    expect = self._dtype_to_expect(result.dtype, result.dim())
+                    FileCheck().check("aten::tensor").check(expect).run(graph)
+
+    def test_dtype_op_shape(self):
+        ops = ['sum', 'mean', 'prod']
+        self._test_dtype_op_shape(ops, args=[])
+        self._test_dtype_op_shape(ops, args=[0, False])
+
+        ops = ['sum', 'mean']
+        self._test_dtype_op_shape(ops, args=[[0, 1], False], input_dims=4)
+
+        ops = ['prod']
+        self._test_dtype_op_shape(ops, args=[0, False])
+        self._test_dtype_op_shape(ops, args=[0, True])
+
+    def test_dtype_op_shape2(self):
+        ops = ['cumprod', 'cumsum', 'softmax', 'log_softmax']
+        self._test_dtype_op_shape(ops, args=[0])
+
+        self._test_dtype_op_shape(ops, args=[1], input_dims=4)
+
     def test_filecheck_parse(self):
         def test_check():
             file = """
