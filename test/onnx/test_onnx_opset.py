@@ -289,12 +289,14 @@ class TestONNXOpset(TestCase):
     def test_std(self):
         class MyModule(Module):
             def forward(self, input):
-                return torch.std(input, dim=[1], unbiased=True, keepdim=True)
+                return torch.std(input, unbiased=True)
 
-        ops = [{"op_name": "ReduceMean", "attributes": [{"name": "axes", "ints": [1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
+        ops = [{"op_name": "ReduceMean",
+                "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
                {"op_name": "Mul"},
                {"op_name": "Mul"},
-               {"op_name": "ReduceMean", "attributes": [{"name": "axes", "ints": [1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
+               {"op_name": "ReduceMean",
+                "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
                {"op_name": "Sub"},
                {"op_name": "Abs"},
                {"op_name": "Constant"},
@@ -310,14 +312,12 @@ class TestONNXOpset(TestCase):
     def test_std_dim(self):
         class MyModule(Module):
             def forward(self, input):
-                return torch.std(input, unbiased=True)
+                return torch.std(input, dim=[1], unbiased=True, keepdim=True)
 
-        ops = [{"op_name": "ReduceMean",
-                "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
+        ops = [{"op_name": "ReduceMean", "attributes": [{"name": "axes", "ints": [1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
                {"op_name": "Mul"},
                {"op_name": "Mul"},
-               {"op_name": "ReduceMean",
-                "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
+               {"op_name": "ReduceMean", "attributes": [{"name": "axes", "ints": [1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
                {"op_name": "Sub"},
                {"op_name": "Abs"},
                {"op_name": "Constant"},
