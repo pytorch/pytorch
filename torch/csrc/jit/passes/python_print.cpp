@@ -193,6 +193,12 @@ struct PythonPrintPass {
     TaggedStringStream(TaggedStringStream&& rhs) = default;
 
     TaggedStringStream& operator<<(const std::string& s) {
+      // This prevents having redundant entries at the same offset,
+      // which can happen for example in printValueList when begin
+      // and end are the empty string.
+      if (s.size() == 0) {
+        return *this;
+      }
       ranges_.emplace_back((size_t)oss.tellp(), srs->back());
       oss << s;
       return *this;
