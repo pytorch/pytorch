@@ -307,17 +307,17 @@ class TestONNXOpset(TestCase):
         x = torch.randn(1, 16, 3, 3)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
-    def test_std(self):
+    def test_std_dim(self):
         class MyModule(Module):
             def forward(self, input):
                 return torch.std(input, unbiased=True)
 
         ops = [{"op_name": "ReduceMean",
-                "attributes": [{"name": "unbiased", "i": 0, "type": 2}]},
+                "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
                {"op_name": "Mul"},
                {"op_name": "Mul"},
                {"op_name": "ReduceMean",
-                "attributes": [{"name": "unbiased", "i": 0, "type": 2}]},
+                "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
                {"op_name": "Sub"},
                {"op_name": "Abs"},
                {"op_name": "Constant"},
