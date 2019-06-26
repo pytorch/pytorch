@@ -1710,20 +1710,12 @@ int dictIndex(Stack& stack) {
   return 0;
 }
 
+template<bool has_default>
 int dictGet(Stack& stack) {
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
-    push(stack, IValue());
-  } else {
-    push(stack, value->value());
+  IValue default_value;
+  if (has_default) {
+    default_value = pop(stack);
   }
-  return 0;
-}
-
-int dictGetDefault(Stack& stack) {
-  auto default_value = pop(stack);
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
   auto value = dict.find(key);
@@ -1751,28 +1743,21 @@ int dictSetDefault(Stack& stack) {
   return 0;
 }
 
+template<bool has_default>
 int dictPop(Stack& stack) {
-  auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
-    AT_ERROR("KeyError: ", key);
-  } else {
-    auto erase_count = dict.erase(key);
-    TORCH_CHECK(
-        erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-    push(stack, value->value());
+  IValue default_value;
+  if (has_default) {
+    default_value = pop(stack);
   }
-  return 0;
-}
-
-int dictPopDefault(Stack& stack) {
-  auto default_value = pop(stack);
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
   auto value = dict.find(key);
   if (value == dict.end()) {
-    push(stack, default_value);
+    if (has_default) {
+      push(stack, default_value);
+    } else {
+      AT_ERROR("KeyError: ", key);
+    }
   } else {
     auto erase_count = dict.erase(key);
     TORCH_CHECK(
@@ -1825,7 +1810,7 @@ int dictItems(Stack& stack) {
   std::vector<IValue> items;
   items.reserve(dict.size());
   for (const auto& item : iterationOrder(dict)) {
-    items.push_back(c10::ivalue::Tuple::create({item.first, item.second}));
+    items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
   }
   push(stack, items);
   return 0;
@@ -2377,11 +2362,11 @@ RegisterOperators reg2({
           dictIndex),                                                         \
       Operator(                                                               \
           "aten::get(Dict(" key_type ", t) self, " key_type " key) -> t(*)?", \
-          dictGet),                                                           \
+          dictGet<false>),                                                    \
       Operator(                                                               \
           "aten::get(Dict(" key_type ", t) self, " key_type                   \
           " key, t default_value) -> t(*)",                                   \
-          dictGetDefault),                                                    \
+          dictGet<true>),                                                     \
       Operator(                                                               \
           "aten::setdefault(Dict(" key_type ", t) self, " key_type            \
           " key, t default_value) -> t(*)",                                   \
@@ -2389,11 +2374,11 @@ RegisterOperators reg2({
       Operator(                                                               \
           "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
           " key) -> t(*)",                                                    \
-          dictPop),                                                           \
+          dictPop<false>),                                                    \
       Operator(                                                               \
           "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
           " key, t default_value) -> t(*)",                                   \
-          dictPopDefault),                                                    \
+          dictPop<true>),                                                     \
       Operator(                                                               \
           "aten::popitem(Dict(" key_type ", t)(a!) self) -> ((" key_type      \
           ", t))",                                                            \

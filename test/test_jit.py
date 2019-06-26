@@ -15607,7 +15607,7 @@ class TestList(JitTestCase):
 
 class TestDict(JitTestCase):
     def dict(self):
-        return {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}
 
     def dict2(self):
         return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
@@ -15648,7 +15648,16 @@ class TestDict(JitTestCase):
             # type: (Dict[str, Tensor]) -> List[Tuple[str, Tensor]]
             return x.items()
 
-        self.checkScript(func, (self.dict(),))
+        # The value returned by Python is in arbitrary order, so we can't use
+        # checkScript
+        scripted_func = torch.jit.script(func)
+
+        eager_out = (func(self.dict()))
+        script_out = (scripted_func(self.dict()))
+
+        self.assertEqual(len(eager_out), len(script_out))
+        for item in eager_out:
+            self.assertTrue(item in script_out)
 
     def test_pop(self):
         def pop(x, key):
@@ -15710,7 +15719,10 @@ class TestDict(JitTestCase):
         self.assertEqual(len(eager_out[1]), len(script_out[1]))
 
         # Check that the item is the correct types
-        self.assertTrue(isinstance(script_out[0][0], str))
+        if PY2:
+            self.assertTrue(isinstance(script_out[0][0], unicode))
+        else:
+            self.assertTrue(isinstance(script_out[0][0], str))
         self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
 
     def test_clear(self):
