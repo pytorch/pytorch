@@ -7,6 +7,20 @@ namespace torch {
 namespace jit {
 namespace script {
 
+
+inline std::vector<SourceRange>& get_stack() {
+  static std::vector<SourceRange> call_stack;
+  return call_stack;
+}
+
+inline void push_call(const SourceRange& range) {
+  get_stack().push_back(range);
+}
+
+inline void pop_call() {
+  get_stack().pop_back();
+}
+
 struct ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e)
       : ss(e.ss.str()), context(e.context), the_message(e.the_message) {}
@@ -16,7 +30,8 @@ struct ErrorReport : public std::exception {
       : context(std::move(r)) {}
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
-  const char* what() const noexcept override {
+
+  const char* what() const noexcept {
     std::stringstream msg;
     msg << "\n" << ss.str();
     if (context) {
@@ -25,9 +40,19 @@ struct ErrorReport : public std::exception {
     } else {
       msg << ".\n";
     }
+
+
+    if (get_stack().size() > 0) {
+      msg << "It was called from:\n";
+      for (auto it = get_stack().rbegin() + 1; it != get_stack().rend(); ++it) {
+        it->highlight(msg);
+      }
+    }
+
     the_message = msg.str();
     return the_message.c_str();
   }
+
 
  private:
   template <typename T>
@@ -44,11 +69,6 @@ const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
   return e;
 }
 
-#define JIT_SCRIPT_ASSERT(ctx, cond)                                       \
-  if (!(cond)) {                                                           \
-    throw ::torch::jit::script::ErrorReport(ctx)                           \
-        << __FILE__ << ":" << __LINE__ << ": assertion failed: " << #cond; \
-  }
 } // namespace script
 } // namespace jit
 } // namespace torch

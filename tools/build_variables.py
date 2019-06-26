@@ -111,6 +111,7 @@ libtorch_sources = [
     "torch/csrc/jit/register_special_ops.cpp",
     "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
+    "torch/csrc/jit/script/error_report.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/api/src/jit.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",

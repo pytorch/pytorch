@@ -837,6 +837,7 @@ struct to_ir {
       List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
+      // ErrorReport::push_call_stack(stmt.range());
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -1339,7 +1340,7 @@ struct to_ir {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
-    // Emit loop information for builtinFunction values like range(), zip(), 
+    // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
     SugaredValuePtr sv = emitSugaredExpr(itrs[0], 1);
 
@@ -1357,7 +1358,7 @@ struct to_ir {
         sv = std::make_shared<SimpleValue>(
           graph->insert(aten::keys, {siv->getValue()}, {}, stmt.range()));
       }
-      emitLoopCommon(stmt.range(), body, sv, targets, {}); 
+      emitLoopCommon(stmt.range(), body, sv, targets, {});
       return;
     }
 
@@ -2161,7 +2162,11 @@ struct to_ir {
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
-    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    // ErrorReport::push_call_stack(tree.range());
+    push_call(tree.range());
+    auto expr = emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    pop_call();
+    return expr;
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -2260,7 +2265,7 @@ struct to_ir {
         if (input_size == 2) {
           start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
         }
-        
+
         if (input_size > 2) {
           throw ErrorReport(loc)
             << "enumerate expected at most 2 arguments, got " << input_size;
@@ -2946,6 +2951,7 @@ std::shared_ptr<Function> CompilationUnit::define(
     const std::unordered_map<std::string, std::shared_ptr<Function>>&
         function_table) const {
   const std::string& name = def.name().name();
+
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -2958,8 +2964,9 @@ std::shared_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     to_ir(def, _resolver, self, method);
   };
-  return std::make_shared<Function>(
+  auto fn = std::make_shared<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);
+  return fn;
 }
 
 void CompilationUnit::define(
