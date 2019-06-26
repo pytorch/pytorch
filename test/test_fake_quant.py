@@ -8,7 +8,7 @@ import unittest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 from common_utils import run_tests
-import torch.nn._intrinsic as _intrinsic
+from torch.quantization.fake_quantize import FakeQuantize
 
 
 # Reference method for quantizing a tensor.
@@ -102,7 +102,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
             'quant_min': quant_min,
             'quant_max': quant_max,
         }
-        fq_module = _intrinsic.FakeQuantize(qconfig)
+        fq_module = FakeQuantize(qconfig)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None

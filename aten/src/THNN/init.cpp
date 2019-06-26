@@ -70,16 +70,10 @@
 #include <THNN/generic/ClassNLLCriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/Col2Im.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/ELU.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/HardTanh.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/Im2Col.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/GatedLinearUnit.c>
@@ -136,13 +130,7 @@
 #include <THNN/generic/SpatialConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialFullDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SpatialDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricConvolutionMM.c>

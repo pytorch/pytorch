@@ -85,6 +85,9 @@ namespace c10 {
   _(prim, max)                     \
   _(prim, abs)                     \
   _(aten, divmod)                  \
+  _(prim, zip)                     \
+  _(prim, enumerate)               \
+  _(prim, range)                   \
   _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _size_if_not_equal)      \
@@ -145,6 +148,7 @@ namespace c10 {
   _(aten, oct)                     \
   _(aten, bin)                     \
   _(prim, unchecked_unwrap_optional)\
+  _(aten, __contains__)            \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

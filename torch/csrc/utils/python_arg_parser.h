@@ -64,6 +64,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 
 #include <array>
 #include <cstddef>
@@ -142,6 +143,7 @@ struct PythonArgs {
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
 #ifdef NAMEDTENSOR_ENABLED
+  inline at::Dimname dimname(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
 #endif
   inline at::MemoryFormat toMemoryFormat(int i);
@@ -415,6 +417,11 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
 }
 
 #ifdef NAMEDTENSOR_ENABLED
+inline at::Dimname PythonArgs::dimname(int i) {
+  TORCH_INTERNAL_ASSERT(args[i] != nullptr);
+  return THPDimname_parse(args[i]);
+}
+
 inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
   if (!args[i]) return c10::nullopt;
   PyObject* arg = args[i];
@@ -439,7 +446,7 @@ inline at::MemoryFormat PythonArgs::toMemoryFormat(int i) {
 
 inline at::QScheme PythonArgs::toQScheme(int i) {
   if (!args[i]) return at::kPerTensorAffine;
-  AT_CHECK(THPQScheme_Check(args[i]), "qscheme arg must be an instance of the torch.qscheme");
+  TORCH_CHECK(THPQScheme_Check(args[i]), "qscheme arg must be an instance of the torch.qscheme");
   const auto qscheme = reinterpret_cast<THPQScheme*>(args[i]);
   return qscheme->qscheme;
 }
