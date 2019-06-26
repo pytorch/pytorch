@@ -387,7 +387,7 @@ inline IValue toIValue(
             return c10::impl::toList(py::cast<std::vector<int64_t>>(obj));
           } else {
             double value = py::cast<int64_t>(obj);
-            c10::List<double> repeated = c10::make_list<double>();
+            c10::List<double> repeated;
             repeated.reserve(*N);
             for (int i = 0; i < *N; ++i) {
               repeated.push_back(value);
@@ -399,7 +399,7 @@ inline IValue toIValue(
             return c10::impl::toList(py::cast<std::vector<double>>(obj));
           } else {
             double value = py::cast<double>(obj);
-            c10::List<double> repeated = c10::make_list<double>();
+            c10::List<double> repeated;
             repeated.reserve(*N);
             for (int i = 0; i < *N; ++i) {
               repeated.push_back(value);

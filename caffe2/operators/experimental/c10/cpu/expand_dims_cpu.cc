@@ -50,7 +50,7 @@ class expand_dims_cpu final : public c10::OperatorKernel {
   }
 
  private:
-  c10::List<int64_t> dims_ = c10::make_list<int64_t>();
+  c10::List<int64_t> dims_;
   bool initialized_ = false;
 };
 
