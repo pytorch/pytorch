@@ -56,7 +56,7 @@ static void report_positional_error(
     const Dimname& other_name,
     DimnameList names,
     DimnameList other_names) {
-  // XXX: Can improve message by checking if names are alignable and suggesting workarounds
+  // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
   TORCH_CHECK(false,
       "Names ", name, " and ", other_name, " do not match positionally ",
       "from the right in names ", names, " and ", other_names, ".");
@@ -71,7 +71,7 @@ static void check_for_misalignment(
   }
   auto it = std::find_if(other_names.begin(), other_names.end(),
       [&](const Dimname& candidate) { return name.can_refer_to(candidate); });
-  // XXX: Can improve message by checking if names are alignable and suggesting workarounds
+  // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
   TORCH_CHECK(it == other_names.end(),
       "Names ", names, " and ", other_names, " are misaligned: name ", name,
       " appears in a different position from the right.");
@@ -88,7 +88,7 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
   auto other_it = other_names.rbegin();
   auto result_it = result.rbegin();
   while (names_it != names.rend() || other_it != other_names.rend()) {
-    // XXX: Don't support tagged names for now. They're a little weird.
+    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
     if (names_it->is_tagged() || other_it->is_tagged()) {
       TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
     }
