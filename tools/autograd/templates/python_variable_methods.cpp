@@ -428,12 +428,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
-  }
-  return torch::utils::tensor_to_numpy(self_.tensor_data());
+  return torch::utils::tensor_to_numpy(self_);
   END_HANDLE_TH_ERRORS
 }
 

@@ -1,11 +1,59 @@
-#include <cfloat>
+#include "caffe2/operators/instance_norm_op.h"
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/instance_norm_op.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 namespace {
+
+template <typename T>
+__global__ void ComputeFusedParamsCUDAKernel(
+    const int64_t N,
+    const int64_t C,
+    const T* mean,
+    const T* rstd,
+    const T* gamma,
+    const T* beta,
+    T* scale,
+    T* bias) {
+  const int64_t index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N * C) {
+    const int64_t c = index % C;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    const T scale_val = __ldg(gamma + c) * __ldg(rstd + index);
+    scale[index] = scale_val;
+    bias[index] = __ldg(beta + c) - scale_val * __ldg(mean + index);
+#else
+    const T scale_val = gamma[c] * rstd[index];
+    scale[index] = scale_val;
+    bias[index] = beta[c] - scale_val * mean[index];
+#endif
+  }
+}
+
+template <typename T, StorageOrder kOrder>
+__global__ void InstanceNormForwardCUDAKernel(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y) {
+  const int64_t index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N * C * HxW) {
+    const int nc = kOrder == StorageOrder::NCHW
+        ? (index / HxW)
+        : (index / (HxW * C) * C + index % C);
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    Y[index] = __ldg(scale + nc) * __ldg(X + index) + __ldg(bias + nc);
+#else
+    Y[index] = scale[nc] * X[index] + bias[nc];
+#endif
+  }
+}
+
 __global__ void InstanceNormMeanKernel(
     int N,
     int C,
@@ -52,37 +100,6 @@ __global__ void InstanceNormInvStdevKernel(
     inv_stdev_data[i] /= dim;
     inv_stdev_data[i] += epsilon;
     inv_stdev_data[i] = 1.0 / sqrtf(inv_stdev_data[i]);
-  }
-}
-
-__global__ void InstanceNormKernel(
-    int N,
-    int C,
-    int dim,
-    int N_stride,
-    int C_stride,
-    int dim_stride,
-    const float* input_data,
-    const float* scale_data,
-    const float* bias_data,
-    const float* mean_data,
-    const float* inv_stdev_data,
-    float* output_data) {
-  CUDA_1D_KERNEL_LOOP(i, N * C * dim) {
-    auto index = i;
-    const auto j = index % dim;
-    index /= dim;
-    const auto c = index % C;
-    index /= C;
-    const auto n = index;
-
-    index = n * N_stride + c * C_stride + j * dim_stride;
-
-    const auto stat_idx = n * C + c;
-
-    output_data[index] = (input_data[index] - mean_data[stat_idx]) *
-            inv_stdev_data[stat_idx] * scale_data[c] +
-        bias_data[c];
   }
 }
 
@@ -183,180 +200,77 @@ __global__ void InstanceNormScaleBiasGradientKernel(
 } // namespace
 
 template <>
-bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
-  const auto& input = Input(INPUT);
-  const auto& scale = Input(SCALE);
-  const auto& bias = Input(BIAS);
-
-  CAFFE_ENFORCE_EQ(4, input.dim());
-  const int N = input.dim32(0);
-  const int H = input.dim32(1);
-  const int W = input.dim32(2);
-  const int C = input.dim32(3);
-  CAFFE_ENFORCE_EQ(1, scale.dim());
-  CAFFE_ENFORCE_EQ(C, scale.dim32(0));
-  CAFFE_ENFORCE_EQ(1, bias.dim());
-  CAFFE_ENFORCE_EQ(C, bias.dim32(0));
-  auto output = Output(OUTPUT, input.sizes(), at::dtype<float>());
-
-  Tensor* mean;
-  if (OutputSize() >= 2) {
-    mean = Output(MEAN, {N, C}, at::dtype<float>().device(CUDA));
-  } else {
-    ReinitializeTensor(&mean_, {N, C}, at::dtype<float>().device(CUDA));
-    mean = &mean_;
-  }
-
-  Tensor* inv_stdev;
-  if (OutputSize() >= 3) {
-    inv_stdev = Output(INV_STDEV, {N, C}, at::dtype<float>().device(CUDA));
-  } else {
-    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<float>().device(CUDA));
-    inv_stdev = &inv_stdev_;
-  }
-
-  const auto input_data = input.data<float>();
-  const auto scale_data = scale.data<float>();
-  const auto bias_data = bias.data<float>();
-  auto output_data = output->template mutable_data<float>();
-  auto mean_data = mean->template mutable_data<float>();
-  auto inv_stdev_data = inv_stdev->template mutable_data<float>();
-
-  const auto dim = H * W;
-  const auto N_stride = C * H * W;
-  const auto C_stride = 1;
-  const auto dim_stride = C;
-
-  InstanceNormMeanKernel<<<
-      CAFFE_GET_BLOCKS(N * C),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N, C, dim, N_stride, C_stride, dim_stride, input_data, mean_data);
-
-  InstanceNormInvStdevKernel<<<
-      CAFFE_GET_BLOCKS(N * C),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N,
-      C,
-      dim,
-      N_stride,
-      C_stride,
-      dim_stride,
-      epsilon_,
-      input_data,
-      mean_data,
-      inv_stdev_data);
-
-  InstanceNormKernel<<<
-      CAFFE_GET_BLOCKS(N * C * H * W),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N,
-      C,
-      dim,
-      N_stride,
-      C_stride,
-      dim_stride,
-      input_data,
-      scale_data,
-      bias_data,
-      mean_data,
-      inv_stdev_data,
-      output_data);
-
+bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const float* X,
+    const float* gamma,
+    const float* beta,
+    float* Y,
+    float* mean,
+    float* rstd) {
+  ReinitializeTensor(&scale_, {N, C}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&bias_, {N, C}, at::dtype<float>().device(CUDA));
+  float* scale_data = scale_.template mutable_data<float>();
+  float* bias_data = bias_.template mutable_data<float>();
+  const std::array<int, 2> X_dims = {static_cast<int>(N * C),
+                                     static_cast<int>(HxW)};
+  const std::array<int, 2> Y_dims = {static_cast<int>(N * C), 1};
+  math::Moments<float, CUDAContext>(
+      2, X_dims.data(), Y_dims.data(), X, mean, rstd, &context_);
+  math::InvStd<float, CUDAContext>(
+      static_cast<int>(N * C),
+      static_cast<float>(epsilon_),
+      rstd,
+      rstd,
+      &context_);
+  int64_t B = math::DivUp<int64_t>(N * C, CAFFE_CUDA_NUM_THREADS);
+  ComputeFusedParamsCUDAKernel<float>
+      <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, C, mean, rstd, gamma, beta, scale_data, bias_data);
+  B = math::DivUp<int64_t>(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
+  InstanceNormForwardCUDAKernel<float, StorageOrder::NCHW>
+      <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, C, HxW, X, scale_data, bias_data, Y);
   return true;
 }
 
 template <>
-bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
-  const auto& input = Input(INPUT);
-  const auto& scale = Input(SCALE);
-  const auto& bias = Input(BIAS);
-
-  CAFFE_ENFORCE_EQ(4, input.dim());
-  const int N = input.dim32(0);
-  const int C = input.dim32(1);
-  const int H = input.dim32(2);
-  const int W = input.dim32(3);
-  CAFFE_ENFORCE_EQ(1, scale.dim());
-  CAFFE_ENFORCE_EQ(C, scale.dim32(0));
-  CAFFE_ENFORCE_EQ(1, bias.dim());
-  CAFFE_ENFORCE_EQ(C, bias.dim32(0));
-  auto output = Output(OUTPUT, input.sizes(), at::dtype<float>());
-
-  Tensor* mean;
-  if (OutputSize() >= 2) {
-    mean = Output(MEAN, {N, C}, at::dtype<float>().device(CUDA));
-  } else {
-    ReinitializeTensor(&mean_, {N, C}, at::dtype<float>().device(CUDA));
-    mean = &mean_;
-  }
-
-  Tensor* inv_stdev;
-  if (OutputSize() >= 3) {
-    inv_stdev = Output(INV_STDEV, {N, C}, at::dtype<float>().device(CUDA));
-  } else {
-    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<float>().device(CUDA));
-    inv_stdev = &inv_stdev_;
-  }
-
-  const auto input_data = input.data<float>();
-  const auto scale_data = scale.data<float>();
-  const auto bias_data = bias.data<float>();
-  auto output_data = output->template mutable_data<float>();
-  auto mean_data = mean->template mutable_data<float>();
-  auto inv_stdev_data = inv_stdev->template mutable_data<float>();
-
-  const auto dim = H * W;
-  const auto N_stride = C * H * W;
-  const auto C_stride = H * W;
-  const auto dim_stride = 1;
-
-  InstanceNormMeanKernel<<<
-      CAFFE_GET_BLOCKS(N * C),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N, C, dim, N_stride, C_stride, dim_stride, input_data, mean_data);
-
-  InstanceNormInvStdevKernel<<<
-      CAFFE_GET_BLOCKS(N * C),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N,
-      C,
-      dim,
-      N_stride,
-      C_stride,
-      dim_stride,
-      epsilon_,
-      input_data,
-      mean_data,
-      inv_stdev_data);
-
-  InstanceNormKernel<<<
-      CAFFE_GET_BLOCKS(N * C * H * W),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N,
-      C,
-      dim,
-      N_stride,
-      C_stride,
-      dim_stride,
-      input_data,
-      scale_data,
-      bias_data,
-      mean_data,
-      inv_stdev_data,
-      output_data);
-
+bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const float* X,
+    const float* gamma,
+    const float* beta,
+    float* Y,
+    float* mean,
+    float* rstd) {
+  ReinitializeTensor(&scale_, {N, C}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&bias_, {N, C}, at::dtype<float>().device(CUDA));
+  float* scale_data = scale_.template mutable_data<float>();
+  float* bias_data = bias_.template mutable_data<float>();
+  const std::array<int, 3> X_dims = {
+      static_cast<int>(N), static_cast<int>(HxW), static_cast<int>(C)};
+  const std::array<int, 3> Y_dims = {
+      static_cast<int>(N), 1, static_cast<int>(C)};
+  math::Moments<float, CUDAContext>(
+      3, X_dims.data(), Y_dims.data(), X, mean, rstd, &context_);
+  math::InvStd<float, CUDAContext>(
+      static_cast<int>(N * C),
+      static_cast<float>(epsilon_),
+      rstd,
+      rstd,
+      &context_);
+  int64_t B = math::DivUp<int64_t>(N * C, CAFFE_CUDA_NUM_THREADS);
+  ComputeFusedParamsCUDAKernel<float>
+      <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, C, mean, rstd, gamma, beta, scale_data, bias_data);
+  B = math::DivUp<int64_t>(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
+  InstanceNormForwardCUDAKernel<float, StorageOrder::NHWC>
+      <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, C, HxW, X, scale_data, bias_data, Y);
   return true;
 }
 
@@ -621,4 +535,5 @@ REGISTER_CUDA_OPERATOR(InstanceNorm, InstanceNormOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     InstanceNormGradient,
     InstanceNormGradientOp<float, CUDAContext>);
+
 } // namespace caffe2
