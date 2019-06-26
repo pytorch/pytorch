@@ -12722,6 +12722,44 @@ class TestRecursiveScript(JitTestCase):
             checker.check("def a(x)")
             checker.run(str(e))
 
+    def test_error_stack_module(self):
+        def d(x):
+            # type: (int) -> int
+            return x + 10
+
+        def c(x):
+            return d("hello") + d(x)
+
+        def b(x):
+            return c(x)
+
+
+        class N(torch.nn.Module):
+            def __init__(self):
+                super(N, self).__init__()
+
+            def forward(self, x):
+                return b(x)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.submodule = N()
+
+            def forward(self, x):
+                return x + self.submodule(x)
+
+        try:
+            scripted = torch.jit.script(M())
+        except RuntimeError as e:
+            checker = FileCheck()
+            checker.check("Expected a value of type 'int'")
+            checker.check("return c(x)")
+            checker.check("return b(x)")
+            checker.check("return x + self.submodule(x)")
+            checker.run(str(e))
+
     def test_script_basic(self):
         def a_python_fn(a, b, c):
             return a + b + c
