@@ -206,6 +206,18 @@ class TestONNXOpset(TestCase):
         ops = {9 : ops, 10 : ops}
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
 
+    def test_full(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.full((3, 4), x)
+
+        ops = [{"op_name" : "Constant"},
+               {"op_name" : "ConstantOfShape"},
+               {"op_name" : "Add"}]
+        ops = {9 : ops, 10 : ops}
+        x = torch.tensor(12)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
     def test_interpolate(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
@@ -285,27 +297,6 @@ class TestONNXOpset(TestCase):
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
-
-    def test_layer_norm(self):
-        model = torch.nn.LayerNorm([10, 10])
-
-        ops = [{"op_name" : "ReduceMean"},
-               {"op_name" : "Constant"},
-               {"op_name" : "Pow"},
-               {"op_name" : "Constant"},
-               {"op_name" : "Pow"},
-               {"op_name" : "ReduceMean"},
-               {"op_name" : "Sub"},
-               {"op_name" : "Sub"},
-               {"op_name" : "Constant"},
-               {"op_name" : "Add"},
-               {"op_name" : "Sqrt"},
-               {"op_name" : "Div"},
-               {"op_name" : "Mul"},
-               {"op_name" : "Add"}]
-        ops = {9 : ops, 10 : ops}
-        x = torch.randn(20, 5, 10, 10)
-        check_onnx_opsets_operator(model, x, ops, opset_versions=[9, 10])
 
 
 if __name__ == '__main__':

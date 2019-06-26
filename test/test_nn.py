@@ -4581,6 +4581,8 @@ class TestNN(NNTestCase):
         incompatible_keys = net.load_state_dict(state_dict)
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
+        self.assertNotIn('Incompatible', str(incompatible_keys))
+        self.assertNotIn('Incompatible', repr(incompatible_keys))
         self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
         self.assertEqual(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
@@ -4592,6 +4594,8 @@ class TestNN(NNTestCase):
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
         self.assertIn('extra', incompatible_keys.unexpected_keys)
+        self.assertIn('Incompatible', str(incompatible_keys))
+        self.assertIn('Incompatible', repr(incompatible_keys))
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
@@ -5305,6 +5309,21 @@ class TestNN(NNTestCase):
         log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
         with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+    def test_CTCLoss_empty_target_cpu(self):
+        target_lengths = [0, 0, 0]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (0,), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+        self.assertTrue((loss >= 0).all().item())
+
+        target_lengths = [0, 9, 0]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (9,), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+        self.assertTrue((loss >= 0).all().item())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -7335,7 +7354,7 @@ class TestNN(NNTestCase):
                             [[3.4500, 6.0000000000, 5.0000, 4.8340, 9.0000],
                              [2.2500, 6.3332500450, 5.0000, 5.1000, 7.7500]]).view(1, 1, 2, 5)
                     else:
-                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                        raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
                 elif mode == 'nearest':
                     if padding_mode == 'zeros':
                         groundtruth = torch.tensor(
@@ -7350,9 +7369,9 @@ class TestNN(NNTestCase):
                             [[1., 8., 5., 7., 9.],
                              [1., 8., 5., 8., 9.]]).view(1, 1, 2, 5)
                     else:
-                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                        raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
                 else:
-                    assert False, "missing groundtruth test for interpolation mode '{}'".format(mode)
+                    raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
                 output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode)
                 self.assertEqual(output, groundtruth,
                                  "groundtruth comparison failed for mode={}, "

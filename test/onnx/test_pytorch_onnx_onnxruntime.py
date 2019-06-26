@@ -29,14 +29,33 @@ class TestONNXRuntime(unittest.TestCase):
             output = output.numpy()
         np.allclose(output, ort_outs[0])
 
+    def test_full_trace(self):
+        class FullModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.full((3, 4), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        model = FullModel()
+        output = model(x)
+        self.run_test(model, x, output)
+
+    def test_full_script(self):
+        class FullModelScripting(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.full((3, 4), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        model = FullModelScripting()
+        output = model(x)
+        self.run_test(model, x, output, example_outputs=output)
 
     def test_layer_norm(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
-        output = model(input)
+        output = model(x)
 
-        self.run_test(model, x)
-
+        self.run_test(model, x, output)
 
 if __name__ == '__main__':
     unittest.main()
