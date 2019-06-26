@@ -238,6 +238,12 @@ inline at::Tensor PythonArgs::tensor(int i) {
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
+  if (!args[i]) return signature.params[i].default_scalar;
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::NumberType::get());
+  }
   return scalarWithDefault(i, signature.params[i].default_scalar);
 }
 

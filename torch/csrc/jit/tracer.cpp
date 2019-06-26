@@ -419,7 +419,13 @@ void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
 }
 void addInputs(Node* n, const char* name, const at::Scalar& value) {
-  detail::genericAddInput(n, value);
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
 }
 void addInputs(
     Node* n,
@@ -649,6 +655,8 @@ void ArgumentStash::stashValue(
     ten = g.insert(prim::Int, {ten});
   } else if (type == FloatType::get()) {
     ten = g.insert(prim::Float, {ten});
+  } else if (type == NumberType::get()) {
+    ten = g.insert(prim::ImplicitTensorToNum, {ten});
   }
 
   stash.values.emplace(arg_name, ten);
