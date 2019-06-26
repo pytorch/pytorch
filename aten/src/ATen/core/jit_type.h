@@ -243,12 +243,6 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(OptionalType);
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return getElementType()->isSubtypeOf(rhs_->getElementType());
-    }
-    return false;
-  }
 
   std::string str() const override {
     std::stringstream ss;
@@ -266,6 +260,15 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     return create(contained_types[0]);
   }
 
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if (Type::isSubtypeOf(rhs)) {
+      return true;
+    }
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return getElementType()->isSubtypeOf(rhs_->getElementType());
+    }
+    return false;
+  }
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:
@@ -784,13 +787,6 @@ struct CAFFE2_API DictType : public Type {
   }
 
   DEFINE_IS_SUBCLASS(DictType);
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if (auto dict_rhs = rhs->cast<DictType>()) {
-      return getKeyType()->isSubtypeOf(dict_rhs->getKeyType()) &&
-          getValueType()->isSubtypeOf(dict_rhs->getValueType());
-    }
-    return false;
-  }
 
   bool hasFreeVariables() const override {
     return has_free_variables;

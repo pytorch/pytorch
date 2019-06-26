@@ -757,55 +757,55 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // list types (with empty list)
   testArgTypes<c10::List<double>>::test(
-    c10::make_list<double>(), [] (const c10::List<double>& v) {EXPECT_EQ(0, v.size());},
-    c10::make_list<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<double>>().size());},
+    c10::List<double>(), [] (const c10::List<double>& v) {EXPECT_EQ(0, v.size());},
+    c10::List<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<double>>().size());},
     "(float[] a) -> float[]");
   testArgTypes<c10::List<int64_t>, c10::List<int64_t>>::test(
-    c10::make_list<int64_t>(), [] (const c10::List<int64_t>& v) {EXPECT_EQ(0, v.size());},
-    c10::make_list<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
+    c10::List<int64_t>(), [] (const c10::List<int64_t>& v) {EXPECT_EQ(0, v.size());},
+    c10::List<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
     "(int[] a) -> int[]");
   testArgTypes<c10::List<bool>>::test(
-    c10::make_list<bool>(), [] (const c10::List<bool>& v) {EXPECT_EQ(0, v.size());},
-    c10::make_list<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<bool>>().size());},
+    c10::List<bool>(), [] (const c10::List<bool>& v) {EXPECT_EQ(0, v.size());},
+    c10::List<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<bool>>().size());},
     "(bool[] a) -> bool[]");
   testArgTypes<c10::List<std::string>>::test(
-    c10::make_list<std::string>(), [] (const c10::List<std::string>& v) {EXPECT_EQ(0, v.size());},
-    c10::make_list<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    c10::List<std::string>(), [] (const c10::List<std::string>& v) {EXPECT_EQ(0, v.size());},
+    c10::List<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
     "(str[] a) -> str[]");
   testArgTypes<c10::List<Tensor>>::test(
-    c10::make_list<Tensor>({}), [] (const c10::List<Tensor>& v) {EXPECT_EQ(0, v.size());},
-    c10::make_list<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<at::Tensor>>().size());},
+    c10::List<Tensor>({}), [] (const c10::List<Tensor>& v) {EXPECT_EQ(0, v.size());},
+    c10::List<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<at::Tensor>>().size());},
     "(Tensor[] a) -> Tensor[]");
 
 
   // list types (with non-empty list)
   testArgTypes<c10::List<double>>::test(
-    c10::make_list<double>({1.5, 2.5}), [] (const c10::List<double>& v) {expectListEquals({1.5, 2.5}, v);},
-    c10::make_list<double>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<c10::List<double>>());},
+    c10::List<double>({1.5, 2.5}), [] (const c10::List<double>& v) {expectListEquals({1.5, 2.5}, v);},
+    c10::List<double>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<c10::List<double>>());},
     "(float[] a) -> float[]");
   testArgTypes<c10::List<int64_t>>::test(
-    c10::make_list<int64_t>({1, 2}), [] (const c10::List<int64_t>& v) {expectListEquals({1, 2}, v);},
-    c10::make_list<int64_t>({3, 4}), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::List<int64_t>>());},
+    c10::List<int64_t>({1, 2}), [] (const c10::List<int64_t>& v) {expectListEquals({1, 2}, v);},
+    c10::List<int64_t>({3, 4}), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::List<int64_t>>());},
     "(int[] a) -> int[]");
   testArgTypes<c10::List<bool>>::test(
-    c10::make_list<bool>({true, false}), [] (const c10::List<bool>& v) {expectListEquals({true, false}, v);},
-    c10::make_list<bool>({true, false}), [] (const IValue& v) {expectListEquals({true, false}, v.to<c10::List<bool>>());},
+    c10::List<bool>({true, false}), [] (const c10::List<bool>& v) {expectListEquals({true, false}, v);},
+    c10::List<bool>({true, false}), [] (const IValue& v) {expectListEquals({true, false}, v.to<c10::List<bool>>());},
     "(bool[] a) -> bool[]");
   testArgTypes<c10::List<std::string>>::test(
-    c10::make_list<std::string>({"first", "second"}), [] (const c10::List<std::string>& v) {expectListEquals({"first", "second"}, v);},
-    c10::make_list<std::string>({"first", "second"}), [] (const IValue& v) {
+    c10::List<std::string>({"first", "second"}), [] (const c10::List<std::string>& v) {expectListEquals({"first", "second"}, v);},
+    c10::List<std::string>({"first", "second"}), [] (const IValue& v) {
       EXPECT_EQ(2, v.toGenericListRef().size());
       EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
       EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
     },
     "(str[] a) -> str[]");
   testArgTypes<c10::List<Tensor>>::test(
-    c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (const c10::List<Tensor>& v) {
+    c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (const c10::List<Tensor>& v) {
       EXPECT_EQ(2, v.size());
       EXPECT_EQ(TensorType1(), v.get(0).type_id());
       EXPECT_EQ(TensorType2(), v.get(1).type_id());
     },
-    c10::make_list<Tensor>({dummyTensor(TensorType2()), dummyTensor(TensorType1())}), [] (const IValue& v) {
+    c10::List<Tensor>({dummyTensor(TensorType2()), dummyTensor(TensorType1())}), [] (const IValue& v) {
       EXPECT_EQ(2, v.to<c10::List<at::Tensor>>().size());
       EXPECT_EQ(TensorType2(), v.to<c10::List<at::Tensor>>().get(0).type_id());
       EXPECT_EQ(TensorType1(), v.to<c10::List<at::Tensor>>().get(1).type_id());
@@ -871,30 +871,30 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // Test optional of list (with empty list)
   testArgTypes<c10::optional<c10::List<int64_t>>>::test(
-    c10::optional<c10::List<int64_t>>(c10::make_list<int64_t>({})), [] (const c10::optional<c10::List<int64_t>>& v) {EXPECT_EQ(0, v.value().size());},
-    c10::optional<c10::List<int64_t>>(c10::make_list<int64_t>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
+    c10::optional<c10::List<int64_t>>(c10::List<int64_t>({})), [] (const c10::optional<c10::List<int64_t>>& v) {EXPECT_EQ(0, v.value().size());},
+    c10::optional<c10::List<int64_t>>(c10::List<int64_t>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with values)
   testArgTypes<c10::optional<c10::List<int64_t>>>::test(
-    c10::optional<c10::List<int64_t>>(c10::make_list<int64_t>({1, 2})), [] (const c10::optional<c10::List<int64_t>>& v) {expectListEquals({1, 2}, v.value());},
-    c10::optional<c10::List<int64_t>>(c10::make_list<int64_t>({3, 4})), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::List<int64_t>>());},
+    c10::optional<c10::List<int64_t>>(c10::List<int64_t>({1, 2})), [] (const c10::optional<c10::List<int64_t>>& v) {expectListEquals({1, 2}, v.value());},
+    c10::optional<c10::List<int64_t>>(c10::List<int64_t>({3, 4})), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::List<int64_t>>());},
     "(int[]? a) -> int[]?");
 
   // Test list of optional (with empty list)
   testArgTypes<c10::List<c10::optional<int64_t>>>::test(
-    c10::List<c10::optional<int64_t>>(c10::make_list<c10::optional<int64_t>>({})), [] (const c10::List<c10::optional<int64_t>>& v) {EXPECT_EQ(0, v.size());},
-    c10::List<c10::optional<int64_t>>(c10::make_list<c10::optional<int64_t>>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<c10::optional<int64_t>>>().size());},
+    c10::List<c10::optional<int64_t>>(c10::List<c10::optional<int64_t>>({})), [] (const c10::List<c10::optional<int64_t>>& v) {EXPECT_EQ(0, v.size());},
+    c10::List<c10::optional<int64_t>>(c10::List<c10::optional<int64_t>>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<c10::optional<int64_t>>>().size());},
     "(int?[] a) -> int?[]");
 
   // Test list of optional (with values)
   testArgTypes<c10::List<c10::optional<int64_t>>>::test(
-    c10::List<c10::optional<int64_t>>(c10::make_list<c10::optional<int64_t>>({3, c10::nullopt, 2})), [] (const c10::List<c10::optional<int64_t>>& v) {expectListEquals<c10::optional<int64_t>>({3, c10::nullopt, 2}, v);},
-    c10::List<c10::optional<int64_t>>(c10::make_list<c10::optional<int64_t>>({3, c10::nullopt, 2})), [] (const IValue& v) {expectListEquals<c10::optional<int64_t>>({3, c10::nullopt, 2}, v.to<c10::List<c10::optional<int64_t>>>());},
+    c10::List<c10::optional<int64_t>>(c10::List<c10::optional<int64_t>>({3, c10::nullopt, 2})), [] (const c10::List<c10::optional<int64_t>>& v) {expectListEquals<c10::optional<int64_t>>({3, c10::nullopt, 2}, v);},
+    c10::List<c10::optional<int64_t>>(c10::List<c10::optional<int64_t>>({3, c10::nullopt, 2})), [] (const IValue& v) {expectListEquals<c10::optional<int64_t>>({3, c10::nullopt, 2}, v.to<c10::List<c10::optional<int64_t>>>());},
     "(int?[] a) -> int?[]");
 
   // dict types
-  c10::Dict<std::string, std::string> str_dict = c10::make_dict<std::string, std::string>();
+  c10::Dict<std::string, std::string> str_dict;
   str_dict.insert("key1", "value1");
   str_dict.insert("key2", "value2");
   testArgTypes<c10::Dict<std::string, std::string>>::test(
@@ -910,7 +910,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
       EXPECT_EQ("value2", dict.at("key2"));
     },
     "(Dict(str, str) a) -> Dict(str, str)");
-  c10::Dict<int64_t, Tensor> tensor_dict = c10::make_dict<int64_t, Tensor>();
+  c10::Dict<int64_t, Tensor> tensor_dict;
   tensor_dict.insert(1, dummyTensor(TensorType1()));
   tensor_dict.insert(2, dummyTensor(TensorType2()));
   testArgTypes<c10::Dict<int64_t, Tensor>>::test(
@@ -964,13 +964,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   // weird deeply nested type
   using DeeplyNestedType = c10::List<c10::Dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>>>;
   auto makeDeeplyNestedObject = [] () -> DeeplyNestedType {
-    auto inner3 = c10::make_dict<int64_t, std::string>();
+    c10::Dict<int64_t, std::string> inner3;
     inner3.insert(1, "1");
-    auto inner2 = c10::make_list<c10::optional<c10::Dict<int64_t, std::string>>>();
+    c10::List<c10::optional<c10::Dict<int64_t, std::string>>> inner2;
     inner2.push_back(std::move(inner3));
-    auto inner1 = c10::make_dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>>();
+    c10::Dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>> inner1;
     inner1.insert("key", std::move(inner2));
-    auto result = c10::make_list<c10::Dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>>>();
+    c10::List<c10::Dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>>> result;
     result.push_back(inner1);
     return result;
   };

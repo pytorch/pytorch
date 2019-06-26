@@ -54,7 +54,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     TypedStack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    const std::shared_ptr<script::Module>& self) {
+    script::Module* self) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
   try {

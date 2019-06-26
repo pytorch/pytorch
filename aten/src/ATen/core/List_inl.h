@@ -5,17 +5,25 @@
 namespace c10 {
 
 template<class T>
-List<T> make_list() {
-  return List<T>(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>());
+List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements)
+: impl_(std::move(elements)) {}
+
+template<class T>
+List<T>::List()
+: List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>()) {}
+
+template<class T>
+List<T>::List(ArrayRef<T> values)
+: List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>()) {
+  impl_->list.reserve(values.size());
+  for (const T& element : values) {
+    impl_->list.push_back(element);
+  }
 }
 
-template<class T> List<T> make_list(ArrayRef<T> values) {
-  List<T> result = make_list<T>();
-  result.reserve(values.size());
-  for (const T& element : values) {
-    result.push_back(element);
-  }
-  return result;
+template<class T>
+List<T>::List(std::initializer_list<T> initial_values)
+: List(ArrayRef<T>(initial_values)) {
 }
 
 template<class T>
@@ -31,16 +39,13 @@ List<T>& List<T>::operator=(List&& rhs) noexcept {
 }
 
 template<class T>
-List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements): impl_(std::move(elements)) {}
-
-template<class T>
 List<T> List<T>::copy() const {
   return List<T>(impl_->copy());
 }
 
 namespace detail {
   template<class T>
-  T list_element_to(const T& element) {
+  T list_element_to(T element) {
     return element;
   }
   template<class T>
@@ -109,7 +114,7 @@ typename List<T>::value_type List<T>::get(size_type pos) const {
 
 template<class T>
 typename List<T>::internal_reference_type List<T>::operator[](size_type pos) const {
-  impl_->list.at(pos); // Throw the exception if it is out of range.
+  static_cast<void>(impl_->list.at(pos)); // Throw the exception if it is out of range.
   return {impl_->list.begin() + pos};
 }
 
@@ -117,7 +122,10 @@ template<class T>
 typename List<T>::value_type List<T>::extract(size_type pos) const {
   auto& elem = impl_->list.at(pos);
   auto result = detail::list_element_to<T>(std::move(elem));
-  elem = detail::list_element_from<T, StorageT>(T{});
+  if (std::is_same<IValue, StorageT>::value) {
+    // Reset the list element to a T() instead of None to keep it correctly typed
+    elem = detail::list_element_from<T, StorageT>(T{});
+  }
   return result;
 }
 

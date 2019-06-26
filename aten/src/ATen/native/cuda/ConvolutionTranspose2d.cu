@@ -253,7 +253,7 @@ void conv_transpose2d_out_cuda_template(
       ones.size(0) * ones.size(1) < output_height * output_width) {
     // Resize plane and fill with ones...
     ones.resize_({output_height, output_width});
-    ones.fill_(1); // or static_cast<scalar_t>(1)
+    ones.fill_(1);
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -750,24 +750,6 @@ void conv_transpose2d_acc_grad_parameters_cuda_template(
                 1,
                 grad_bias.data<scalar_t>(),
                 1);
-            /*
-            #ifdef THC_REAL_IS_HALF
-            THCudaBlas_Hgemm(
-                't',
-                'n',
-                m_,
-                1,
-                k_,
-                scale,
-                grad_output_n.data<scalar_t>(),
-                k_,
-                ones.data<scalar_t>(),
-                k_,
-                static_cast<scalar_t>(1),
-                grad_bias.data<scalar_t>(),
-                m_);
-            #endif
-            */
           }
         }
 
