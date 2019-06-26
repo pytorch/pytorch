@@ -5,6 +5,12 @@ namespace torch {
 namespace jit {
 namespace {
 
+c10::OperatorOptions aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+
 // Convert an python index (which may be negative) into an index usable for a
 // C++ container
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
@@ -83,7 +89,7 @@ RegisterOperators reg_str_ops({
               return char_op(c);                                   \
             }));                                                   \
     return 0;                                                      \
-  })
+  }, aliasAnalysisFromSchema())
 
     DEFINE_STRING_IS_OP(aten::isdigit, ::isdigit),
     DEFINE_STRING_IS_OP(aten::isspace, ::isspace),
@@ -101,7 +107,7 @@ RegisterOperators reg_str_ops({
     }                                                       \
     push(stack, ss.str());                                  \
     return 0;                                               \
-  })
+  }, aliasAnalysisFromSchema())
 
     DEFINE_STRING_CHAR_MAP_OP(aten::upper, ::toupper),
     DEFINE_STRING_CHAR_MAP_OP(aten::lower, ::tolower),
@@ -115,9 +121,10 @@ RegisterOperators reg_str_ops({
 
 });
 
-auto reg_str_ops_2 = torch::jit::RegisterOperators()
-  .op("aten::splitlines(str self, bool keepends=False) -> str[]",
-        [](std::string string, bool keepends) {
+auto reg_str_ops_2 = torch::RegisterOperators()
+    .op("aten::splitlines(str self, bool keepends=False) -> str[]", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, bool keepends) {
           std::string delimiters =
               "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
           std::vector<std::string> splits;
@@ -139,14 +146,17 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           }
 
           return splits;
-        })
+        }))
     .op("aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
-        stringSlice)
+        torch::RegisterOperators::options()
+          .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+          .catchAllKernel<decltype(stringSlice), &stringSlice>())
 
     // upper and lower require there to be at least one alpha character,
     // and ignore all other characters
-    .op("aten::isupper(str self) -> bool",
-        [](std::string string) {
+    .op("aten::isupper(str self) -> bool", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string) {
           bool found_alpha = false;
           bool is_upper = true;
           for (size_t i = 0; i < string.size() && is_upper; ++i) {
@@ -155,9 +165,10 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             is_upper &= (!::isalpha(c) || ::isupper(c));
           }
           return found_alpha && is_upper;
-        })
-    .op("aten::islower(str self) -> bool",
-        [](std::string string) {
+        }))
+    .op("aten::islower(str self) -> bool", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string) {
           bool found_alpha = false;
           bool is_lower = true;
           for (size_t i = 0; i < string.size() && is_lower; ++i) {
@@ -166,10 +177,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             is_lower &= (!::isalpha(c) || ::islower(c));
           }
           return found_alpha && is_lower;
-        })
+        }))
 
-    .op("aten::capitalize(str self) -> str",
-        [](std::string string) {
+    .op("aten::capitalize(str self) -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string) {
           std::stringstream ss;
           auto first_char = true;
           for (char c : string) {
@@ -181,10 +193,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             }
           }
           return ss.str();
-        })
+        }))
 
-    .op("aten::title(str self) -> str",
-        [](std::string string) {
+    .op("aten::title(str self) -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string) {
           std::stringstream ss;
           bool prev_is_nonalpha = true;
           for (char c : string) {
@@ -200,10 +213,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             }
           }
           return ss.str();
-        })
+        }))
 
-    .op("aten::center(str self, int width, str fillchar=' ') -> str",
-        [](std::string string, int64_t width, std::string fillchar) {
+    .op("aten::center(str self, int width, str fillchar=' ') -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, int64_t width, std::string fillchar) {
           if (fillchar.size() != 1) {
             // TODO: this should be a TypeError
             throw std::runtime_error(
@@ -229,12 +243,13 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             ss << fillchar;
           }
           return ss.str();
-        })
+        }))
 
     // Adapted from
     // https://stackoverflow.com/questions/22489073/counting-the-number-of-occurrences-of-a-string-within-a-string
-    .op("aten::count(str self, str substr, int start=0, int end=-1) -> int",
-        [](std::string string, std::string substr, int64_t start, int64_t end) {
+    .op("aten::count(str self, str substr, int start=0, int end=-1) -> int", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string substr, int64_t start, int64_t end) {
           int64_t size = string.size();
           if (start > size) {
             return int64_t(0);
@@ -257,10 +272,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             pos += substr.length();
           }
           return occurrences;
-        })
+        }))
 
-    .op("aten::endswith(str self, str substr, int start=0, int end=-1) -> bool",
-        [](std::string string, std::string substr, int64_t start, int64_t end) {
+    .op("aten::endswith(str self, str substr, int start=0, int end=-1) -> bool", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string substr, int64_t start, int64_t end) {
 
           int64_t size = string.size();
           if (start < 0) {
@@ -278,10 +294,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
                 string.length() - substr.length(), substr.length(), substr);
           }
           return result;
-        })
+        }))
 
-    .op("aten::startswith(str self, str substr, int start=0, int end=-1) -> bool",
-        [](std::string string, std::string substr, int64_t start, int64_t end) {
+    .op("aten::startswith(str self, str substr, int start=0, int end=-1) -> bool", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string substr, int64_t start, int64_t end) {
 
           int64_t size = string.size();
           if (start < 0) {
@@ -298,10 +315,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             result = !string.compare(0, substr.length(), substr);
           }
           return result;
-        })
+        }))
 
-    .op("aten::expandtabs(str self, int tabsize=8) -> str",
-        [](std::string string, int64_t tabsize) {
+    .op("aten::expandtabs(str self, int tabsize=8) -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+        .catchAllKernel([](std::string string, int64_t tabsize) {
           std::stringstream ss;
           size_t index = 0;
           for (const auto& c : string) {
@@ -319,38 +337,43 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             }
           }
           return ss.str();
-        })
+        }))
 
-    .op("aten::find(str self, str substr, int start=0, int end=-1) -> int",
-        [](std::string string, std::string substr, int64_t start, int64_t end) {
+    .op("aten::find(str self, str substr, int start=0, int end=-1) -> int", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string substr, int64_t start, int64_t end) {
           return stringFindImpl(string, substr, start, end);
-        })
+        }))
 
-    .op("aten::rfind(str self, str substr, int start=0, int end=-1) -> int",
-        [](std::string string, std::string substr, int64_t start, int64_t end) {
+    .op("aten::rfind(str self, str substr, int start=0, int end=-1) -> int", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string substr, int64_t start, int64_t end) {
           return stringFindImpl(string, substr, start, end, true);
-        })
+        }))
 
-    .op("aten::index(str self, str substr, int start=0, int end=-1) -> int",
-        [](std::string string, std::string substr, int64_t start, int64_t end) {
+    .op("aten::index(str self, str substr, int start=0, int end=-1) -> int", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string substr, int64_t start, int64_t end) {
           auto result = stringFindImpl(string, substr, start, end);
           if (result < 0) {
             throw std::runtime_error("ValueError: substring not found");
           }
           return result;
-        })
+        }))
 
-    .op("aten::rindex(str self, str substr, int start=0, int end=-1) -> int",
-        [](std::string string, std::string substr, int64_t start, int64_t end) {
+    .op("aten::rindex(str self, str substr, int start=0, int end=-1) -> int", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string substr, int64_t start, int64_t end) {
           auto result = stringFindImpl(string, substr, start, end, true);
           if (result < 0) {
             throw std::runtime_error("ValueError: substring not found");
           }
           return result;
-        })
+        }))
 
-    .op("aten::isidentifier(str self) -> bool",
-        [](std::string string) {
+    .op("aten::isidentifier(str self) -> bool", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string) {
           LOG(WARNING)
               << "The isidentifier() implementation being used is from Python 2\n";
           if (string.size() < 1) {
@@ -363,10 +386,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             return ::isalnum(c);
           });
           return result;
-        })
+        }))
 
-    .op("aten::istitle(str self) -> bool",
-        [](std::string string) {
+    .op("aten::istitle(str self) -> bool", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string) {
           auto result = false;
 
           bool prev_is_alpha = false;
@@ -393,19 +417,21 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             }
           }
           return result;
-        })
+        }))
 
     // Can't reuse DEFINE_STRING_IS_OP because "" is printable
-    .op("aten::isprintable(str self) -> bool",
-        [](std::string string) {
+    .op("aten::isprintable(str self) -> bool", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string) {
           auto result = std::all_of(string.begin(), string.end(), [](char c) {
             return ::isalnum(c) || ::ispunct(c) || c == ' ';
           });
           return result;
-        })
+        }))
 
-    .op("aten::ljust(str self, int width, str fillchar=' ') -> str",
-        [](std::string string, int64_t width, std::string fillchar) {
+    .op("aten::ljust(str self, int width, str fillchar=' ') -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, int64_t width, std::string fillchar) {
           if (fillchar.size() != 1) {
             // TODO: this should be a TypeError
             throw std::runtime_error(
@@ -420,10 +446,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           }
 
           return ss.str();
-        })
+        }))
 
-    .op("aten::rjust(str self, int width, str fillchar=' ') -> str",
-        [](std::string string, int64_t width, std::string fillchar) {
+    .op("aten::rjust(str self, int width, str fillchar=' ') -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, int64_t width, std::string fillchar) {
           if (fillchar.size() != 1) {
             // TODO: this should be a TypeError
             throw std::runtime_error(
@@ -437,10 +464,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           }
           ss << string;
           return ss.str();
-        })
+        }))
 
-    .op("aten::zfill(str self, int width) -> str",
-        [](std::string string, int64_t width) {
+    .op("aten::zfill(str self, int width) -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, int64_t width) {
           auto to_append = std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
           std::stringstream ss;
@@ -450,10 +478,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           ss << string;
 
           return ss.str();
-        })
+        }))
 
-    .op("aten::lstrip(str self, str chars=' \\n\\t\\f\\v') -> str",
-        [](std::string string, std::string chars) {
+    .op("aten::lstrip(str self, str chars=' \\n\\t\\f\\v') -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string chars) {
           auto index = string.find_first_not_of(chars);
           if (index != std::string::npos) {
             string = string.substr(index, string.size());
@@ -461,10 +490,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             string = "";
           }
           return string;
-        })
+        }))
 
-    .op("aten::rstrip(str self, str chars=' \\n\\t\\f\\v') -> str",
-        [](std::string string, std::string chars) {
+    .op("aten::rstrip(str self, str chars=' \\n\\t\\f\\v') -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string chars) {
           auto index = string.find_last_not_of(chars);
           if (index != std::string::npos) {
             string = string.substr(0, index + 1);
@@ -472,10 +502,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             string = "";
           }
           return string;
-        })
+        }))
 
-    .op("aten::strip(str self, str chars=' \\n\\t\\f\\v') -> str",
-        [](std::string string, std::string chars) {
+    .op("aten::strip(str self, str chars=' \\n\\t\\f\\v') -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string chars) {
           auto rindex = string.find_last_not_of(chars);
           if (rindex != std::string::npos) {
             string = string.substr(0, rindex + 1);
@@ -489,10 +520,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             string = "";
           }
           return string;
-        })
+        }))
 
-    .op("aten::replace(str self, str old, str new, int max=-1) -> str",
-        [](std::string string, std::string old_str, std::string new_str, int64_t max) {
+    .op("aten::replace(str self, str old, str new, int max=-1) -> str", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string old_str, std::string new_str, int64_t max) {
           int64_t occurrences = 0;
           std::string::size_type pos = 0;
           while ((pos = string.find(old_str, pos)) != std::string::npos) {
@@ -504,10 +536,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           }
 
           return string;
-        })
+        }))
 
-    .op("aten::partition(str self, str separator) -> (str, str, str)",
-        [](std::string string, std::string separator) {
+    .op("aten::partition(str self, str separator) -> (str, str, str)", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string separator) {
 
           auto pos = string.find(separator, 0);
           if (pos == std::string::npos) {
@@ -521,10 +554,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           return std::make_tuple(pre_partition,
            separator,
            post_partition);
-        })
+        }))
 
-    .op("aten::rpartition(str self, str separator) -> (str, str, str)",
-        [](std::string string, std::string separator) {
+    .op("aten::rpartition(str self, str separator) -> (str, str, str)", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string separator) {
 
           auto pos = string.find(separator, 0);
           auto rpos = pos;
@@ -545,10 +579,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           return std::make_tuple(pre_partition,
            separator,
            post_partition);
-        })
+        }))
 
-    .op("aten::split(str self, str separator=' ', int max=-1) -> str[]",
-        [](std::string string, std::string separator, int64_t max) {
+    .op("aten::split(str self, str separator=' ', int max=-1) -> str[]", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string separator, int64_t max) {
           std::string::size_type prev_pos = 0;
           std::string::size_type pos = 0;
           std::vector<std::string> splits;
@@ -566,10 +601,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           splits.emplace_back(
               string.substr(prev_pos, string.size() - prev_pos));
           return splits;
-        })
+        }))
 
-    .op("aten::rsplit(str self, str separator=' ', int max=-1) -> str[]",
-        [](std::string string, std::string separator, int64_t max) {
+    .op("aten::rsplit(str self, str separator=' ', int max=-1) -> str[]", torch::RegisterOperators::options()
+      .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+      .catchAllKernel([](std::string string, std::string separator, int64_t max) {
           std::reverse(separator.begin(), separator.end());
           std::reverse(string.begin(), string.end());
 
@@ -593,8 +629,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           std::reverse(substr.begin(), substr.end());
           splits.emplace(splits.begin(), substr);
           return splits;
-        });
+        }));
 } // namespace
 } // namespace jit
 } // namespace torch
-
