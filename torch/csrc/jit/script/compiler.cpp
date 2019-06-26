@@ -837,7 +837,6 @@ struct to_ir {
       List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
-      // ErrorReport::push_call_stack(stmt.range());
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -2162,11 +2161,7 @@ struct to_ir {
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
-    // ErrorReport::push_call_stack(tree.range());
-    push_call(tree.range());
-    auto expr = emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
-    pop_call();
-    return expr;
+    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -2203,8 +2198,11 @@ struct to_ir {
         return sv->attr(select.range(), method, select.selector().name());
       }
       case TK_APPLY: {
+        push_call(tree.range());
         auto apply = Apply(tree);
-        return emitApplyExpr(apply, n_binders);
+        auto sv = emitApplyExpr(apply, n_binders);
+        pop_call();
+        return sv;
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));

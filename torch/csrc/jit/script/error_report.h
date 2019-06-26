@@ -41,9 +41,10 @@ struct ErrorReport : public std::exception {
       msg << ".\n";
     }
 
-
     if (get_stack().size() > 0) {
-      msg << "It was called from:\n";
+      // Print the calling stack to show why this function was being compiled,
+      // skip the first entry in the list since it's the current function
+      msg << "\nCalled from:\n";
       for (auto it = get_stack().rbegin() + 1; it != get_stack().rend(); ++it) {
         it->highlight(msg);
       }
