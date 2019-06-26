@@ -50,7 +50,7 @@ class TestONNXRuntime(unittest.TestCase):
             "number of outputs differ"
 
         if isinstance(outputs, torch.Tensor):
-                np.allclose(get_numpy_value(outputs), ort_outs[0])
+            np.allclose(get_numpy_value(outputs), ort_outs[0])
         else :
             for i in range(0, len(outputs)):
                 np.allclose(get_numpy_value_at_index(outputs, i), ort_outs[i])
