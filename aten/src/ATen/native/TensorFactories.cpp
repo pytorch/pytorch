@@ -18,6 +18,9 @@
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -117,6 +120,17 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   return tensor;
 }
 
+#ifdef NAMEDTENSOR_ENABLED
+Tensor empty(
+    IntArrayRef size,
+    at::optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  internal_set_names_inplace(result, names);
+  return result;
+}
+#endif
+
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
   check_size_nonnegative(size);
   auto t = at::native::empty_cpu({0}, options);
@@ -166,8 +180,8 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     //                       "empty_like for quantized Tensor only works for
     //                        PerTensorAffine scheme right now");
     return at::_empty_affine_quantized(self.sizes(), self.options(),
-                                       self.q_scale().toDouble(),
-                                       self.q_zero_point().toLong());
+                                       self.q_scale(),
+                                       self.q_zero_point());
   }
   return at::empty(self.sizes(), options);
 }
@@ -430,9 +444,11 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
   result.resize_({n});
   int64_t r__stride_0 = result.stride(0);
 
-  for(int64_t i = 0; i < n; i++) {
-    r__data[i*r__stride_0] = static_cast<scalar_t>(i);
-  }
+  at::parallel_for(0, n, internal::GRAIN_SIZE,
+                  [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
+    for(int64_t i = p_begin; i < p_end; i++)
+      r__data[i*r__stride_0] = static_cast<scalar_t>(i);
+  });
 
   for(int64_t i = 0; i < n - 1; i++)
   {

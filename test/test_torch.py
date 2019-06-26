@@ -991,14 +991,14 @@ class _TestTorchMixin(object):
             ans = torch.norm(x, "nuc", dim=axes)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03))
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True))
 
             out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
             ans = torch.norm(x, "nuc", dim=axes, out=out)
             self.assertIs(ans, out)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03))
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True))
 
         for n in range(1, 3):
             for m in range(1, 3):
@@ -1026,7 +1026,7 @@ class _TestTorchMixin(object):
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions Fortran
-                        y = torch.randn(o, n, m, device=device).transpose(-1, -2)
+                        x = torch.randn(o, m, n, device=device).transpose(-1, -2)
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions non-contiguous
@@ -1255,6 +1255,10 @@ class _TestTorchMixin(object):
         shape = (2, 0, 4)
         for device in torch.testing.get_all_device_types():
             x = torch.randn(shape, device=device)
+
+            for fn in [torch.max, torch.min]:
+                ident_err = 'operation does not have an identity'
+                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
 
             for item in fns_to_test:
                 name, fn, identity = item
@@ -1761,17 +1765,18 @@ class _TestTorchMixin(object):
             self.assertEqual(res_reciprocal, res_div)
 
     def test_mul(self):
-        m1 = torch.randn(10, 10)
-        res1 = m1.clone()
-        res1[:, 3].mul_(2)
-        res2 = m1.clone()
-        for i in range(res1.size(0)):
-            res2[i, 3] = res2[i, 3] * 2
-        self.assertEqual(res1, res2)
+        for device in torch.testing.get_all_device_types():
+            m1 = torch.randn(10, 10, device=device)
+            res1 = m1.clone()
+            res1[:, 3].mul_(2)
+            res2 = m1.clone()
+            for i in range(res1.size(0)):
+                res2[i, 3] = res2[i, 3] * 2
+            self.assertEqual(res1, res2)
 
-        a1 = torch.tensor([True, False, False, True], dtype=torch.bool)
-        a2 = torch.tensor([True, False, True, False], dtype=torch.bool)
-        self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool))
+            a1 = torch.tensor([True, False, False, True], dtype=torch.bool, device=device)
+            a2 = torch.tensor([True, False, True, False], dtype=torch.bool, device=device)
+            self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool, device=device))
 
     def test_div(self):
         m1 = torch.randn(10, 10)
@@ -2652,6 +2657,38 @@ class _TestTorchMixin(object):
                 self.assertEqual(var1, var2)
                 self.assertEqual(mean1, mean2)
 
+    def test_std_mean_some_dims(self):
+        sizes = (4, 6, 7, 5, 3)
+        dims = len(sizes)
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(sizes, device=device)
+            for num_of_dims in range(2, dims):
+                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
+                for dim in dim_list:
+                    for unbiased in [False, True]:
+                        for keepdim in [False, True]:
+                            std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            mean2 = x.mean(dim=dim, keepdim=keepdim)
+                            self.assertEqual(std1, std2)
+                            self.assertEqual(mean1, mean2)
+
+    def test_var_mean_some_dims(self):
+        sizes = (4, 6, 7, 5, 3)
+        dims = len(sizes)
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(sizes, device=device)
+            for num_of_dims in range(2, dims):
+                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
+                for dim in dim_list:
+                    for unbiased in [False, True]:
+                        for keepdim in [False, True]:
+                            var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            mean2 = x.mean(dim=dim, keepdim=keepdim)
+                            self.assertEqual(var1, var2)
+                            self.assertEqual(mean1, mean2)
+
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
 
@@ -2921,157 +2958,6 @@ class _TestTorchMixin(object):
                 assertEqual('cuda:1', lambda: torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cuda:1'))
                 if TEST_NUMPY:
                     assertEqual('cuda:1', lambda: torch.tensor(np.random.randn(2, 3), device='cuda:1'))
-
-    def test_qtensor(self):
-        num_elements = 10
-        r = torch.ones(num_elements, dtype=torch.float)
-        scale = 1.0
-        zero_point = 2
-        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
-        self.assertEqual(qr.q_scale(), scale)
-        self.assertEqual(qr.q_zero_point(), zero_point)
-        self.assertTrue(qr.is_quantized)
-        self.assertFalse(r.is_quantized)
-        # slicing and int_repr
-        int_repr = qr.int_repr()
-        for num in int_repr:
-            self.assertEqual(num, 3)
-        for num in qr[2:].int_repr():
-            self.assertEqual(num, 3)
-        # dequantize
-        rqr = qr.dequantize()
-        for i in range(num_elements):
-            self.assertEqual(r[i], rqr[i])
-        # Scalar Tensor
-        # item
-        r = torch.ones(1, dtype=torch.float)
-        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
-        self.assertEqual(qr.item(), 1)
-        self.assertEqual(qr[0].item(), 1)
-        # assignment
-        self.assertTrue(qr[0].is_quantized)
-        qr[0] = 11.3  # float asignment
-        self.assertEqual(qr.item(), 11)
-        x = torch.ones(1, dtype=torch.float) * 15.3
-        # Copying from a float Tensor
-        qr[:] = x
-        self.assertEqual(qr.item(), 15)
-        # we can also print a qtensor
-        self.assertEqual(str(qr),
-                         "tensor([15.], size=(1,), dtype=torch.quint8, " +
-                         "scale=1.0, zero_point=2)")
-        empty_r = torch.ones((0, 1), dtype=torch.float)
-        empty_qr = torch.quantize_linear(empty_r, scale, zero_point, torch.quint8)
-        self.assertEqual(str(empty_qr),
-                         "tensor([], size=(0, 1), dtype=torch.quint8, " +
-                         "scale=1.0, zero_point=2)")
-
-    def test_qtensor_quant_dequant(self):
-        r = np.random.rand(3, 2) * 2 - 4
-        r = torch.from_numpy(r).float()
-        scale = 2
-        zero_point = 2
-        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-
-    def test_qtensor_creation(self):
-        scale = 0.5
-        zero_point = 10
-        val = 100
-        numel = 10
-        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        self.assertEqual(scale, q.q_scale())
-        self.assertEqual(zero_point, q.q_zero_point())
-
-        # create Tensor from uint8_t Tensor, scale and zero_point
-        int_tensor = torch.randint(0, 100, size=(10,), dtype=torch.uint8)
-        q = torch._per_tensor_affine_qtensor(int_tensor, scale, zero_point)
-        self.assertEqual(int_tensor, q.int_repr())
-        self.assertEqual(scale, q.q_scale())
-        self.assertEqual(zero_point, q.q_zero_point())
-
-    def test_qtensor_dtypes(self):
-        r = np.random.rand(3, 2) * 2 - 4
-        r = torch.from_numpy(r).float()
-        scale = 2
-        zero_point = 2
-        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_linear(r, scale, zero_point, torch.qint32)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-
-    def test_qtensor_dequantize_linear(self):
-        t = torch.arange(-10, 10, dtype=torch.int8)
-        scale = 3
-        zero_point = 2
-        qt = torch._dequantize_linear(t, scale, zero_point, torch.qint8)
-        qt2 = torch._per_tensor_affine_qtensor(t, scale, zero_point)
-        self.assertEqual(qt, qt2.dequantize())
-
-    def test_qtensor_per_channel_affine(self):
-        r = np.random.rand(3, 2) * 2 - 4
-        r = torch.from_numpy(r).float()
-        scales = torch.tensor([2.0, 3.0]).float()
-        zero_points = torch.tensor([5, 10]).int()
-        axis = [1]
-
-        def quantize_c(data, scales, zero_points):
-            res = torch.empty((3, 2))
-            quant_min, quant_max = 0, 255
-            for i in range(3):
-                for j in range(2):
-                    res[i][j] = np.clip(np.round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
-            return res
-        qr = torch.quantize_linear_per_channel(r, scales, zero_points, axis, torch.quint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
-
-    def test_qtensor_permute(self):
-        r = np.random.rand(100, 30) * 2 - 4
-        r = torch.from_numpy(r).float()
-        scale = 2
-        zero_point = 2
-        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
-        qr = qr.transpose(0, 1)
-        rqr = qr.dequantize()
-        # compare transpose + dequantized result with orignal transposed result
-        self.assertTrue(np.allclose(r.numpy().T, rqr.numpy(), atol=2 / scale))
-
-        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
-        qr1 = qr.permute([1, 0])
-        qr2 = qr.transpose(0, 1)
-        # compare int representation after transformations
-        self.assertTrue(torch.equal(qr1.int_repr(), qr2.int_repr()))
-        self.assertTrue(qr1.q_scale() == qr2.q_scale())
-        self.assertTrue(qr1.q_zero_point() == qr2.q_zero_point())
-        # compare dequantized result
-        self.assertTrue(np.array_equal(qr1.dequantize().numpy(), qr2.dequantize().numpy()))
-        # compare permuted + dequantized result with original transposed result
-        self.assertTrue(np.allclose(qr2.dequantize().numpy(), r.numpy().T, atol=2 / scale))
-        # make permuted result contiguous
-        self.assertTrue(torch.equal(qr2.contiguous().int_repr(), qr2.int_repr()))
-
-    def test_qtensor_load_save(self):
-        scale = 2.0
-        zero_point = 10
-        r = torch.ones(15, dtype=torch.float) * 2
-        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
-            qr = torch.quantize_linear(r, scale, zero_point, dtype)
-            with tempfile.NamedTemporaryFile() as f:
-                # Serializing and Deserializing Tensor
-                torch.save(qr, f)
-                f.seek(0)
-                qr2 = torch.load(f)
-                self.assertEqual(qr.int_repr(), qr2.int_repr())
-                self.assertEqual(qr.q_scale(), qr2.q_scale())
-                self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -7804,6 +7690,11 @@ class _TestTorchMixin(object):
             dest.index_copy_(0, index, src)
             self.assertEqual(dest, torch.tensor([[True, True], [True, True]], device=device))
 
+            # Error cases
+            a = torch.randn(3, 5)
+            c = torch.zeros(3)
+            self.assertRaises(IndexError, lambda: a.index_copy_(dim=1, index=torch.tensor([3]), source=c))
+
     def test_index_add(self):
         num_copy, num_dest = 3, 3
         dest = torch.randn(num_dest, 4, 5)
@@ -9175,9 +9066,9 @@ class _TestTorchMixin(object):
 
         # test for non-contiguous case
         expanded_data = torch.arange(1, 4, device=device).view(3, 1).expand(3, 2)
-        tranposed_data = torch.arange(1, 9, device=device).view(2, 2, 2).transpose(0, 1)
+        transposed_data = torch.arange(1, 9, device=device).view(2, 2, 2).transpose(0, 1)
         self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), expanded_data.flip(0))
-        self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), tranposed_data.flip(0, 1, 2))
+        self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), transposed_data.flip(0, 1, 2))
 
         # test for shape
         data = torch.randn(2, 3, 4, device=device)

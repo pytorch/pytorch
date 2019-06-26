@@ -22,6 +22,7 @@ $storage_tensor_headers
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/ATenDispatch.h>
 
 #include <cstddef>
 #include <functional>
@@ -58,4 +59,6 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 
 ${type_derived_method_definitions}
 
+static auto& registerer = globalATenDispatch()
+  ${function_registrations};
 }

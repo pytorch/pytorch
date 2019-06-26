@@ -53,12 +53,6 @@ class JitTestCase(TestCase):
         self.clearHooks()
         torch._C._jit_clear_class_registry()
 
-    @contextmanager
-    def disableEmitHook(self):
-        self.clearHooks()
-        yield None
-        self.setHooks()
-
     def _isHookExceptionOk(self, e):
         se = str(e)
         allowed = ("Could not export Python function",
@@ -70,10 +64,10 @@ class JitTestCase(TestCase):
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        if func.name == "<lambda>" or "aten::" in func.name or _in_first_class_mode:
+        if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
             return
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hooks():
             try:
                 src, constants = _jit_python_print(func)
                 cu = torch.jit.CompilationUnit()._import(src, constants)
@@ -98,7 +92,7 @@ class JitTestCase(TestCase):
             return c
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hooks():
             try:
                 if len(module.code) == 0:
                     # short-circuit if this is an empty module
@@ -256,6 +250,26 @@ class JitTestCase(TestCase):
         if set_graph:
             trace.set_graph(graph)
         return graph
+
+    def checkScriptRaisesRegex(self, script, inputs, exception, regex,
+                               optimize=True, outputs=None, capture_output=False):
+        """
+        Checks that a given function will throw the correct exception,
+        when executed with normal python, the string frontend, and the AST frontend
+        """
+        # normal python
+        with self.assertRaisesRegex(exception, regex):
+            script(*inputs)
+        # string frontend
+        with self.assertRaisesRegex(exception, regex):
+            source = textwrap.dedent(inspect.getsource(script))
+            cu = torch.jit.CompilationUnit(source, optimize)
+            ge = getattr(cu, script.__name__)
+            ge(*inputs)
+        # python AST frontend
+        with self.assertRaisesRegex(exception, regex):
+            ge = torch.jit.script(script, optimize)
+            ge(*inputs)
 
     def checkScript(self,
                     script,
@@ -428,17 +442,16 @@ def enable_profiling_mode():
     yield
     torch._C._jit_set_profiling_mode(False)
 
-
-_in_first_class_mode = False
+_inline_everything = True
 @contextmanager
-def enable_first_class_mode():
-    global _in_first_class_mode
-    old = _in_first_class_mode
-    torch._C._jit_set_first_class_mode(True)
-    _in_first_class_mode = True
+def disable_inline_everything_mode():
+    global _inline_everything
+    old = _inline_everything
+    _inline_everything = False
+    torch._C._jit_set_inline_everything_mode(False)
     yield
-    torch._C._jit_set_first_class_mode(old)
-    _in_first_class_mode = old
+    _inline_everything = old
+    torch._C._jit_set_inline_everything_mode(old)
 
 
 # note: not re-entrant, use unnested only
