@@ -174,8 +174,6 @@ struct PythonPrintPass {
     explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
       TORCH_INTERNAL_ASSERT(stack);
       if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
-        std::cout << "pushing original source range\n";
-        gen_source->highlight(std::cout);
         stack->push_back(std::move(gen_source.value()));
       } else {
         stack->push_back(std::move(n->sourceRange()));
@@ -1244,8 +1242,6 @@ struct PythonPrintPass {
     for (const auto& x : body_.ranges()) {
       source_ranges_out.push_back(x);
       source_ranges_out.back().bytes += source_offset;
-      std::cout << "offset " << source_ranges_out.back().bytes << "\n";
-      source_ranges_out.back().range.highlight(std::cout);
     }
   }
 };

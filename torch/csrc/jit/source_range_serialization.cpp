@@ -24,7 +24,7 @@ class SourceRangeSerializer {
 
 class SourceRangeDeserializer {
  public:
-  SourceRange deserialize(c10::IValue iv) {
+  SourceRange deserialize(const c10::IValue& iv) {
     auto tup_elems = iv.toTuple()->elements();
     TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
     std::shared_ptr<Source> source_ = deserialize_source(tup_elems[0]);
@@ -34,7 +34,7 @@ class SourceRangeDeserializer {
   }
 
  private:
-  std::shared_ptr<Source> deserialize_source(c10::IValue iv) {
+  std::shared_ptr<Source> deserialize_source(const c10::IValue& iv) {
     // TODO: cache these?
     auto tup_elems = iv.toTuple()->elements();
     TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
