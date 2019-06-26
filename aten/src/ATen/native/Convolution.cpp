@@ -309,7 +309,7 @@ auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
   #if AT_CUDNN_ENABLED
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    int cudnn_version = detail::getCUDAHooks().versionCUDNN();
+    long cudnn_version = detail::getCUDAHooks().versionCUDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
                          use_cudnn(input) &&
                          prop->major >= 7 &&  // Volta/Tensor cores
