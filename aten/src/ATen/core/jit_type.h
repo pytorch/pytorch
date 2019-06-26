@@ -268,13 +268,6 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     }
     return false;
   }
-
-  bool operator==(const Type& rhs) const override {
-    if (auto opt_rhs = rhs.cast<OptionalType>()) {
-      return *getElementType() == *opt_rhs->getElementType();
-    }
-    return false;
-  }
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:
