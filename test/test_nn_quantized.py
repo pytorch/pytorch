@@ -26,8 +26,6 @@ class FunctionalAPITest(TestCase):
 class ModuleAPITest(TestCase):
     def test_linear_api(self):
         """test API functionality for nn.quantized.linear"""
-        # TODO: create from_float
-        # create __init__
         in_features = 10
         out_features = 20
         batch_size = 5
