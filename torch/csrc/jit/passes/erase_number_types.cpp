@@ -34,9 +34,9 @@ static void EraseNumberTypesOnBlock(Block* block) {
           it->output()->replaceAllUsesWith(r);
         }
       } break;
-      case prim::Bool:
-      case prim::Float:
-      case prim::Int:
+      case aten::Bool:
+      case aten::Float:
+      case aten::Int:
       case prim::ImplicitTensorToNum:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);

@@ -176,7 +176,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
     }
   }
 
-  if (v->node()->kind() == prim::Float) {
+  if (v->node()->kind() == aten::Float) {
     auto op = getOperation(v->node());
     if (auto input = toIValue(v->node()->input())) {
       auto op = getOperation(v->node());

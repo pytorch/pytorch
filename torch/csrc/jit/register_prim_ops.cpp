@@ -253,46 +253,6 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Bool(Tensor a) -> bool",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_nonzero());
-           return 0;
-         }),
-     Operator(
-         "prim::Bool(int a) -> bool",
-         [](Stack& stack) {
-           int64_t i;
-           pop(stack, i);
-           push(stack, (bool)i);
-           return 0;
-         }),
-     Operator(
-         "prim::Bool(float a) -> bool",
-         [](Stack& stack) {
-           double d;
-           pop(stack, d);
-           push(stack, (bool)d);
-           return 0;
-         }),
-     Operator(
-         "prim::Int(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<int64_t>());
-           return 0;
-         }),
-     Operator(
-         "prim::Float(Tensor a) -> float",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<double>());
-           return 0;
-         }),
-     Operator(
          "prim::ImplicitTensorToNum(Tensor a) -> Scalar",
          [](const Node* node) -> Operation {
            if (node->output()->type() == IntType::get()) {
@@ -332,43 +292,39 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Float(Scalar a) -> float",
+         "aten::Bool(Tensor a) -> bool",
          [](Stack& stack) {
-           IValue scalar;
-           pop(stack, scalar);
-           if (scalar.isDouble()) {
-             push(stack, std::move(scalar));
-           } else {
-             push(stack, static_cast<double>(scalar.toInt()));
-           }
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_nonzero());
            return 0;
          }),
      Operator(
-         "prim::Float(int a) -> float",
+         "aten::Bool(int a) -> bool",
          [](Stack& stack) {
            int64_t i;
            pop(stack, i);
-           push(stack, (float)i);
+           push(stack, (bool)i);
            return 0;
          }),
      Operator(
-         "prim::Int(float a) -> int",
+         "aten::Bool(float a) -> bool",
          [](Stack& stack) {
            double d;
            pop(stack, d);
-           push(stack, (int64_t)d);
+           push(stack, (bool)d);
            return 0;
          }),
      Operator(
-         "prim::Float(bool a) -> float",
+         "aten::Int(Tensor a) -> int",
          [](Stack& stack) {
-           bool b;
-           pop(stack, b);
-           push(stack, (float)b);
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<int64_t>());
            return 0;
          }),
      Operator(
-         "prim::Int(bool a) -> int",
+         "aten::Int(bool a) -> int",
          [](Stack& stack) {
            bool b;
            pop(stack, b);
@@ -376,7 +332,15 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> int",
+         "aten::Int(float a) -> int",
+         [](Stack& stack) {
+           double d;
+           pop(stack, d);
+           push(stack, (int64_t)d);
+           return 0;
+         }),
+     Operator(
+         "aten::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -388,7 +352,43 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Float(str a) -> float",
+         "aten::Float(Tensor a) -> float",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<double>());
+           return 0;
+         }),
+     Operator(
+         "aten::Float(Scalar a) -> float",
+         [](Stack& stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isDouble()) {
+             push(stack, std::move(scalar));
+           } else {
+             push(stack, static_cast<double>(scalar.toInt()));
+           }
+           return 0;
+         }),
+     Operator(
+         "aten::Float(int a) -> float",
+         [](Stack& stack) {
+           int64_t i;
+           pop(stack, i);
+           push(stack, (float)i);
+           return 0;
+         }),
+     Operator(
+         "aten::Float(bool a) -> float",
+         [](Stack& stack) {
+           bool b;
+           pop(stack, b);
+           push(stack, (float)b);
+           return 0;
+         }),
+     Operator(
+         "aten::Float(str a) -> float",
          [](Stack& stack) {
            auto s = pop(stack).toString();
            if (s->string() == "inf")
@@ -400,6 +400,14 @@ RegisterOperators reg(
                  "Only 'inf' or '-inf' can be cast to a float, but got '",
                  s->string(),
                  "'");
+           return 0;
+         }),
+     Operator(
+         "aten::Str(t elem) -> str",
+         [](Stack& stack) {
+           std::stringstream ss;
+           ss << pop(stack);
+           push(stack, ss.str());
            return 0;
          }),
      Operator(
@@ -1935,29 +1943,17 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("t", c10::List<IValue>),
 #undef CREATE_LIST_OPS
     Operator("aten::sort(int[](a!) self) -> ()", listSort<int64_t>),
-    Operator(
-        "aten::sort(float[](a!) self) -> ()",
-        listSort<double>),
-    Operator(
-        "aten::sort(Tensor[](a!) self) -> ()",
-        listSort<at::Tensor>),
+    Operator("aten::sort(float[](a!) self) -> ()", listSort<double>),
+    Operator("aten::sort(Tensor[](a!) self) -> ()", listSort<at::Tensor>),
     Operator("aten::sort(bool[](a!) self) -> ()", listSort<bool>),
 
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<int64_t>),
-    Operator(
-        "aten::eq(float[] a, float[] b) -> bool",
-        listEq<double>),
-    Operator(
-        "aten::eq(Tensor[] a, Tensor[] b) -> bool",
-        listEq<at::Tensor>),
+    Operator("aten::eq(float[] a, float[] b) -> bool", listEq<double>),
+    Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<at::Tensor>),
     Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<bool>),
     Operator("aten::ne(int[] a, int[] b) -> bool", listNe<int64_t>),
-    Operator(
-        "aten::ne(float[] a, float[] b) -> bool",
-        listNe<double>),
-    Operator(
-        "aten::ne(Tensor[] a, Tensor[] b) -> bool",
-        listNe<at::Tensor>),
+    Operator("aten::ne(float[] a, float[] b) -> bool", listNe<double>),
+    Operator("aten::ne(Tensor[] a, Tensor[] b) -> bool", listNe<at::Tensor>),
     Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<bool>),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
@@ -2002,14 +1998,6 @@ RegisterOperators reg2({
           auto string = pop(stack).toStringRef();
           char c = string.at(index);
           push(stack, std::string(&c, 1));
-          return 0;
-        }),
-    Operator(
-        "prim::str(t elem) -> str",
-        [](Stack& stack) {
-          std::stringstream ss;
-          ss << pop(stack);
-          push(stack, ss.str());
           return 0;
         }),
     Operator(
