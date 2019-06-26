@@ -21,7 +21,6 @@ LIST(APPEND ATen_CORE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/function_schema_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/lexer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/strtod.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/error_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_range.cpp
 )
