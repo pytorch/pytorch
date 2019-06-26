@@ -484,12 +484,10 @@ void Reducer::initialize_buckets(
 
 // Traverse the autograd graph starting at the specified output.
 // All parameters for which we have a pointer to their gradient accumulation
-// functions and don't show up in this graph can be marked as ready
-// for reduction immediately. Not doing this means we would deadlock waiting
-// on a gradient for those parameters that will never be computed.
-//
-// Rough copy of torch::autograd::Engine::compute_dependencies.
-//
+// functions, but don't show up in the autograd graph will be marked ready for
+// for reduction as soon as the first autograd hook is called. This is not
+// done immediately because the model output may be ignored, and we only
+// want to start performing reductions on `torch.autograd.backward()`.
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
