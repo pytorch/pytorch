@@ -721,7 +721,7 @@ add_docstr_all('fill_diagonal_',
 fill_diagonal_(fill_value, wrap=False) -> Tensor
 
 Fill the main diagonal of a tensor that has at least 2-dimensions.
-Tensor at least 2-dims. When dims>2, all dimensions of input must be of equal length
+When dims>2, all dimensions of input must be of equal length.
 This function modifies the input tensor in-place, and returns the input tensor.
 
 Arguments:
