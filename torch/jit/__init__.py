@@ -7,7 +7,7 @@ import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
-    string_classes, builtins
+    string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
