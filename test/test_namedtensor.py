@@ -1,4 +1,5 @@
 import unittest
+from collections import namedtuple
 from common_utils import TestCase, run_tests
 from common_cuda import TEST_CUDA
 import itertools
@@ -89,14 +90,17 @@ class TestNamedTensor(TestCase):
             self.assertEqual(test.func(device).names, test.expected_names)
 
     def test_unary_fns(self):
-        def _test(lambd, names=('N', 'D'), device='cpu'):
+        TestCase = namedtuple('TestCase', ['name', 'lambd'])
+
+        def _test(testcase, names=('N', 'D'), device='cpu'):
             sizes = [2] * len(names)
             tensor = torch.empty(sizes, names=names, device=device)
-            out = lambd(tensor)
-            self.assertEqual(out.names, tensor.names)
+            out = testcase.lambd(tensor)
+            self.assertEqual(out.names, tensor.names,
+                             message=testcase.name)
 
         def method(name, *args, **kwargs):
-            return [lambda t: getattr(t, name)(*args, **kwargs)]
+            return [TestCase(name, lambda t: getattr(t, name)(*args, **kwargs))]
 
         def out_function(name, *args, **kwargs):
             out_fn = getattr(torch, name)
@@ -106,7 +110,7 @@ class TestNamedTensor(TestCase):
                 out_fn(tensor, *args, out=result, **kwargs)
                 return result
 
-            return [fn]
+            return [TestCase(name + '_out', fn)]
 
         def fn_method_and_inplace(name, *args, **kwargs):
             return (
@@ -120,6 +124,36 @@ class TestNamedTensor(TestCase):
 
         tests = [
             fn_method_and_inplace('abs'),
+            fn_method_and_inplace('acos'),
+            fn_method_and_inplace('asin'),
+            fn_method_and_inplace('atan'),
+            fn_method_and_inplace('ceil'),
+            fn_method_and_inplace('clamp', -1, 1),
+            fn_method_and_inplace('clamp_min', -2),
+            fn_method_and_inplace('clamp_max', 2),
+            fn_method_and_inplace('cos'),
+            fn_method_and_inplace('cosh'),
+            fn_method_and_inplace('erf'),
+            fn_method_and_inplace('erfc'),
+            fn_method_and_inplace('exp'),
+            fn_method_and_inplace('expm1'),
+            fn_method_and_inplace('floor'),
+            fn_method_and_inplace('frac'),
+            fn_method_and_inplace('log'),
+            fn_method_and_inplace('log10'),
+            fn_method_and_inplace('log1p'),
+            fn_method_and_inplace('log2'),
+            fn_method_and_inplace('neg'),
+            fn_method_and_inplace('reciprocal'),
+            fn_method_and_inplace('round'),
+            fn_method_and_inplace('rsqrt'),
+            fn_method_and_inplace('sin'),
+            fn_method_and_inplace('sinh'),
+            fn_method_and_inplace('sqrt'),
+            fn_method_and_inplace('tan'),
+            fn_method_and_inplace('trunc'),
+            method('fill_', 1),
+            method('fill_', torch.tensor(3.14)),
         ]
         tests = flatten(tests)
 
