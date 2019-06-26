@@ -1,6 +1,7 @@
 import unittest
 from common_utils import TestCase, run_tests
 from common_cuda import TEST_CUDA
+from collections import namedtuple
 import itertools
 import torch
 import sys
