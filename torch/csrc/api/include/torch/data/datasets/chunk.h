@@ -247,12 +247,10 @@ struct ChunkDatasetOptions {
   ChunkDatasetOptions(
       size_t preloader_count,
       size_t batch_size,
-      size_t cache_size = 2048,
-      std::string resume_from_file = "")
+      size_t cache_size = 2048)
       : preloader_count_(preloader_count),
         batch_size_(batch_size),
-        cache_size_(cache_size),
-        resume_from_file_(std::move(resume_from_file)) {
+        cache_size_(cache_size) {
     TORCH_CHECK(
         preloader_count_ > 0,
         "Preloader count is 0. At least one preloader needs to be specified.");
@@ -276,12 +274,6 @@ struct ChunkDatasetOptions {
 
   /// The capacity of the queue for batch caching.
   TORCH_ARG(size_t, cache_size) = 2048;
-
-  /// The file name from where to load ChunkDatset's state. Default to empty
-  /// string meaning start ChunkDataset from fresh begining; when specified with
-  /// a file name, ChunkDataset::reset() will try to load the sampler state from
-  /// that file.
-  TORCH_ARG(std::string, resume_from_file) = "";
 };
 
 /// A stateful dataset that support hierarchical sampling and prefetching of
@@ -319,7 +311,7 @@ class ChunkDataset final
         options_(std::move(options)),
         quit_worker_(false),
         running_preloaders_(0),
-        load_checkpoint_(!options_.resume_from_file_.empty()) {}
+        load_checkpoint_(false) {}
 
   virtual ~ChunkDataset() {
     // stop batch buffer first.
@@ -346,11 +338,6 @@ class ChunkDataset final
     return batch_buffer_->get_batch();
   }
 
-  void save(const std::string& save_file_name) override {
-    std::lock_guard<std::mutex> lock(chunk_index_guard_);
-    torch::save(this->chunk_sampler(), save_file_name);
-  }
-            
   /// Helper method around get_batch as `batch_size` is not strictly necessary
   BatchType get_batch() {
     return get_batch(options_.batch_size_);
@@ -370,14 +357,8 @@ class ChunkDataset final
     if (!load_checkpoint_){
       chunk_reader_.reset();
       chunk_sampler_.reset(chunk_reader_.chunk_count());
-    }
-    else {
-      torch::load(chunk_sampler_, options_.resume_from_file_);
-      
-      // After the checkpoint is loaded, mark the boolean to false to prevent future loading.
       load_checkpoint_ = false;
     }
-
 
     // Throw out any existing cached batch in the buffer and re-creates a new
     // chunk buffer.
@@ -406,6 +387,16 @@ class ChunkDataset final
   // loading to set the epoch number for the sampler.
   ChunkSamplerType& chunk_sampler() {
     return chunk_sampler_;
+  }
+
+  void save(serialize::OutputArchive& archive) const override {
+    std::lock_guard<std::mutex> lock(chunk_index_guard_);
+    chunk_sampler_.save(archive);
+  }
+
+  void load(serialize::InputArchive& archive) override{
+    chunk_sampler_.load(archive);
+    load_checkpoint_ = true;
   }
 
  private:
@@ -478,7 +469,7 @@ class ChunkDataset final
   std::atomic<size_t> running_preloaders_;
 
   // mutex to synchronize chunk sampler next() call.
-  std::mutex chunk_index_guard_;
+  mutable std::mutex chunk_index_guard_;
 
   // boolean value to indicate whether we need to load the checkpoint for chunk_sampler_.
   bool load_checkpoint_;

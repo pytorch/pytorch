@@ -101,8 +101,7 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
   auto initialization_function =
       [&](size_t preloader_count,
           size_t batch_size,
-          size_t cache_size,
-          std::string checkpoint_file_name = "") {
+          size_t cache_size) {
         datasets::SharedBatchDataset<datasets::ChunkDataset<
             DummyChunkDataReader,
             samplers::SequentialSampler,
@@ -117,8 +116,7 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
                 datasets::ChunkDatasetOptions(
                     preloader_count,
                     batch_size,
-                    cache_size,
-                    checkpoint_file_name));
+                    cache_size));
       };
 
   ASSERT_THROWS_WITH(
@@ -1472,7 +1470,8 @@ TEST(DataLoaderTest, StatefulDatasetWithNoWorkers) {
     void reset() override {
       counter = 0;
     }
-    void save(const std::string& save_file_name) override{};
+    void save(torch::serialize::OutputArchive& archive) const override{};
+    void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
 
@@ -1509,8 +1508,8 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
     void reset() override {
       counter = 0;
     }
-    void save(const std::string& save_file_name) override{};
-
+    void save(torch::serialize::OutputArchive& archive) const override{};
+    void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
     std::mutex mutex;
   };
@@ -1548,7 +1547,8 @@ TEST(DataLoaderTest, StatefulDatasetWithMap) {
     void reset() override {
       counter = 0;
     }
-    void save(const std::string& save_file_name) override{};
+    void save(torch::serialize::OutputArchive& archive) const override{};
+    void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
 
@@ -1596,7 +1596,8 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
     void reset() override {
       counter = 0;
     }
-    void save(const std::string& save_file_name) override{};
+    void save(torch::serialize::OutputArchive& archive) const override{};
+    void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
 
@@ -1956,7 +1957,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
            ++iterator, ++iteration_count) {
              
         if ((iteration_count + 1) % save_interval == 0) {
-          dataset->save(tempfile.name);
+          torch::save(*dataset, tempfile.name);
 
           samplers::SequentialSampler new_sampler(0);
           torch::load(new_sampler, tempfile.name);
@@ -2004,7 +2005,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
   }
 }
 
-TEST(DataLoaderTest, ChunkDatasetResume) {
+TEST(DataLoaderTest, ChunkDatasetLoad) {
   auto tempfile = c10::make_tempfile();
 
   const size_t prefetch_count = 1;
@@ -2042,9 +2043,9 @@ TEST(DataLoaderTest, ChunkDatasetResume) {
           datasets::ChunkDatasetOptions(
               prefetch_count,
               batch_size,
-              20 /*cache size*/,
+              20 /*cache size*/));
 
-              tempfile.name));
+  torch::load(*dataset, tempfile.name);
 
   auto data_loader = torch::data::make_data_loader(
       dataset, DataLoaderOptions(batch_size).workers(dataloader_worker_count));

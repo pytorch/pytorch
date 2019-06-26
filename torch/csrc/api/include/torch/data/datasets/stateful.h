@@ -31,9 +31,31 @@ class StatefulDataset
   /// Resets internal state of the dataset.
   virtual void reset() = 0;
 
-  /// Saves the dataset's state to file.
-  virtual void save(const std::string& save_file_name) = 0;
+  /// Saves the statefulDataset's state to OutputArchive.
+  virtual void save(serialize::OutputArchive& archive) const = 0;
+
+  /// Deserializes the statefulDataset's state from the `archive`.
+  virtual void load(serialize::InputArchive& archive) = 0;
 };
+
+/// Serializes a statefulDataset to `OutputArchive`.
+template <typename... Args>
+serialize::OutputArchive& operator<<(
+    serialize::OutputArchive& archive,
+    const StatefulDataset<Args...>& statefulDataset) {
+  statefulDataset.save(archive);
+  return archive;
+}
+
+/// Deserializes a statefulDataset from an `InputArchive`.
+template <typename... Args>
+serialize::InputArchive& operator>>(
+    serialize::InputArchive& archive,
+    StatefulDataset<Args...>& statefulDataset) {
+  statefulDataset.load(archive);
+  return archive;
+}
+
 } // namespace datasets
 } // namespace data
 } // namespace torch
