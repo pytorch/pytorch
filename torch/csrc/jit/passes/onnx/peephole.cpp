@@ -233,6 +233,7 @@ void pushPackingPastRnn(Block* b) {
     }
     if (n->outputs().at(0)->uses().size() != 1) {
       // For now, only handle the case where there is one consumer.
+      std::cout << "Canot do " << *n << ", it has " << n->outputs().at(0)->uses().size() << " uses\n";
       continue;
     }
     Node* rnn = n->outputs()[0]->uses()[0].user;
@@ -248,7 +249,9 @@ void pushPackingPastRnn(Block* b) {
     if (rnn->outputs().at(0)->uses().empty() &&
         n->outputs().at(1)->uses().size() == 1) {
       n->outputs().at(0)->replaceAllUsesWith(n->inputs().at(0));
-      n->outputs().at(1)->replaceFirstUseWith(n->inputs().at(1));
+
+      n->outputs().at(1)->replaceAllUsesWith(n->inputs().at(1));
+      std::cout << "Destryoing " << **it << "\n";
       it.destroyCurrent();
       continue;
     }
@@ -270,10 +273,11 @@ void pushPackingPastRnn(Block* b) {
 
     // note there can be multiple uses of the length blob. If we are
     // translating a multi-level RNN it will be an input to each level.
-    n->outputs().at(1)->replaceFirstUseWith(n->inputs().at(1));
+    n->outputs().at(1)->replaceAllUsesWith(n->inputs().at(1));
 
     // and insert new PackPadded after the RNN
     Node* newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
+    std::cout << "Created pack: " << *newPackPadded << "\n";
     newPackPadded->insertAfter(next);
 
     // make things consume from the new PackPadded
@@ -301,6 +305,7 @@ void pushPackingPastRnn(Block* b) {
       next->outputs().at(0)->setType(newType);
     }
 
+    std::cout << "Destryoing 2 " << **it << "\n";
     it.destroyCurrent();
   }
 }
