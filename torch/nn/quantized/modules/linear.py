@@ -6,7 +6,8 @@ from ...._jit_internal import weak_module
 @weak_module
 class Linear(NNLinear):
     r"""
-    A module that wraps the quantized fbgemm linear operator function
+    A quantized linear module with quantized tensor as inputs
+    and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
     for documentation.
 
@@ -32,8 +33,9 @@ class Linear(NNLinear):
     __constants__ = ['bias', 'in_features', 'out_features']
 
     def __init__(self, in_features, out_features, bias=True):
-        assert bias, 'Quantized Linear module always has bias'
+        assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
+        del self.weight
         del self.bias
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0,
@@ -70,8 +72,9 @@ class Linear(NNLinear):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
-        self.bias = state_dict[prefix + 'bias']
+        self.bias.copy_(state_dict[prefix + 'bias'])
         state_dict.pop(prefix + 'weight')
+        state_dict.pop(prefix + 'bias')
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
