@@ -878,16 +878,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // NOTE [ TensorImpl Shallow-Copying ]
   //
-  // TensorImpl shallow-copying is used when we want to have two Variables share the same storage pointer
-  // and tensor metadata, but each with a different autograd history. Example call sites:
+  // TensorImpl shallow-copying is used when we want to have two Variables share the same tensor metadata
+  // (e.g. sizes / strides / storage pointer / storage_offset), but each with a different autograd history.
+  // Example call sites:
   //
   // 1. `var_detached = var.detach()` uses `shallow_copy_and_detach()` to create `var_detached` that shares
-  // the same storage pointer and tensor metadata with `var`, but with a completely new autograd history.
-  // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy storage pointer and tensor metadata from
+  // the same tensor metadata with `var`, but with a completely new autograd history.
+  // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy tensor metadata from
   // `tensor` into `var`, while keeping `var`'s original AutogradMeta.
   //
   // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` / `shallow_copy_from()` /
-  // `copy_tensor_metadata()`) copy the storage pointer and the tensor metadata fields (e.g. sizes / strides /
+  // `copy_tensor_metadata()`) copy the tensor metadata fields (e.g. sizes / strides / storage pointer /
   // storage_offset) by value. However, the following fields are not copied:
   //
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
@@ -1457,7 +1458,7 @@ protected:
   }
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
    * from one TensorImpl to another TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
