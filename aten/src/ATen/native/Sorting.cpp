@@ -1,9 +1,10 @@
+#include <ATen/native/Sorting.h>
+
 #include <ATen/ATen.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
-#include <ATen/LegacyTHFunctions.h>
 
 namespace at {
 namespace native {
@@ -31,41 +32,6 @@ namespace {
 
 constexpr int64_t MAX_LEVELS = 300;
 constexpr int64_t M_SMALL = 10; // Limit for small subfiles
-
-template <typename Fn>
-void dim_apply(TensorList tensors, int64_t dim, Fn f) {
-  AT_ASSERT(tensors.size() > 0);
-  auto t = tensors[0];
-  auto sizes = t.sizes();
-  int64_t ndim = t.dim();
-  int64_t itersize = 1;
-  for (int64_t i = 0; i < ndim; i++) {
-    if (i != dim) {
-      itersize *= t.size(i);
-    }
-  }
-  parallel_for(0, itersize, 1, [&](int64_t i_begin, int64_t i_end) {
-    std::vector<Tensor> narrowed_tensors;
-    narrowed_tensors.reserve(tensors.size());
-    for (int64_t it = i_begin; it < i_end; it++) {
-      narrowed_tensors.clear();
-      for (auto ti : tensors) {
-        int64_t i = it;
-        Tensor nt = ti;
-        for (size_t d = 0; d < ndim; d++) {
-          if (d != dim) {
-            // this could be avoided for slower-changing dimensions if done
-            // better
-            nt = nt.select((d > dim ? 1 : 0), i % sizes[d]);
-            i = i / sizes[d];
-          }
-        }
-        narrowed_tensors.emplace_back(nt);
-      }
-      f(it, narrowed_tensors);
-    }
-  });
-}
 
 template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
@@ -221,88 +187,10 @@ std::tuple<Tensor&, Tensor&> topk_out_cpu(
     indices.zero_();
     return std::forward_as_tuple(values, indices);
   }
-  auto tmp_values = self;
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
-    dim_apply(
-        {self, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
-          auto tmp_values = tl[0].accessor<scalar_t, 1>();
-          auto mode_values = tl[1].accessor<scalar_t, 1>();
-          auto mode_indices = tl[2].accessor<int64_t, 1>();
 
-          auto n = tmp_values.size(0);
-          auto use_partial_sort = k * 64 <= n;
-
-          using elem_t = std::pair<scalar_t, int64_t>;
-          std::vector<elem_t> queue(n);
-          for (int64_t j = 0; j < n; j++) {
-            queue[j].first = tmp_values[j];
-            queue[j].second = j;
-          }
-
-          // we want NaN to be sorted as top for numpy compatibility
-          if (use_partial_sort) {
-            if (largest) {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                });
-            } else {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                });
-            }
-          } else {
-            if (largest) {
-              std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k - 1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-                  });
-              }
-            } else {
-              std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k -1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-                  });
-              }
-            }
-          }
-
-          for (int64_t j = 0; j < k; j++) {
-            mode_values[j] = queue[j].first;
-            mode_indices[j] = queue[j].second;
-          }
-        });
-  });
+  topk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
 
   return std::forward_as_tuple(values, indices);
-}
-
-std::tuple<Tensor&, Tensor&> topk_out(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    int64_t k,
-    int64_t dim,
-    bool largest,
-    bool sorted) {
-  if (self.is_cuda()) {
-    return at::legacy::th::_th_topk_out(values, indices, self, k, dim, largest, sorted);
-  } else {
-    return at::native::topk_out_cpu(values, indices, self, k, dim, largest, sorted);
-  }
 }
 
 std::tuple<Tensor, Tensor> topk(
@@ -364,6 +252,8 @@ Tensor median_cpu(const Tensor& self) {
   });
   return result.view({});
 }
+
+DEFINE_DISPATCH(topk_stub);
 
 } // namespace native
 } // namespace at
