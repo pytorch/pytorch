@@ -31,8 +31,7 @@ struct ErrorReport : public std::exception {
       : context(std::move(r)) {}
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
-
-  const char* what() const noexcept {
+  const char* what() const noexcept override {
     std::stringstream msg;
     msg << "\n" << ss.str();
     if (context) {
@@ -54,7 +53,6 @@ struct ErrorReport : public std::exception {
     the_message = msg.str();
     return the_message.c_str();
   }
-
 
  private:
   template <typename T>

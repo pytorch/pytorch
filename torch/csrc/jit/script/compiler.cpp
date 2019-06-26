@@ -2949,7 +2949,6 @@ std::shared_ptr<Function> CompilationUnit::define(
     const std::unordered_map<std::string, std::shared_ptr<Function>>&
         function_table) const {
   const std::string& name = def.name().name();
-
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -2962,9 +2961,8 @@ std::shared_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     to_ir(def, _resolver, self, method);
   };
-  auto fn = std::make_shared<Function>(
+  return std::make_shared<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);
-  return fn;
 }
 
 void CompilationUnit::define(
