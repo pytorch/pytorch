@@ -8,6 +8,7 @@ namespace jit {
 namespace script {
 
 
+// List of source ranges representing the current stack of calls being compiled
 inline std::vector<SourceRange>& get_stack() {
   static std::vector<SourceRange> call_stack;
   return call_stack;
