@@ -8,7 +8,10 @@ import unittest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 from common_utils import run_tests
+from torch.quantization.QConfig import QConfig
 from torch.quantization.fake_quantize import FakeQuantize
+from torch.quantization.observer import *
+
 
 
 # Reference method for quantizing a tensor.
@@ -97,13 +100,15 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         quant_min, quant_max = 0, 255
         X = to_tensor(np.random.rand(20, 20) * 125)
         X.requires_grad_(True)
-        fq_config = {
+        qoptions = {
             'qscheme': torch.per_tensor_affine,
             'dtype': torch.qint8,
-            'quant_min': quant_min,
-            'quant_max': quant_max,
         }
-        fq_module = FakeQuantize(fq_config)
+        fq_config = QConfig(
+            activation=observer(Observer, qoptions),
+            weight=observer(Observer, qoptions)
+        )
+        fq_module = FakeQuantize(fq_config, quant_min, quant_max)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
