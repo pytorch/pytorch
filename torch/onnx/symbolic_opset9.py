@@ -1620,7 +1620,7 @@ def _std(g, input, unbiased=True):
 
 
 @parse_args('v', 'is', 'b', 'i')
-def _std_dim(g, input, dim, unbiased=True, keepdim=False):
+def _std_along_dims(g, input, dim, unbiased=True, keepdim=False):
     if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
         mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
         meansqrd = g.op("Mul", mean, mean)
@@ -1639,12 +1639,12 @@ def _std_dim(g, input, dim, unbiased=True, keepdim=False):
         _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")
 
 
-# This is a hack since position of optional arguments can change for std. As shown below, 'dim' argument could be listed
-# before 'unbiased' :
+# Since position of optional arguments can change for std, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
 # torch.std(input, unbiased=True)
 # torch.std(input, dim, keepdim=False, unbiased=True)
 def std(g, input, *args):
     if args[0].type().isSubtypeOf(ListType.ofInts()):
-        return _std_dim(g, input, args[0], args[1], args[2])
+        return _std_along_dims(g, input, args[0], args[1], args[2])
     else:
         return _std(g, input, args[0])

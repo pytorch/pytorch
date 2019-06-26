@@ -309,7 +309,7 @@ class TestONNXOpset(TestCase):
         x = torch.randn(1, 16, 3, 3)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
-    def test_std_dim(self):
+    def test_std_along_dims(self):
         class MyModule(Module):
             def forward(self, input):
                 return torch.std(input, dim=[1], unbiased=True, keepdim=True)
