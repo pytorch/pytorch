@@ -259,6 +259,38 @@ class Subset(Dataset):
         return len(self.indices)
 
 
+class ChunkDataset(IterableDataset):
+    r"""
+    Subset of a dataset at specified indices.
+
+    Arguments:
+        dataset (Dataset): The whole Dataset
+        indices (sequence): Indices in the whole set selected for subset
+    """
+    def __init__(self, dataset):
+        super(ChunkDataset, self).__init__()
+        self.dataset = dataset
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        raise NotImplementedError()
+
+    def __next__(self):
+        batch = self.dataset.get_batch()
+        if batch is None:
+            raise StopIteration
+        return batch
+
+    def reset(self):
+        self.dataset.reset()
+
+    def chunk_sampler(self):
+        return self.dataset.chunk_sampler()
+
+    next = __next__  # py2 compatibility
+
 def random_split(dataset, lengths):
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.

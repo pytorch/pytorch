@@ -99,6 +99,11 @@ class DataLoader(object):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
+        auto_collation (bool, optional): usually auto collation mode is dynamically determined,
+            (i.e. if a ``batch_sampler`` is specified, ``auto_collation`` mode will be ``True``
+            and ``False`` otherwise). However, depending on the dataset implementation,
+            it can also be manually specified. If ``True``, auto collation mode is enabled
+            and multiple batches are merged in a single list. (default: ``None``)
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -120,7 +125,7 @@ class DataLoader(object):
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
                  batch_sampler=None, num_workers=0, collate_fn=None, pin_memory=False,
-                 drop_last=False, timeout=0, worker_init_fn=None, collate_fn_args=None):
+                 drop_last=False, timeout=0, worker_init_fn=None, collate_fn_args=None, auto_collation=None):
         torch._C._log_api_usage_once("python.data_loader")
         self.dataset = dataset
         self.num_workers = num_workers
@@ -222,13 +227,14 @@ class DataLoader(object):
         self.batch_sampler = batch_sampler
 
         if collate_fn is None:
-            if self._auto_collation:
+            if self.auto_collation:
                 collate_fn = _utils.collate.default_collate
             else:
                 collate_fn = _utils.collate.default_convert
 
         self.collate_fn = collate_fn
         self.collate_fn_args = collate_fn_args
+        self._auto_collation = auto_collation
         self.__initialized = True
 
     def __setattr__(self, attr, val):
@@ -245,8 +251,15 @@ class DataLoader(object):
             return _MultiProcessingDataLoaderIter(self)
 
     @property
-    def _auto_collation(self):
-        return self.batch_sampler is not None
+    def auto_collation(self):
+        if self._auto_collation is not None:
+            return self._auto_collation
+        else:
+            return self.batch_sampler is not None
+
+    @auto_collation.setter
+    def auto_collation(self, value):
+        self._auto_collation = value
 
     @property
     def _index_sampler(self):
@@ -255,7 +268,7 @@ class DataLoader(object):
         # `.batch_sampler` if in auto-collation mode, and `.sampler` otherwise.
         # We can't change `.sampler` and `.batch_sampler` attributes for BC
         # reasons.
-        if self._auto_collation:
+        if self.auto_collation:
             return self.batch_sampler
         else:
             return self.sampler
@@ -268,7 +281,7 @@ class _BaseDataLoaderIter(object):
     def __init__(self, loader):
         self.dataset = loader.dataset
         self.dataset_kind = loader.dataset_kind
-        self.auto_collation = loader._auto_collation
+        self.auto_collation = loader.auto_collation
         self.drop_last = loader.drop_last
         self.index_sampler = loader._index_sampler
         self.num_workers = loader.num_workers
