@@ -26,8 +26,6 @@ class FunctionalAPITest(TestCase):
 class ModuleAPITest(TestCase):
     def test_linear_api(self):
         """test API functionality for nn.quantized.linear"""
-        # TODO: create from_float
-        # create __init__
         in_features = 10
         out_features = 20
         batch_size = 5
@@ -40,7 +38,7 @@ class ModuleAPITest(TestCase):
         B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32)
         out_scale = 0.5
         out_zero_point = 3
-        qlinear = nnq.Linear(out_features, in_features)
+        qlinear = nnq.Linear(in_features, out_features)
         qlinear._packed_weight = W_pack
         qlinear.bias = B_q
         qlinear.out_scale = torch.tensor([out_scale])
@@ -61,7 +59,7 @@ class ModuleAPITest(TestCase):
             loaded_dict = torch.load(f)
         for key in model_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
-        loaded_qlinear = nnq.Linear(out_features, in_features)
+        loaded_qlinear = nnq.Linear(in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
 
         linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
