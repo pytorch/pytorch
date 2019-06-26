@@ -51,6 +51,19 @@ static void abs_kernel(TensorIterator& iter) {
   });
 }
 
+static void bitwise_not_kernel(TensorIterator& iter) {
+  AT_DISPATCH_INTEGRAL_AND_BOOL_TYPES(iter.dtype(), "bitwise_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t {
+          if (std::is_same<scalar_t, bool>::value)
+            return !a;
+          else
+            return ~a;
+        });
+    });
+}
+
 static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
   if( iter.dtype() == ScalarType::Half ) {
     auto value = value_scalar.to<at::Half>().x;
@@ -222,6 +235,7 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
+REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);

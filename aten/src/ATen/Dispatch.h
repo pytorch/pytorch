@@ -184,6 +184,23 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                        \
   }()
 
+#define AT_DISPATCH_INTEGRAL_AND_BOOL_TYPES(TYPE, NAME, ...)                          \
+  [&] {                                                                      \
+    const auto& the_type = TYPE;                                             \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
+    switch (_st) {                                                           \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)        \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)        \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Bool, bool, __VA_ARGS__)          \
+      default:                                                               \
+        AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");       \
+    }                                                                        \
+  }()
+
 #define AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                               \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
