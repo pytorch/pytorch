@@ -1815,7 +1815,14 @@ def _convert_to_script_module(mod, methods=None):
         return script_method(func, createResolutionCallbackFromClosure(func))
 
     stubs = list(map(make_stub, methods))
-    return WeakScriptModuleProxy(mod, stubs)
+    try:
+        proxy = WeakScriptModuleProxy(mod, stubs)
+        return proxy
+    except RuntimeError as e:
+        # Catching and re-raising the error erases the Python traceback and keeps
+        # it from filling up with recursive calls to this function that the
+        # compiler makes (but that aren't useful to users)
+        raise e
 
 
 def _make_strong(mod):
