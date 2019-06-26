@@ -3762,15 +3762,9 @@
     CUDA: _lu_with_info_cuda
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_btrisolve_out
-    CUDA: legacy::cuda::_th_btrisolve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_btrisolve
-    CUDA: legacy::cuda::_th_btrisolve
 
 - func: _lu_solve_helper(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: function
