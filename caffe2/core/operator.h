@@ -932,6 +932,9 @@ class Operator : public OperatorBase {
   // non-async executors that do not rely on events
   bool Run(int stream_id = 0) final {
     try {
+      // yf225 TODO: add comment here!
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+
       StartAllObservers();
 
       context_.SwitchToDevice(stream_id);
@@ -979,6 +982,9 @@ class Operator : public OperatorBase {
 
   bool RunAsync(int stream_id = 0) final {
     try {
+      // yf225 TODO: add comment here!
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+
       StartAllObservers();
 
       context_.SwitchToDevice(stream_id);
