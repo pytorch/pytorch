@@ -47,14 +47,14 @@ Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Ten
 
 // accepting input(self) here to determine template data types, since running_mean/running_var are optional
 std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
-                                                        const Tensor& running_var, double momentum, double epsilon, int64_t count) {
+                                                        const Tensor& running_var, double momentum, double epsilon, const Tensor& counts) {
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_update_stats_cuda", [&] {
       int world_size = mean.size(1);
       using accscalar_t = at::acc_type<scalar_t, true>;
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, static_cast<int32_t>(count));
+        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts);
       } else {
-        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int64_t>(mean, invstd, running_mean, running_var, momentum, epsilon, count);
+        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int64_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts);
       }
     });
 }
