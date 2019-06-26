@@ -100,8 +100,8 @@ class DataLoader(object):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
         auto_collation (bool, optional): usually auto collation mode is dynamically determined,
-            (i.e. if a ``batch_sampler`` is specified, ``auto_collation`` mode will be ``True``
-            and ``False`` otherwise). However, depending on the dataset implementation,
+            (i.e. if a ``batch_sampler`` or ``batch_size`` are specified, ``auto_collation`` will 
+            be ``True`` and ``False`` otherwise). However, depending on the dataset implementation,
             it can also be manually specified. If ``True``, auto collation mode is enabled
             and multiple batches are merged in a single list. (default: ``None``)
 
@@ -225,6 +225,7 @@ class DataLoader(object):
         self.drop_last = drop_last
         self.sampler = sampler
         self.batch_sampler = batch_sampler
+        self._auto_collation = auto_collation
 
         if collate_fn is None:
             if self.auto_collation:
@@ -234,7 +235,6 @@ class DataLoader(object):
 
         self.collate_fn = collate_fn
         self.collate_fn_args = collate_fn_args
-        self._auto_collation = auto_collation
         self.__initialized = True
 
     def __setattr__(self, attr, val):

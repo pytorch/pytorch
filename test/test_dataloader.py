@@ -239,7 +239,7 @@ class TestConcatDataset(TestCase):
 
 
 # takes in dummy var so this can also be used as a `worker_init_fn`
-def set_faulthander_if_available(_=None, dataset_kind=None, dataset=None):
+def set_faulthander_if_available(_=None, dataset=None):
     if HAS_FAULTHANDLER:
         faulthandler.enable()
         if not IS_WINDOWS:
@@ -426,7 +426,7 @@ def _test_timeout_pin_memory():
     _ = next(iter(dataloader))
 
 
-def disable_stderr(worker_id, dataset_kind=None, dataset=None):
+def disable_stderr(worker_id, dataset=None):
     r"""
     Avoids printing "ERROR: Unexpected segmentation fault encountered in worker."
     from workers. Since worker signal handler prints with low-level write(),
@@ -574,7 +574,7 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 
 # Should be used as worker_init_fn with TestWorkerInfoDataset.
 # See _test_get_worker_info below for usage.
-def test_worker_info_init_fn(worker_id, dataset_kind=None, dataset=None):
+def test_worker_info_init_fn(worker_id, dataset=None):
     worker_info = torch.utils.data.get_worker_info()
     assert worker_id == worker_info.id, "worker_init_fn and worker_info should have consistent id"
     assert worker_id < worker_info.num_workers, "worker_init_fn and worker_info should have valid id"
@@ -625,7 +625,7 @@ def _test_get_worker_info():
 
 
 # test custom init function
-def init_fn(worker_id, dataset_kind=None, dataset=None):
+def init_fn(worker_id, dataset=None):
     torch.manual_seed(12345)
 
 
@@ -636,7 +636,7 @@ class ErrorIterableDataset(IterableDataset):
 
 
 # used with test_error_in_init
-def error_worker_init_fn(_, dataset_kind=None, dataset=None):
+def error_worker_init_fn(_, dataset=None):
     raise RuntimeError("Error in worker_init_fn")
 
 
@@ -984,7 +984,7 @@ class TestDataLoader(TestCase):
             seeds.add(batch[0])
         self.assertEqual(len(seeds), num_workers)
 
-    def test_worker_init_fn(self, dataset_kind=None, dataset=None):
+    def test_worker_init_fn(self, dataset=None):
         dataset = SeedDataset(4)
         dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
                                 worker_init_fn=init_fn)
@@ -1613,9 +1613,8 @@ class TestWorkerQueueDataset(Dataset):
         self.data = data
         self.worker_id = None
 
-    def worker_init_fn(self, worker_id, dataset_kind=None, dataset=None):
+    def worker_init_fn(self, worker_id, dataset=None):
         self.worker_id = worker_id
-        self.dataset_kind = dataset_kind
         self.dataset = dataset
 
     def __getitem__(self, item):
