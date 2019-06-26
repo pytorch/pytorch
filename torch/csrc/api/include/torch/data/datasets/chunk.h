@@ -395,6 +395,7 @@ class ChunkDataset final
   }
 
   void load(serialize::InputArchive& archive) override{
+    std::lock_guard<std::mutex> lock(chunk_index_guard_);
     chunk_sampler_.load(archive);
     load_checkpoint_ = true;
   }

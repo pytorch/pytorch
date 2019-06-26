@@ -1895,6 +1895,17 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
   auto iterator = data_loader->begin();
 }
 
+// Test ChunkDataset save function.
+// Note [save/load ChunkDataset as ChunkSampler]:
+// The chunk sampler inside ChunkDataset is used in a seperate thread pool other
+// than the main thread. Thus it is very hard to acuratly estimate its status
+// when ChunkDataset::save/ChunkDataset::load is called. For the pure purpose of
+// testing, we utilize the implementation fact that the file format for sampler
+// serialization is the same as ChunkDataset serialization, and manually control
+// the chunk sampler by calling the sampler's save/load method for value
+// validation. This is only for testing the specific save/load functionality. In
+// real user case, the user should still use matching ChunkDataset::save and
+// ChunkDataset::load method.
 TEST(DataLoaderTest, ChunkDatasetSave) {
   const size_t chunk_count_ = 6;
   const size_t chunk_size = 10;
@@ -1943,9 +1954,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
             sampler,
             sampler,
             ChunkDatasetOptions(
-                prefetch_count,
-                batch_size,
-                chunk_size /*cache size*/));
+                prefetch_count, batch_size, chunk_size /*cache size*/));
 
     auto data_loader = torch::data::make_data_loader(
         dataset,
@@ -1955,11 +1964,12 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
       int iteration_count = 0;
       for (auto iterator = data_loader->begin(); iterator != data_loader->end();
            ++iterator, ++iteration_count) {
-             
         if ((iteration_count + 1) % save_interval == 0) {
           torch::save(*dataset, tempfile.name);
 
           samplers::SequentialSampler new_sampler(0);
+
+          // See Note [save/load ChunkDataset as ChunkSampler]
           torch::load(new_sampler, tempfile.name);
 
           // Verify save logic. For ChunkDataset, the chunk data is stored in a
@@ -2005,6 +2015,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
   }
 }
 
+// Test ChunkDataset load function.
 TEST(DataLoaderTest, ChunkDatasetLoad) {
   auto tempfile = c10::make_tempfile();
 
@@ -2022,6 +2033,8 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   {
     sampler.reset(data_reader.chunk_count());
     sampler.next(skipped_chunk);
+
+    // See Note [save/load ChunkDataset as ChunkSampler]
     torch::save(sampler, tempfile.name);
   }
 
@@ -2041,9 +2054,7 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
           sampler,
           sampler,
           datasets::ChunkDatasetOptions(
-              prefetch_count,
-              batch_size,
-              20 /*cache size*/));
+              prefetch_count, batch_size, 20 /*cache size*/));
 
   torch::load(*dataset, tempfile.name);
 
@@ -2076,6 +2087,8 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   }
 
   samplers::SequentialSampler new_sampler(0);
+
+  // See Note [save/load ChunkDataset as ChunkSampler]
   torch::load(new_sampler, tempfile.name);
 
   ASSERT_EQ(new_sampler.index(), skipped_chunk);
