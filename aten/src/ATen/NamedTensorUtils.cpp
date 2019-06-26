@@ -151,6 +151,10 @@ optional<std::vector<Dimname>> erase_name(optional<DimnameList> self_names, int6
   return outnames;
 }
 
+void propagate_names(Tensor& result, const Tensor& src) {
+  at::internal_set_names_inplace(result, src.names());
+}
+
 } // namespace namedinference
 } // namespace at
 #endif
