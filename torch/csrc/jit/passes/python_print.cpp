@@ -167,58 +167,79 @@ const static std::unordered_set<std::string> reserved_names = {
 };
 
 struct PythonPrintPass {
-  struct TaggedToken {
-    std::string tok;
-    std::shared_ptr<SourceRange> sr;
-  };
+  using SourceRangeStack = std::vector<SourceRange>;
+  SourceRangeStack source_range_stack_ = {SourceRange("")};
 
-  using SourceRangeStack = std::vector<std::shared_ptr<SourceRange>>;
-  SourceRangeStack source_range_stack_ = {nullptr};
-
-  struct SourceRangeCtxMgr {
-    explicit SourceRangeCtxMgr(
-        SourceRangeStack* stack,
-        std::shared_ptr<SourceRange> sr)
-        : stack(stack) {
+  struct WithSourceRange {
+    explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
       TORCH_INTERNAL_ASSERT(stack);
-      stack->push_back(std::move(sr));
+      if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
+        std::cout << "pushing original source range\n";
+        gen_source->highlight(std::cout);
+        stack->push_back(std::move(gen_source.value()));
+      } else {
+        stack->push_back(std::move(n->sourceRange()));
+      }
     }
-    ~SourceRangeCtxMgr() {
+
+    ~WithSourceRange() {
       stack->pop_back();
     }
+
     SourceRangeStack* stack;
   };
 
-  struct SourceRangeTokenStream {
-    SourceRangeTokenStream(const SourceRangeStack* srs) : srs(srs) {}
-    std::vector<TaggedToken> stream;
+  class TaggedStringStream {
+   public:
+    TaggedStringStream(const SourceRangeStack* srs) : srs(srs) {}
+    TaggedStringStream(TaggedStringStream&& rhs) = default;
 
-    SourceRangeTokenStream& operator<<(const std::string& s) {
-      stream.push_back({s, srs->back()});
+    TaggedStringStream& operator<<(const std::string& s) {
+      ranges_.emplace_back((size_t)oss.tellp(), srs->back());
+      oss << s;
       return *this;
     }
-    SourceRangeTokenStream& operator<<(const std::vector<TaggedToken>& expr) {
-      stream.insert(stream.end(), expr.cbegin(), expr.cend());
+
+    TaggedStringStream& operator<<(const TaggedStringStream& rhs) {
+      for (const auto& range : rhs.ranges_) {
+        ranges_.emplace_back((size_t)oss.tellp() + range.bytes, range.range);
+      }
+      oss << rhs.oss.str();
+      return *this;
+    }
+
+    // This overload is here to prevent people from shooting themselves in the
+    // foot. I would be highly surprised if someone actually wanted to write out
+    // the address of a TaggedStringStream in the pretty print.
+    TaggedStringStream& operator<<(
+        const std::shared_ptr<TaggedStringStream>& rhs) {
+      (*this) << *rhs;
       return *this;
     }
 
     template <typename T>
-    SourceRangeTokenStream& operator<<(const T& t) {
+    TaggedStringStream& operator<<(const T& t) {
       std::stringstream ss;
       ss << t;
-      stream.push_back({ss.str(), srs->back()});
+      (*this) << ss.str();
       return *this;
     }
 
-    std::vector<TaggedToken> vec() const {
-      return stream;
+    std::string str() const {
+      return oss.str();
+    }
+
+    const std::vector<TaggedRange>& ranges() const {
+      return ranges_;
     }
 
    private:
+    std::ostringstream oss;
+    std::vector<TaggedRange> ranges_;
     const SourceRangeStack* srs;
   };
 
-  SourceRangeTokenStream body_;
+  TaggedStringStream body_;
 
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
@@ -453,29 +474,33 @@ struct PythonPrintPass {
   }
 
   // map from Value to how it should be printed at each use
-  std::unordered_map<Value*, std::vector<TaggedToken>> value_to_tagged_tok_;
+  std::unordered_map<Value*, std::shared_ptr<TaggedStringStream>> value_names_;
 
-  std::vector<TaggedToken> useOf(Value* v) const {
-    return value_to_tagged_tok_.at(v);
+  // NB: we MUST pass around the shared pointers to these streams by value.
+  // There is an interaction in splitLongInlines where the string value for
+  // both the RHS and the LHS of an expression are live at the same time,
+  // however the value for the RHS is overwritten in the table.
+  std::shared_ptr<TaggedStringStream> useOf(Value* v) const {
+    return value_names_.at(v);
   }
-  void assignValue(Value* v, const std::vector<TaggedToken>& n) {
-    value_to_tagged_tok_[v] = n;
-  }
-  void assignValue(Value* v, const std::string& s) {
-    value_to_tagged_tok_[v] = {TaggedToken{s, source_range_stack_.back()}};
+  void assignValue(Value* v, std::shared_ptr<TaggedStringStream> s) {
+    value_names_[v] = std::move(s);
   }
   void assignValue(Value* v, Value* w) {
     assignValue(v, useOf(w));
   }
   void assignValuesToTheirUniqueNames(at::ArrayRef<Value*> values) {
     for (auto v : values) {
-      assignValue(v, genUniqueNameFor(v));
+      auto name_stream =
+          std::make_shared<TaggedStringStream>(&source_range_stack_);
+      (*name_stream) << genUniqueNameFor(v);
+      assignValue(v, std::move(name_stream));
     }
   }
 
   size_t level = 0;
   // indent to the current indent level
-  SourceRangeTokenStream& indent() {
+  TaggedStringStream& indent() {
     for (size_t i = 0; i < level; ++i) {
       body_ << "  ";
     }
@@ -503,7 +528,7 @@ struct PythonPrintPass {
   }
 
   void printValueList(
-      SourceRangeTokenStream& stmt,
+      TaggedStringStream& stmt,
       at::ArrayRef<Value*> list,
       const char* begin = "",
       const char* end = "") {
@@ -518,7 +543,7 @@ struct PythonPrintPass {
   }
 
   void printDict(
-      SourceRangeTokenStream& stmt,
+      TaggedStringStream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
       const char* begin = "{",
       const char* end = "}") {
@@ -644,16 +669,13 @@ struct PythonPrintPass {
     }
   }
 
-  bool isLongLine(const std::vector<TaggedToken>& expr) {
-    size_t s = 0;
-    for (const auto& tt : expr) {
-      s += tt.tok.size();
-    }
-    return s + level * 2 >= 40;
+  bool isLongLine(const std::string& str) {
+    return str.size() + level * 2 >= 40;
   }
 
   bool isLongInline(Node* node) {
-    return output_inline_.count(node) && isLongLine(useOf(node->output()));
+    return output_inline_.count(node) &&
+        isLongLine(useOf(node->output())->str());
   }
 
   bool isNonConstantInline(Value* input) {
@@ -692,7 +714,9 @@ struct PythonPrintPass {
     }
   }
 
-  void printOutputDefinition(Node* node, const std::vector<TaggedToken>& expr) {
+  void printOutputDefinition(
+      Node* node,
+      const std::shared_ptr<TaggedStringStream>& expr) {
     assignValuesToTheirUniqueNames(node->outputs());
     indent();
     // Print outputs
@@ -700,7 +724,7 @@ struct PythonPrintPass {
       printValueList(body_, node->outputs());
       body_ << " = ";
     }
-    body_ << expr << "\n";
+    body_ << *expr << "\n";
   }
 
   // Recursively check contained types for any class dependencies
@@ -718,14 +742,7 @@ struct PythonPrintPass {
   }
 
   void printNode(Node* node, bool print_const) {
-    std::shared_ptr<SourceRange> debug_range;
-    if (auto orig_range = node->sourceRange().orig_range()) {
-      debug_range = orig_range;
-    } else {
-      debug_range = std::make_shared<SourceRange>(node->sourceRange());
-    }
-
-    SourceRangeCtxMgr guard(&source_range_stack_, debug_range);
+    WithSourceRange guard(&source_range_stack_, node);
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -790,9 +807,9 @@ struct PythonPrintPass {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
-        SourceRangeTokenStream ss(&source_range_stack_);
-        ss << "fork(" << name << ")";
-        printOutputDefinition(node, ss.vec());
+        auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+        (*ss) << "fork(" << name << ")";
+        printOutputDefinition(node, ss);
       } break;
       case prim::Function: {
         if (enforce_importable_) {
@@ -800,7 +817,7 @@ struct PythonPrintPass {
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
-        auto name = useOf(node->output());
+        auto name = useOf(node->output())->str();
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         indent();
         body_ << "def " << name << "(";
@@ -816,19 +833,19 @@ struct PythonPrintPass {
         printBody(graph->block());
       } break;
       default:
-        SourceRangeTokenStream ss(&source_range_stack_);
-        printRHS(ss, node);
+        auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+        printRHS(*ss, node);
 
         // we prevent long constants from inlining here.
         // it is not safe to do the same thing for non-constants here
         // because of [reordering of inlines]
         if (output_inline_.count(node) == 0 ||
-            (node->kind() == prim::Constant && isLongLine(ss.vec()))) {
-          printOutputDefinition(node, ss.vec());
+            (node->kind() == prim::Constant && isLongLine(ss->str()))) {
+          printOutputDefinition(node, ss);
         } else {
           // this node is safe to inline, so assign the output value
           // to that expression directly
-          assignValue(node->output(), ss.vec());
+          assignValue(node->output(), ss);
         }
     }
   }
@@ -841,13 +858,11 @@ struct PythonPrintPass {
     if (list_size == 0) {
       stmt << "annotate(List[" << the_type << "], [])";
     } else {
-      std::stringstream ss;
-      ss << the_list;
-      stmt << ss.str();
+      stmt << the_list;
     }
   }
 
-  void printConstant(SourceRangeTokenStream& stmt, const IValue& v) {
+  void printConstant(TaggedStringStream& stmt, const IValue& v) {
     std::stringstream ss;
     if (v.isTensor()) {
       ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
@@ -880,7 +895,7 @@ struct PythonPrintPass {
     stmt << ss.str();
   }
 
-  void printNone(SourceRangeTokenStream& stmt, const Node* node) {
+  void printNone(TaggedStringStream& stmt, const Node* node) {
     if (node->output()->type()->isSubtypeOf(NoneType::get())) {
       stmt << "None";
       return;
@@ -911,7 +926,7 @@ struct PythonPrintPass {
   }
 
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
-  void printRHS(SourceRangeTokenStream& stmt, Node* node) {
+  void printRHS(TaggedStringStream& stmt, Node* node) {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
@@ -926,8 +941,8 @@ struct PythonPrintPass {
         if (value->ignore_on_export) {
           stmt << "ops.prim.IgnoredPythonOp";
         } else {
-          stmt << "^" << value->name();
           std::stringstream scalars_stream;
+          stmt << "^" << value->name();
           value->writeScalars(scalars_stream);
           stmt << scalars_stream.str();
         }
@@ -1024,8 +1039,7 @@ struct PythonPrintPass {
           stmt << "getattr(" << useOf(obj) << ", ";
           std::stringstream field_stream;
           printQuotedString(field_stream, field);
-          stmt << field_stream.str();
-          stmt << ")";
+          stmt << field_stream.str() << ")";
         }
       } break;
       default: {
@@ -1055,16 +1069,14 @@ struct PythonPrintPass {
             // vararg functions like format can have extra arguments
             AT_ASSERT(schema.is_vararg());
           }
-          stmt << v;
+          stmt << *v;
         }
         stmt << ")";
       } break;
     }
   }
 
-  SourceRangeTokenStream& printBlock(
-      Block* root,
-      bool block_has_other_statements) {
+  TaggedStringStream& printBlock(Block* root, bool block_has_other_statements) {
     // pythons weird 'pass' syntax creates a bunch of places where we have to
     // check if this block would be empty. But not everything in a block is a
     // node. Sometimes if, loop, and return statements will follow this block
@@ -1082,7 +1094,7 @@ struct PythonPrintPass {
 
   void printDefaultValue(
       const TypePtr& typ,
-      SourceRangeTokenStream& stmt,
+      TaggedStringStream& stmt,
       const IValue& value) {
     // xxx - many weak script modules store default values for broadcasting
     // lists that are not actually the same type as the argument. We can only
@@ -1123,15 +1135,7 @@ struct PythonPrintPass {
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
 
-    std::shared_ptr<SourceRange> debug_range;
-    if (auto orig_range = graph.param_node()->sourceRange().orig_range()) {
-      debug_range = orig_range;
-    } else {
-      debug_range =
-          std::make_shared<SourceRange>(graph.param_node()->sourceRange());
-    }
-
-    SourceRangeCtxMgr guard(&source_range_stack_, debug_range);
+    WithSourceRange guard(&source_range_stack_, graph.param_node());
 
     indent();
     body_ << "def " << func.name() << "(";
@@ -1151,7 +1155,10 @@ struct PythonPrintPass {
       if (arg.default_value()) {
         printDefaultValue(arg.type(), body_, *arg.default_value());
       }
-      assignValue(*param_it++, arg_name);
+      auto arg_stream =
+          std::make_shared<TaggedStringStream>(&source_range_stack_);
+      (*arg_stream) << arg_name;
+      assignValue(*param_it++, arg_stream);
     }
 
     body_ << ") -> " << resultType(graph)->python_str() << ":\n";
@@ -1230,22 +1237,22 @@ struct PythonPrintPass {
         class_deps_.end());
   }
 
-  void print(std::ostream& out, SourceRangeRecords& source_ranges) {
+  void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
     out << getImports();
-    std::shared_ptr<SourceRange> last = nullptr;
-    for (const auto& tok : body_.vec()) {
-      if (tok.sr != last) {
-        last = tok.sr;
-        source_ranges.emplace_back(out.tellp(), tok.sr);
-      }
-      out << tok.tok;
+    int64_t source_offset = out.tellp();
+    out << body_.str();
+    for (const auto& x : body_.ranges()) {
+      source_ranges_out.push_back(x);
+      source_ranges_out.back().bytes += source_offset;
+      std::cout << "offset " << source_ranges_out.back().bytes << "\n";
+      source_ranges_out.back().range.highlight(std::cout);
     }
   }
 };
 
 void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges,
+    SourceRangeRecords& source_ranges_out,
     const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
@@ -1253,12 +1260,12 @@ void PythonPrint(
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printFunction(func);
-  pp.print(out, source_ranges);
+  pp.print(out, source_ranges_out);
 }
 
 void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges,
+    SourceRangeRecords& source_ranges_out,
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
@@ -1266,19 +1273,19 @@ void PythonPrint(
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printCompilationUnit(cu);
-  pp.print(out, source_ranges);
+  pp.print(out, source_ranges_out);
 }
 
 void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges,
+    SourceRangeRecords& source_ranges_out,
     const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);
-  pp.print(out, source_ranges);
+  pp.print(out, source_ranges_out);
 }
 
 bool printerHasSpecialCaseFor(Symbol sym) {

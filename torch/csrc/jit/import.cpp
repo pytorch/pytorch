@@ -9,7 +9,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/source_range_serialization.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
@@ -318,15 +318,16 @@ void ScriptModuleDeserializer::convertModule(
         attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
   }
 
-  std::shared_ptr<DebugInfo> debug_info = nullptr;
+  // If present, load in the table of source ranges from the original
+  // generating code.
+  std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr;
   if (module_def.has_torchscript_debug_arena()) {
     at::DataPtr data;
     size_t size;
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_debug_arena().key());
 
-    debug_info = std::make_shared<DebugInfo>(
-        DebugInfo::SerializedDebugInfo(std::move(data), size));
+    gen_ranges = std::make_shared<SourceRangeUnpickler>(std::move(data), size);
   }
 
   if (module_def.has_torchscript_arena()) {
@@ -339,7 +340,7 @@ void ScriptModuleDeserializer::convertModule(
         std::string(static_cast<const char*>(data.get()), size),
         module_def.torchscript_arena().key(),
         1,
-        std::move(debug_info));
+        std::move(gen_ranges));
 
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };

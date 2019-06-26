@@ -12,12 +12,9 @@ struct Method;
 struct Module;
 } // namespace script
 
-using SourceRangeRecords =
-    std::vector<std::tuple<size_t, std::shared_ptr<SourceRange>>>;
-
 TORCH_API void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges,
+    SourceRangeRecords& source_ranges_out,
     const Function& callee,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
@@ -26,7 +23,7 @@ TORCH_API void PythonPrint(
 
 TORCH_API void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges,
+    SourceRangeRecords& source_ranges_out,
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
@@ -35,7 +32,7 @@ TORCH_API void PythonPrint(
 
 TORCH_API void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges,
+    SourceRangeRecords& source_ranges_out,
     const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,

@@ -3355,7 +3355,6 @@ def foo(xyz):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
-
     def test_serialized_source_ranges(self):
 
         class FooTest(torch.jit.ScriptModule):
@@ -12622,6 +12621,8 @@ a")
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))
         self.checkScript(fn, ({'bye': 3},))
 
+
+        # Check evaluation order
         @torch.jit.script
         def a():
             print("a")
