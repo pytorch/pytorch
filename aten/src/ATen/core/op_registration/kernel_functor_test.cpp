@@ -13,7 +13,6 @@ using c10::Stack;
 using c10::guts::make_unique;
 using c10::intrusive_ptr;
 using c10::Dict;
-using c10::make_dict;
 using at::Tensor;
 using std::unique_ptr;
 using std::string;
@@ -184,7 +183,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorOutput_wh
 
 struct KernelWithTensorListOutput final : OperatorKernel {
   c10::List<Tensor> operator()(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
-    return c10::make_list<Tensor>({input1, input2, input3});
+    return c10::List<Tensor>({input1, input2, input3});
   }
 };
 
@@ -205,7 +204,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutpu
 
 struct KernelWithIntListOutput final : OperatorKernel {
   c10::List<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
-    return c10::make_list<int64_t>({input1, input2, input3});
+    return c10::List<int64_t>({input1, input2, input3});
   }
 };
 
@@ -226,13 +225,13 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListOutput_w
 
 struct KernelWithMultipleOutputs final : OperatorKernel {
   std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> operator()(Tensor) {
-    Dict<string, Tensor> dict = make_dict<string, Tensor>();
+    Dict<string, Tensor> dict;
     dict.insert("first", dummyTensor(TensorType1()));
     dict.insert("second", dummyTensor(TensorType2()));
     return std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
       dummyTensor(TensorType2()),
       5,
-      c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}),
+      c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}),
       c10::optional<int64_t>(c10::in_place, 0),
       dict
     );
@@ -409,7 +408,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
 }
@@ -427,7 +426,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
 }
@@ -446,7 +445,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -464,7 +463,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -485,7 +484,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_witho
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  Dict<string, Tensor> dict = make_dict<string, Tensor>();
+  Dict<string, Tensor> dict;
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -506,7 +505,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withO
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict = make_dict<string, string>();
+  Dict<string, string> dict;
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -527,7 +526,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictOutput_when
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict = make_dict<string, string>();
+  Dict<string, string> dict;
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
