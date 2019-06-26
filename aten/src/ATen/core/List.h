@@ -13,8 +13,6 @@ class Tensor;
 namespace c10 {
 struct IValue;
 template<class T> class List;
-template<class T> List<T> make_list();
-template<class T> List<T> make_list(ArrayRef<T> values);
 
 namespace detail {
 
@@ -182,7 +180,7 @@ template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
  * This is a pointer type. After a copy, both Lists
  * will share the same storage:
  *
- * > List<int> a = make_list<string>();
+ * > List<int> a;
  * > List<int> b = a;
  * > b.push_back("three");
  * > ASSERT("three" == a.get(0));
@@ -226,15 +224,15 @@ public:
   /**
    * Constructs an empty list.
    */
-  friend List make_list<T>();
+  List();
 
   /**
-   * Constructs a list with some initial values
+   * Constructs a list with some initial values.
+   * Example:
+   *   List<int> a({2, 3, 4});
    */
-  friend List make_list<T>(ArrayRef<T>);
-
-  // please use make_list instead.
-  List() = delete;
+  explicit List(std::initializer_list<T> initial_values);
+  explicit List(ArrayRef<T> initial_values);
 
   List(const List&) = default;
   List& operator=(const List&) = default;
@@ -420,14 +418,6 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
 
-inline GenericList make_generic_list() {
-  return make_list<IValue>();
-}
-
-inline GenericList make_generic_list(ArrayRef<IValue> values) {
-  return make_list<IValue>(values);
-}
-
 template<class T>
 List<T> toTypedList(GenericList list) {
   static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
@@ -454,7 +444,7 @@ const std::vector<T>& toVector(const List<T>& list) {
 template<class T>
 List<T> toList(std::vector<T> list) {
   static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toList only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  List<T> result = make_list<T>();
+  List<T> result;
   result.impl_->list = std::move(list);
   return result;
 }

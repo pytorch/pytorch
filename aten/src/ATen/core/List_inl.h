@@ -5,17 +5,25 @@
 namespace c10 {
 
 template<class T>
-List<T> make_list() {
-  return List<T>(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>());
+List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements)
+: impl_(std::move(elements)) {}
+
+template<class T>
+List<T>::List()
+: List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>()) {}
+
+template<class T>
+List<T>::List(ArrayRef<T> values)
+: List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>()) {
+  impl_->list.reserve(values.size());
+  for (const T& element : values) {
+    impl_->list.push_back(element);
+  }
 }
 
-template<class T> List<T> make_list(ArrayRef<T> values) {
-  List<T> result = make_list<T>();
-  result.reserve(values.size());
-  for (const T& element : values) {
-    result.push_back(element);
-  }
-  return result;
+template<class T>
+List<T>::List(std::initializer_list<T> initial_values)
+: List(ArrayRef<T>(initial_values)) {
 }
 
 template<class T>
@@ -29,9 +37,6 @@ List<T>& List<T>::operator=(List&& rhs) noexcept {
   rhs.impl_ = make_intrusive<detail::ListImpl<StorageT>>();
   return *this;
 }
-
-template<class T>
-List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements): impl_(std::move(elements)) {}
 
 template<class T>
 List<T> List<T>::copy() const {

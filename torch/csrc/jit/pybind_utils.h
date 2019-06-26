@@ -305,7 +305,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  c10::List<IValue> elems = c10::make_list<IValue>();
+  c10::List<IValue> elems;
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
@@ -316,7 +316,7 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  c10::impl::GenericDict elems = c10::impl::make_generic_dict();
+  c10::impl::GenericDict elems = c10::impl::GenericDict();
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(
@@ -590,7 +590,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return pyObj;
   } else {
-    AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
+    AT_ERROR(
+        "Missing cases in 'toPyObject'! Can't convert ",
+        ivalue.tagKind(),
+        " to a Python object");
   }
 }
 
@@ -729,6 +732,9 @@ inline py::object invokeScriptFunctionFromPython(
     AutoNoGIL no_gil_guard;
     callee.run(stack);
   }
+  AT_CHECK(
+      stack.size() > 0,
+      "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
 
