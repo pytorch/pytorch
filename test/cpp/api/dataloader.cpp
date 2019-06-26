@@ -1897,8 +1897,8 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
 
 // Test ChunkDataset save function.
 // Note [save/load ChunkDataset as ChunkSampler]:
-// The chunk sampler inside ChunkDataset is used in a seperate thread pool other
-// than the main thread. Thus it is very hard to acuratly estimate its status
+// The chunk sampler inside ChunkDataset is used in a separate thread pool other
+// than the main thread. Thus it is very hard to accurately estimate its status
 // when ChunkDataset::save/ChunkDataset::load is called. For the pure purpose of
 // testing, we utilize the implementation fact that the file format for sampler
 // serialization is the same as ChunkDataset serialization, and manually control
