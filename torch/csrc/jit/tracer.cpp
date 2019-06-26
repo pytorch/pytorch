@@ -302,7 +302,9 @@ static void gatherParametersAndBuffers(
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self) {
+std::pair<std::shared_ptr<TracingState>, Stack> enter(
+    TypedStack inputs,
+    script::Module* self) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
