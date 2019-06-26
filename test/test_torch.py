@@ -2936,7 +2936,7 @@ class _TestTorchMixin(object):
         self.assertIsInstance(d[None, ..., 0, slice(0, 1, 1)], C)  # multi-index
 
         # test ptype propagation with numpy ufuncs
-        if False:  # TEST_NUMPY
+        if TEST_NUMPY:
             np_func = np.add
             self.assertIsInstance(np_func(a, 1), A)
             self.assertIsInstance(np_func(1, a), A)
@@ -11138,7 +11138,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 r2 = np_sc * t
                 self.assertIsInstance(r2, torch.Tensor)
                 self.assertTrue(r2.dtype == t_dtype)
-                self.assertTrue(r2.requires_grad)
+                self.assertFalse(r2.requires_grad)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_trapz(self):
