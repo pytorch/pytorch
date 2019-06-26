@@ -292,6 +292,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Device &': 'device',
         'c10::optional<DimnameList>': 'toDimnameListOptional',
         'c10::optional<ScalarType>': 'scalartypeOptional',
+        'c10::optional<MemoryFormat>': 'memoryformatOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
         'c10::optional<bool>': 'toBoolOptional',
