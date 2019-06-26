@@ -74,7 +74,7 @@ compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
     if (!op.tensor.defined()) continue;
     if (!predicate(op)) continue;
     ScalarType tensor_dtype;
-    if( op.tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(op.tensor.scalar_type())) {
+    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(op.tensor.scalar_type())) {
       tensor_dtype = typeMetaToScalarType(caffe2::get_default_dtype());
     } else {
       tensor_dtype = op.tensor.scalar_type();
@@ -104,16 +104,6 @@ compute_result_type(at::ArrayRef<OperandInfo> operands,
 std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
   // See [Result type computation] in TensorIterator.h
 
-  // in case of in-place operations, result type will be defined and needs to
-  // be preserved. Not an additional predicate becaue doesn't participate in
-  // zero-dim floating point promotion.
-  auto output = compute_result_type(operands_,
-    [](const OperandInfo& op) { return op.is_output; }
-  );
-  if( std::get<1>(output) != ScalarType::Undefined ) {
-    return output;
-  }
-
   auto result_type =
       compute_result_type(operands_,
         [](const OperandInfo& op) { return op.tensor.dim() > 0; },
@@ -122,13 +112,13 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
 
   // if non-zero-dim tensor result is an integral type and there's a zero-dim
   // floating point operand, we'll promote the the floating point type.
-  if( isIntegralType(std::get<1>(result_type)) ) {
+  if (isIntegralType(std::get<1>(result_type))) {
     auto alternate = compute_result_type(operands_,
         [](const OperandInfo& op) {
           return isFloatingType(op.tensor.scalar_type()) && op.tensor.dim() == 0;
         }
     );
-    if( std::get<1>(alternate) != ScalarType::Undefined) {
+    if (std::get<1>(alternate) != ScalarType::Undefined) {
       // preserve device from original result
       return std::make_tuple(std::get<0>(result_type), std::get<1>(alternate));
     }
@@ -136,6 +126,19 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
 
   TORCH_INTERNAL_ASSERT(std::get<1>(result_type) != ScalarType::Undefined);
   return result_type;
+}
+
+// just checks for safe promotion.
+static bool can_promote(const ScalarType& from, const ScalarType& to) {
+  // we disallow float -> integral, e.g., float_tensor *= int is disallowed.
+  if (isFloatingType(from) && isIntegralType(to)) {
+    return false;
+  }
+  // if destination dtype is smaller, would lose information.
+  if (elementSize(from) > elementSize(to)) {
+    return false;
+  }
+  return true;
 }
 
 void TensorIterator::compute_types() {
@@ -179,22 +182,30 @@ void TensorIterator::compute_types() {
         }
       }
 
-      if( op.tensor.defined() && op.tensor.scalar_type() != common_dtype )
+      if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
       {
-        auto tensor = op.tensor;
-        op.tensor = tensor.to(common_dtype);
-        op.dtype = op.tensor.scalar_type();
-        auto original_element_size = tensor.element_size();
-        auto new_element_size = op.tensor.element_size();
-        // stride size (in bytes) can change if we change the dtype.
-        if( original_element_size != new_element_size ) {
-          for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
-            auto stride = op.stride_bytes[i] / original_element_size;
-            op.stride_bytes[i] = stride * new_element_size;
+        if (op.is_output) {
+          if (!can_promote(common_dtype, op.tensor.scalar_type())) {
+            AT_ERROR("result type ", common_dtype,
+              " doesn't match the desired output type ",
+              op.tensor.scalar_type());
+          }
+        } else {
+          auto tensor = op.tensor;
+          op.tensor = tensor.to(common_dtype);
+          op.dtype = op.tensor.scalar_type();
+          auto original_element_size = tensor.element_size();
+          auto new_element_size = op.tensor.element_size();
+          // stride size (in bytes) can change if we change the dtype.
+          if ( original_element_size != new_element_size ) {
+            for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
+              auto stride = op.stride_bytes[i] / original_element_size;
+              op.stride_bytes[i] = stride * new_element_size;
+            }
           }
         }
       }
-      if( op.tensor.defined() && op.device != op.tensor.device()) {
+      if (op.tensor.defined() && op.device != op.tensor.device()) {
         if (op.is_output) {
           AT_ERROR("output with device ", op.tensor.device(),
                    " doesn't match the desired device ", op.device);

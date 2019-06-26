@@ -1070,12 +1070,8 @@ class TestCuda(TestCase):
             self.assertEqual(x * y, 4.5)
             self.assertEqual(y * x, 4.5)
 
-            # *= is an in-place operation equivalent to prod_(). Doesn't modify
-            # dtype, instead casts x to int.
-            y *= x
-            self.assertEqual(y, 3)
-            y = torch.tensor(3, dtype=torch.int32, device='cuda')
-
+            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired"):
+                y *= x
             x *= y
             self.assertEqual(x, 4.5)
 
