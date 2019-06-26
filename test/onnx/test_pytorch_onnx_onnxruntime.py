@@ -50,6 +50,16 @@ class TestONNXRuntime(unittest.TestCase):
         output = model(x)
         self.run_test(model, x, output, example_outputs=output)
 
+    def test_std(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=[0, 1], unbiased=False)
+
+        x = torch.randn(3, 3, 3)
+        model = StandardDeviation()
+        output = model(x)
+        self.run_test(model, x, output)
+
 
 if __name__ == '__main__':
     unittest.main()
