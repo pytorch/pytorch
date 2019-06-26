@@ -1597,35 +1597,54 @@ def gather(g, self, dim, index, sparse_grad=False):
     return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
 
 
-@parse_args('v', 'i', 'i', 'i', 'i')
-def std(g, input, dim=None, unbiased=True, keepdim=None):
+@parse_args('v', 'b')
+def _std(g, input, unbiased=True):
+    print(unbiased)
     if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
-        if dim is None or keepdim is None:
-            mean = g.op("ReduceMean", input, keepdims_i=0)
-            meansqrd = g.op("MatMul", mean, mean)
-            sqrd = g.op("MatMul", input, input)
-            sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
-            std = g.op("Sub", sqrdmean, meansqrd)
-            if unbiased:
-                count = 1
-                for x in input.type().sizes():
-                    count *= x
-                mul = g.op("Mul", std, g.op("Constant", value_t=torch.LongTensor([count])))
-                std = g.op("Div", mul, g.op("Constant", value_t=torch.LongTensor([count - 1])))
-        else:
-            if dim < 0:
-                dim = input.type().dim() + dim
-            mean = g.op("ReduceMean", input, axes_i=[dim], keepdims_i=keepdim)
-            meansqrd = g.op("MatMul", mean, mean)
-            sqrd = g.op("MatMul", input, input)
-            sqrdmean = g.op("ReduceMean", sqrd, axes_i=[dim], keepdims_i=keepdim)
-            std = g.op("Sub", sqrdmean, meansqrd)
-            if unbiased:
-                count = 1
-                for x in [dim]:
-                    count *= input.type().sizes()[x]
-                mul = g.op("Mul", std, g.op("Constant", value_t=torch.LongTensor([count])))
-                std = g.op("Div", mul, g.op("Constant", value_t=torch.LongTensor([count - 1])))
+        mean = g.op("ReduceMean", input, keepdims_i=0)
+        meansqrd = g.op("Mul", mean, mean)
+        sqrd = g.op("Mul", input, input)
+        sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
+        var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
+        if unbiased:
+            count = 1
+            for x in input.type().sizes():
+                count *= x
+            mul = g.op("Mul", var, g.op("Constant", value_t=torch.tensor(count, dtype=torch.float)))
+            var = g.op("Div", mul, g.op("Constant", value_t=torch.tensor(count - 1, dtype=torch.float)))
+
+        std = g.op("Sqrt", var)
         return std
     else:
         _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")
+
+
+@parse_args('v', 'is', 'b', 'i')
+def _std_dim(g, input, dim, unbiased=True, keepdim=False):
+    if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
+        mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+        meansqrd = g.op("Mul", mean, mean)
+        sqrd = g.op("Mul", input, input)
+        sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
+        var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
+        if unbiased:
+            count = 1
+            for x in [1]:
+                count *= input.type().sizes()[x]
+            mul = g.op("Mul", var, g.op("Constant", value_t=torch.tensor(count, dtype=torch.float)))
+            var = g.op("Div", mul, g.op("Constant", value_t=torch.tensor(count - 1, dtype=torch.float)))
+        std = g.op("Sqrt", var)
+        return std
+    else:
+        _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")
+
+
+# This is a hack since position of optional arguments can change for std. As shown below, 'dim' argument could be listed
+# before 'unbiased' :
+# torch.std(input, unbiased=True)
+# torch.std(input, dim, keepdim=False, unbiased=True)
+def std(g, input, *args):
+    if args[0].type().isSubtypeOf(ListType.ofInts()):
+        return _std_dim(g, input, args[0], args[1], args[2])
+    else:
+        return _std(g, input, args[0])

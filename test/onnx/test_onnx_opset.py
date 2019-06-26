@@ -289,13 +289,42 @@ class TestONNXOpset(TestCase):
     def test_std(self):
         class MyModule(Module):
             def forward(self, input):
-                return torch.std(input, unbiased=False)
+                return torch.std(input, dim=[1], unbiased=True, keepdim=True)
 
-        ops = [{"op_name": "ReduceMean", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
-               {"op_name": "MatMul"},
-               {"op_name": "MatMul"},
-               {"op_name": "ReduceMean", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
-               {"op_name": "Sub"}
+        ops = [{"op_name": "ReduceMean", "attributes": [{"name": "axes", "ints": [1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
+               {"op_name": "Mul"},
+               {"op_name": "Mul"},
+               {"op_name": "ReduceMean", "attributes": [{"name": "axes", "ints": [1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
+               {"op_name": "Sub"},
+               {"op_name": "Abs"},
+               {"op_name": "Constant"},
+               {"op_name": "Mul"},
+               {"op_name": "Constant"},
+               {"op_name": "Div"},
+               {"op_name": "Sqrt"}
+               ]
+        ops = {9: ops, 10: ops}
+        x = torch.randn(1, 16, 3, 3)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
+    def test_std(self):
+        class MyModule(Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=True)
+
+        ops = [{"op_name": "ReduceMean",
+                "attributes": [{"name": "unbiased", "i": 0, "type": 2}]},
+               {"op_name": "Mul"},
+               {"op_name": "Mul"},
+               {"op_name": "ReduceMean",
+                "attributes": [{"name": "unbiased", "i": 0, "type": 2}]},
+               {"op_name": "Sub"},
+               {"op_name": "Abs"},
+               {"op_name": "Constant"},
+               {"op_name": "Mul"},
+               {"op_name": "Constant"},
+               {"op_name": "Div"},
+               {"op_name": "Sqrt"}
                ]
         ops = {9: ops, 10: ops}
         x = torch.randn(1, 16, 3, 3)
