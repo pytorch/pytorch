@@ -11,7 +11,7 @@ import io
 
 class TestONNXRuntime(unittest.TestCase):
 
-    def run_test(self, model, input, output, opset_version=None, example_outputs=None):
+    def run_test(self, model, input, output, opset_version=None, example_outputs=None, rtol=1e-05, atol=1e-08):
         # export the model to ONNX
         f = io.BytesIO()
         torch.onnx.export(model, input, f,
@@ -27,7 +27,7 @@ class TestONNXRuntime(unittest.TestCase):
             output = output.detach().numpy()
         else:
             output = output.numpy()
-        np.allclose(output, ort_outs[0])
+        assert np.allclose(output, ort_outs[0], rtol=rtol, atol=atol)
 
     def test_full_trace(self):
         class FullModel(torch.nn.Module):
@@ -55,7 +55,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 5, 10, 10)
         output = model(x)
 
-        self.run_test(model, x, output)
+        self.run_test(model, x, output, rtol=1e-05, atol=1e-07)
 
 if __name__ == '__main__':
     unittest.main()

@@ -869,12 +869,7 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
 
 @parse_args('v', 'is', 'v', 'v', 'f', 'i')
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
-    if input.type().kind() != "CompleteTensorType" and \
-       input.type().kind() != "DimensionedTensorType":
-        return _unimplemented("layer_norm", "missing tensor information")
-
-    axes = [i + (input.type().dim() - len(normalized_shape))
-            for i in range(0, len(normalized_shape))]
+    axes = [-i for i in range(len(normalized_shape), 0, -1)]
 
     two_cst = g.op("Constant", value_t=torch.tensor(2.))
     eps_cst = g.op("Constant", value_t=torch.tensor(eps))
@@ -892,7 +887,7 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
        not (weight is None or weight.node().mustBeNone()):
         layer_norm = add(g, mul(g, layer_norm, weight), bias)
 
-    return layer_norm    
+    return layer_norm
 
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
