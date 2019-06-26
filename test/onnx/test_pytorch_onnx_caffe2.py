@@ -479,7 +479,7 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_resnet(self):
         state_dict = model_zoo.load_url(model_urls['resnet50'], progress=False)
         self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,
-                            state_dict=state_dict, atol=1e-6)
+                            state_dict=state_dict, atol=1e-5)
 
     def test_squeezenet(self):
         sqnet_v1_1 = SqueezeNet(version=1.1)
@@ -891,6 +891,13 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(*shape)
         self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_cosine_similarity(self):
+        shape = (100, 128)
+        x = torch.randn(*shape)
+        y = torch.randn(*shape)
+        self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
+                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_lstm_constant_folding(self):
         class LstmNet(nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -1249,6 +1256,15 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=(torch.ones(x.size()),))
+
+    def test_full(self):
+        class FullModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.full((3, 4), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        self.run_model_test(FullModel(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False)
 
     def test_full_script(self):
         class FullClass(torch.jit.ScriptModule):

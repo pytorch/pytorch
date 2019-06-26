@@ -218,7 +218,7 @@ class TestOperators(TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                assert False
+                raise AssertionError()
 
             @staticmethod
             def forward(ctx, x, y):
@@ -502,10 +502,6 @@ class TestOperators(TestCase):
     def test_upsample_nearest(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
-
-    def test_upsample_bilinear(self):
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)

@@ -105,8 +105,8 @@
 #     then the build will fail if the requested BLAS is not found, otherwise
 #     the BLAS will be chosen based on what is found on your system.
 #
-#   MKL_SEQ=1
-#     chooses a sequential version of MKL library (in case of BLAS=MKL)
+#   MKL_THREADING
+#     MKL flavor: SEQ, TBB or OMP (default)
 #
 #   USE_FBGEMM
 #     Enables use of FBGEMM
@@ -367,7 +367,8 @@ def check_pydep(importname, module):
 
 class build_ext(setuptools.command.build_ext.build_ext):
     def run(self):
-        # report build options
+        # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
+        # accurate report on what is used and what is not.
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
@@ -396,7 +397,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using NCCL')
         if cmake_cache_vars['USE_DISTRIBUTED']:
-            report('-- Building with THD distributed package ')
             if IS_LINUX:
                 report('-- Building with c10d distributed package ')
             else:

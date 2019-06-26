@@ -44,4 +44,7 @@ TypeID ${Type}::ID() const {
 
 ${type_derived_method_definitions}
 
+static auto& registerer = globalATenDispatch()
+  ${function_registrations};
+
 }

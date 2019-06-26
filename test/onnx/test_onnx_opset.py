@@ -207,18 +207,97 @@ class TestONNXOpset(TestCase):
         ops = {9 : ops, 10 : ops}
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
 
-    def test_gather_from_index_select(self):
+    def test_full(self):
         class MyModule(Module):
             def forward(self, x):
-                return torch.index_select(x, dim=1, index=torch.tensor(2))
+                return torch.full((3, 4), x)
 
-        x = torch.randn(3, 4)
+        ops = [{"op_name" : "Constant"},
+               {"op_name" : "ConstantOfShape"},
+               {"op_name" : "Add"}]
+        ops = {9 : ops, 10 : ops}
+        x = torch.tensor(12)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
-        ops = [
-            {"op_name" : "Constant"},
-            {"op_name" : "Gather", "attributes" : [{"name" : "axis", "i" : 1, "type" : 2}]}]
-        ops = {9 : ops}
-        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9])
+    def test_interpolate(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                return torch.nn.functional.interpolate(x,
+                                                       size=size,
+                                                       mode='nearest')
+        ops_9 = [{"op_name" : "Constant"},
+                 {"op_name" : "Shape"},
+                 {"op_name" : "Gather"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Shape"},
+                 {"op_name" : "Gather"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Mul"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Mul"},
+                 {"op_name" : "Unsqueeze"},
+                 {"op_name" : "Unsqueeze"},
+                 {"op_name" : "Concat"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Cast"},
+                 {"op_name" : "Shape"},
+                 {"op_name" : "Slice"},
+                 {"op_name" : "Cast"},
+                 {"op_name" : "Div"},
+                 {"op_name" : "Concat"},
+                 {"op_name" : "Upsample",
+                  "attributes" :
+                  [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Shape"},
+                  {"op_name" : "Gather"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Shape"},
+                  {"op_name" : "Gather"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Mul"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Mul"},
+                  {"op_name" : "Unsqueeze"},
+                  {"op_name" : "Unsqueeze"},
+                  {"op_name" : "Concat"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Cast"},
+                  {"op_name" : "Shape"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice"},
+                  {"op_name" : "Cast"},
+                  {"op_name" : "Div"},
+                  {"op_name" : "Concat"},
+                  {"op_name" : "Resize",
+                   "attributes" :
+                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        check_onnx_opsets_operator(MyModel(), x, ops, opset_versions=[9, 10])
+
+        class MyDynamicModel(torch.nn.Module):
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                # work around for now: turn the dynamic sizes into constant
+                size = [int(i) for i in size]
+                return torch.nn.functional.interpolate(x,
+                                                       size=size,
+                                                       mode='nearest')
+        ops_9 = [{"op_name" : "Constant"},
+                 {"op_name" : "Upsample",
+                  "attributes" :
+                  [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Resize",
+                   "attributes" :
+                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.randn(20, 16, 50)
+        check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
 
 
 if __name__ == '__main__':
