@@ -1339,7 +1339,7 @@ struct to_ir {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
-    // Emit loop information for builtinFunction values like range(), zip(), 
+    // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
     SugaredValuePtr sv = emitSugaredExpr(itrs[0], 1);
 
@@ -1357,7 +1357,7 @@ struct to_ir {
         sv = std::make_shared<SimpleValue>(
           graph->insert(aten::keys, {siv->getValue()}, {}, stmt.range()));
       }
-      emitLoopCommon(stmt.range(), body, sv, targets, {}); 
+      emitLoopCommon(stmt.range(), body, sv, targets, {});
       return;
     }
 
@@ -2260,7 +2260,7 @@ struct to_ir {
         if (input_size == 2) {
           start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
         }
-        
+
         if (input_size > 2) {
           throw ErrorReport(loc)
             << "enumerate expected at most 2 arguments, got " << input_size;
@@ -2805,7 +2805,15 @@ struct to_ir {
       Value* dict_val,
       Value* key_val) {
     auto dict_type = dict_val->type()->cast<DictType>();
-    AT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
+
+    if (!key_val->type()->isSubtypeOf(dict_type->getKeyType())) {
+      throw ErrorReport(loc)
+          << "Expected key type '" << key_val->type()->python_str()
+          << "' to subtype the key type '"
+          << dict_type->getKeyType()->python_str() << "' of the dict '"
+          << dict_type->python_str() << "'";
+    }
+
     return graph->insertNode(graph->createDictIndex(dict_val, key_val))
         ->output();
   }
