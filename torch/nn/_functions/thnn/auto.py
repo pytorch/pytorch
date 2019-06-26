@@ -276,11 +276,8 @@ def _generate_function_classes(scope_dict):
         'SpatialFullConvolution',
         'SpatialConvolutionMM',
         'TemporalConvolution',
-        'SpatialAveragePooling',
         'SpatialMaxUnpooling',
-        'VolumetricAveragePooling',
         'VolumetricMaxUnpooling',
-        'VolumetricConvolution',
         'VolumetricFullConvolution',
         'VolumetricConvolutionMM',
         'TemporalMaxPooling',
@@ -297,7 +294,6 @@ def _generate_function_classes(scope_dict):
     }
     name_remap = {
         'TemporalConvolution': 'Conv1d',
-        'SpatialDilatedConvolution': 'DilatedConv2d',
         'HardTanh': 'Hardtanh',
         'HardShrink': 'Hardshrink',
         'SoftPlus': 'Softplus',

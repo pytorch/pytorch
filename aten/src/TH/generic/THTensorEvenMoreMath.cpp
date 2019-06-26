@@ -153,7 +153,14 @@ scalar_t THTensor_(minall)(THTensor *tensor)
   scalar_t theMin;
   scalar_t value;
 
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
+  THArgCheck(
+      THTensor_(nElement)(tensor) > 0,
+      1,
+      "cannot perform reduction function min "
+      "on tensor with no elements because the "
+      "operation does not have an identity"
+  );
+
   theMin = tensor->data<scalar_t>()[0];
   TH_TENSOR_APPLY(scalar_t, tensor,
                   value = *tensor_data;
@@ -171,7 +178,14 @@ scalar_t THTensor_(maxall)(THTensor *tensor)
   scalar_t theMax;
   scalar_t value;
 
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
+  THArgCheck(
+      THTensor_(nElement)(tensor) > 0,
+      1,
+      "cannot perform reduction function max "
+      "on tensor with no elements because the "
+      "operation does not have an identity"
+  );
+
   theMax = tensor->data<scalar_t>()[0];
   TH_TENSOR_APPLY(scalar_t, tensor,
                   value = *tensor_data;
@@ -218,7 +232,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
     for (i=0; i<numel; i++) {
       if (index_data[i] < 0 || index_data[i] > max) {
         THLongTensor_free(index);
-        THError("index out of range");
+        THError("index out of range: Tried to access index %d out of table with %d rows.", index_data[i], max);
       }
     }
 

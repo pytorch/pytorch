@@ -94,6 +94,16 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
+  // return length of this thing, if not then it can't be iterated.
+  virtual Value* len(const SourceRange& loc, Function& m) {
+    throw ErrorReport(loc) << "'" << kind() << "'"
+                           << " object is not iterable";
+  }
+  // expression for ith elemement for iterable value
+  virtual Value* getelem(const SourceRange&loc, Function& m, Value* i) {
+    throw ErrorReport(loc) << " cannot get the element of value " << kind();
+  }
+
   virtual ~SugaredValue() = default;
 };
 
@@ -141,6 +151,9 @@ struct TORCH_API SimpleValue : public SugaredValue {
   Value* getValue() const {
     return value_;
   }
+
+  Value* len(const SourceRange& loc, Function& m) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
 
  private:
   Value* value_;
@@ -213,6 +226,23 @@ struct TORCH_API ClassValue : public SugaredValue {
   }
 
   ClassTypePtr type_;
+};
+
+struct TORCH_API NamedTupleConstructor : public SugaredValue {
+  explicit NamedTupleConstructor(TupleTypePtr type) : type_(std::move(type)) {}
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+  std::string kind() const override {
+    return type_->str();
+  }
+
+  TupleTypePtr type_;
 };
 
 struct FunctionValue : public SugaredValue {
@@ -328,7 +358,9 @@ using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
-  MagicMethod(std::string desugared_name, SugaredValuePtr base)
+  MagicMethod(
+      std::string desugared_name,
+      SugaredValuePtr base)
       : base_value_(std::move(base)),
         desugared_name_(std::move(desugared_name)) {}
 
@@ -351,6 +383,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
               << class_ptr->python_str() << " does not define a "
               << desugared_name_ << " method";
         }
+
         return MethodValue(self, desugared_name_)
             .call(loc, m, inputs.slice(1), attributes, n_binders);
       }
@@ -402,6 +435,71 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   std::string kind() const override {
     return "isinstance";
   }
+};
+
+// matched against for special handling of range expressions
+struct TORCH_API RangeValue : SugaredValue {
+  RangeValue(const SourceRange& loc, Function&m, std::vector<Value*> inputs);
+  std::string kind() const override {
+    return "range";
+  }
+  Value* len(const SourceRange& loc, Function& m) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+
+  private:
+    Value* start_;
+    Value* end_;
+    Value* step_;
+    // a flag to determine if it's a simple range() call with only end_ from
+    // arguments If true, we will not insert length calculation and index
+    // derivation nodes to simplify the graph and enable more possible
+    // optimizations
+    bool has_only_end_;
+};
+
+// matched against for special handling of iterables like zip(), enumerate()
+struct TORCH_API IterableValue : SugaredValue {
+  IterableValue(Symbol symbol): symbol_(symbol) {}
+  std::string kind() const override {
+    return "iterable";
+  }
+  Symbol symbol_;
+};
+
+// Specialized Tree structure to matched against for special handling 
+// of builtin functions iterables expressions like zip(), enumerate(), etc.
+// zip and enumerate can be modeled as a tree of SimpleValue/RangeValue:
+//    zip(x, y) ->  (x, y) with tuple assignment to each loop target
+//    enumerate(x) -> (range(0, math.inf, 1), x)
+// So a complicated expression like zip(a, enumerate(b), range(0, 100)) will be:
+// (a, (range(0, math.inf, 1), b), range(0, 100))
+// We use those base iterables to fill in the loop information like max_trip_count
+// and set the value table for loop targets
+struct TORCH_API IterableTree : SugaredValue {
+  IterableTree() = default;
+  IterableTree(const std::vector<SugaredValuePtr> children): children_(std::move(children)) {}
+  std::string kind() const override {
+    return "iterabletree";
+  }
+  void addChild(SugaredValuePtr sv) {
+    children_.emplace_back(sv);
+  }
+
+  std::vector<SugaredValuePtr> get_children() {
+    return children_;
+  }
+
+  // given a IterableTree node, get all the base iterables/leaves under the
+  // IterableTree node, which are either SimpleValue or RangeValue. This enable
+  // us to get all the basic SugaredValues that contains valid loop information
+  // with len() and getelem()
+  std::vector<SugaredValuePtr> get_base_iterables();
+
+  Value* len(const SourceRange& loc, Function& m) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+
+  private:
+    std::vector<SugaredValuePtr> children_;
 };
 
 // This represents the "__new__" method on classes, which can't be a MethodValue

@@ -261,7 +261,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
 
   // delete a post hook matching the key
   bool del_post_hook(const uintptr_t& key) {
-    for (auto it = post_hooks_.begin(); it != post_hooks_.end();) {
+    for (auto it = post_hooks_.begin(); it != post_hooks_.end(); ++it) {
       if (key == reinterpret_cast<std::uintptr_t>(it->get())) {
         post_hooks_.erase(it);
         return true;
