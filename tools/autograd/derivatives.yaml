@@ -315,7 +315,7 @@
   self: zeros_like(grad)
 
 - name: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max, int quant_delay, int iter) -> Tensor
-  self: at::fake_quantize_per_tensor_affine_backward(grad, self, scale, zero_point, quant_min, quant_max, quant_delay, iter)
+  self: fake_quantize_per_tensor_affine_backward(grad, self, scale, zero_point, quant_min, quant_max, quant_delay, iter)
 
 - name: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
   self: zeros_like(grad)

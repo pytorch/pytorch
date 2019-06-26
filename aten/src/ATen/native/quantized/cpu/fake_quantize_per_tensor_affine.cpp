@@ -24,8 +24,8 @@ Notes:
     beginning of the training.
   - quantization range [quant_min, quant_max]
 */
-at::Tensor fake_quantize_per_tensor_affine_cpu(
-      const at::Tensor& self,
+Tensor fake_quantize_per_tensor_affine_cpu(
+      const Tensor& self,
       double scale,
       int64_t zero_point,
       int64_t quant_min,
@@ -83,9 +83,9 @@ Notes:
     beginning of the training.
   - quantization range [0, 2^bits - 1]
 */
-at::Tensor fake_quantize_per_tensor_affine_backward_cpu(
-      const at::Tensor& dY,
-      const at::Tensor& X,
+Tensor fake_quantize_per_tensor_affine_backward_cpu(
+      const Tensor& dY,
+      const Tensor& X,
       double scale,
       int64_t zero_point,
       int64_t quant_min,

@@ -97,12 +97,13 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         quant_min, quant_max = 0, 255
         X = to_tensor(np.random.rand(20, 20) * 125)
         X.requires_grad_(True)
-        qconfig = {
+        fq_config = {
             'qscheme': torch.per_tensor_affine,
+            'dtype': torch.qint8,
             'quant_min': quant_min,
             'quant_max': quant_max,
         }
-        fq_module = FakeQuantize(qconfig)
+        fq_module = FakeQuantize(fq_config)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
