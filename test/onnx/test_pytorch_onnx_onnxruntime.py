@@ -50,6 +50,12 @@ class TestONNXRuntime(unittest.TestCase):
         output = model(x)
         self.run_test(model, x, output, example_outputs=output)
 
+    def test_layer_norm(self):
+        model = torch.nn.LayerNorm([10, 10])
+        x = torch.randn(20, 5, 10, 10)
+        output = model(x)
+
+        self.run_test(model, x, output)
 
 if __name__ == '__main__':
     unittest.main()
