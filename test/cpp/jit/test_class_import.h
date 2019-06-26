@@ -74,8 +74,8 @@ void testClassImport() {
 }
 
 void testScriptObject() {
-  Module m1;
-  Module m2;
+  Module m1("m1");
+  Module m2("m2");
   std::vector<at::Tensor> constantTable;
   import_libs(
       *m1.class_compilation_unit(),
