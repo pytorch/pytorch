@@ -9216,7 +9216,7 @@ a")
             # type: (List[int], List[int], List[int]) -> int
             sum = 0
             for (i, (j, k)) in zip(x, zip(y, z)):
-                sum += i * j * k 
+                sum += i * j * k
 
             return sum
 
@@ -9238,7 +9238,7 @@ a")
                 # type: (List[int], List[int], List[int]) -> int
                 sum = 0
                 for (i, (j, k)) in zip(x, y, z):
-                    sum += i * j * k 
+                    sum += i * j * k
 
                 return sum
 
@@ -15919,6 +15919,13 @@ class TestDict(JitTestCase):
             return a
 
         self.assertEqual(fn(), {'ok': 10})
+
+    def test_key_type(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected key type 'None' to subtype"):
+            @torch.jit.script
+            def fn(a):
+                # type: (Dict[str, int]) -> int
+                return a[None]
 
     def test_loop(self):
         @torch.jit.script
