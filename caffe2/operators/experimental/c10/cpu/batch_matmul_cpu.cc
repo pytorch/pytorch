@@ -1,5 +1,5 @@
 #include <ATen/core/op_registration/op_registration.h>
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
@@ -269,23 +269,13 @@ class batch_matmul_cpu final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::BatchMatmul",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("A"),
-            c10::Argument("B"),
-            c10::Argument("output"),
-            c10::Argument("trans_a", IntType::get()),
-            c10::Argument("trans_b", IntType::get()),
-            c10::Argument("broadcast", IntType::get())}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<batch_matmul_cpu<float, CPUContext>>(),
-    c10::dispatchKey(CPUTensorId()));
+    "_c10_experimental::BatchMatmul",
+    c10::RegisterOperators::options()
+      .kernel<batch_matmul_cpu<float, CPUContext>>(CPUTensorId()));
 
 } // namespace
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::BatchMatmul",
     C10BatchMatMul_DontUseThisOpYet)
 

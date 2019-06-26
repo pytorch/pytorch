@@ -1,5 +1,7 @@
 #include <ATen/${Type}.h>
 
+#include <ATen/core/ATenDispatch.h>
+
 namespace at {
 
 std::unordered_map<std::string, void *>& ${Type}Dispatch::get_fn_table() {
@@ -9,18 +11,6 @@ std::unordered_map<std::string, void *>& ${Type}Dispatch::get_fn_table() {
 
 ${Type}::${Type}()
   : TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-
-Allocator* ${Type}::allocator() const {
-  AT_ERROR("allocator is not implemented for ${Type}");
-}
-
-Device ${Type}::getDeviceFromPtr(void * data) const {
-  return DeviceType::${DeviceType};
-}
-
-std::unique_ptr<Generator> ${Type}::generator() const {
-  AT_ERROR("generator is not implemented for ${Type}");
-}
 
 Backend ${Type}::backend() const {
   return Backend::${Backend};
@@ -35,5 +25,8 @@ TypeID ${Type}::ID() const {
 }
 
 ${type_method_definitions}
+
+static auto& registerer = globalATenDispatch()
+  ${function_registrations};
 
 } // namespace at

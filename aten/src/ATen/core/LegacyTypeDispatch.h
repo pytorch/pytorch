@@ -59,8 +59,7 @@ class CAFFE2_API LegacyTypeDispatch {
   }
   Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) {
-      initForDeviceType(backendToDeviceType(p));
-      initForScalarType(s);
+      initForBackend(p);
     }
     auto type = getNonVariableTypeRaw(p, s);
 
@@ -103,10 +102,11 @@ class CAFFE2_API LegacyTypeDispatch {
     type_registry[static_cast<int>(b)] = std::move(t);
     detail::getVariableHooks().registerVariableTypeFor(this, b);
   }
-private:
-  void initForDeviceType(DeviceType p) {
+  void initForBackend(Backend b) {
+    auto p = backendToDeviceType(b);
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
+    static std::once_flag complex_once;
     if (p == DeviceType::CPU) {
       std::call_once(cpu_once, [] {
         getLegacyDeviceTypeInit().initCPU();
@@ -120,17 +120,13 @@ private:
         getLegacyDeviceTypeInit().initHIP();
       });
     }
-  }
-  void initForScalarType(ScalarType s) {
-    static std::once_flag once;
-    // Only complex may need initialization
-    if (isComplexType(s)) {
-      std::call_once(once, [] {
+    if (b == Backend::ComplexCPU || b == Backend::ComplexCUDA) {
+      std::call_once(complex_once, [] {
         getLegacyDeviceTypeInit().initComplex();
       });
     }
   }
-
+ private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   TypeUniquePtr type_registry
@@ -138,11 +134,6 @@ private:
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
-
-struct CAFFE2_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
-};
 
 // A RAII, thread local (!) guard that has the following effect:
 //
@@ -180,7 +171,7 @@ inline Type& legacyTensorType(const TensorImpl& tensor) {
   return *globalLegacyTypeDispatch().getTypeRaw(
       tensorTypeIdToBackend(tensor.type_id()),
       typeMetaToScalarType(tensor.dtype()),
-      tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
+      tensor.is_variable());
 }
 
 inline void initializeLegacyTypeDispatchFor(const TensorImpl& tensor) {
@@ -188,7 +179,7 @@ inline void initializeLegacyTypeDispatchFor(const TensorImpl& tensor) {
   globalLegacyTypeDispatch().getType(
       tensorTypeIdToBackend(tensor.type_id()),
       typeMetaToScalarType(tensor.dtype()),
-      tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
+      tensor.is_variable());
 }
 
 } // namespace at

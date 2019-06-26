@@ -179,7 +179,7 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
 
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid;
-  AT_CHECK(cuda::getApplyGrid(N, dim_grid, in_tensor.get_device()), "unable to get dim grid");
+  TORCH_CHECK(cuda::getApplyGrid(N, dim_grid, in_tensor.get_device()), "unable to get dim grid");
 
   auto total_dims = in_tensor.dim();
 

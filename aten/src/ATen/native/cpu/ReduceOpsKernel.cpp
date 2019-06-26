@@ -15,7 +15,7 @@ namespace at { namespace native { namespace {
 using namespace vec256;
 
 static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sum_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
     binary_kernel_reduce_vec(
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
@@ -38,7 +38,7 @@ static void std_var_kernel_impl(TensorIterator &iter, bool unbiased, bool take_s
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
       iter,
-      WelfordOps<scalar_t, double, int64_t, double> { unbiased, take_sqrt },
+      WelfordOps<scalar_t, double, int64_t, double, std::tuple<scalar_t, scalar_t>> { unbiased, take_sqrt },
       WelfordData<double, int64_t, double>()
     );
   });

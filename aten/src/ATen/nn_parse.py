@@ -423,7 +423,7 @@ def run(paths):
                 forward_backend_types[backend] = backend_props.get('forward_scalar_types', default_scalar_types)
                 backward_backend_types[backend] = backend_props.get('backward_scalar_types', default_scalar_types)
 
-            base = base_declaration(func, fwd_function, backends, default_scalar_types)
+            base = base_declaration(func, fwd_function, backends, None)
             declarations.append(forward_declaration(base, fwd_function, forward_backend_types))
             if bwd_functions:
                 declarations.append(backward_declaration(base, bwd_functions, backward_backend_types))

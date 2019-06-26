@@ -18,7 +18,7 @@ foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    endforeach()
 endforeach()
 
-foreach(THC_FILE TensorMathCompareT TensorMathCompare TensorMathReduce TensorMasked)
+foreach(THC_FILE TensorMathCompareT TensorMathCompare TensorMathReduce TensorMasked TensorMathPointwise)
    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
       FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu"
         "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBoolType.h>\n")
@@ -31,7 +31,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cpp
 
   ${CMAKE_CURRENT_SOURCE_DIR}/THCReduceApplyUtils.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCBlas.cu
@@ -108,7 +107,6 @@ INSTALL(FILES
           THCTensorMode.cuh
           THCTensorTopK.cuh
           # See Note [TH abstraction violation]
-          THCGenerator.hpp
           THCTensor.hpp
           THCStorage.hpp
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC")

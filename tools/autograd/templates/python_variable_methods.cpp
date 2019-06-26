@@ -5,10 +5,11 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -126,6 +127,14 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(self.data_ptr());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -142,17 +151,24 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_contiguous(const Tensor & self) {
+static Tensor dispatch_contiguous(const Tensor & self, at::MemoryFormat memory_format) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  return self.contiguous();
+  return self.contiguous(memory_format);
 }
- static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
+
+static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "contiguous(*, MemoryFormat memory_format=contiguous_format)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  auto memory_format = r.memoryformat(0);
   // avoids touching the GIL or current device if self is already contiguous
-  if (self_.is_contiguous()) {
+  if (self_.is_contiguous(memory_format)) {
     // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
     // record this call to contiguous() in the trace regardless of whether
     // we actually call contiguous here, we need to record this information
@@ -162,13 +178,14 @@ static Tensor dispatch_contiguous(const Tensor & self) {
       auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "self", self_);
+      jit::tracer::addInputs(node, "memory_format", memory_format);
       tracer_state->graph->insertNode(node);
       jit::tracer::addOutput(node, self_);
     }
     Py_INCREF(self);
     return self;
   }
-  return THPVariable_Wrap(dispatch_contiguous(self_));
+  return THPVariable_Wrap(dispatch_contiguous(self_, memory_format));
   END_HANDLE_TH_ERRORS
 }
 
@@ -309,6 +326,36 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_nonzero(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.nonzero();
+}
+
+static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.nonzero_numpy();
+}
+
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "nonzero()|deprecated",
+    "nonzero(*, bool as_tuple=False)",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0 || (r.idx == 1 && !r.toBool(0))) {
+    return wrap(dispatch_nonzero(self_));
+  } else {
+    return wrap(dispatch_nonzero_numpy(self_));
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -320,7 +367,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
-  AT_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
+  TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::cuda_lazy_init();
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false));
   END_HANDLE_TH_ERRORS
@@ -381,12 +428,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
-  }
-  return torch::utils::tensor_to_numpy(self_.data());
+  return torch::utils::tensor_to_numpy(self_);
   END_HANDLE_TH_ERRORS
 }
 
@@ -431,15 +473,21 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
-inline bool dispatch_is_contiguous(Tensor & self) {
-  return self.is_contiguous();
+inline bool dispatch_is_contiguous(Tensor & self, MemoryFormat memory_format) {
+  return self.is_contiguous(memory_format);
 }
 
-static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args)
+static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "is_contiguous(*, MemoryFormat memory_format=contiguous_format)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto memory_format = r.memoryformat(0);
   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
-  return wrap(dispatch_is_contiguous(self));
+  return wrap(dispatch_is_contiguous(self, memory_format));
   END_HANDLE_TH_ERRORS
 }
 
@@ -599,7 +647,7 @@ static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a Python list", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return torch::utils::tensor_to_list(self_.data());
+  return torch::utils::tensor_to_list(self_);
   END_HANDLE_TH_ERRORS
 }
 
@@ -685,10 +733,11 @@ PyMethodDef variable_methods[] = {
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
-  {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
+  {"contiguous", (PyCFunction)THPVariable_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"data_ptr", (PyCFunction)THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
@@ -697,7 +746,7 @@ PyMethodDef variable_methods[] = {
   {"bool", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
-  {"is_contiguous", (PyCFunction)THPVariable_is_contiguous, METH_NOARGS, NULL},
+  {"is_contiguous", (PyCFunction)THPVariable_is_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},
   {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
   {"map_", (PyCFunction)THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -710,6 +759,7 @@ PyMethodDef variable_methods[] = {
   {"new_ones", (PyCFunction)THPVariable_new_ones, METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_tensor", (PyCFunction)THPVariable_new_tensor, METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_zeros", (PyCFunction)THPVariable_new_zeros, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"nonzero", (PyCFunction)THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"requires_grad_", (PyCFunction)THPVariable_requires_grad_, METH_VARARGS | METH_KEYWORDS, NULL},

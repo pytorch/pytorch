@@ -57,16 +57,28 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       variable.grad() = new_grad.clone();
     }
   } else if (!GradMode::is_enabled()) {
-    Variable& grad_variable = as_variable_ref(grad);
     // This case is not strictly necessary, but it makes the first-order only case
-    // slightly more efficient and, what's more important, more predictable for
-    // the users. Thanks to this case we can avoid changing the grad tensor,
-    // a thing never promised and documented, but used in some hacks seen
-    // on the internet.
+    // slightly more efficient.
+    Variable& grad_variable = as_variable_ref(grad);
     if (grad_variable.is_sparse() && !new_grad.is_sparse()) {
-      grad_variable.set_data(new_grad.data() + grad_variable.data());
+      // If `grad_variable` is sparse and `new_grad` is not sparse, their sum is not
+      // sparse, and we must change the TensorImpl type of `grad_variable` for it to
+      // store the result. However, changing the TensorImpl type of a tensor requires
+      // changing the tensor itself, and thus in this case we have to change the grad
+      // tensor.
+      grad_variable = new_grad + grad_variable;
     } else {
-      grad_variable.data() += new_grad.data();
+      // In this case we can avoid changing the grad tensor. There are three scenarios
+      // when we'll hit this case:
+      //
+      // 1. `grad_variable` is sparse, and `new_grad` is sparse.
+      // 2. `grad_variable` is dense, and `new_grad` is sparse.
+      // 3. `grad_variable` is dense, and `new_grad` is dense.
+      //
+      // In all of these three cases, `grad_variable += new_grad` is a valid operation
+      // which adds `new_grad` to `grad_variable` in place. `grad_variable` is thus
+      // still referring to the same tensor after the operation.
+      grad_variable += new_grad;
     }
   } else {
     variable.grad() = grad + new_grad;

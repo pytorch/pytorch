@@ -38,7 +38,7 @@ make_data_loader(
     Dataset dataset,
     DataLoaderOptions options = DataLoaderOptions()) {
   const optional<size_t> size = dataset.size();
-  AT_CHECK(
+  TORCH_CHECK(
       size.has_value(),
       "Expected the dataset to be sized in "
       "order to construct the Sampler");

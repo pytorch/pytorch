@@ -12,6 +12,7 @@ import contextlib
 import platform
 import ctypes
 import os
+import sys
 import torch
 import traceback
 import warnings
@@ -28,7 +29,23 @@ _cudart = None
 
 
 def find_cuda_windows_lib():
-    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE, stderr=PIPE, stdin=PIPE)
+    # Override the default search process
+    # Fixes https://github.com/pytorch/pytorch/issues/20202
+    # The libary selection will be done in these directories one by one
+    # 1. [Package Root]\Lib 
+    #    That's where our libraries are in, which should be loaded first.
+    # 2. [Python Root]\Library\bin
+    #    That's where `cudatoolkit` store the cuda libraries.
+    # 3. Default directories
+    #    That is stored in the environment variable `PATH`.
+    test_env = os.environ.copy()
+    old_path = test_env['PATH']
+    py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
+    th_dll_path = os.path.join(os.path.dirname(
+        os.path.dirname(__file__)), 'lib')
+    test_env['PATH'] = ';'.join([th_dll_path, py_dll_path, old_path])
+    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE,
+                 stderr=PIPE, stdin=PIPE, env=test_env)
     out, err = proc.communicate()
     out = out.decode().strip()
     if len(out) > 0:
@@ -93,8 +110,8 @@ of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 def _check_capability():
     incorrect_binary_warn = """
-    Found GPU%d %s which requires CUDA_VERSION >= %d for
-     optimal performance and fast startup time, but your PyTorch was compiled
+    Found GPU%d %s which requires CUDA_VERSION >= %d to
+     work properly, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
      using instructions from https://pytorch.org
     """
@@ -109,13 +126,12 @@ def _check_capability():
     for d in range(device_count()):
         capability = get_device_capability(d)
         major = capability[0]
+        minor = capability[1]
         name = get_device_name(d)
-        if CUDA_VERSION < 8000 and major >= 6:
-            warnings.warn(incorrect_binary_warn % (d, name, 8000, CUDA_VERSION))
-        elif CUDA_VERSION < 9000 and major >= 7:
-            warnings.warn(incorrect_binary_warn % (d, name, 9000, CUDA_VERSION))
-        elif capability == (3, 0) or major < 3:
+        if capability == (3, 0) or major < 3:
             warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
+        elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
+            warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 
 def _lazy_call(callable):

@@ -42,6 +42,7 @@ bool GlobalInitAlreadyRun() {
 }
 
 bool GlobalInit(int* pargc, char*** pargv) {
+  C10_LOG_API_USAGE_ONCE("caffe2.global_init");
   static std::recursive_mutex init_mutex;
   std::lock_guard<std::recursive_mutex> guard(init_mutex);
   internal::State& init_state = internal::GlobalInitState();
@@ -99,5 +100,10 @@ bool GlobalInit() {
   char* mobile_name = &caffe2_name[0];
   char** mobile_argv = &mobile_name;
   return ::caffe2::GlobalInit(&mobile_argc, &mobile_argv);
+}
+
+bool unsafeRunCaffe2InitFunction(const char* name, int* pargc, char*** pargv) {
+  return internal::Caffe2InitializeRegistry::Registry()->RunNamedFunction(
+      name, pargc, pargv);
 }
 }  // namespace caffe2

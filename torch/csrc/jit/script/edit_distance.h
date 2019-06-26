@@ -2,7 +2,6 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <cstddef>
-#include <string>
 
 namespace torch {
 namespace jit {

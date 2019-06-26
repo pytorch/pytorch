@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
 namespace jit {
@@ -22,7 +22,8 @@ namespace script {
 
 enum NoneStatus { ALWAYS, MAYBE, NEVER };
 
-struct TORCH_API SugaredValue : public std::enable_shared_from_this<SugaredValue> {
+struct TORCH_API SugaredValue
+    : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
   virtual std::string kind() const = 0;
 
@@ -93,6 +94,16 @@ struct TORCH_API SugaredValue : public std::enable_shared_from_this<SugaredValue
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
+  // return length of this thing, if not then it can't be iterated.
+  virtual Value* len(const SourceRange& loc, Function& m) {
+    throw ErrorReport(loc) << "'" << kind() << "'"
+                           << " object is not iterable";
+  }
+  // expression for ith elemement for iterable value
+  virtual Value* getelem(const SourceRange&loc, Function& m, Value* i) {
+    throw ErrorReport(loc) << " cannot get the element of value " << kind();
+  }
+
   virtual ~SugaredValue() = default;
 };
 
@@ -140,6 +151,9 @@ struct TORCH_API SimpleValue : public SugaredValue {
   Value* getValue() const {
     return value_;
   }
+
+  Value* len(const SourceRange& loc, Function& m) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
 
  private:
   Value* value_;
@@ -214,6 +228,22 @@ struct TORCH_API ClassValue : public SugaredValue {
   ClassTypePtr type_;
 };
 
+struct TORCH_API NamedTupleConstructor : public SugaredValue {
+  explicit NamedTupleConstructor(TupleTypePtr type) : type_(std::move(type)) {}
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+  std::string kind() const override {
+    return type_->str();
+  }
+
+  TupleTypePtr type_;
+};
 
 struct FunctionValue : public SugaredValue {
   FunctionValue(std::shared_ptr<Function> callee)
@@ -229,17 +259,36 @@ struct FunctionValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    return std::make_shared<SimpleValue>(
-        callee_->emit_call(*f.graph(), loc, inputs, attributes));
+    callee_->ensure_defined();
+    MatchedSchema match =
+        matchSchema(callee_->getSchema(), loc, *f.graph(), inputs, attributes);
+    Value* output = f.graph()->insertFunctionCall(callee_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
+
  private:
   std::shared_ptr<Function> callee_;
 };
 
+struct TORCH_API ClosureValue : public SugaredValue {
+  ClosureValue(Value* value) : value_(value) {
+    TORCH_INTERNAL_ASSERT(value_->node()->kind() == prim::Function);
+  }
+  std::string kind() const override {
+    return "closure";
+  }
+  Value* asValue(const SourceRange& range, Function& m) override {
+    return value_;
+  }
+  Value* value_;
+};
+
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
-  MethodValue(NamedValue self, std::shared_ptr<Function> method)
-      : self_(std::move(self)), method_(std::move(method)) {}
+  MethodValue(Value* self, std::string method_name)
+      : self_(std::move(self)), method_name_(std::move(method_name)) {}
+
   std::string kind() const override {
     return "method";
   }
@@ -250,19 +299,22 @@ struct MethodValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    std::vector<NamedValue> inputsWithSelf;
-    inputsWithSelf.emplace_back(loc, self_.value(*f.graph()));
+    std::vector<NamedValue> inputsWithSelf = {self_};
     inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-    return FunctionValue(method_).call(
-        loc, f, inputsWithSelf, attributes, n_binders);
+    auto method = self_->type()->expect<ClassType>()->getMethod(method_name_);
+    TORCH_INTERNAL_ASSERT(method);
+    method->ensure_defined();
+    MatchedSchema match = matchSchema(
+        method->getSchema(), loc, *f.graph(), inputsWithSelf, attributes);
+    Value* output = f.graph()->insertMethodCall(method_name_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:
-  NamedValue self_;
-  std::shared_ptr<Function> method_;
+  Value* self_;
+  std::string method_name_;
 };
-
-
 
 struct TORCH_API PrintValue : public SugaredValue {
   std::string kind() const override {
@@ -301,6 +353,49 @@ struct TORCH_API CastValue : public BuiltinFunction {
   TypePtr type_;
 };
 
+using SugaredValuePtr = std::shared_ptr<SugaredValue>;
+
+// builtins operators and functions that call a method if it exists
+// on a class type, like 'len(x)' and 'x + y'
+struct TORCH_API MagicMethod : public SugaredValue {
+  MagicMethod(
+      std::string desugared_name,
+      SugaredValuePtr base)
+      : base_value_(std::move(base)),
+        desugared_name_(std::move(desugared_name)) {}
+
+  std::string kind() const override {
+    return desugared_name_;
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    if (inputs.size() > 0) {
+      Value* self = inputs[0].value(*m.graph());
+
+      if (auto class_ptr = self->type()->cast<ClassType>()) {
+        if (!class_ptr->getMethod(desugared_name_)) {
+          throw ErrorReport(loc)
+              << class_ptr->python_str() << " does not define a "
+              << desugared_name_ << " method";
+        }
+
+        return MethodValue(self, desugared_name_)
+            .call(loc, m, inputs.slice(1), attributes, n_binders);
+      }
+    }
+    return base_value_->call(loc, m, inputs, attributes, n_binders);
+  }
+
+ private:
+  SugaredValuePtr base_value_;
+  std::string desugared_name_;
+};
+
 // These SugaredValues have special handling in the compiler because they
 // change the normal evalution order of the expression they participate in.
 // They are exposed here so that the python frontend can inject them
@@ -319,6 +414,13 @@ struct TORCH_API AnnotateValue : public SugaredValue {
   }
 };
 
+struct TORCH_API UninitializedValue : public SugaredValue {
+  UninitializedValue() = default;
+  std::string kind() const override {
+    return "uninitialized";
+  }
+};
+
 // matched against for special handling of getattr expressions
 struct TORCH_API GetAttrValue : SugaredValue {
   GetAttrValue() = default;
@@ -333,6 +435,71 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   std::string kind() const override {
     return "isinstance";
   }
+};
+
+// matched against for special handling of range expressions
+struct TORCH_API RangeValue : SugaredValue {
+  RangeValue(const SourceRange& loc, Function&m, std::vector<Value*> inputs);
+  std::string kind() const override {
+    return "range";
+  }
+  Value* len(const SourceRange& loc, Function& m) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+
+  private:
+    Value* start_;
+    Value* end_;
+    Value* step_;
+    // a flag to determine if it's a simple range() call with only end_ from
+    // arguments If true, we will not insert length calculation and index
+    // derivation nodes to simplify the graph and enable more possible
+    // optimizations
+    bool has_only_end_;
+};
+
+// matched against for special handling of iterables like zip(), enumerate()
+struct TORCH_API IterableValue : SugaredValue {
+  IterableValue(Symbol symbol): symbol_(symbol) {}
+  std::string kind() const override {
+    return "iterable";
+  }
+  Symbol symbol_;
+};
+
+// Specialized Tree structure to matched against for special handling 
+// of builtin functions iterables expressions like zip(), enumerate(), etc.
+// zip and enumerate can be modeled as a tree of SimpleValue/RangeValue:
+//    zip(x, y) ->  (x, y) with tuple assignment to each loop target
+//    enumerate(x) -> (range(0, math.inf, 1), x)
+// So a complicated expression like zip(a, enumerate(b), range(0, 100)) will be:
+// (a, (range(0, math.inf, 1), b), range(0, 100))
+// We use those base iterables to fill in the loop information like max_trip_count
+// and set the value table for loop targets
+struct TORCH_API IterableTree : SugaredValue {
+  IterableTree() = default;
+  IterableTree(const std::vector<SugaredValuePtr> children): children_(std::move(children)) {}
+  std::string kind() const override {
+    return "iterabletree";
+  }
+  void addChild(SugaredValuePtr sv) {
+    children_.emplace_back(sv);
+  }
+
+  std::vector<SugaredValuePtr> get_children() {
+    return children_;
+  }
+
+  // given a IterableTree node, get all the base iterables/leaves under the
+  // IterableTree node, which are either SimpleValue or RangeValue. This enable
+  // us to get all the basic SugaredValues that contains valid loop information
+  // with len() and getelem()
+  std::vector<SugaredValuePtr> get_base_iterables();
+
+  Value* len(const SourceRange& loc, Function& m) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+
+  private:
+    std::vector<SugaredValuePtr> children_;
 };
 
 // This represents the "__new__" method on classes, which can't be a MethodValue

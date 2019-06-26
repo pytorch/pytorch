@@ -7,48 +7,52 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 
-PyObject * THPAutograd_initExtension(PyObject *_unused)
-{
+PyObject* THPAutograd_initExtension(PyObject* _unused) {
+  using namespace torch::autograd::profiler;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch.tensor"));
-  if (!tensor_module) throw python_error();
+  if (!tensor_module)
+    throw python_error();
 
   // NOTE: "leaks" THPVariableClass
   THPVariableClass = PyObject_GetAttrString(tensor_module, "Tensor");
-  if (!THPVariableClass) throw python_error();
+  if (!THPVariableClass)
+    throw python_error();
 
   auto autograd_module = THPObjectPtr(PyImport_ImportModule("torch.autograd"));
-  if (!autograd_module) throw python_error();
+  if (!autograd_module)
+    throw python_error();
 
   // NOTE: "leaks" Function
   THPFunctionClass = PyObject_GetAttrString(autograd_module, "Function");
-  if (!THPFunctionClass) throw python_error();
+  if (!THPFunctionClass)
+    throw python_error();
 
   auto m = py::handle(autograd_module).cast<py::module>();
 
-  py::class_<torch::autograd::profiler::Event>(m, "ProfilerEvent")
-      .def("kind", &torch::autograd::profiler::Event::kind)
-      .def(
-          "name",
-          [](const torch::autograd::profiler::Event& e) { return e.name(); })
-      .def("thread_id", &torch::autograd::profiler::Event::thread_id)
-      .def("device", &torch::autograd::profiler::Event::device)
-      .def("cpu_elapsed_us", &torch::autograd::profiler::Event::cpu_elapsed_us)
-      .def(
-          "cuda_elapsed_us", &torch::autograd::profiler::Event::cuda_elapsed_us)
-      .def("has_cuda", &torch::autograd::profiler::Event::has_cuda);
-  py::enum_<torch::autograd::profiler::ProfilerState>(m,"ProfilerState")
-  .value("Disabled", torch::autograd::profiler::ProfilerState::Disabled)
-  .value("CPU", torch::autograd::profiler::ProfilerState::CPU)
-  .value("CUDA", torch::autograd::profiler::ProfilerState::CUDA)
-  .value("NVTX", torch::autograd::profiler::ProfilerState::NVTX);
+  py::enum_<ProfilerState>(m, "ProfilerState")
+      .value("Disabled", ProfilerState::Disabled)
+      .value("CPU", ProfilerState::CPU)
+      .value("CUDA", ProfilerState::CUDA)
+      .value("NVTX", ProfilerState::NVTX);
 
-  m.def("_enable_profiler", torch::autograd::profiler::enableProfiler);
-  m.def("_disable_profiler", torch::autograd::profiler::disableProfiler);
+  py::class_<ProfilerConfig>(m, "ProfilerConfig")
+      .def(py::init<ProfilerState, bool>());
 
-  m.def("_push_range", [](std::string name) {
-    torch::autograd::profiler::pushRange(std::move(name));
-  });
-  m.def("_pop_range", []() { torch::autograd::profiler::popRange(); });
+  py::class_<Event>(m, "ProfilerEvent")
+      .def("kind", &Event::kind)
+      .def("name", [](const Event& e) { return e.name(); })
+      .def("thread_id", &Event::thread_id)
+      .def("device", &Event::device)
+      .def("cpu_elapsed_us", &Event::cpu_elapsed_us)
+      .def("cuda_elapsed_us", &Event::cuda_elapsed_us)
+      .def("has_cuda", &Event::has_cuda)
+      .def("shapes", &Event::shapes);
+
+  m.def("_enable_profiler", enableProfiler);
+  m.def("_disable_profiler", disableProfiler);
+
+  m.def("_push_range", [](std::string name) { pushRange(std::move(name)); });
+  m.def("_pop_range", []() { popRange(); });
 
   Py_RETURN_TRUE;
 }

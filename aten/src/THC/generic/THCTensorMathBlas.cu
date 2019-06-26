@@ -9,6 +9,11 @@
 
 accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 {
+  if ( (THTensor_nDimension(self) != 1) || (THTensor_nDimension(src) != 1) ) {
+    THError("1D tensors expected, got %dD, %dD tensors",
+       THTensor_nDimension(self), THTensor_nDimension(src));
+  }
+
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   THArgCheck(THCTensor_(nElement)(state, self) ==
@@ -48,9 +53,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
-  if( (mat->dim() != 2) || (THTensor_nDimensionLegacyNoScalars(vec) != 1) )
+  if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
-       mat->dim(), THTensor_nDimensionLegacyNoScalars(vec));
+       mat->dim(), THTensor_nDimension(vec));
 
 
   auto vec_size = THTensor_sizeLegacyNoScalars(vec, 0);
@@ -155,9 +160,9 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
-  if ( (THTensor_nDimensionLegacyNoScalars(vec1) != 1) || (THTensor_nDimensionLegacyNoScalars(vec2) != 1) ) {
+  if ( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
-       THTensor_nDimensionLegacyNoScalars(vec1), THTensor_nDimensionLegacyNoScalars(vec2));
+       THTensor_nDimension(vec1), THTensor_nDimension(vec2));
   }
   auto vec1_size = THTensor_sizeLegacyNoScalars(vec1, 0);
   auto vec2_size = THTensor_sizeLegacyNoScalars(vec2, 0);

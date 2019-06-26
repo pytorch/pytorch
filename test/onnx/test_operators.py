@@ -8,7 +8,6 @@ import torch.nn as nn
 
 import itertools
 import io
-import unittest
 import inspect
 import glob
 import os
@@ -219,7 +218,7 @@ class TestOperators(TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                assert False
+                raise AssertionError()
 
             @staticmethod
             def forward(ctx, x, y):
@@ -248,6 +247,29 @@ class TestOperators(TestCase):
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
         self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
+
+    def test_conv_variable_length(self):
+        x = torch.ones(5, 3, 6, 6, requires_grad=True)
+        model = torch.nn.Conv2d(3, 2, 3)
+        y = model(x)
+
+        dynamic_axes = {'input_1': [0, 2, 3], 'output_1': {0: 'output_1_variable_dim_0', 1: 'output_1_variable_dim_1'}}
+        model_proto_name = 'conv2d.onnx'
+        torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
+                          example_outputs=y, dynamic_axes=dynamic_axes)
+
+        import onnx
+        onnx_model = onnx.load(model_proto_name)
+        onnx.checker.check_model(onnx_model)
+
+        # Asserting the default dynamic axes names are generated when custom names are not provided
+        assert(onnx_model.graph.input[0].type.tensor_type.shape.dim[0].dim_param == "input_1_dynamic_axes_1")
+        assert(onnx_model.graph.input[0].type.tensor_type.shape.dim[2].dim_param == "input_1_dynamic_axes_2")
+        assert(onnx_model.graph.input[0].type.tensor_type.shape.dim[3].dim_param == "input_1_dynamic_axes_3")
+
+        # Asserting the custom names are applied when provided
+        assert(onnx_model.graph.output[0].type.tensor_type.shape.dim[0].dim_param == "output_1_variable_dim_0")
+        assert(onnx_model.graph.output[0].type.tensor_type.shape.dim[1].dim_param == "output_1_variable_dim_1")
 
     def test_convtranspose(self):
         x = torch.ones(2, 3, 4, 5, requires_grad=True)
@@ -335,9 +357,29 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.mean(x, dim=2, keepdim=True), x)
 
+    def test_mean_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::mean',
+                                   lambda x: torch.mean(x, dtype=torch.double), x)
+
+    def test_reduced_mean_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::mean',
+                                   lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
+
     def test_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.sum(x), x)
+
+    def test_sum_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::sum',
+                                   lambda x: torch.sum(x, dtype=torch.double), x)
+
+    def test_reduced_sum_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::sum',
+                                   lambda x: torch.sum(x, dim=0, dtype=torch.double), x)
 
     def test_reduced_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -358,6 +400,16 @@ class TestOperators(TestCase):
     def test_reduced_prod_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.prod(x, dim=2, keepdim=True), x)
+
+    def test_prod_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::prod',
+                                   lambda x: torch.prod(x, dtype=torch.double), x)
+
+    def test_reduced_prod_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::prod',
+                                   lambda x: torch.prod(x, dim=0, dtype=torch.double), x)
 
     def test_sqrt(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -416,6 +468,10 @@ class TestOperators(TestCase):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
 
+    def test_sign(self):
+        x = torch.rand(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.sign(), x)
+
     def test_narrow(self):
         x = torch.randn(3, 3, requires_grad=True)
         self.assertONNX(lambda x: torch.narrow(x, 0, 0, 2), x)
@@ -469,14 +525,17 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, requires_grad=True)
         self.assertONNX(lambda x: x.repeat(1, 2, 3, 4), x)
 
-    def test_norm(self):
+    def test_norm_p1(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.norm(p=1, dim=2), (x))
+
+    def test_norm_p2(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
-    def test_upsample(self):
+    def test_upsample_nearest(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -504,9 +563,17 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
 
+    def test_rand(self):
+        x = torch.rand(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.rand(1, 2, 3, 4) + x, x)
+
     def test_rrelu(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(torch.nn.RReLU(), x)
+
+    def test_prelu(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.PReLU(2), x)
 
     def test_log_sigmoid(self):
         x = torch.randn(1, 2, 3, 4)
@@ -553,6 +620,11 @@ class TestOperators(TestCase):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
 
+    def test_gather(self):
+        data = torch.randn(3, 4, 3, requires_grad=True)
+        index = torch.tensor([2, 0]).view(1, 2, 1).expand(3, 2, 3)
+        self.assertONNX(lambda data, index: data.gather(1, index), (data, index))
+
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
@@ -581,7 +653,7 @@ class TestOperators(TestCase):
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
                     (scores), (bbox_deltas), (im_info), (anchors),
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 return a, b
 
