@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
@@ -68,17 +67,6 @@ struct Source {
     return starting_line_no_;
   }
 
-  // Serialize as Tuple[str, Optional[str], int, List[int]]
-  std::shared_ptr<c10::IValue> __getstate__() {
-    if (!serialized_) {
-      std::vector<c10::IValue> elements{
-          text_, filename_, (int64_t)starting_line_no_};
-      serialized_ =
-          std::make_shared<c10::IValue>(c10::ivalue::Tuple::create(elements));
-    }
-    return serialized_;
-  }
-
  private:
   void calc_line_start_offsets() {
     size_t pos = 0;
@@ -90,51 +78,37 @@ struct Source {
   std::string text_;
   c10::optional<std::string> filename_;
   // If filename_ is not present, starting_line_no_ is don't care
-  int64_t starting_line_no_;
+  size_t starting_line_no_;
   // Starting offsets for lines into the source. e.g. line 0 starts at
   // line_starting_offsets_[0], etc.
-  std::vector<int64_t> line_starting_offsets_;
-  // serialized IValue representing this Source
-  // Lazily populated, nullptr if not populated
-  //
-  // NB: if you introduce methods that mutate a Source object, you *must*
-  // adjust this caching mechanism accordingly.
-  std::shared_ptr<c10::IValue> serialized_ = nullptr;
+  std::vector<size_t> line_starting_offsets_;
 };
 
 // A SourceRange is a view into a Source, that points to a subset of the source,
 // specified by `start` and `end` byte offsets into the source text.
 struct CAFFE2_API SourceRange {
   SourceRange(std::shared_ptr<Source> source_, size_t start_, size_t end_)
-      : source_(std::move(source_)), start_(start_), end_(end_) {
-    TORCH_CHECK(
-        end_ >= start_,
-        "Attempted to create a source range that starts before it ends!");
-  }
+      : source_(std::move(source_)), start_(start_), end_(end_) {}
   explicit SourceRange(std::string string_range)
       : source_(std::make_shared<Source>(std::move(string_range))),
         start_(0),
-        end_(source_->text().size()) {
-    TORCH_CHECK(
-        end_ >= start_,
-        "Attempted to create a source range that starts before it ends!");
-  }
+        end_(source_->text().size()) {}
 
   const std::string text() const {
     return source_->text().substr(start(), end() - start());
   }
-  int64_t size() const {
+  size_t size() const {
     return end() - start();
   }
-  static const int64_t CONTEXT = 10;
+  static const size_t CONTEXT = 10;
   void highlight(std::ostream& out) const;
   const std::shared_ptr<Source>& source() const {
     return source_;
   }
-  int64_t start() const {
+  size_t start() const {
     return start_;
   }
-  int64_t end() const {
+  size_t end() const {
     return end_;
   }
   std::string str() const {
@@ -157,29 +131,10 @@ struct CAFFE2_API SourceRange {
         (size_t)col_offset);
   }
 
-  // Serialize as Tuple[SourceType, int, int]
-  // where SourceType = Tuple[str, Optional[str], int, List[int]],
-  // the serialized form of Source
-  std::shared_ptr<c10::IValue> __getstate__() {
-    if (!serialized_) {
-      std::vector<c10::IValue> elements = {
-          *source_->__getstate__(), start_, end_};
-      serialized_ =
-          std::make_shared<c10::IValue>(c10::ivalue::Tuple::create(elements));
-    }
-    return serialized_;
-  }
-
  private:
   std::shared_ptr<Source> source_;
-  int64_t start_;
-  int64_t end_;
-  // serialized IValue representing this SourceRange
-  // Lazily populated, nullptr if not populated
-  //
-  // NB: if you introduce methods that mutate a Source object, you *must*
-  // adjust this caching mechanism accordingly.
-  std::shared_ptr<c10::IValue> serialized_ = nullptr;
+  size_t start_;
+  size_t end_;
 };
 
 inline std::ostream& operator<<(std::ostream& out, const SourceRange& range) {

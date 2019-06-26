@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/source_range_serializer.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -931,11 +932,12 @@ void ScriptModuleSerializer::convertModule(
     torch::RecordRef* debug_record =
         module_def->mutable_torchscript_debug_arena();
     Pickler p;
+    SourceRangeSerializer srs;
     p.start();
     p.startTuple();
     for (const auto& range : source_ranges) {
-      std::vector<c10::IValue> row_elems{(int64_t)std::get<0>(range),
-                                         *std::get<1>(range)->__getstate__()};
+      std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
+                                         srs.serialize(range.range)};
       p.addIValue(c10::ivalue::Tuple::create(row_elems));
     }
     p.endTuple();
