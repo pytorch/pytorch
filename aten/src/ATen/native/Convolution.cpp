@@ -309,7 +309,9 @@ auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
   #if AT_CUDNN_ENABLED
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    bool kernel_cond =  (use_cudnn(input) &&
+    int cudnn_version = detail::getCUDAHooks().versionCUDNN();
+    bool kernel_cond =  (cudnn_version >= 7600 &&
+                         use_cudnn(input) &&
                          prop->major >= 7 &&  // Volta/Tensor cores
                          input.scalar_type() == kHalf && // only for FP16
                          weight.scalar_type() == kHalf &&
