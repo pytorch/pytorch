@@ -1257,6 +1257,15 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=(torch.ones(x.size()),))
 
+    def test_full(self):
+        class FullModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.full((3, 4), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        self.run_model_test(FullModel(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False)
+
     def test_full_script(self):
         class FullClass(torch.jit.ScriptModule):
             @torch.jit.script_method
