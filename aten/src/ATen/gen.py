@@ -13,7 +13,6 @@ import nn_parse
 import native_parse
 import preprocess_declarations
 import function_wrapper
-from function_wrapper import scalar_types
 
 from code_template import CodeTemplate
 from env import NAMEDTENSOR_ENABLED
