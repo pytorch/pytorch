@@ -260,7 +260,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            int64_t n;
            pop(stack, n);
-           c10::List<int64_t> elems = c10::make_list<int64_t>();
+           c10::List<int64_t> elems;
            elems.reserve(n);
            for (int i = 0; i < n; i++) {
              elems.push_back(i);
@@ -1012,7 +1012,7 @@ RegisterOperators reg(
            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::List<at::Tensor> vals = c10::make_list<at::Tensor>();
+               c10::List<at::Tensor> vals;
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]).toTensor());
@@ -1024,7 +1024,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::List<IValue> vals = c10::make_list<IValue>();
+               c10::List<IValue> vals;
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -1045,7 +1045,7 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::impl::GenericDict vals = c10::impl::make_generic_dict();
+             c10::impl::GenericDict vals;
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
@@ -1314,7 +1314,7 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
 
 template <typename T>
 int listAppend(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   T el;
   pop(stack, list, el);
 
@@ -1326,7 +1326,7 @@ int listAppend(Stack& stack) {
 
 template <typename T>
 int listReverse(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   pop(stack, list);
 
   std::reverse(list.begin(), list.end());
@@ -1336,7 +1336,7 @@ int listReverse(Stack& stack) {
 
 template <typename T>
 int listPop(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t idx;
   pop(stack, list, idx);
 
@@ -1355,7 +1355,7 @@ int listPop(Stack& stack) {
 
 template <typename T>
 int listClear(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   pop(stack, list);
 
   list.clear();
@@ -1364,7 +1364,7 @@ int listClear(Stack& stack) {
 
 template <typename T>
 int listInsert(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t idx;
   T elem;
   pop(stack, list, idx, elem);
@@ -1387,7 +1387,7 @@ int listInsert(Stack& stack) {
 
 template <typename T>
 int listRemove(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   T elem;
   pop(stack, list, elem);
 
@@ -1404,7 +1404,7 @@ int listRemove(Stack& stack) {
 
 template <>
 int listRemove<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> list;
   at::Tensor elem;
   pop(stack, list, elem);
 
@@ -1425,7 +1425,7 @@ int listRemove<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listIndex(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   T elem;
   pop(stack, list, elem);
 
@@ -1442,7 +1442,7 @@ int listIndex(Stack& stack) {
 
 template <>
 int listIndex<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> list;
   at::Tensor elem;
   pop(stack, list, elem);
 
@@ -1463,7 +1463,7 @@ int listIndex<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listCount(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   T elem;
   pop(stack, list, elem);
 
@@ -1475,7 +1475,7 @@ int listCount(Stack& stack) {
 
 template <>
 int listCount<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> list;
   at::Tensor elem;
   pop(stack, list, elem);
 
@@ -1492,8 +1492,8 @@ int listCount<at::Tensor>(Stack& stack) {
 template <typename T>
 Operation listExtend(const Node* node) {
   return [](Stack& stack) {
-    c10::List<T> a = c10::make_list<T>();
-    c10::List<T> b = c10::make_list<T>();
+    c10::List<T> a;
+    c10::List<T> b;
     pop(stack, a, b);
 
     a.reserve(a.size() + b.size());
@@ -1507,7 +1507,7 @@ Operation listExtend(const Node* node) {
 template <typename T>
 Operation listCopy(const Node* node) {
   return [](Stack& stack) {
-    c10::List<T> list = c10::make_list<T>();
+    c10::List<T> list;
     pop(stack, list);
     push(stack, list.copy());
     return 0;
@@ -1516,7 +1516,7 @@ Operation listCopy(const Node* node) {
 
 template <typename T>
 int listSelect(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t idx;
   pop(stack, list, idx);
 
@@ -1527,7 +1527,7 @@ int listSelect(Stack& stack) {
 
 template <typename T>
 int listLen(Stack& stack) {
-  c10::List<T> a = c10::make_list<T>();
+  c10::List<T> a;
   pop(stack, a);
 
   const int64_t size = a.size();
@@ -1537,8 +1537,8 @@ int listLen(Stack& stack) {
 
 template <typename T>
 int listEq(Stack& stack) {
-  c10::List<T> a = c10::make_list<T>();
-  c10::List<T> b = c10::make_list<T>();
+  c10::List<T> a;
+  c10::List<T> b;
   pop(stack, a, b);
   push(stack, list_is_equal(a, b));
   return 0;
@@ -1546,8 +1546,8 @@ int listEq(Stack& stack) {
 
 template <typename T>
 int listNe(Stack& stack) {
-  c10::List<T> a = c10::make_list<T>();
-  c10::List<T> b = c10::make_list<T>();
+  c10::List<T> a;
+  c10::List<T> b;
   pop(stack, a, b);
   push(stack, !list_is_equal(a, b));
   return 0;
@@ -1576,8 +1576,8 @@ inline bool tensor_list_equal(const c10::List<at::Tensor>& a, const c10::List<at
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 int listEq<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> a = c10::make_list<at::Tensor>();
-  c10::List<at::Tensor> b = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> a;
+  c10::List<at::Tensor> b;
   pop(stack, a, b);
   push(stack, tensor_list_equal(a, b));
   return 0;
@@ -1586,8 +1586,8 @@ int listEq<at::Tensor>(Stack& stack) {
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 int listNe<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> a = c10::make_list<at::Tensor>();
-  c10::List<at::Tensor> b = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> a;
+  c10::List<at::Tensor> b;
   pop(stack, a, b);
   push(stack, !tensor_list_equal(a, b));
   return 0;
@@ -1603,11 +1603,11 @@ Operation listList(const Node* node) {
 
 template <class T>
 int listAdd(Stack& stack) {
-  c10::List<T> a = c10::make_list<T>();
-  c10::List<T> b = c10::make_list<T>();
+  c10::List<T> a;
+  c10::List<T> b;
   pop(stack, a, b);
 
-  c10::List<T> ret = c10::make_list<T>();
+  c10::List<T> ret;
   const auto total_size = a.size() + b.size();
   ret.reserve(total_size);
   for (T a_element : a) {
@@ -1623,11 +1623,11 @@ int listAdd(Stack& stack) {
 
 template <class T>
 int listMulIntLeft(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t n;
   pop(stack, list, n);
 
-  c10::List<T> ret = c10::make_list<T>();
+  c10::List<T> ret;
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1643,11 +1643,11 @@ int listMulIntLeft(Stack& stack) {
 
 template <class T>
 int listMulIntRight(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t n;
   pop(stack, n, list);
 
-  c10::List<T> ret = c10::make_list<T>();
+  c10::List<T> ret;
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1663,7 +1663,7 @@ int listMulIntRight(Stack& stack) {
 
 template <typename T>
 int listSlice(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t start;
   int64_t end;
   int64_t step;
@@ -1677,7 +1677,7 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  c10::List<T> sliced_list = c10::make_list<T>();
+  c10::List<T> sliced_list;
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
     push(stack, std::move(sliced_list));
@@ -1719,7 +1719,7 @@ int listSort<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listSetItem(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t idx;
   T value;
 
@@ -1746,7 +1746,7 @@ int dictLen(Stack& stack) {
 
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  c10::impl::GenericList keys = c10::impl::make_generic_list();
+  c10::impl::GenericList keys;
   keys.reserve(dict.size());
   for (auto& item : dict) {
     keys.push_back(item.key());
@@ -1758,7 +1758,7 @@ int dictKeys(Stack& stack) {
 template <typename Elem>
 c10::List<Elem> makeListForDictValues(
     const std::vector<std::pair<IValue, IValue>>& order) {
-  c10::List<Elem> values = c10::make_list<Elem>();
+  c10::List<Elem> values;
   values.reserve(order.size());
   for (auto item : order) {
     values.push_back(item.second.to<Elem>());
@@ -1786,33 +1786,25 @@ Operation dictValues(const Node* n) {
 }
 
 int dictIndex(Stack& stack) {
-  auto index = pop(stack);
+  auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(index);
+  auto value = dict.find(key);
   if (value == dict.end()) {
-    AT_ERROR("KeyError: '", index, "'");
+    AT_ERROR("KeyError: ", key);
   }
   push(stack, value->value());
   return 0;
 }
 
+template<bool has_default>
 int dictGet(Stack& stack) {
-  auto index = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(index);
-  if (value == dict.end()) {
-    push(stack, IValue());
-  } else {
-    push(stack, value->value());
+  IValue default_value;
+  if (has_default) {
+    default_value = pop(stack);
   }
-  return 0;
-}
-
-int dictGetDefault(Stack& stack) {
-  auto default_value = pop(stack);
-  auto index = pop(stack);
+  auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(index);
+  auto value = dict.find(key);
   if (value == dict.end()) {
     push(stack, std::move(default_value));
   } else {
@@ -1821,10 +1813,97 @@ int dictGetDefault(Stack& stack) {
   return 0;
 }
 
+// If the key is in the dict, return it. Else set it to the default value and
+// return that.
+int dictSetDefault(Stack& stack) {
+  auto default_value = pop(stack);
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  auto value = dict.find(key);
+  if (value == dict.end()) {
+    dict.insert(key, default_value);
+    push(stack, std::move(default_value));
+  } else {
+    push(stack, value->value());
+  }
+  return 0;
+}
+
+template<bool has_default>
+int dictPop(Stack& stack) {
+  IValue default_value;
+  if (has_default) {
+    default_value = pop(stack);
+  }
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  auto value = dict.find(key);
+  if (value == dict.end()) {
+    if (has_default) {
+      push(stack, default_value);
+    } else {
+      AT_ERROR("KeyError: ", key);
+    }
+  } else {
+    auto erase_count = dict.erase(key);
+    TORCH_CHECK(
+        erase_count == 1, "Expected to erase 1 item, found ", erase_count);
+    push(stack, value->value());
+  }
+  return 0;
+}
+
+int dictPopItem(Stack& stack) {
+  auto dict = pop(stack).toGenericDict();
+  if (dict.size() == 0) {
+    AT_ERROR("popitem(): dictionary is empty");
+  }
+  auto item = iterationOrder(dict).at(0);
+  auto erase_count = dict.erase(item.first);
+  TORCH_CHECK(
+      erase_count == 1, "Expected to erase 1 item, found ", erase_count);
+
+  IValue tuple = c10::ivalue::Tuple::create({item.first, item.second});
+  push(stack, tuple);
+  return 0;
+}
+
 int dictContains(Stack& stack) {
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
   push(stack, dict.contains(key));
+  return 0;
+}
+
+int dictClear(Stack& stack) {
+  auto dict = pop(stack).toGenericDict();
+  dict.clear();
+  return 0;
+}
+
+int dictUpdate(Stack& stack) {
+  auto to_add = pop(stack).toGenericDict();
+  auto dict = pop(stack).toGenericDict();
+
+  for (auto item : to_add) {
+    dict.insert(item.key(), item.value());
+  }
+  return 0;
+}
+
+int dictItems(Stack& stack) {
+  auto dict = pop(stack).toGenericDict();
+  std::vector<IValue> items;
+  items.reserve(dict.size());
+  for (const auto& item : iterationOrder(dict)) {
+    items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
+  }
+  push(stack, items);
+  return 0;
+}
+
+int dictCopy(Stack& stack) {
+  push(stack, pop(stack).toGenericDict().copy());
   return 0;
 }
 
@@ -1875,7 +1954,7 @@ RegisterOperators reg2({
         "aten::list(str t) -> str[]",
         [](Stack& stack) {
           auto str = pop(stack).toStringRef();
-          c10::List<std::string> chars = c10::make_list<std::string>();
+          c10::List<std::string> chars;
           chars.reserve(str.size());
           for (auto c : str) {
             chars.push_back(std::string(1, c));
@@ -2054,35 +2133,17 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("t", c10::List<IValue>),
 #undef CREATE_LIST_OPS
     Operator("aten::sort(int[](a!) self) -> ()", listSort<int64_t>, aliasAnalysisFromSchema()),
-    Operator(
-        "aten::sort(float[](a!) self) -> ()",
-        listSort<double>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::sort(Tensor[](a!) self) -> ()",
-        listSort<at::Tensor>,
-        aliasAnalysisFromSchema()),
+    Operator("aten::sort(float[](a!) self) -> ()", listSort<double>, aliasAnalysisFromSchema()),
+    Operator("aten::sort(Tensor[](a!) self) -> ()", listSort<at::Tensor>, aliasAnalysisFromSchema()),
     Operator("aten::sort(bool[](a!) self) -> ()", listSort<bool>, aliasAnalysisFromSchema()),
 
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<int64_t>, aliasAnalysisFromSchema()),
-    Operator(
-        "aten::eq(float[] a, float[] b) -> bool",
-        listEq<double>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::eq(Tensor[] a, Tensor[] b) -> bool",
-        listEq<at::Tensor>,
-        aliasAnalysisFromSchema()),
+    Operator("aten::eq(float[] a, float[] b) -> bool", listEq<double>, aliasAnalysisFromSchema()),
+    Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<at::Tensor>, aliasAnalysisFromSchema()),
     Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<bool>, aliasAnalysisFromSchema()),
     Operator("aten::ne(int[] a, int[] b) -> bool", listNe<int64_t>, aliasAnalysisFromSchema()),
-    Operator(
-        "aten::ne(float[] a, float[] b) -> bool",
-        listNe<double>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::ne(Tensor[] a, Tensor[] b) -> bool",
-        listNe<at::Tensor>,
-        aliasAnalysisFromSchema()),
+    Operator("aten::ne(float[] a, float[] b) -> bool", listNe<double>, aliasAnalysisFromSchema()),
+    Operator("aten::ne(Tensor[] a, Tensor[] b) -> bool", listNe<at::Tensor>, aliasAnalysisFromSchema()),
     Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<bool>, aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
@@ -2200,7 +2261,7 @@ RegisterOperators reg2({
         "prim::min(int[] x) -> int",
         [](Stack& stack) {
           c10::List<int64_t> int_list = pop(stack).toIntList();
-          int64_t min_element = std::numeric_limits<int64_t>::max(); 
+          int64_t min_element = std::numeric_limits<int64_t>::max();
 
           for(int64_t ele: int_list) {
             if(ele < min_element) {
@@ -2424,7 +2485,7 @@ RegisterOperators reg2({
         [](Stack& stack) {
           at::Tensor t;
           pop(stack, t);
-          c10::List<int64_t> elems = c10::make_list<int64_t>();
+          c10::List<int64_t> elems;
           elems.reserve(t.size(0));
           for (int i = 0; i < t.size(0); i++) {
             elems.push_back(*t[i].data<int32_t>());
@@ -2463,12 +2524,49 @@ RegisterOperators reg2({
           aliasAnalysisSpecialCase()),                                        \
       Operator(                                                               \
           "aten::get(Dict(" key_type ", t) self, " key_type " key) -> t(*)?", \
-          dictGet,                                                            \
+          dictGet<false>,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::get(Dict(" key_type ", t) self, " key_type                   \
           " key, t default_value) -> t(*)",                                   \
-          dictGetDefault,                                                     \
+          dictGet<true>,                                                      \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::setdefault(Dict(" key_type ", t) self, " key_type            \
+          " key, t default_value) -> t(*)",                                   \
+          dictSetDefault,                                                     \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
+          " key) -> t(*)",                                                    \
+          dictPop<false>,                                                     \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
+          " key, t default_value) -> t(*)",                                   \
+          dictPop<true>,                                                      \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::popitem(Dict(" key_type ", t)(a!) self) -> ((" key_type      \
+          ", t))",                                                            \
+          dictPopItem,                                                        \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::clear(Dict(" key_type ", t)(a!) self) -> ()", dictClear,     \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::update(Dict(" key_type ", t)(a!) self, Dict(" key_type       \
+          ", t)(a!) to_add) -> ()",                                           \
+          dictUpdate,                                                         \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::items(Dict(" key_type ", t) self) -> ((" key_type ", t)[])", \
+          dictItems,                                                          \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::copy(Dict(" key_type ", t)(a) self) -> Dict(" key_type       \
+          ", t)",                                                             \
+          dictCopy,                                                           \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::__contains__(Dict(" key_type ", t) dict, " key_type          \
