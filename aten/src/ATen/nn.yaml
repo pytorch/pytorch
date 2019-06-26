@@ -5,6 +5,15 @@
   scalar_check:
     output: 'false'
     grad_input: 'false'
+  # Using this section you can specify what scalar types should be used for each backend
+  # to generate backward and forward methods
+  # If not specified, ['Float', 'Double', 'Half'] will be used
+  CPU:
+    forward_scalar_types: ['Float', 'Double', 'Half']
+    backward_scalar_types: ['Float', 'Double', 'Half']
+  CUDA:
+    forward_scalar_types: ['Float', 'Double', 'Half']
+    backward_scalar_types: ['Float', 'Double', 'Half']
 
 - name: _thnn_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: AbsCriterion
