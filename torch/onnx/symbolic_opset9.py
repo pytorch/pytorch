@@ -213,8 +213,10 @@ def _reduce_op_symbolic(onnx_op_name):
             return g.op(onnx_op_name, self, keepdims_i=0)
         else:
             # dim-reduce path
-            dim, keepdim = sym_help._get_const(dim, 'is', 'dim'), sym_help._get_const(keepdim, 'i', 'keepdim')
-            return g.op(onnx_op_name, self, axes_i=dim, keepdims_i=keepdim)
+            desc = 'is' if allow_multi_dim_support else 'i'
+            dim, keepdim = sym_help._get_const(dim, desc, 'dim'), sym_help._get_const(keepdim, 'i', 'keepdim')
+            dim_list = dim if allow_multi_dim_support else [dim] 
+            return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
     return symbolic
 
 def overload_by_arg_count(fn):
