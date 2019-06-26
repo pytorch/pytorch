@@ -664,8 +664,8 @@ def trace(func,
           _force_outplace=False,
           _module_class=None):
     """
-    Trace a function and return an executable ``ScriptModule`` that will be optimized
-    using just-in-time compilation.
+    Trace a function and return an executable ``ScriptModule`` or ``torch.jit._C.Function``
+    that will be optimized using just-in-time compilation.
 
     .. warning::
 
@@ -709,11 +709,14 @@ def trace(func,
                                            results diverge numerically for a known reason, such as operator fusion.
 
     Returns:
-        A ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
-        When ``func`` is a ``torch.nn.Module``, the returned ``ScriptModule`` will have the same set of
-        sub-modules and parameters as ``func``.
+        if ``callable`` is ``nn.Module`` or ``forward()`` of ``nn.Module``, ``trace`` returns
+        a ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
+        The returned ``ScriptModule`` will have the same set of sub-modules and parameters as the
+        original ``nn.Module``.
+        If ``callable`` is a standalone function, ``trace`` returns ``torch.jit._C.Function``
 
     Example::
+
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
@@ -728,8 +731,9 @@ def trace(func,
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
         n = Net()
-        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
-        module = torch.jit.trace_module(n, inputs)
+        # the following two calls are equivalent
+        module = torch.jit.trace_module(n, example_forward_input)
+        module = torch.jit.trace_module(n.forward, example_forward_input)
 
     """
     if not _enabled:
@@ -793,7 +797,7 @@ def trace_module(mod,
                  _force_outplace=False,
                  _module_class=None):
     """
-    Trace a function and return an executable ``ScriptModule`` that will be optimized
+    Trace a module and return an executable ``ScriptModule`` that will be optimized
     using just-in-time compilation.
 
     .. warning::
@@ -840,9 +844,22 @@ def trace_module(mod,
 
     Example::
 
-        def f(x):
-            return x * 2
-        traced_f = torch.jit.trace(f, torch.rand(1))
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+            def weighted_kernel_sum(self, weight):
+                return weight * self.conv.weight
+
+        example_weight = torch.rand(1, 1, 3, 3)
+        example_forward_input = torch.rand(1, 1, 3, 3)
+        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        n = Net()
+        module = torch.jit.trace_module(n, inputs)
 
     """
 
