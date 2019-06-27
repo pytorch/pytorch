@@ -206,7 +206,7 @@ def _slice(g, input, axes, starts, ends):
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
-def _reduce_op_symbolic(onnx_op_name):
+def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
             # all-reduce path
@@ -231,8 +231,8 @@ def overload_by_arg_count(fn):
         raise NotImplementedError("Unknown aten::{} signature".format(fn.__name__))
     return wrapper
 
-def _reduce_with_dtype(onnx_op, name):
-    symbolic = _reduce_op_symbolic(onnx_op)
+def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
+    symbolic = _reduce_op_symbolic(onnx_op, allow_multi_dim_support=allow_multi_dim_support)
 
     @overload_by_arg_count
     def reduce(g, *args, **kwargs):
@@ -242,7 +242,9 @@ def _reduce_with_dtype(onnx_op, name):
                 return _unimplemented(name, "dtype")
             return symbolic(g, self)
 
-        @parse_args('v', 'i', 'i', 'none')
+        dim_desc = 'is' if allow_multi_dim_support else 'i'
+
+        @parse_args('v', dim_desc, 'i', 'none')
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() != 'prim::Constant':
                 return _unimplemented(name, "dtype")
@@ -252,7 +254,7 @@ def _reduce_with_dtype(onnx_op, name):
 
 sum = _reduce_with_dtype('ReduceSum', 'sum')
 mean = _reduce_with_dtype('ReduceMean', 'mean')
-prod = _reduce_with_dtype('ReduceProd', 'prod')
+prod = _reduce_with_dtype('ReduceProd', 'prod', allow_multi_dim_support=False)  # torch.prod does not support multidimensional 'dim'
 
 @parse_args('v', 'i', 'none')
 def cumsum(g, input, dim, dtype):
