@@ -49,6 +49,40 @@ class QuantizedLinear(torch.jit.ScriptModule):
                'scale={scale}, zero_point={zero_point}'.format(**self.__dict__)
         return repr
 
+# FP16 weights
+class QuantizedLinearFP16(torch.jit.ScriptModule):
+
+    def __init__(self, other):
+        super(QuantizedLinearFP16, self).__init__()
+        self.in_features = other.in_features
+        self.out_features = other.out_features
+        self.original_weight = other.weight
+        self.weight = torch.fbgemm_pack_gemm_matrix_fp16(
+            other.weight.clone().float())
+        assert other.bias is not None, 'QuantizedLinearFP16 requires a bias'
+        self.bias = torch.nn.Parameter(other.bias.clone().float(), requires_grad=False)
+        self.register_buffer('packed_weight', self.weight)
+
+    @torch.jit.script_method
+    def _unpack(self):
+        self.packed_weight.set_(
+            torch.fbgemm_pack_gemm_matrix_fp16(
+                self.original_weight))
+
+    @torch.jit.script_method
+    def _pack(self):
+        self.packed_weight.set_(
+            torch.zeros(torch.jit.annotate(List[int], []), dtype=torch.uint8).detach())
+
+    @torch.jit.script_method
+    def forward(self, input):
+        out = torch.fbgemm_linear_fp16_weight(
+            input.float(), self.packed_weight, self.bias)
+        return out
+
+    def extra_repr(self):
+        repr = 'in_features={in_features}, out_features={out_features}, '.format(**self.__dict__)
+        return repr
 
 # Quantized RNN cell implementations
 class QuantizedRNNCellBase(torch.jit.ScriptModule):
@@ -456,19 +490,25 @@ def quantize_rnn_cell_modules(module):
     return module
 
 
-def quantize_linear_modules(module):
+def quantize_linear_modules(module, dtype=torch.uint8):
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
             continue
-        new_mod = quantize_linear_modules(mod)
+        new_mod = quantize_linear_modules(mod, dtype)
         if new_mod is not mod:
             reassign[name] = new_mod
 
     for name, mod in reassign.items():
         setattr(module, name, mod)
     if isinstance(mod, torch.nn.Linear):
-        return QuantizedLinear(mod)
+        if dtype == torch.uint8:
+            return QuantizedLinear(mod)
+        elif dtype == torch.float16:
+            return QuantizedLinearFP16(mod)
+        else: 
+            raise RuntimeError(
+                "Unsupported dtype: {}".format(dtype))
     return module
 
 
