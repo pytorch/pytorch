@@ -1860,9 +1860,9 @@ The returned tensor and :attr:`ndarray` share the same memory. Modifications to
 the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
 tensor is not resizable.
 
-The :attr:`ndarray` currently supports dtypes of ``torch.float64``,
-``torch.float32``, ``torch.float16``, ``torch.int64``, ``torch.int32``,
-``torch.int16``, ``torch.int8``, ``torch.uint8``, and ``torch.bool``.
+It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
+``numpy.float32``, ``numpy.float16``, ``numpy.int64``, ``numpy.int32``,
+``numpy.int16``, ``numpy.int8``, ``numpy.uint8``, and ``numpy.bool``.
 
 Example::
 
