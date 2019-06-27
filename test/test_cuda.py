@@ -1104,7 +1104,7 @@ class TestCuda(TestCase):
             b = t()
             torch.bitwise_not(a, out=b)
             self.assertEqual(expected_res, b)
-            # inplace
+            # in-place
             a.bitwise_not_()
             self.assertEqual(expected_res, a)
 
