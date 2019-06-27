@@ -1507,12 +1507,11 @@ int listNe<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-Operation listList(const Node* node) {
-  return [=](Stack& stack) {
-    // Intentional no-op, needed to match Python semantics for list(iterable),
-    // but in JIT these will already be lists
-    return 0;
-  };
+template <typename T>
+int listList(Stack& stack) {
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  push(stack, a.copy());
+  return 0;
 }
 
 template <class T>
@@ -2011,7 +2010,8 @@ RegisterOperators reg2({
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
           listSlice<c_type::value_type>),                                           \
-      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList),       \
+      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]",                  \
+          listList<c_type::value_type>),                                            \
       Operator(                                                                     \
           "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
           listMulIntLeft<c_type::value_type>),                                      \
