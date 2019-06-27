@@ -6,6 +6,7 @@
 #include <torch/types.h>
 
 #include <test/cpp/api/support.h>
+#include <test/cpp/api/dataloader.h>
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/tempfile.h>
@@ -60,39 +61,6 @@ TEST(DataTest, TransformCallsGetApplyCorrectly) {
   std::vector<std::string> expected = {"1", "2", "3", "4", "5"};
   ASSERT_EQ(batch, expected);
 }
-
-// dummy chunk data reader with 3 chunks and 35 examples in total. Each chunk
-// contains 10, 5, 20 examples respectively.
-
-struct DummyChunkDataReader
-    : public datasets::ChunkDataReader<int> {
- public:
-  using BatchType = datasets::ChunkDataReader<int>::ChunkType;
-  using DataType = datasets::ChunkDataReader<int>::ExampleType;
-
-  /// Read an entire chunk.
-  BatchType read_chunk(size_t chunk_index) override {
-    BatchType batch_data;
-    int start_index = chunk_index == 0
-        ? 0
-        : std::accumulate(chunk_sizes, chunk_sizes + chunk_index, 0);
-
-    batch_data.resize(chunk_sizes[chunk_index]);
-
-    std::iota(batch_data.begin(), batch_data.end(), start_index);
-
-    return batch_data;
-  }
-
-  size_t chunk_count() override {
-    return chunk_count_;
-  };
-
-  void reset() override{};
-
-  const static size_t chunk_count_ = 3;
-  size_t chunk_sizes[chunk_count_] = {10, 5, 20};
-};
 
 TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
   DummyChunkDataReader data_reader;

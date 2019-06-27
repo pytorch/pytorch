@@ -11,7 +11,7 @@ import unittest
 import itertools
 import warnings
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
+from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset, ChunkDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
@@ -251,6 +251,8 @@ def set_faulthander_if_available(_=None, dataset=None):
 set_faulthander_if_available()
 
 # Process `pid` must have called `set_faulthander_if_available`
+
+
 def print_traces_of_all_threads(pid):
     if HAS_FAULTHANDLER:
         if not IS_WINDOWS:
@@ -1647,6 +1649,33 @@ class TestIndividualWorkerQueue(TestCase):
             for num_workers in range(1, 6):
                 self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
 
+
+class TestChunkDataset(TestCase):
+    def setUp(self):
+        super(TestChunkDataset, self).setUp()
+        self.chunk_count=3
+        self.batch_size=5
+        self.cache_size=100
+        self.preloaders=1
+        self.chunk_sampler = torch._C.data.SequentialSampler(size=self.chunk_count)
+        self.example_sampler = torch._C.data.SequentialSampler(size=self.batch_size)
+        self.chunk_sampler_wrapper = torch._C.data.SamplerWrapper(sampler=self.chunk_sampler)
+        self.example_sampler_wrapper = torch._C.data.SamplerWrapper(sampler=self.example_sampler)
+        self.reader = torch._C.DummyChunkDataReader()
+        self.opt = torch._C.data.ChunkDatasetOptions(preloader_count=self.preloaders, batch_size=self.batch_size, cache_size=self.cache_size)
+
+    def test_chunkdataset_reading(self):
+        dummy_chunkdataset = torch._C.DummyChunkDataset(chunk_reader=self.reader,
+                                             chunk_sampler=self.chunk_sampler_wrapper,
+                                             example_sampler=self.example_sampler_wrapper,
+                                             options=self.opt)
+
+        trainset = ChunkDataset(dummy_chunkdataset)
+        trainset.reset()
+        trainloader = DataLoader(dataset=trainset)
+        for i, actual in enumerate(trainloader, 0):
+            expected=[torch.tensor([j], dtype=torch.long) for j in list(range(self.batch_size*i, self.batch_size*i+self.batch_size))]
+            self.assertEqual(expected, actual)
 
 if __name__ == '__main__':
     run_tests()

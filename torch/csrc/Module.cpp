@@ -663,7 +663,7 @@ PyObject* initModule() {
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
-  torch::data::initDataBindings(module);
+  torch::data::init_dataset_bindings(module);
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif

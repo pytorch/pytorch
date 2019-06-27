@@ -8,7 +8,10 @@ namespace py = pybind11;
 
 namespace torch {
 namespace data {
-void initDataBindings(PyObject* module);
+
+void init_dataset_bindings(PyObject* module);
+void init_dataset_bindings_impl(PyObject* module);
+void init_dataset_bindings_test(PyObject* module);
 
 namespace samplers {
 class SamplerWrapper : public Sampler<> {
@@ -53,9 +56,6 @@ class SamplerWrapper : public Sampler<> {
   torch::optional<std::vector<size_t>> next(size_t batch_size) override {
     if (total_stride_ > 0) {
       torch::optional<std::vector<size_t>> indices;
-      /// TODO: JALIYA: NOTE: SPECIAL CHUNK SAMPLER WRAPPER
-      ///       WHICH ONLY WORKS FOR CHUNK SAMPLER. OTHERWISE WE NEED TO
-      ///       SUPPORT BATCH SIZE.
       AT_ASSERT(batch_size == 1);
       while (true) {
         torch::optional<std::vector<size_t>> idx = sampler_->next(batch_size);
@@ -164,24 +164,6 @@ class PyChunkDataReader : public ChunkDataReader<DataType> {
   void reset() override {
     PYBIND11_OVERLOAD_PURE(void, ChunkDataReader<DataType>, reset);
   }
-};
-
-class DummyChunkDataReader : public ChunkDataReader<int32_t> {
- public:
-  using BatchType = std::vector<int32_t>;
-  DummyChunkDataReader(){};
-  virtual ~DummyChunkDataReader() = default;
-
-  BatchType read_chunk(size_t chunk_index) override {
-    return std::vector<int32_t>(5, 0);
-  }
-
-  size_t chunk_count() override {
-    return 5;
-  };
-
-  // Nothing to be done
-  void reset() override{};
 };
 
 } // namespace datasets

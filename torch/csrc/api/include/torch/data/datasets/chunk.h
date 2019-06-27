@@ -4,6 +4,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/data/datasets/stateful.h>
 #include <torch/data/samplers.h>
+#include <torch/data/worker_exception.h>
 #include <queue>
 #include <thread>
 
