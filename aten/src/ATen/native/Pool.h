@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/div_rtn.h>
 #include <tuple>
 
 #pragma once
@@ -23,7 +24,9 @@ safe_downcast(src_t v)
 template<typename T>
 static inline T pooling_output_shape(
         T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
-    T outputSize = ((inputSize + 2 * pad - dilation * (kernelSize - 1) - 1 + (ceil_mode ? stride - 1 : 0)) / stride + 1);
+    T outputSize = div_rtn<T>(
+        inputSize + 2 * pad - dilation * (kernelSize - 1) - 1 +
+        (ceil_mode ? stride - 1 : 0), stride) + 1;
     if (pad) {
         // ensure that the last pooling starts inside the image
         // needed to avoid problems in ceil mode

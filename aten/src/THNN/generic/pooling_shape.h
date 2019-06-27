@@ -1,13 +1,16 @@
 #ifndef THNN_POOLING_SHAPE_H
 #define THNN_POOLING_SHAPE_H
 
+#include <ATen/div_rtn.h>
+
 template<typename T>
 static inline T pooling_output_shape_pad_lr(
     T inputSize, T kernelSize, T pad_l, T pad_r, T stride, T dilation,
     bool ceil_mode
   ) {
-    T outputSize = ((inputSize + pad_l + pad_r - dilation * (kernelSize - 1)
-        - 1 + (ceil_mode ? stride - 1 : 0)) / stride + 1);
+    T outputSize = div_rtn<T>(
+        inputSize + pad_l + pad_r - dilation * (kernelSize - 1) - 1 +
+        (ceil_mode ? stride - 1 : 0), stride) + 1;
     if (pad_l) {
         // ensure that the last pooling starts inside the image
         // needed to avoid problems in ceil mode
