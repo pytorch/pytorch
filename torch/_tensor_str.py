@@ -248,7 +248,7 @@ def _str(self):
         if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
             suffixes.append('device=\'' + str(self.device) + '\'')
 
-    has_default_dtype = self.dtype == torch.get_default_dtype() or self.dtype == torch.int64 or self.dtype == torch.bool
+    has_default_dtype = self.dtype in (torch.get_default_dtype(), torch.int64, torch.bool)
     if self.is_sparse:
         suffixes.append('size=' + str(tuple(self.shape)))
         suffixes.append('nnz=' + str(self._nnz()))
