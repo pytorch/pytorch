@@ -53,9 +53,19 @@ class TestONNXRuntime(unittest.TestCase):
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
-                return torch.std(input, dim=[0, 1], unbiased=False)
+                return torch.std(input, unbiased=False)
 
-        x = torch.randn(3, 3, 3)
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        output = model(x)
+        self.run_test(model, x, output)
+
+    def test_std_along_dims(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
         model = StandardDeviation()
         output = model(x)
         self.run_test(model, x, output)

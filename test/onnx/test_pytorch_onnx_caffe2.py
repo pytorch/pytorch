@@ -1908,11 +1908,24 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
-                return torch.std(input, dim=[0, 1], unbiased=False, keepdim=False)
+                return torch.std(input, unbiased=False)
 
         model = StandardDeviation()
-        inputs = torch.randn(3, 3)
-        self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
+        inputs = torch.randn(2, 3, 4)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_std_along_dims(self):
+        class StandardDeviationAlongDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False, keepdim=False)
+
+        model = StandardDeviationAlongDims()
+        inputs = torch.randn(2, 3, 4)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
 # a bit of metaprogramming to set up all the rnn tests
 

@@ -22,7 +22,7 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # check the schema with the onnx checker
     onnx.checker.check_model(model)
 
-    # check target type and attributes 
+    # check target type and attributes
     graph = model.graph
     # ops should contain an object for each node
     # in graph.node, in the right order.
@@ -301,35 +301,30 @@ class TestONNXOpset(TestCase):
     def test_std(self):
         class MyModule(Module):
             def forward(self, input):
-                return torch.std(input, unbiased=True)
+                return torch.std(input, unbiased=False)
 
-        ops = [{"op_name": "ReduceMean",
-                "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
+        ops = [{"op_name": "Mul"},
+               {"op_name": "ReduceMean", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
+               {"op_name": "ReduceMean", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
                {"op_name": "Mul"},
-               {"op_name": "Mul"},
-               {"op_name": "ReduceMean",
-                "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
                {"op_name": "Sub"},
                {"op_name": "Abs"},
-               {"op_name": "Constant"},
-               {"op_name": "Mul"},
-               {"op_name": "Constant"},
-               {"op_name": "Div"},
-               {"op_name": "Sqrt"}
-               ]
+               {"op_name": "Sqrt"}]
         ops = {9: ops, 10: ops}
-        x = torch.randn(1, 16, 3, 3)
+        x = torch.randn(2, 3, 4)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
     def test_std_along_dims(self):
         class MyModule(Module):
             def forward(self, input):
-                return torch.std(input, dim=[1], unbiased=True, keepdim=True)
+                return torch.std(input, dim=(0, 1), unbiased=True, keepdim=True)
 
-        ops = [{"op_name": "ReduceMean", "attributes": [{"name": "axes", "ints": [1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
+        ops = [{"op_name": "Mul"},
+               {"op_name": "ReduceMean",
+                "attributes": [{"name": "axes", "ints": [0, 1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
+               {"op_name": "ReduceMean",
+                "attributes": [{"name": "axes", "ints": [0, 1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
                {"op_name": "Mul"},
-               {"op_name": "Mul"},
-               {"op_name": "ReduceMean", "attributes": [{"name": "axes", "ints": [1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
                {"op_name": "Sub"},
                {"op_name": "Abs"},
                {"op_name": "Constant"},
@@ -339,7 +334,7 @@ class TestONNXOpset(TestCase):
                {"op_name": "Sqrt"}
                ]
         ops = {9: ops, 10: ops}
-        x = torch.randn(1, 16, 3, 3)
+        x = torch.randn(2, 3, 4)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
 
