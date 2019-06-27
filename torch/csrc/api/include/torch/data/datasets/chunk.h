@@ -1,6 +1,13 @@
 #pragma once
 
+#include <torch/arg.h>
+#include <torch/csrc/utils/memory.h>
 #include <torch/data/datasets/stateful.h>
+#include <torch/data/samplers.h>
+#include <queue>
+#include <thread>
+
+#include <torch/serialize.h>
 
 namespace torch {
 namespace data {
@@ -12,10 +19,11 @@ namespace datasets {
 /// A chunk could be an entire file, such as an audio data file or an image,
 /// or part of a file in the case of a large text-file split based on seek
 /// positions.
-template <typename Chunk = std::vector<Example<>>>
+template <typename ExampleType_, typename ChunkType_ = std::vector<ExampleType_>>
 class ChunkDataReader {
  public:
-  using ChunkType = Chunk;
+  using ChunkType = ChunkType_;
+  using ExampleType = ExampleType_;
 
   /// Read an entire chunk.
   virtual ChunkType read_chunk(size_t chunk_index) = 0;
@@ -34,7 +42,7 @@ namespace detail {
 /// return. If the cache is empty, it either waits to load more chunks or return
 /// null if all chunks are loaded.
 template <
-    typename UnwrappedBatch = std::vector<Example<>>,
+    typename UnwrappedBatch,
     typename ExampleSampler = samplers::RandomSampler>
 class BatchDataBuffer {
  public:
@@ -106,7 +114,7 @@ class BatchDataBuffer {
           batch_example_indices.value().size() == example_count)
       BatchRequestType& indices = batch_example_indices.value();
       for (size_t i : indices) {
-        AT_CHECK(i < data_size, "Index out of range");
+        TORCH_CHECK(i < data_size, "Index out of range");
         batch.emplace_back(std::move(data[i]));
       }
       remaining_size -= example_count;
@@ -243,16 +251,16 @@ struct ChunkDatasetOptions {
       : preloader_count_(preloader_count),
         batch_size_(batch_size),
         cache_size_(cache_size) {
-    AT_CHECK(
+    TORCH_CHECK(
         preloader_count_ > 0,
         "Preloader count is 0. At least one preloader needs to be specified.");
-    AT_CHECK(
+    TORCH_CHECK(
         batch_size_ > 0,
         "Batch size is 0. A positive batch size needs to be specified.");
-    AT_CHECK(
+    TORCH_CHECK(
         cache_size_ > 0,
         "Cache size is 0. A positive cache size needs to be specified.");
-    AT_CHECK(
+    TORCH_CHECK(
         cache_size_ >= batch_size_,
         "Cache size is less than batch size. Cache needs to be large enough to "
         "hold at least one batch.");
@@ -264,7 +272,7 @@ struct ChunkDatasetOptions {
   /// The size of each batch.
   TORCH_ARG(size_t, batch_size);
 
-  // the capacity of the queue for batch caching.
+  /// The capacity of the queue for batch caching.
   TORCH_ARG(size_t, cache_size) = 2048;
 };
 
@@ -302,7 +310,8 @@ class ChunkDataset final
         example_sampler_(std::move(example_sampler)),
         options_(std::move(options)),
         quit_worker_(false),
-        running_preloaders_(0) {}
+        running_preloaders_(0),
+        load_checkpoint_(false) {}
 
   virtual ~ChunkDataset() {
     // stop batch buffer first.
@@ -317,17 +326,21 @@ class ChunkDataset final
   /// is dataset agnostic and does not need overriding in different chunk
   /// datasets.
   BatchType get_batch(size_t batch_size) override {
-    AT_CHECK(
+    TORCH_CHECK(
       batch_buffer_ != nullptr,
       "Dataset needs to call reset() before calling get_batch().");
 
-    AT_CHECK(
+    TORCH_CHECK(
       batch_size == options_.batch_size_,
       "The requested batch size does not match with the initialized batch size.\n"
       " The requested batch size is ", batch_size,
       ", while the dataset is created with batch size equal to ", options_.batch_size_);
-
     return batch_buffer_->get_batch();
+  }
+
+  /// Helper method around get_batch as `batch_size` is not strictly necessary
+  BatchType get_batch() {
+    return get_batch(options_.batch_size_);
   }
 
   /// This will clear any internal state and starts the internal prefetching
@@ -341,9 +354,11 @@ class ChunkDataset final
     free_workers();
     preload_threads_.clear();
 
-    chunk_reader_.reset();
-
-    chunk_sampler_.reset(chunk_reader_.chunk_count());
+    if (!load_checkpoint_){
+      chunk_reader_.reset();
+      chunk_sampler_.reset(chunk_reader_.chunk_count());
+      load_checkpoint_ = false;
+    }
 
     // Throw out any existing cached batch in the buffer and re-creates a new
     // chunk buffer.
@@ -372,6 +387,17 @@ class ChunkDataset final
   // loading to set the epoch number for the sampler.
   ChunkSamplerType& chunk_sampler() {
     return chunk_sampler_;
+  }
+
+  void save(serialize::OutputArchive& archive) const override {
+    std::lock_guard<std::mutex> lock(chunk_index_guard_);
+    chunk_sampler_.save(archive);
+  }
+
+  void load(serialize::InputArchive& archive) override{
+    std::lock_guard<std::mutex> lock(chunk_index_guard_);
+    chunk_sampler_.load(archive);
+    load_checkpoint_ = true;
   }
 
  private:
@@ -444,7 +470,10 @@ class ChunkDataset final
   std::atomic<size_t> running_preloaders_;
 
   // mutex to synchronize chunk sampler next() call.
-  std::mutex chunk_index_guard_;
+  mutable std::mutex chunk_index_guard_;
+
+  // boolean value to indicate whether we need to load the checkpoint for chunk_sampler_.
+  bool load_checkpoint_;
 };
 } // namespace datasets
 } // namespace data

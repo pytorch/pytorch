@@ -8,38 +8,9 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
 
-namespace detail {
-// InputToIValue takes a value and converts it to an IValue to be put on a stack.
-template<class T>
-struct InputToIValue final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    return c10::IValue(std::forward<T_>(v));
-  }
-};
-template<class T>
-struct InputToIValue<c10::optional<T>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    if (v.has_value()) {
-      return c10::IValue(std::move(*v));
-    } else {
-      return c10::IValue();
-    }
-  }
-};
-template<class T>
-struct InputToIValue<c10::ArrayRef<T>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    return c10::IValue(v.vec());
-  }
-};
-}
-
 template<class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
-  return {detail::InputToIValue<c10::guts::decay_t<Inputs>>::call(std::forward<Inputs>(inputs))...};
+  return {std::forward<Inputs>(inputs)...};
 }
 
 inline at::Tensor dummyTensor(c10::TensorTypeId dispatch_key) {
@@ -64,14 +35,14 @@ inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... ar
 }
 
 inline void expectDoesntFindKernel(const char* op_name, c10::TensorTypeId dispatch_key) {
-  auto op = c10::Dispatcher::singleton().findSchema(op_name, "");
+  auto op = c10::Dispatcher::singleton().findSchema({op_name, ""});
   EXPECT_ANY_THROW(
     callOp(*op, dummyTensor(dispatch_key), 5);
   );
 }
 
 inline void expectDoesntFindOperator(const char* op_name) {
-  auto op = c10::Dispatcher::singleton().findSchema(op_name, "");
+  auto op = c10::Dispatcher::singleton().findSchema({op_name, ""});
   EXPECT_FALSE(op.has_value());
 }
 
@@ -85,4 +56,20 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
   }
   ADD_FAILURE() << "Expected to throw exception containing \""
     << expectMessageContains << "\" but didn't throw";
+}
+
+template<class T>
+void expectListEquals(c10::ArrayRef<T> expected, c10::List<T> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual.get(i));
+  }
+}
+
+template<class T>
+void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
 }

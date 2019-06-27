@@ -6,6 +6,12 @@ REGISTER_CPU_OPERATOR(LearningRate, LearningRateOp<float, CPUContext>);
 OPERATOR_SCHEMA(LearningRate)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef&,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0] = in[0];
+      return out;
+    })
     .SetDoc(R"DOC(
 Learning rate is a decreasing function of time. With low learning rates the
 improvements will be linear. With high learning rates they will start to look
@@ -19,6 +25,7 @@ Required:
    `fixed`
    `step`: uses `stepsize`, `gamma`
    `exp`: uses `gamma`
+   `gate`: uses 'multiplier_1', 'multiplier_2', `num_iter``
    `inv`: uses `gamma`, `power`
    `linearWarmup`: uses `start_multiplier`, `num_iter`
    `constantWarmup`: uses `multiplier`, `num_iter`
@@ -38,6 +45,13 @@ Optional:
   `num_iter`: defaults to 0
   `start_multiplier`: defaults to 0
   `multiplier`: defaults to 0.5
+  `multiplier_1`: defaults to 1
+  `multiplier_2`: defaults to 1
+  `m1`: defaults to 0.5, the first piece lr of piece warmup
+  `n1`: defaults to 0, iter threshold of the first piece lr
+  `m2`: defaults to 0.5, the second piece lr of piece warmup
+  `n2`: defaults to 0, iter threshold of the second piece lr
+  `m3`: defaults to 0.5, the third piece lr of piece warmup
 
 
 Usage:
@@ -73,8 +87,17 @@ Example usage:
         "multiplier",
         "(float, default 0.5) constant multiplier for learning rate")
     .Arg(
+        "multiplier_1",
+        "(float, default 1) start multiplier for learning rate")
+    .Arg("multiplier_2", "(float, default 1) end multiplier for learning rate")
+    .Arg(
         "sub_policy_num_iters",
         "(int array, default empty) number of iterations for each sub learning rate policy in composite policy")
+    .Arg("m1", "")
+    .Arg("n1", "")
+    .Arg("m2", "")
+    .Arg("n2", "")
+    .Arg("m3", "")
     .Input(0, "input", "description needed")
     .Output(0, "output", "description needed")
     .DeviceInferenceFunction([](const OperatorDef& def) {

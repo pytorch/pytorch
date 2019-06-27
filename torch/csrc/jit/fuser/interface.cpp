@@ -47,8 +47,8 @@ std::vector<at::Tensor> debugLaunchGraph(
     at::ArrayRef<at::Tensor> inputs) {
   // Creates a fusion group node
   auto wrapper_graph = std::make_shared<Graph>();
-  Node* fusion_group =
-      wrapper_graph->insertNode(wrapper_graph->createFusionGroup());
+  Node* fusion_group = wrapper_graph->insertNode(
+      wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
   for (size_t i = 0; i < graph.inputs().size(); ++i) {
     fusion_group->addInput(wrapper_graph->addInput());
@@ -70,7 +70,7 @@ std::string debugGetFusedKernelCode(
   // Creates a fusion group node
   auto wrapper_graph = std::make_shared<Graph>();
   Node* fusion_group =
-      wrapper_graph->insertNode(wrapper_graph->createFusionGroup());
+      wrapper_graph->insertNode(wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
   for (size_t i = 0; i < graph.inputs().size(); ++i) {
     fusion_group->addInput(wrapper_graph->addInput());

@@ -16,6 +16,11 @@ set(CMAKE_CXX_STANDARD 11)
 if (NOT MSVC)
   set(CMAKE_C_STANDARD 11)
 endif()
+if (DEFINED GLIBCXX_USE_CXX11_ABI)
+  if (${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
+    set(CXX_STANDARD_REQUIRED ON)
+  endif()
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -61,9 +66,7 @@ endif()
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
-option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
 option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
@@ -71,6 +74,7 @@ option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_pa
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
+option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -81,6 +85,7 @@ option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
+option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_ROCM "Use ROCm" ON)
@@ -89,6 +94,7 @@ cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
+option(NAMEDTENSOR_ENABLED "Experimental: compile with namedtensor support" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -131,9 +137,10 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
     "USE_GLOO" OFF)
+option(USE_TBB "Use TBB" OFF)
 
 # Used when building Caffe2 through setup.py
-option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
+option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
 
 # /Z7 override option
 # When generating debug symbols, CMake default to use the flag /Zi.
@@ -141,7 +148,7 @@ option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside t
 # But some users don't use sccache; this override is for them.
 option(MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON)
 
-SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
+set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
 # For MSVC,
 # 1. Replace /Zi and /ZI with /Z7
@@ -163,10 +170,33 @@ if (MSVC)
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
   endforeach(flag_var)
+  # Turning off USE_DISTRIBUTED on default
+  set(USE_DISTRIBUTED OFF)
 endif(MSVC)
 
+# Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
+# applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
-  set(BUILD_ATEN_MOBILE ON)
+  set(INTERN_BUILD_MOBILE ON)
+endif()
+
+# INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
+# It's disabled for caffe2 mobile library.
+if (INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
+  set(INTERN_BUILD_ATEN_OPS OFF)
+else()
+  set(INTERN_BUILD_ATEN_OPS ON)
+endif()
+
+# BUILD_CAFFE2_MOBILE is the master switch to choose between libcaffe2 v.s. libtorch mobile build.
+# When it's enabled it builds original libcaffe2 mobile library without ATen/TH ops nor TorchScript support;
+# When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
+# TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
+if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  set(BUILD_PYTHON OFF)
+  set(BUILD_CAFFE2_OPS OFF)
+  set(USE_DISTRIBUTED OFF)
+  set(FEATURE_TORCH_MOBILE ON)
 endif()
 
 if (BUILD_ATEN_ONLY)
@@ -191,8 +221,12 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_DEFAULT_VERSION "1.0.0")
+set(TORCH_DEFAULT_VERSION "1.1.0")
 set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
+if (DEFINED ENV{PYTORCH_BUILD_VERSION})
+  set(TORCH_BUILD_VERSION "$ENV{PYTORCH_BUILD_VERSION}"
+    CACHE STRING "Torch build version" FORCE)
+endif()
 if (NOT TORCH_BUILD_VERSION)
   # An empty string was specified so force version to the default
   set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}"
@@ -237,6 +271,10 @@ include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
+endif()
+
+if(NAMEDTENSOR_ENABLED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMEDTENSOR_ENABLED")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
@@ -289,6 +327,14 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments")
+    if (${COLORIZE_OUTPUT})
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcolor-diagnostics")
+    endif()
+  endif()
+  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
+    if (${COLORIZE_OUTPUT})
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
+    endif()
   endif()
   if ((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
     OR (CMAKE_COMPILER_IS_GNUCXX
@@ -314,7 +360,9 @@ if(NOT MSVC)
 else()
   foreach(flag_var
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+      CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO)
     if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
         string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
@@ -479,6 +527,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
+
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
       COMPONENT dev)

@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/symbolic_script.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/compiler.h>
 
 namespace torch {
 namespace jit {
@@ -44,23 +46,27 @@ const std::vector<std::string> functions = {
                 result = AD_unsqueeze_multiple(result, dim, n_dims)
             return grad * (self - result).exp()
 
-        def mean_0(self):
+        def mean_0(self, *, dtype: Optional[int]):
             self_size = self.size()
             self_numel = self.numel()
+            self_scalar_type = self.dtype
             def backward(grad_output):
-                return grad_output.expand(self_size) / self_numel
+                return grad_output.expand(self_size).to(self_scalar_type) / self_numel, None
 
-            return torch.mean(self), backward
+            return torch.mean(self, dtype=dtype), backward
 
         def mean_1(self,
                    dim: List[int],
-                   keepdim: bool):
+                   keepdim: bool,
+                   *,
+                   dtype: Optional[int]):
             self_size = self.size()
+            self_scalar_type = self.dtype
             def backward(grad_output):
-                grad_self = AD_sum_backward(grad_output, self_size, dim, keepdim) / AD_safe_size(self_size, dim)
-                return grad_self, None, None
+                grad_self = AD_sum_backward(grad_output, self_size, dim, keepdim).to(self_scalar_type) / AD_safe_size(self_size, dim)
+                return grad_self, None, None, None
 
-            return torch.mean(self, dim, keepdim), backward
+            return torch.mean(self, dim, keepdim, dtype=dtype), backward
 
         def logsumexp(self,
                       dim: List[int],
@@ -400,11 +406,11 @@ const std::vector<std::string> functions = {
 
             return torch._dim_arange(like, dim), backward
 
-        def contiguous(self):
+        def contiguous(self, *, memory_format: int=0):
             def backward(grad_output):
-                return grad_output
+                return grad_output, None
 
-            return self.contiguous(), backward
+            return self.contiguous(memory_format=memory_format), backward
 
         def dot(self, tensor):
             def backward(grad_output):
@@ -463,16 +469,6 @@ const std::vector<std::string> functions = {
                 grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
                 return grad_self, grad_end, None
             return torch.lerp(self, end, weight), backward
-
-        def mul(self, other):
-            def backward(grad_output):
-                # self & other are used in backward. No need to pass in their size
-                # from forward pass
-                grad_self = (grad_output * other)._grad_sum_to_size(self.size())
-                grad_other = (grad_output * self)._grad_sum_to_size(other.size())
-                return grad_self, grad_other
-
-            return self * other, backward
 
         def reshape(self,
                     shape: List[int]):
@@ -696,21 +692,43 @@ const std::vector<std::string> functions = {
 
     )",
     R"(
-        def div(self, other):
+        def AD_sizes_if_not_equal_multi(t1, t2, res):
+            return torch._size_if_not_equal(t1.size(), res.size()), torch._size_if_not_equal(t2.size(), res.size())
+
+        def mul(self, other):
+            result = self * other
+            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+
             def backward(grad_output):
-                grad_self = (grad_output / other)._grad_sum_to_size(self.size())
-                grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other.size())
+                # self & other are used in backward. No need to pass in their size
+                # from forward pass
+                grad_self = (grad_output * other)._grad_sum_to_size(self_size)
+                grad_other = (grad_output * self)._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
-            return self / other, backward
+            return result, backward
+
+        def div(self, other):
+            result = self / other
+            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+
+            def backward(grad_output):
+                grad_self = (grad_output / other)._grad_sum_to_size(self_size)
+                grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other_size)
+                return grad_self, grad_other
+
+            return result, backward
 
         def max(self, other):
+            result = torch.max(self, other)
+            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+
             def backward(grad_output):
-                grad_self = (grad_output * (self > other).type_as(grad_output))._grad_sum_to_size(self.size())
-                grad_other = (grad_output * (other > self).type_as(grad_output))._grad_sum_to_size(other.size())
+                grad_self = (grad_output * (self > other).type_as(grad_output))._grad_sum_to_size(self_size)
+                grad_other = (grad_output * (other > self).type_as(grad_output))._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
-            return torch.max(self, other), backward
+            return result, backward
 
         def min(self, other):
             def backward(grad_output):
@@ -946,12 +964,21 @@ const std::vector<std::string> functions = {
             return torch.trunc(self), backward
 
         def _grad_sum_to_size(self,
-                              size: List[int]):
-            self_size = self.size()
-            def backward(grad_output):
-                return grad_output.expand(self_size), None
+                              size: Optional[List[int]]):
+            if size is not None:
+                self_size = self.size()
+            else:
+                self_size = None
 
-            return torch._grad_sum_to_size(self, size), backward
+            result = torch._grad_sum_to_size(self, size)
+            def backward(grad_output):
+                if self_size is None:
+                    grad_input = grad_output
+                else:
+                    grad_input = grad_output.expand(self_size)
+                return grad_input, None
+
+            return result, backward
     )",
     R"(
         def AD_adaptive_avg_pool2d_backward(grad,
@@ -1044,7 +1071,8 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        def layer_norm(input : Tensor,
+        # disable the layernorm AD temporarily because of bug in https://github.com/pytorch/pytorch/issues/19769
+        def layer_norm_disabled(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1126,7 +1154,13 @@ const std::vector<std::string> functions = {
                 mask.bernoulli_(p1m)
                 res = mask * input / p1m
 
+            if not train:
+                p1m = 1.
+                res = input
+                mask = torch.ones_like(input)
+
             def backward(grad_output):
+                use_cuda = grad_output.is_cuda
                 if use_cuda:
                     grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
                 else:
@@ -1146,11 +1180,11 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
-        def log_softmax(self, dim: int):
-            result = torch.log_softmax(self, dim)
+        def log_softmax(self, dim: int, *, dtype: Optional[int]):
+            result = torch.log_softmax(self, dim, dtype=dtype)
             def backward(grad_output):
                 grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
-                return grad_self, None
+                return grad_self, None, None
 
             return result, backward
 
@@ -1160,21 +1194,13 @@ const std::vector<std::string> functions = {
                 return torch.nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight), None, None, None, None
             return result, backward
 
-        def softmax_0(self, dim: int):
-            result = torch.softmax(self, dim)
-            def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
-                return grad_self, None
-
-            return result, backward
-
-        def softmax_1(self, dim: int, dtype: int):
+        def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
                 grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
                 return grad_self, None, None
 
-            return torch.softmax(self, dim, dtype), backward
+            return result, backward
 
         def AD_interpolate_backward(grad,
                                     input,
@@ -1272,20 +1298,20 @@ std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 } // anonymous namespace
 
 std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
-  AT_CHECK(
+  TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
   Value* fn = closure->node()->inputs().at(0);
   Value* context = closure->node()->inputs().at(1);
 
-  AT_CHECK(
+  TORCH_CHECK(
       fn->node()->kind() == prim::Function,
       "closure tuple must contain a prim::Function");
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
 Argument originalReturnType(const TupleTypePtr& tup) {
-  AT_CHECK(tup->elements().size() > 1);
+  TORCH_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
   std::vector<TypePtr> types = tup->elements().vec();
@@ -1330,7 +1356,7 @@ void loadModule(const script::CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw script::ErrorReport(forward_tuple->getSourceLocation())
+      throw script::ErrorReport(forward_tuple->sourceRange())
           << "gradient must return literal a tuple";
     }
 

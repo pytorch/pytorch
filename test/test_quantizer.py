@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 import torch.jit
 import torch.nn as nn
 import torch.nn.functional as F
-
 from common_utils import TestCase
 # TODO : Quantizer tests to be integrated with CI once quantizer intf hardened
 
@@ -209,7 +208,7 @@ class QuantizerTestCase(TestCase):
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         # Insert observers
-        torch._C._jit_pass_insert_observers(scriptM.graph, activationQuantObj.observer)
+        torch._C._jit_pass_insert_observers(scriptM._c, "forward", activationQuantObj.observer)
 
         # Run ScriptM Model and Collect statistics
         scriptM.forward(data)
@@ -219,6 +218,7 @@ class QuantizerTestCase(TestCase):
         eagerDict = eagerQuantObj.getQParamDict()
         activationDict = activationQuantObj.getQParamDict()
 
-        self.assertTrue('z' in eagerDict and 'z' in activationDict)
-        self.assertAlmostEqual(eagerDict["z"][0], activationDict["z"][0], places=15)
-        self.assertAlmostEqual(eagerDict["z"][1], activationDict["z"][1], places=15)
+        # TODO - fix @eellison
+        self.assertTrue('z' in eagerDict and 'z.1' in activationDict)
+        self.assertAlmostEqual(eagerDict["z"][0], activationDict["z.1"][0], places=15)
+        self.assertAlmostEqual(eagerDict["z"][1], activationDict["z.1"][1], places=15)

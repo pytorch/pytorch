@@ -126,7 +126,6 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
       oldOutput->replaceAllUsesWith(groupOutput);
     }
   }
-
   // Remove the original node now that the merge is complete
   toMerge->destroy();
 }

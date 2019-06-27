@@ -1,10 +1,9 @@
+#include <torch/csrc/jit/passes/python_print.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -176,23 +175,25 @@ struct PythonPrintPass {
 
   // Any classes used are written to this table, to be later written out as
   // dependencies.
-  std::vector<ClassTypePtr>& class_table_;
-  std::vector<ClassTypePtr> class_deps_;
+  std::vector<c10::NamedTypePtr>& class_table_;
+  std::vector<c10::NamedTypePtr> class_deps_;
   // Helper to avoid duplicating class types
-  void addToClassTable(const ClassTypePtr& classType) {
+  void addToClassTable(const c10::NamedTypePtr& type) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
-    if (classType->qualname() == "__torch__.$Module") {
-      return;
+    if (auto classType = type->cast<ClassType>()) {
+      if (classType->is_module()) {
+        return;
+      }
     }
-    if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
+    if (std::find(class_table_.cbegin(), class_table_.cend(), type) ==
         class_table_.cend()) {
-      class_table_.push_back(classType);
+      class_table_.push_back(type);
     }
-    if (std::find(class_deps_.cbegin(), class_deps_.cend(), classType) ==
+    if (std::find(class_deps_.cbegin(), class_deps_.cend(), type) ==
         class_deps_.cend()) {
-      class_deps_.push_back(classType);
+      class_deps_.push_back(type);
     }
   }
 
@@ -252,7 +253,7 @@ struct PythonPrintPass {
     // if it has a name set, then it was written as a variable so preserve that
     // unless it is being fed directly to the end of the block.
     // in which case it is not as useful to give it a name just to return it
-    if (v->hasUniqueName() && use.user->kind() != prim::Return)
+    if (v->hasDebugName() && use.user->kind() != prim::Return)
       return false;
     // don't try to inline control blocks
     if (n->blocks().size() != 0)
@@ -354,7 +355,7 @@ struct PythonPrintPass {
     buildConstantList(b->return_node(), constants);
   }
 
-  // get a new name unique across calls to uniqueName() and
+  // get a new name unique across calls to debugName() and
   // anything we have used.
   std::unordered_map<std::string, size_t> next_id;
 
@@ -394,10 +395,10 @@ struct PythonPrintPass {
     return ss.str();
   }
   // if we have to assign 'v' a name, what should it be?
-  // use the uniqueName if it was set, otherwise generate a name.
+  // use the debugName if it was set, otherwise generate a name.
   std::string genUniqueNameFor(Value* v) {
     return genName(
-        v->hasUniqueName() ? makeValidIdentifier(v->uniqueNameBase()) : "_");
+        v->hasDebugName() ? makeValidIdentifier(v->debugNameBase()) : "_");
   }
 
   // map from Value to how it should be printed at each use
@@ -532,7 +533,7 @@ struct PythonPrintPass {
       // this must be a while loop, but check that there isn't _also_ a trip
       // count
       if (trip_count_is_specified) {
-        throw script::ErrorReport(stmt.node()->getSourceLocation())
+        throw script::ErrorReport(stmt.node()->sourceRange())
             << "loop cannot be printed as python "
             << "because it has gone through an optimization "
             << "that combined while and for loops. File a bug.";
@@ -648,6 +649,10 @@ struct PythonPrintPass {
   void registerClassDependencies(const TypePtr& type) {
     if (const auto classType = type->cast<ClassType>()) {
       addToClassTable(classType);
+    } else if (const auto tupleType = type->cast<TupleType>()) {
+      if (tupleType->qualified_name_obj()) {
+        addToClassTable(tupleType);
+      }
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -666,20 +671,11 @@ struct PythonPrintPass {
 
     if (!print_const && node->kind() == prim::Constant)
       return;
-    if (node->kind() == prim::PythonOp) {
-      auto value = static_cast<const PythonOp*>(node);
-      if (enforce_importable_ && value->ignore_on_export) {
-        // Op has been marked as ignored, so insert an error in its place
-        indent();
-        body_ << "ops.prim.IgnoredPythonOp()\n";
-        return;
-      }
-    }
     splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this.";
         }
@@ -734,7 +730,7 @@ struct PythonPrintPass {
       } break;
       case prim::Function: {
         if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
@@ -797,14 +793,14 @@ struct PythonPrintPass {
     } else if (v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
-      for (const auto& t : v.toTensorListRef()) {
+      for (const at::Tensor& t : v.toTensorListRef()) {
         stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
       stmt << "]";
     } else if (v.isBoolList()) {
       printMaybeAnnotatedConstantList(
-          stmt, "bool", v.toBoolListRef().size(), v);
+          stmt, "bool", v.toBoolList().size(), v);
     } else if (v.isIntList()) {
       printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
     } else if (v.isDoubleList()) {
@@ -850,17 +846,24 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
-              << "could not export python function call " << value->name()
-              << ". Remove calls to Python functions before export. "
+        if (enforce_importable_ && !value->ignore_on_export) {
+          throw script::ErrorReport(node->sourceRange())
+              << "Could not export Python function call '" << value->name()
+              << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
-              << "If this is a nn.ModuleList, add it to __constants__.";
+              << "If this is a nn.ModuleList, add it to __constants__";
         }
 
-        stmt << "^" << value->name();
-        value->writeScalars(stmt);
+        if (value->ignore_on_export) {
+          stmt << "ops.prim.IgnoredPythonOp";
+        } else {
+          stmt << "^" << value->name();
+          value->writeScalars(stmt);
+        }
         printValueList(stmt, node->inputs(), "(", ")");
+      } break;
+      case prim::Uninitialized: {
+        stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
       } break;
       case prim::Constant: {
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
@@ -883,16 +886,25 @@ struct PythonPrintPass {
       case prim::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
+      case prim::str: {
+        printValueList(stmt, node->inputs(), "str(", ")");
+      } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
       case prim::TupleConstruct: {
+        if (auto qualname = node->output()
+                                ->type()
+                                ->expect<TupleType>()
+                                ->qualified_name_obj()) {
+          stmt << qualname->qualifiedName();
+        }
         printValueList(
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
       case prim::TupleIndex: {
-        stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index)
-             << "]";
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
@@ -1031,7 +1043,7 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(script::Function& func) {
+  void printFunction(const Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1076,7 +1088,7 @@ struct PythonPrintPass {
 
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
-      std::vector<ClassTypePtr>& class_table,
+      std::vector<c10::NamedTypePtr>& class_table,
       bool enforce_importable,
       bool is_method)
       : tensor_table_(tensor_table),
@@ -1095,23 +1107,40 @@ struct PythonPrintPass {
     }
   }
 
-  void printCompilationUnit(script::CompilationUnit& cu) {
+  void printCompilationUnit(const script::CompilationUnit& cu) {
     for (auto& func : cu.get_functions()) {
       printFunction(*func);
     }
   }
 
-  void printClass(const ClassTypePtr& classType) {
-    body_ << "class " << classType->basename() << ":\n";
-    {
-      const auto guard = WithIndented();
-      for (auto& method : classType->methods()) {
-        printFunction(*method);
+  void printClass(const c10::NamedTypePtr& type) {
+    if (auto classType = type->cast<ClassType>()) {
+      body_ << "class " << classType->basename() << ":\n";
+      {
+        const auto guard = WithIndented();
+        // TODO fields
+        for (auto& method : classType->methods()) {
+          printFunction(*method);
+        }
       }
+    } else if (auto tupleType = type->cast<TupleType>()) {
+      TORCH_INTERNAL_ASSERT(tupleType->schema());
+      body_ << "class " << tupleType->basename();
+      body_ << "(NamedTuple):\n";
+      {
+        const auto guard = WithIndented();
+        for (const auto& attr : tupleType->schema()->arguments()) {
+          TORCH_INTERNAL_ASSERT(attr.type());
+          indent();
+          body_ << attr.name() << " : " << attr.type()->python_str() << "\n";
+        }
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
     }
     // remove `classType` from the list of deps
     class_deps_.erase(
-        std::remove(class_deps_.begin(), class_deps_.end(), classType),
+        std::remove(class_deps_.begin(), class_deps_.end(), type),
         class_deps_.end());
   }
 
@@ -1122,14 +1151,13 @@ struct PythonPrintPass {
 
 void PythonPrint(
     std::ostream& out,
-    const script::Function& func,
+    const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printFunction(const_cast<script::Function&>(func));
+  pp.printFunction(func);
   pp.print(out);
 }
 
@@ -1138,19 +1166,18 @@ void PythonPrint(
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printCompilationUnit(const_cast<script::CompilationUnit&>(cu));
+  pp.printCompilationUnit(cu);
   pp.print(out);
 }
 
 void PythonPrint(
     std::ostream& out,
-    const ClassTypePtr& classType,
+    const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);
@@ -1167,6 +1194,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
       prim::Constant,
+      prim::Uninitialized,
       prim::fork,
       prim::ListConstruct,
       prim::DictConstruct,
@@ -1204,6 +1232,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
+      prim::profile, // used in interpreter only
 
   };
 
@@ -1218,6 +1247,5 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   return handled.count(sym) || unneeded.count(sym) ||
       !required_namespaces.count(sym.ns());
 }
-
 } // namespace jit
 } // namespace torch

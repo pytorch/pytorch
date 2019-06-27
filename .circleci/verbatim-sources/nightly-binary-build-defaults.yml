@@ -25,61 +25,19 @@
 # do not need both the pytorch and builder repos, so this is a little wasteful
 # (smoke tests and upload jobs do not need the pytorch repo).
 binary_checkout: &binary_checkout
-  name: Checkout
-  command: |
-    if [[ -n "$CIRCLE_SHA1" ]]; then
-      # we are on a PR or on a master-merge, but not on a timed build
-      git_url="https://raw.githubusercontent.com/pytorch/pytorch/$CIRCLE_SHA1"
-    else
-      # scheduled nightly binary builds. These run at 05:05 UTC every day. 
-      last_commit="$(git rev-list --before "$(date -u +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
-      git_url="https://raw.githubusercontent.com/pytorch/pytorch/$last_commit"
-    fi
-    retry () {
-        $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
-    }
-    retry curl -s "$git_url/.circleci/scripts/binary_checkout.sh" -o "binary_checkout.sh"
-    cat "binary_checkout.sh"
-    source "binary_checkout.sh"
+  name: Checkout pytorch/builder repo
+  command: ~/workspace/.circleci/scripts/binary_checkout.sh
 
 # Parses circleci arguments in a consistent way, essentially routing to the
 # correct pythonXgccXcudaXos build we want
 binary_populate_env: &binary_populate_env
-  name: Set up env
-  command: |
-    # This step runs on multiple executors with different envfile locations
-    if [[ "$(uname)" == Darwin ]]; then
-      # macos executor (builds and tests)
-      workdir="/Users/distiller/project"
-    elif [[ -d "/home/circleci/project" ]]; then
-      # machine executor (binary tests)
-      workdir="/home/circleci/project"
-    else
-      # docker executor (binary builds)
-      workdir="/"
-    fi
-    script="$workdir/pytorch/.circleci/scripts/binary_populate_env.sh"
-    cat "$script"
-    source "$script"
+  name: Set up binary env variables
+  command: ~/workspace/.circleci/scripts/binary_populate_env.sh
 
 binary_install_miniconda: &binary_install_miniconda
   name: Install miniconda
   no_output_timeout: "1h"
-  command: |
-    # This step runs on multiple executors with different envfile locations
-    if [[ "$(uname)" == Darwin ]]; then
-      # macos executor (builds and tests)
-      workdir="/Users/distiller/project"
-    elif [[ -d "/home/circleci/project" ]]; then
-      # machine executor (binary tests)
-      workdir="/home/circleci/project"
-    else
-      # docker executor (binary builds)
-      workdir="/"
-    fi
-    script="$workdir/pytorch/.circleci/scripts/binary_install_miniconda.sh"
-    cat "$script"
-    source "$script"
+  command: ~/workspace/.circleci/scripts/binary_install_miniconda.sh
 
 # This section is used in the binary_test and smoke_test jobs. It expects
 # 'binary_populate_env' to have populated /home/circleci/project/env and it
@@ -87,9 +45,24 @@ binary_install_miniconda: &binary_install_miniconda
 # with the code to run in the docker
 binary_run_in_docker: &binary_run_in_docker
   name: Run in docker
+  # This step only runs on circleci linux machine executors that themselves
+  # need to start docker images
+  command: ~/workspace/.circleci/scripts/binary_run_in_docker.sh
+
+# This is copied almost verbatim from the macos_brew_update job
+# In version 2.1 and above we could make this a command and pass a parameter to
+# it, but in this version there is no way to pass a parameter to a step
+binary_macos_brew_update: &binary_macos_brew_update
+  name: Brew update and install moreutils and expect
+  no_output_timeout: "1h"
   command: |
-    # This step only runs on circleci linux machine executors that themselves
-    # need to start docker images
-    script="/home/circleci/project/pytorch/.circleci/scripts/binary_install_miniconda.sh"
-    cat "$script"
-    source "$script"
+    set -eux -o pipefail
+    # moreutils installs a `parallel` executable by default, which conflicts
+    # with the executable from the GNU `parallel`, so we must unlink GNU
+    # `parallel` first, and relink it afterwards
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+

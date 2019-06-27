@@ -8,7 +8,13 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 
-_IncompatibleKeys = namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])
+class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
+    def __repr__(self):
+        if not self.missing_keys and not self.unexpected_keys:
+            return '<All keys matched successfully>'
+        return super(_IncompatibleKeys, self).__repr__()
+
+    __str__ = __repr__
 
 
 def _addindent(s_, numSpaces):
@@ -41,8 +47,8 @@ class Module(object):
                 self.conv2 = nn.Conv2d(20, 20, 5)
 
             def forward(self, x):
-               x = F.relu(self.conv1(x))
-               return F.relu(self.conv2(x))
+                x = F.relu(self.conv1(x))
+                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
@@ -63,6 +69,7 @@ class Module(object):
     _version = 1
 
     def __init__(self):
+        torch._C._log_api_usage_once("python.nn_module")
         self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
@@ -192,13 +199,44 @@ class Module(object):
         for module in self.children():
             module._apply(fn)
 
-        for param in self._parameters.values():
+        def compute_should_use_set_data(tensor, tensor_applied):
+            if torch._has_same_tensorimpl_type(tensor, tensor_applied):
+                # If the new tensor has the same TensorImpl type as the existing tensor,
+                # the current behavior is to change the tensor in-place using `.data =`,
+                # and the future behavior is to overwrite the existing tensor. However,
+                # changing the current behavior is a BC-breaking change, and we want it
+                # to happen in future releases. So for now we introduce the
+                # `torch.__future__.get_overwrite_module_params_on_conversion()`
+                # global flag to let the user control whether they want the future
+                # behavior of overwriting the existing tensor or not.
+                return not torch.__future__.get_overwrite_module_params_on_conversion()
+            else:
+                return False
+
+        for key, param in self._parameters.items():
             if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't
-                # want to create copy nodes, so we have to unpack the data.
-                param.data = fn(param.data)
-                if param._grad is not None:
-                    param._grad.data = fn(param._grad.data)
+                # Tensors stored in modules are graph leaves, and we don't want to
+                # track autograd history of `param_applied`, so we have to use
+                # `with torch.no_grad():`
+                with torch.no_grad():
+                    param_applied = fn(param)
+                should_use_set_data = compute_should_use_set_data(param, param_applied)
+                if should_use_set_data:
+                    param.data = param_applied
+                else:
+                    assert isinstance(param, Parameter)
+                    assert param.is_leaf
+                    self._parameters[key] = Parameter(param_applied, param.requires_grad)
+
+                if param.grad is not None:
+                    with torch.no_grad():
+                        grad_applied = fn(param.grad)
+                    should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
+                    if should_use_set_data:
+                        param.grad.data = grad_applied
+                    else:
+                        assert param.grad.is_leaf
+                        self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
@@ -603,6 +641,26 @@ class Module(object):
         self._state_dict_hooks[handle.id] = hook
         return handle
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        r"""Saves module state to `destination` dictionary, containing a state
+        of the module, but not its descendants. This is called on every
+        submodule in :meth:`~torch.nn.Module.state_dict`.
+
+        In rare cases, subclasses can achieve class-specific behavior by
+        overriding this method with custom logic.
+
+        Arguments:
+            destination (dict): a dict where state will be stored
+            prefix (str): the prefix for parameters and buffers used in this
+                module
+        """
+        for name, param in self._parameters.items():
+            if param is not None:
+                destination[prefix + name] = param if keep_vars else param.data
+        for name, buf in self._buffers.items():
+            if buf is not None:
+                destination[prefix + name] = buf if keep_vars else buf.data
+
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
 
@@ -623,12 +681,7 @@ class Module(object):
             destination = OrderedDict()
             destination._metadata = OrderedDict()
         destination._metadata[prefix[:-1]] = local_metadata = dict(version=self._version)
-        for name, param in self._parameters.items():
-            if param is not None:
-                destination[prefix + name] = param if keep_vars else param.data
-        for name, buf in self._buffers.items():
-            if buf is not None:
-                destination[prefix + name] = buf if keep_vars else buf.data
+        self._save_to_state_dict(destination, prefix, keep_vars)
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
@@ -761,6 +814,7 @@ class Module(object):
                     load(child, prefix + name + '.')
 
         load(self)
+        load = None  # break load->load reference cycle
 
         if strict:
             if len(unexpected_keys) > 0:

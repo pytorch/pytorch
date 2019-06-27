@@ -4,17 +4,11 @@
 
 /* ||AX-B|| */
 TH_API void THLapack_(gels)(char trans, int m, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, scalar_t *work, int lwork, int *info);
-/* Eigenvals */
-TH_API void THLapack_(syev)(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info);
 /* Non-sym eigenvals */
 TH_API void THLapack_(geev)(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info);
 /* svd */
 TH_API void THLapack_(gesdd)(char jobz, int m, int n, scalar_t *a, int lda, scalar_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *iwork, int *info);
-/* LU decomposition */
-TH_API void THLapack_(getrf)(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
 TH_API void THLapack_(getrs)(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
-/* Matrix Inverse */
-TH_API void THLapack_(getri)(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int* info);
 
 /* Positive Definite matrices */
 /* Matrix inverse based on Cholesky factorization */

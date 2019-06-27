@@ -42,13 +42,13 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       filter.dim32(3),
       this->kernel_w(),
       "filter width must be equal to kernel width");
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    return true;
+  }
   const std::vector<std::int64_t> Y_dims =
       ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
   auto* Y = Output(0, Y_dims, at::dtype<T>());
-
-  if (N == 0) {
-    return true;
-  }
 
   const int K_HxW = kernel_h() * kernel_w();
   const int kernel_dim = C / G * K_HxW;
@@ -196,12 +196,13 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       kernel_w(),
       "filter width must be equal to kernel width");
 
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    return true;
+  }
   const std::vector<std::int64_t> Y_dims =
       ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
   auto* Y = Output(0, Y_dims, at::dtype<T>());
-  if (N == 0) {
-    return true;
-  }
 
   const int K_HxW = kernel_h() * kernel_w();
   const int kernel_dim = C / G * K_HxW;
@@ -319,6 +320,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int H = X.dim32(2);
   const int W = X.dim32(3);
   const int G = group_;
+
   CAFFE_ENFORCE_EQ(M, filter.dim32(0));
   CAFFE_ENFORCE_EQ(
       M % G, 0, "The number of input channels is not divisible by group.");
@@ -358,7 +360,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
   math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
 
-  if (N == 0) {
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
     math::Set<T, Context>(C, T(0), dbias_data, &context_);
     return true;
   }
@@ -520,7 +523,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
   math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
 
-  if (N == 0) {
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
     math::Set<T, Context>(C, T(0), dbias_data, &context_);
     return true;
   }

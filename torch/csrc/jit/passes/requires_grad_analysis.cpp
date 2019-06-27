@@ -1,8 +1,8 @@
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
 
 #include <vector>
 

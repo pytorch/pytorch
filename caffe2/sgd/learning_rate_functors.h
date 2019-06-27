@@ -80,6 +80,28 @@ class ExpLearningRate : public LearningRateFunctor<T> {
   T gamma_;
 };
 
+// Gate: return multiplier_1 if before num_iter, else multiplier_2
+template <typename T>
+class GateLearningRate : public LearningRateFunctor<T> {
+ public:
+  GateLearningRate(
+      const T multiplier_1,
+      const T multiplier_2,
+      const int64_t num_iter)
+      : multiplier_1_(multiplier_1),
+        multiplier_2_(multiplier_2),
+        num_iter_(num_iter) {}
+  T operator()(const int64_t iter) const override {
+    if (iter >= num_iter_) {
+      return T(multiplier_2_);
+    }
+    return T(multiplier_1_);
+  }
+  T multiplier_1_;
+  T multiplier_2_;
+  uint64_t num_iter_;
+};
+
 // Inv: return (1 + gamma * iter) ^ (-power)
 template <typename T>
 class InvLearningRate : public LearningRateFunctor<T> {
@@ -116,7 +138,8 @@ class LinearWarmupLearningRate : public LearningRateFunctor<T> {
     if (iter >= num_iter_) {
       return 1.;
     }
-    return start_multiplier_ + (1. - start_multiplier_) * T(iter) / T(num_iter_);
+    return start_multiplier_ +
+        (1. - start_multiplier_) * T(iter) / T(num_iter_);
   }
   T start_multiplier_;
   uint64_t num_iter_;
@@ -136,6 +159,31 @@ class ConstantWarmupLearningRate : public LearningRateFunctor<T> {
   }
   T multiplier_;
   uint64_t num_iter_;
+};
+
+// ConstantWarmup: return scale when iter < num_iter, and 1 otherwise
+template <typename T>
+class PieceWarmupLearningRate : public LearningRateFunctor<T> {
+ public:
+  PieceWarmupLearningRate(
+      const T m1,
+      const int64_t n1,
+      const T m2,
+      const int64_t n2,
+      const T m3)
+      : m1_(m1), m2_(m2), m3_(m3), n1_(n1), n2_(n2){};
+
+  T operator()(const int64_t iter) const override {
+    if (iter < n1_) {
+      return m1_;
+    } else if (iter < n2_) {
+      return m2_;
+    }
+    return m3_;
+  }
+
+  T m1_, m2_, m3_;
+  uint64_t n1_, n2_;
 };
 
 // hill: the learning rate changes according to following 3 stages
