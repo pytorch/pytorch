@@ -7,35 +7,12 @@ namespace torch {
 namespace jit {
 namespace script {
 
+void push_call(const SourceRange& range);
+void pop_call();
+void push_function(const std::string& name);
+void pop_function();
 
-// List of source ranges representing the current stack of calls being compiled
-inline std::vector<SourceRange>& get_stack() {
-  static std::vector<SourceRange> call_stack;
-  return call_stack;
-}
-
-inline std::vector<std::string>& get_fn_stack() {
-  static std::vector<std::string> fns;
-  return fns;
-}
-
-inline void push_call(const SourceRange& range) {
-  get_stack().push_back(range);
-}
-
-inline void pop_call() {
-  get_stack().pop_back();
-}
-
-inline void push_function(const std::string& name) {
-  get_fn_stack().push_back(name);
-}
-
-inline void pop_function() {
-  get_fn_stack().pop_back();
-}
-
-struct ErrorReport : public std::exception {
+struct CAFFE2_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e)
       : ss(e.ss.str()), context(e.context), the_message(e.the_message) {}
 
@@ -44,35 +21,7 @@ struct ErrorReport : public std::exception {
       : context(std::move(r)) {}
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
-  const char* what() const noexcept override {
-    std::stringstream msg;
-    msg << "\n" << ss.str();
-    if (context) {
-      msg << ":\n";
-      context->highlight(msg);
-    } else {
-      msg << ".\n";
-    }
-
-    if (get_stack().size() > 0) {
-      // Print the calling stack to show why this function was being compiled,
-      // skip the first entry in the list since it's the current function
-      auto range_it = get_stack().rbegin() + 1;
-      auto names_it = get_fn_stack().rbegin();
-      for (;
-           range_it != get_stack().rend() && names_it != get_fn_stack().rend();
-           ++range_it, ++names_it) {
-        msg << "\n";
-        msg << "'" << *names_it
-            << "' is being compiled since it was called from '"
-            << *(names_it + 1) << "'\n";
-        range_it->highlight(msg);
-      }
-    }
-
-    the_message = msg.str();
-    return the_message.c_str();
-  }
+  const char* what() const noexcept override;
 
  private:
   template <typename T>
