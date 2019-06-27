@@ -603,7 +603,7 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            for e in range(epochs):                
+            for e in range(epochs):
                 self.opt.step()
                 scheduler.step()
             self.assertTrue(len(ws) == 0, "No warning should be raised")
@@ -617,7 +617,7 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            for e in range(epochs):                
+            for e in range(epochs):
                 self.opt.step()
                 scheduler.step(e)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
@@ -672,6 +672,25 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
+
+    def test_get_lr_step_lr(self):
+        from torch.nn import Parameter
+        epochs = 10
+        optimizer = torch.optim.SGD([Parameter(torch.randn(2, 2, requires_grad=True))], 0.1)
+        targets = [[0.1] * 3 + [0.01] * 3 + [0.001] * 3 + [0.0001]]
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 3, gamma=0.1)
+        self._test_get_lr(scheduler, targets, epochs)
+
+    def test_get_lr_multi_step_lr(self):
+        # lr = 0.05     if epoch < 2
+        # lr = 0.005    if 2 <= epoch < 5
+        # lr = 0.0005   if epoch < 9
+        # lr = 0.00005   if epoch >= 9
+        epochs = 10
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
+        self._test_get_lr(scheduler, targets, epochs)
 
     def test_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
@@ -1260,7 +1279,20 @@ class TestLRScheduler(TestCase):
         for key in scheduler.__dict__.keys():
             if key != 'optimizer':
                 self.assertAlmostEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
-        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
+        self.assertAlmostEqual(scheduler._compute_lr(), scheduler_copy._compute_lr())
+
+    def _test_get_lr(self, schedulers, targets, epochs=10):
+        if isinstance(schedulers, _LRScheduler):
+            schedulers = [schedulers]
+        for epoch in range(epochs):
+            [scheduler.step(epoch) for scheduler in schedulers]
+            result = [scheduler.get_lr() for scheduler in schedulers]
+            target = [[t[epoch] for t in targets]] * len(schedulers)
+            # print(target)
+            for t, r in zip(target, result):
+                self.assertAlmostEqual(target, result,
+                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                            epoch, t, r), delta=1e-5)
 
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
