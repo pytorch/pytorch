@@ -78,12 +78,14 @@ class ModuleAPITest(TestCase):
         q_bias = torch.quantize_linear(bias, scale, zero_point, torch.qint32)
 
         # Results check
-        conv_2d = Conv2d(weight=q_filters, bias=q_bias,
-                         scale=scale, zero_point=zero_point,
-                         dtype=torch_type,
+        conv_2d = Conv2d(in_channels=iC, out_channels=oC, kernel_size=(kH, kW),
                          stride=stride, padding=i_padding,
                          dilation=dilation, groups=groups,
                          padding_mode='zeros')
+        conv_2d.weight = q_filters
+        conv_2d.bias = q_bias
+        conv_2d.scale = scale
+        conv_2d.zero_point = zero_point
         try:
             ref_result = qF.conv2d(q_inputs, q_filters, bias=q_bias,
                                    scale=scale, zero_point=zero_point,

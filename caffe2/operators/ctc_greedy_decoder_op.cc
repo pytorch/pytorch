@@ -7,7 +7,7 @@ namespace {
 const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
   const auto dims = tensor.sizes();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
-  int offset = (t * dims[1] + n) * dims[2];
+  int64_t offset = (t * dims[1] + n) * dims[2];
   CAFFE_ENFORCE_LT(offset, tensor.numel());
   return tensor.template data<float>() + offset;
 }

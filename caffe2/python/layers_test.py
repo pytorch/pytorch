@@ -779,6 +779,14 @@ class TestLayers(LayersTestCase):
         loss = self.model.BatchMSELoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
+    def testBatchHuberLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, (1,)))),
+            ('prediction', schema.Scalar((np.float32, (2,)))),
+        ))
+        loss = self.model.BatchHuberLoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
     def testBatchSigmoidCrossEntropyLoss(self):
         input_record = self.new_record(schema.Struct(
             ('label', schema.Scalar((np.float32, (32,)))),

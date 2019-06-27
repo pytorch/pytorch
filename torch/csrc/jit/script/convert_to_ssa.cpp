@@ -50,7 +50,7 @@ struct ControlFlowLoadStores {
       const std::string& name) {
     auto out = n->addOutput()->setType(type);
     if (meaningfulName(name)) {
-      out->setUniqueName(name);
+      out->setDebugName(name);
     }
     auto g = n->owningGraph();
     g->createStore(name, out)->insertAfter(n);

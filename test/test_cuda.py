@@ -662,7 +662,15 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
-    _do_cuda_non_default_stream = True
+    # See https://github.com/pytorch/pytorch/issues/21589
+    # We used to have this turned on for the tests in this file which
+    # we had tested to be OK, but when people added new tests to
+    # this file, it would trigger nondeterministic failures that
+    # are hard to debug.  Since there are KNOWN bugs with our
+    # stream handling, we shouldn't turn this on by default.
+    # If you decide to make this True, be sure to run the test suite
+    # under cuda-memcheck
+    _do_cuda_non_default_stream = False
     FIFTY_MIL_CYCLES = 50000000
 
     @staticmethod
@@ -1330,6 +1338,11 @@ class TestCuda(TestCase):
         self.assertEqual(result[tuple(index)], x)
         index[dim] = slice(x.size(dim), x.size(dim) + y.size(dim))
         self.assertEqual(result[tuple(index)], y)
+
+        # Bool test case
+        t = torch.tensor([[False, True], [True, True]], device='cuda')
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')), 
+                         torch.tensor([[False, False], [True, True]], device='cuda'))
 
     def test_gather(self):
         self._test_gather(0)
@@ -2692,10 +2705,12 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipCUDANonDefaultStreamIf(True)
     def test_nuclear_norm_axes_small_brute_force(self):
         _TestTorchMixin._test_nuclear_norm_axes(self, device='cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipCUDANonDefaultStreamIf(True)
     def test_nuclear_norm_exceptions(self):
         _TestTorchMixin._test_nuclear_norm_exceptions(self, device='cuda')
 

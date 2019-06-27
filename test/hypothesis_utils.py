@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 import torch
 
+from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
 from hypothesis.searchstrategy import SearchStrategy
@@ -142,13 +143,16 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
     _minibatch = draw(st.integers(min_batch, max_batch))
     _in_channels = draw(st.integers(min_in_channels, max_in_channels))
     _out_channels = draw(st.integers(min_out_channels, max_out_channels))
+    g = draw(st.integers(1, max_groups))
+    assume(_in_channels % g == 0)
+    assume(_out_channels % g == 0)
+
     _iH = draw(st.integers(H_range[0], H_range[1]))
     _iW = draw(st.integers(W_range[0], W_range[1]))
     _kH = draw(st.integers(kH_range[0], kH_range[1]))
     _kW = draw(st.integers(kW_range[0], kW_range[1]))
 
     # Resolve the tensors
-    g = draw(st.integers(1, max_groups))
     X = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
                          shape=(_minibatch, _in_channels, _iH, _iW)))

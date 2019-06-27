@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/core/MemoryFormat.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
@@ -11,6 +12,10 @@
 #include <functional>
 #include <initializer_list>
 #include <utility>
+
+#ifdef NAMEDTENSOR_ENABLED
+using at::DimnameList;
+#endif
 
 namespace torch {
 
@@ -42,6 +47,7 @@ AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 
 /// A generic deleter function.
 using Deleter = std::function<void(void*)>;
+using at::MemoryFormat;
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
 /// original data. `sizes` should specify the shape of the tensor, `strides` the

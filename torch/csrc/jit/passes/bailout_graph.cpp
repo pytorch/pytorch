@@ -1,7 +1,9 @@
+#include <torch/csrc/jit/passes/bailout_graph.h>
+#include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
 #include <unordered_set>
 
@@ -9,10 +11,10 @@ namespace torch {
 namespace jit {
 
 struct BailOutGraphBuilderForNode {
-  explicit BailOutGraphBuilderForNode(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {
-    copy_graph_ = std::make_shared<Graph>();
-  }
+  explicit BailOutGraphBuilderForNode(
+      std::shared_ptr<Graph> graph,
+      std::shared_ptr<Graph> target)
+      : graph_(std::move(graph)), copy_graph_(std::move(target)) {}
 
   // capture `old_value` into the bailout graph
   // by creating a new input and mapping
@@ -130,15 +132,41 @@ struct BailOutGraphBuilderForNode {
   std::unordered_map<Value*, Value*> old_to_new_;
 };
 
+// `BailOutInserter` replaces prim::Guard nodes with
+// prim::BailOut nodes that allow interpreter to
+// resume execution of the unoptimized(deoptimized)
+// version of an original graph from a particular point
 struct BailOutInserter {
   explicit BailOutInserter(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
   void run() {
+    liveness_sets_ = BuildLivenessSets(graph_);
     insertBailOuts(graph_->block());
     replaceGuardsWithBailouts();
+    // embed a full original graph
+    addUnoptimizedFuncToBailouts();
   }
 
+  // Packs the original unoptimized graph into a Function constant
+  // and add it as the first input to every prim::BailOut point
+  // This graph will be used to compute a bailout graph for
+  // any given bailout point
+  void addUnoptimizedFuncToBailouts() {
+    auto unoptimized_graph = graph_->copy();
+    auto func = std::make_shared<Function>(
+        std::string{"bailout"}, false, unoptimized_graph, nullptr);
+    auto unopt_func = graph_->create(prim::Constant);
+    unopt_func->output()->setType(FunctionType::create(std::move(func)));
+    unopt_func->insertBefore(*graph_->block()->nodes().begin());
+    for (auto bn : bailouts_) {
+      bn->insertInput(0, unopt_func->output());
+    }
+  }
+
+  // Removes guards by hooking up the guarded tensor
+  // directly to its users and also clears
+  // profiling information on it.
   void removeGuards(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
@@ -155,38 +183,52 @@ struct BailOutInserter {
     }
   }
 
+  // replace each prim::Guard
+  // with its corresponding prim::BailOut
   void replaceGuardsWithBailouts() {
-    for (auto e : subgraphs) {
-      e.second->insertBefore(e.first);
-      e.first->output()->replaceAllUsesWith(e.second->output());
-      removeGuards(e.second->g(attr::Subgraph)->block());
-      // this isn't strictly necessarily
-      // but it makes debugging much easier
-      ConstantPooling(e.second->g(attr::Subgraph));
+    for (auto e : replacements_) {
+      e.first->replaceAllUsesWith(e.second);
+      e.second->node()->insertAfter(e.first->node());
+      e.first->node()->destroy();
     }
   }
 
+  // Inserts prim::BailOut nodes for every prim::Guard
+  // Each BailOut point takes the set of inputs live
+  // at that particular execution point.
+  // An input is live if it's used beyond the guard/BailOut
+  // point to compute graph's outputs
   void insertBailOuts(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
         auto bailout_node = b->owningGraph()->create(prim::BailOut);
-        auto node = *it;
+        bailouts_.push_back(bailout_node);
 
-        BailOutGraphBuilderForNode bg(graph_);
-        auto bailout_graph = bg.buildBailOutGraphFrom(node);
+        const auto& live_inputs = liveness_sets_[*it];
 
-        for (size_t i = 0; i < bg.live_inputs_.size(); i++) {
-          bailout_node->addInput(bg.live_inputs_[i]);
+        // guarded inputs come first
+        // currently, there's always one  guaded input
+        bailout_node->addInput(it->input());
 
-          // to tell which input (index offset)
-          // we are actually supposed to guard
-          if (it->input() == bg.live_inputs_[i]) {
-            bailout_node->i_(attr::slot, i);
-            bailout_node->output()->setType(it->output()->type());
+        for (auto li : live_inputs) {
+          // Guarded inputs have already been added
+          // Also, BailOutGraphBuilder materializes constants into a bailout
+          // graph rather than captures them as arguments,
+          // so there's no need to add them to inputs
+          if (li->node()->kind() == prim::Constant || li == it->input()) {
+            continue;
           }
+
+          bailout_node->addInput(li);
         }
-        bailout_node->g_(attr::Subgraph, bailout_graph);
-        subgraphs.insert({node, bailout_node});
+
+        bailout_node->output()->setType(it->output()->type());
+        bailout_node->i_(attr::index, bailout_index_++);
+        // we can't immediately replace nodes since this action will corrupt
+        // the liveness sets of following BailOut nodes if any of their
+        // arguments are BailOut nodes themselves
+        replacements_.insert({it->output(), bailout_node->output()});
+
       } else {
         for (auto ib : it->blocks()) {
           insertBailOuts(ib);
@@ -197,11 +239,69 @@ struct BailOutInserter {
 
   std::shared_ptr<Graph> graph_;
   std::map<Node*, Node*> subgraphs;
+  std::size_t bailout_index_;
+  std::unordered_map<Node*, std::vector<Value*>> liveness_sets_;
+  std::vector<Node*> bailouts_;
+  std::map<Value*, Value*> replacements_;
 };
 
 void InsertBailOuts(std::shared_ptr<Graph> graph) {
   BailOutInserter ibo(std::move(graph));
   ibo.run();
+}
+
+// linearly scans through graph's nodes to locate prim::BailOut whose
+// index matches the given `index`
+static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
+  for (auto n : b->nodes()) {
+    if (n->kind() == prim::BailOut && n->hasAttribute(attr::index) &&
+        n->i(attr::index) == index) {
+      return n;
+    }
+    for (auto ib : n->blocks()) {
+      if (auto bn = locateBailOutNodeInUnoptimizedGraph(ib, index)) {
+        return bn;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Removes prim::BailOuts and hooks the guarded input directly
+// to its users
+static void removeBailouts(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::BailOut) {
+      // clear profiling information
+      it->inputs().at(0)->setType(TensorType::create());
+      it->output()->replaceAllUsesWith(it->inputs().at(0));
+      it.destroyCurrent();
+    } else {
+      for (auto ib : it->blocks()) {
+        removeBailouts(ib);
+      }
+    }
+  }
+}
+
+// see `bailout_graph.h`
+TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
+    int64_t bailout_index,
+    const std::shared_ptr<Graph>& orig,
+    const std::shared_ptr<Graph>& target) {
+  auto orig_bailout_node =
+      locateBailOutNodeInUnoptimizedGraph(orig->block(), bailout_index);
+  TORCH_INTERNAL_ASSERT(
+      orig_bailout_node->inputs().at(0)->type()->cast<FunctionType>() ==
+      nullptr);
+  TORCH_INTERNAL_ASSERT(
+      orig_bailout_node && orig_bailout_node->kind() == prim::BailOut &&
+      bailout_index == orig_bailout_node->i(attr::index));
+  BailOutGraphBuilderForNode bg(orig, target);
+  auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
+  removeBailouts(bailout_graph->block());
+  ConstantPooling(bailout_graph);
+  return bailout_graph;
 }
 
 } // namespace jit

@@ -41,6 +41,8 @@ TYPE_MAP = {
     'std::string': 'str',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
+    'MemoryFormat?': 'MemoryFormat?',
+    'QScheme': 'QScheme',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
     'Tensor?': 'Tensor?',
@@ -98,6 +100,8 @@ FROM_IVALUE = {
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
+    'MemoryFormat?': '{}.toOptional<c10::MemoryFormat>()',
+    'QScheme': '{}.toQScheme()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
@@ -169,7 +173,13 @@ Operator(
 """)
 
 
-blacklisted_types = {'Storage'}
+blacklisted_types = {
+    'Storage',
+    'DimnameList?',
+    'ConstQuantizerPtr',
+    'Dimname',
+}
+
 default_only_types = {'Generator'}
 
 
@@ -486,6 +496,7 @@ def signature(decl, should_match_schema=True):
                 .replace('false', 'False') \
                 .replace('Reduction::Mean', 'Mean') \
                 .replace('MemoryFormat::Contiguous', 'contiguous_format') \
+                .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
                 .replace('}', ']')

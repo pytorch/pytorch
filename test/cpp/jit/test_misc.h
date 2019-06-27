@@ -442,13 +442,12 @@ void testEvalModeForLoadedModule() {
   if (isSandcastle())
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
-  std::shared_ptr<torch::jit::script::Module> module =
-      torch::jit::load(module_path);
-  AT_ASSERT(module->get_module("dropout")->is_training());
-  module->eval();
-  AT_ASSERT(!module->get_module("dropout")->is_training());
-  module->train();
-  AT_ASSERT(module->get_module("dropout")->is_training());
+  torch::jit::script::Module module = torch::jit::load(module_path);
+  AT_ASSERT(module.get_module("dropout").is_training());
+  module.eval();
+  AT_ASSERT(!module.get_module("dropout").is_training());
+  module.train();
+  AT_ASSERT(module.get_module("dropout").is_training());
 }
 
 // test a few features that are not directly used in schemas yet
@@ -840,36 +839,36 @@ void testNoneSchemaMatch() {
 }
 
 void testModuleDefine() {
-  auto m = std::make_shared<script::Module>();
-  m->register_parameter("foo", torch::ones({}), false);
-  m->define(R"(
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
     def add_it(self, x, b : int = 4):
       return self.foo + x + b
   )");
-  auto result = m->run_method("add_it", torch::ones({}));
+  auto result = m.run_method("add_it", torch::ones({}));
   AT_ASSERT(result.toTensor().item<float>() == 6)
 }
 
 void testModuleConversion() {
-  auto m = std::make_shared<script::Module>();
+  script::Module m("test");
   {
     // test cuda to cpu for params and buffers
-    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
-    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+    m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m.register_buffer("bar", torch::ones({}, at::kCUDA));
 
-    m->to(at::kCUDA);
-    m->to(at::kCPU);
-    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
-    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
+    m.to(at::kCUDA);
+    m.to(at::kCPU);
+    AT_ASSERT(m.get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m.get_buffer("bar").device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
-    m->register_parameter("foo", torch::ones({}), false);
-    m->register_buffer("bar", torch::ones({}));
+    m.register_parameter("foo", torch::ones({}), false);
+    m.register_buffer("bar", torch::ones({}));
 
-    m->to(at::kCUDA);
-    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
-    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
+    m.to(at::kCUDA);
+    AT_ASSERT(m.get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m.get_buffer("bar").device().is_cuda());
   }
 }
 
@@ -909,16 +908,7 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-std::vector<std::size_t> values_to_value_ids(
-    const std::vector<Value*>& values) {
-  std::vector<std::size_t> result;
-  for (auto v : values) {
-    result.push_back(v->unique());
-  }
-  return result;
-};
-
-void testInsertAndEliminateGuards() {
+void testInsertAndEliminateRedundantGuards() {
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y
@@ -954,7 +944,7 @@ void testInsertAndEliminateGuards() {
   ASSERT_EQ(num_guards, 11);
   // now eliminate as many guards as possible
   // we should be left with two guards on x and y's defs
-  EliminateGuards(copy);
+  EliminateRedundantGuards(copy);
   num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 2);
 }
@@ -991,7 +981,7 @@ void testInsertBailOuts() {
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
   InsertGuards(copy);
-  EliminateGuards(copy);
+  EliminateRedundantGuards(copy);
   auto nodes = copy->block()->nodes();
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
@@ -1002,28 +992,11 @@ void testInsertBailOuts() {
   ASSERT_EQ(num_guards, num_bailouts);
   std::vector<Node*> bailouts(num_bailouts);
   std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
-  auto last_graph = bailouts[num_bailouts - 1]->g(attr::Subgraph);
-  ASSERT_EQ(last_graph->inputs().size(), 1);
-  ASSERT_EQ(last_graph->outputs().size(), 1);
-  auto lb_nodes = last_graph->nodes();
-  auto is_add = [](Node* n) { return n->kind() == aten::add; };
-  auto is_loop = [](Node* n) { return n->kind() == prim::Loop; };
-  auto lb_graph_num_adds =
-      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_add);
-  auto lb_graph_num_loops =
-      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_loop);
-  ASSERT_EQ(lb_graph_num_adds, 1);
-  ASSERT_EQ(lb_graph_num_loops, 0);
-  auto first_graph = bailouts[0]->g(attr::Subgraph);
-  auto fst_nodes = first_graph->nodes();
-  ASSERT_EQ(first_graph->inputs().size(), 2);
-  ASSERT_EQ(first_graph->outputs().size(), 1);
-  auto fst_graph_num_adds =
-      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_add);
-  auto fst_graph_num_loops =
-      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_loop);
-  ASSERT_EQ(fst_graph_num_loops, 1);
-  ASSERT_EQ(fst_graph_num_adds, 5);
+
+  for (auto blo : bailouts) {
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
+    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+  }
 }
 
 void testProfiler() {

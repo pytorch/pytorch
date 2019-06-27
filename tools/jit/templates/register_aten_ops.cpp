@@ -40,6 +40,7 @@ using at::ScalarType;
 using at::Tensor;
 using at::TensorOptions;
 using at::DeviceGuard;
+using at::MemoryFormat;
 
 using ::c10::fmap;
 using ::c10::filter;
@@ -72,7 +73,7 @@ std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
 }
 
 template<size_t N>
-std::array<bool, N> as_bool_array(const c10::ListPtr<bool>& list) {
+std::array<bool, N> as_bool_array(const c10::List<bool>& list) {
   std::array<bool, N> res;
   AT_ASSERT(list.size() == N);
   std::copy(list.begin(), list.end(), res.begin());
