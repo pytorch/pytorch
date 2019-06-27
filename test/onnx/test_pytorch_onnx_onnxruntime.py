@@ -135,7 +135,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.logsumexp(input, dim=(0, 1))
 
         x = torch.randn(4, 4, requires_grad=True)
-        self.run_model_test(ReduceLogSumExpModel(), x)
+        self.run_test(ReduceLogSumExpModel(), x)
 
 # opset 10 tests
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
