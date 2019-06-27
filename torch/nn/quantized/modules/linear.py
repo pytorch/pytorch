@@ -63,3 +63,18 @@ class Linear(NNLinear):
             self.out_scale,
             self.out_zero_point)
         return Y_q
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'weight'] = torch.ops.quantized.fbgemm_linear_unpack(destination[prefix + '_packed_weight'])
+        destination.pop(prefix + '_packed_weight')
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
+        self.bias.copy_(state_dict[prefix + 'bias'])
+        state_dict.pop(prefix + 'weight')
+        state_dict.pop(prefix + 'bias')
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
+        return
