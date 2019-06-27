@@ -309,9 +309,9 @@ struct DifferentiableGraphBackward : public autograd::Function {
 // to the output Variables if present.
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
-      : f(grad.f),
-        grad(std::move(grad)),
+      : grad(std::move(grad)),
         grad_executor(this->grad.df),
+        fprop_grad_executor(this->grad.f, /*optimize=*/false),
         num_inputs(this->grad.f->inputs().size()),
         num_outputs(this->grad.f->outputs().size()) {}
 
@@ -332,10 +332,9 @@ struct DifferentiableGraphOp {
       }
       captureInputs(*grad_fn, inputs);
     }
-
     detachVariables(stack);
-    InterpreterState(f).run(stack);
-
+    auto plan = fprop_grad_executor.getPlanFor(stack);
+    InterpreterState(plan.code).run(stack);
     {
       auto outputs = last(stack, num_outputs);
       // hookup the gradients for the output tensors that require gradients
@@ -405,9 +404,9 @@ struct DifferentiableGraphOp {
     }
   }
 
-  Code f;
   Gradient grad;
   GraphExecutor grad_executor;
+  mutable GraphExecutor fprop_grad_executor;
 
   const size_t num_inputs;
   const size_t num_outputs;
