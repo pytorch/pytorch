@@ -343,7 +343,7 @@
   variants: function, method
 
 - func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
-  variants: function, method
+  variants: method
   dispatch:
     CPU: _bitwise_not__cpu
 
