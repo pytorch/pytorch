@@ -1750,22 +1750,23 @@ class _TestTorchMixin(object):
 
     def test_bitwise_not(self):
         res = 0xffff - torch.arange(127, dtype=torch.int8)
-        for t in (torch.BoolTensor, torch.LongTensor, torch.IntTensor, torch.ShortTensor, torch.CharTensor):
+        for t in (torch.BoolTensor,
+                  torch.ByteTensor, torch.LongTensor, torch.IntTensor, torch.ShortTensor, torch.CharTensor):
             if t == torch.BoolTensor:
                 a = torch.BoolTensor([True, False])
-                this_res = torch.BoolTensor([False, True])
+                expected_res = torch.BoolTensor([False, True])
             else:
                 a = torch.arange(127, dtype=t.dtype)
-                this_res = res.type(t)
+                expected_res = res.type(t)
             # new tensor
-            self.assertEqual(this_res, a.bitwise_not())
+            self.assertEqual(expected_res, a.bitwise_not())
             # out
             b = t()
             torch.bitwise_not(a, out=b)
-            self.assertEqual(this_res, b)
+            self.assertEqual(expected_res, b)
             # inplace
             a.bitwise_not_()
-            self.assertEqual(this_res, a)
+            self.assertEqual(expected_res, a)
 
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):

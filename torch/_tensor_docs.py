@@ -481,6 +481,20 @@ bincount(weights=None, minlength=0) -> Tensor
 See :func:`torch.bincount`
 """)
 
+add_docstr_all('bitwise_not',
+               r"""
+bitwise_not() -> Tensor
+
+See :func:`torch.bitwise_not`
+""")
+
+add_docstr_all('bitwise_not_',
+               r"""
+bitwise_not_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_not`
+""")
+
 add_docstr_all('bmm',
                r"""
 bmm(batch2) -> Tensor

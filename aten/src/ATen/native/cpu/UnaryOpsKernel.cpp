@@ -51,8 +51,8 @@ static void abs_kernel(TensorIterator& iter) {
   });
 }
 
-// Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not_int_bool wraps this operation for both Boolean
-// and integral types.
+// Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not wraps this operation for both Boolean and
+// integral types.
 inline bool bitwise_not(bool a) {
   return !a;
 }
