@@ -553,7 +553,11 @@ void initTensorImplConversion(PyObject* module) {
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
-    // yf225 TODO: this is similar to our as_variable() implementation in VariableType
+    // For now, there is no guarantee that the tensors returned from Caffe2 ops
+    // are not Variables, because inputs to Caffe2 ops can be Variables.
+    //
+    // In the near future, once we make every tensor a Variable, we can remove
+    // the `tensor.is_variable()` check and directly return `tensor` as a Variable.
     return py::cast(tensor.is_variable() ? torch::autograd::Variable(tensor) :
       torch::autograd::make_variable(std::move(tensor), false));
   });

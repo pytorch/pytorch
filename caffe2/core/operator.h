@@ -808,7 +808,6 @@ class Operator : public OperatorBase {
   /// required device type for the input (by default, we assert that the tensor
   /// is consistent with the device type implied by the Context parameter of an
   /// Operator.)
-  // yf225 TODO: need to assert that inputs are in fact !is_variable()
   inline const Tensor& Input(
       int idx,
       DeviceType type = Context::GetDeviceType()) {
@@ -933,7 +932,9 @@ class Operator : public OperatorBase {
   // non-async executors that do not rely on events
   bool Run(int stream_id = 0) final {
     try {
-      // yf225 TODO: add comment here!
+      // This `at::AutoNonVariableTypeMode` thread-local guard is to make sure
+      // all Variable inputs to this Caffe2 op are treated as Tensors (i.e.
+      // their `is_variable()` is false) within the scope of `Run()`.
       at::AutoNonVariableTypeMode non_var_type_mode(true);
 
       StartAllObservers();
@@ -983,7 +984,9 @@ class Operator : public OperatorBase {
 
   bool RunAsync(int stream_id = 0) final {
     try {
-      // yf225 TODO: add comment here!
+      // This `at::AutoNonVariableTypeMode` thread-local guard is to make sure
+      // all Variable inputs to this Caffe2 op are treated as Tensors (i.e.
+      // their `is_variable()` is false) within the scope of `RunAsync()`.
       at::AutoNonVariableTypeMode non_var_type_mode(true);
 
       StartAllObservers();
