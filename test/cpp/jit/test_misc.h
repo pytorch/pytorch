@@ -18,12 +18,15 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/passes/guard_elimination.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
+#include "torch/csrc/jit/passes/liveness.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -439,13 +442,12 @@ void testEvalModeForLoadedModule() {
   if (isSandcastle())
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
-  std::shared_ptr<torch::jit::script::Module> module =
-      torch::jit::load(module_path);
-  AT_ASSERT(module->get_module("dropout")->is_training());
-  module->eval();
-  AT_ASSERT(!module->get_module("dropout")->is_training());
-  module->train();
-  AT_ASSERT(module->get_module("dropout")->is_training());
+  torch::jit::script::Module module = torch::jit::load(module_path);
+  AT_ASSERT(module.get_module("dropout").is_training());
+  module.eval();
+  AT_ASSERT(!module.get_module("dropout").is_training());
+  module.train();
+  AT_ASSERT(module.get_module("dropout").is_training());
 }
 
 // test a few features that are not directly used in schemas yet
@@ -692,9 +694,7 @@ void testRecordFunction() {
             std::make_tuple(std::string(getFullName(&fn)), sizes));
       },
       [](const autograd::profiler::RecordFunction&) {},
-      true);
-
-  autograd::profiler::setSamplingProbability(1.0);
+      /* needs_inputs */ true);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
@@ -714,6 +714,59 @@ void testRecordFunction() {
 
   checkTracedInputs(eager_inputs);
   checkTracedInputs(jit_inputs);
+
+  // test sampled callbacks
+  int sampled_cb_ctr = 0;
+  autograd::profiler::pushCallback(
+      [&sampled_cb_ctr](const autograd::profiler::RecordFunction& fn) {
+        if (std::string(fn.name().str()) == "test") {
+          ++sampled_cb_ctr;
+        }
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ false,
+      /* sampled */ true);
+
+  int non_sampled_cb_ctr = 0;
+  autograd::profiler::pushCallback(
+      [&non_sampled_cb_ctr](const autograd::profiler::RecordFunction& fn) {
+        if (std::string(fn.name().str()) == "test") {
+          ++non_sampled_cb_ctr;
+        }
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ false,
+      /* sampled */ false);
+
+  auto run_test_function = []() {
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    for (auto k = 0; k < 1000; k++) {
+      invokeTestRecordFunction(t);
+    }
+  };
+
+  autograd::profiler::setSamplingProbability(0.5);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 1000);
+  TORCH_CHECK(sampled_cb_ctr > 0 && sampled_cb_ctr < 1000);
+
+  sampled_cb_ctr = 0;
+  autograd::profiler::setSamplingProbability(0.0);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 2000);
+  TORCH_CHECK(sampled_cb_ctr == 0);
+
+  sampled_cb_ctr = 0;
+  autograd::profiler::setSamplingProbability(1.0);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 3000);
+  TORCH_CHECK(sampled_cb_ctr == 1000);
+
+  autograd::profiler::popCallback();
+  autograd::profiler::popCallback();
 }
 
 void testAutogradProfiler() {
@@ -786,36 +839,36 @@ void testNoneSchemaMatch() {
 }
 
 void testModuleDefine() {
-  auto m = std::make_shared<script::Module>();
-  m->register_parameter("foo", torch::ones({}), false);
-  m->define(R"(
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
     def add_it(self, x, b : int = 4):
       return self.foo + x + b
   )");
-  auto result = m->run_method("add_it", torch::ones({}));
+  auto result = m.run_method("add_it", torch::ones({}));
   AT_ASSERT(result.toTensor().item<float>() == 6)
 }
 
 void testModuleConversion() {
-  auto m = std::make_shared<script::Module>();
+  script::Module m("test");
   {
     // test cuda to cpu for params and buffers
-    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
-    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+    m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m.register_buffer("bar", torch::ones({}, at::kCUDA));
 
-    m->to(at::kCUDA);
-    m->to(at::kCPU);
-    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
-    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
+    m.to(at::kCUDA);
+    m.to(at::kCPU);
+    AT_ASSERT(m.get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m.get_buffer("bar").device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
-    m->register_parameter("foo", torch::ones({}), false);
-    m->register_buffer("bar", torch::ones({}));
+    m.register_parameter("foo", torch::ones({}), false);
+    m.register_buffer("bar", torch::ones({}));
 
-    m->to(at::kCUDA);
-    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
-    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
+    m.to(at::kCUDA);
+    AT_ASSERT(m.get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m.get_buffer("bar").device().is_cuda());
   }
 }
 
@@ -855,7 +908,7 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-void testInsertGuards() {
+void testInsertAndEliminateRedundantGuards() {
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y
@@ -886,10 +939,64 @@ void testInsertGuards() {
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
   checkShape(*guard, {2, 3}, false);
-  int num_guards = std::count_if(nodes.begin(), nodes.end(), [](Node* n) {
-    return n->kind() == prim::Guard;
-  });
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 11);
+  // now eliminate as many guards as possible
+  // we should be left with two guards on x and y's defs
+  EliminateRedundantGuards(copy);
+  num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 2);
+}
+
+void testInsertBailOuts() {
+  static const auto basic_example = R"JIT(
+  def basic_loop(x, y):
+
+      a = x + 1
+      b = y + 2
+      c = x + y + 3
+
+      for i in range(10):
+          a = a + b
+          # invariant
+          d = b * c
+          #
+          a = a - d
+
+      e = a + 4
+      return e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic_loop");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  EliminateRedundantGuards(copy);
+  auto nodes = copy->block()->nodes();
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 3);
+  InsertBailOuts(copy);
+  auto is_bailout = [](Node* n) { return n->kind() == prim::BailOut; };
+  auto num_bailouts = std::count_if(nodes.begin(), nodes.end(), is_bailout);
+  ASSERT_EQ(num_guards, num_bailouts);
+  std::vector<Node*> bailouts(num_bailouts);
+  std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
+
+  for (auto blo : bailouts) {
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
+    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+  }
 }
 
 void testProfiler() {

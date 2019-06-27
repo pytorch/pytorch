@@ -398,7 +398,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
-Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, ScalarType dtype) {
+Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, optional<ScalarType> dtype) {
   return cumprod_backward(grad.to(input.scalar_type()), input, dim);
 }
 
@@ -423,10 +423,6 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
-}
-
-Tensor cumsum_backward(const Tensor &x, int64_t dim, ScalarType input_dtype) {
-  return cumsum_backward(x.to(input_dtype), dim);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
@@ -1711,30 +1707,94 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     auto glambda = grads[0];
     auto gv = grads[1];
 
-    auto vt = v.t();
+    auto vt = v.transpose(-2, -1);
 
     Tensor result;
     if (gv.defined()) {
-        Tensor F = lambda.unsqueeze(0).expand_as(self).clone();
-        F.sub_(at::unsqueeze(lambda, 1));
-        F.diagonal().fill_(INFINITY);
+        Tensor F = lambda.unsqueeze(-2).expand_as(self).clone();
+        F.sub_(at::unsqueeze(lambda, -1));
+        F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
         F.pow_(-1);
 
-        F.mul_(vt.mm(gv));
-        result = v.mm(F.mm(vt));
+        F.mul_(at::matmul(vt, gv));
+        result = at::matmul(v, at::matmul(F, vt));
     } else {
         result = at::zeros_like(self);
     }
 
     if (glambda.defined()) {
-        result.add_((v * glambda).mm(vt));
+        result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
     }
     if (upper) {
-        result = at::triu(result) + at::triu(result.t(), 1);
+        result = at::triu(result) + at::triu(result.transpose(-2, -1), 1);
     } else {
-        result = at::tril(result) + at::tril(result.t(), -1);
+        result = at::tril(result) + at::tril(result.transpose(-2, -1), -1);
     }
     return result;
+}
+
+// We refer Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
+// Algebra Functions with Application in Optimum Experimental Design (Extended Version)
+// The derivative for the QR decomposition is adapted from Eq. 42 of the
+// above reference.
+Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                   bool some, const Tensor& Q, const Tensor& R) {
+  auto grad_Q = grads[0];
+  auto grad_R = grads[1];
+  TORCH_CHECK(R.size(-2) == R.size(-1),
+              "The derivative when R is non-square is not implemented. ");
+
+  // Compute R (R')^{T}
+  Tensor R_term;
+  if (grad_R.defined()) {
+    R_term = at::matmul(R, grad_R.transpose(-2, -1));
+  } else {
+    // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
+    R_term = at::zeros_like(R);
+  }
+
+  // Compute Q^{T} Q'
+  Tensor Q_term;
+  if (grad_Q.defined()) {
+    Q_term = at::matmul(Q.transpose(-2, -1), grad_Q);
+  } else {
+    // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
+    Q_term = at::zeros_like(R);
+  }
+
+  // We want to compute: (rhs_solve_1 . R^{-T})
+  // Note that (rhs_solve_1 . R^{-T}) = (R^{-1} . rhs_solve_1^{T})^{T}
+  // Since R is upper triangular, we can do this using
+  // triangular_solve(rhs_solve_1^{T}, R)^{T}
+  auto rhs_solve_1 = R_term - R_term.transpose(-2, -1) + Q_term - Q_term.transpose(-2, -1);
+  rhs_solve_1 = at::tril(rhs_solve_1, /*k=*/-1);
+  Tensor solve_soln_1;
+  std::tie(solve_soln_1, std::ignore) = at::triangular_solve(rhs_solve_1.transpose(-2, -1), R,
+                                                             /*upper=*/true, /*transpose=*/false,
+                                                             /*unitriangular=*/false);
+  Tensor grad_A;
+  if (grad_R.defined()) {
+    grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1) + grad_R);
+  } else {
+    grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1));
+  }
+
+  // Successive computations involve computation of QQ^{T} which is identity when A is square
+  if (self.size(-1) != self.size(-2)) {
+    Tensor rhs_solve_2;
+    // We use the same trick from above for this computation
+    if (grad_Q.defined()) {
+      rhs_solve_2 = grad_Q - at::matmul(Q, Q_term);
+    } else {
+      rhs_solve_2 = -at::matmul(Q, Q_term);
+    }
+    Tensor solve_soln_2;
+    std::tie(solve_soln_2, std::ignore) = at::triangular_solve(rhs_solve_2.transpose(-2, -1), R,
+                                                               /*upper=*/true, /*transpose=*/false,
+                                                               /*unitriangular=*/false);
+    grad_A.add_(solve_soln_2.transpose(-2, -1));
+  }
+  return grad_A;
 }
 
 // Invertible case is derived from Jacobi's formula, and also can be found at:
@@ -2133,6 +2193,12 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
 
   return gg_weight.view(size);
 }
+
+Tensor index_backward(const Tensor & self, TensorList indices, const Tensor& grad) {
+   auto zeros = at::zeros_like(self);
+   return at::_index_put_impl_(zeros, indices, grad, true, true);
+}
+
 
 } // anonymous namespace
 

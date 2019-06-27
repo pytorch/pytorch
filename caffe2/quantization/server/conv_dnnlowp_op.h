@@ -1,7 +1,6 @@
 #pragma once
 
 #include <fbgemm/Fbgemm.h>
-#include <fbgemm/src/FbgemmI8DepthwiseAvx2.h>
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"

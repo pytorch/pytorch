@@ -159,6 +159,14 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
 
+PyObject *THPVariable_get_T(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  auto& var = self->cdata;
+  return THPVariable_Wrap(var.numpy_T());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_get_cdata(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -303,6 +311,37 @@ PyObject *THPVariable_get_ndim(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef NAMEDTENSOR_ENABLED
+PyObject *THPVariable_get_names(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  // The long-term plan is to return a list of (python) torch.Dimname.
+  // However, for now, return a list of string.
+  size_t size = self->cdata.dim();
+  THPObjectPtr tuple(PyTuple_New(size));
+  if (!tuple) throw python_error();
+
+  if (!self->cdata.is_named()) {
+    for (size_t i = 0; i < size; ++i) {
+      PyTuple_SET_ITEM(tuple.get(), i, Py_None);
+    }
+    return tuple.release();
+  }
+
+  const auto dimnames = self->cdata.names().value();
+  for (size_t i = 0; i < size; ++i) {
+    PyObject* str = Py_None;
+    if (dimnames[i].type() != at::NameType::WILDCARD) {
+      str = THPUtils_packString(dimnames[i].full_name().toUnqualString());
+      if (!str) throw python_error();
+    }
+    PyTuple_SET_ITEM(tuple.get(), i, str);
+  }
+  return tuple.release();
+  END_HANDLE_TH_ERRORS
+}
+#endif
+
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
@@ -421,6 +460,7 @@ static PyObject * THPVariable_device(THPVariable* self) {
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {
+  {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
   {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
   {"grad_fn", (getter)THPVariable_get_grad_fn, nullptr, nullptr, nullptr},
@@ -443,6 +483,9 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
+#ifdef NAMEDTENSOR_ENABLED
+  {"names", (getter)THPVariable_get_names, nullptr, nullptr, nullptr},
+#endif
   {nullptr}
 };
 

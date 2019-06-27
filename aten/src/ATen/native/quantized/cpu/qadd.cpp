@@ -14,7 +14,8 @@ class QAddInt8 final : public c10::OperatorKernel {
  public:
   Tensor operator()(at::Tensor qa, at::Tensor qb,
                     double scale, int64_t zero_point) {
-    AT_ASSERTM(qa.numel() == qb.numel(), "Add operands must be the same size!");
+    TORCH_CHECK(
+        qa.numel() == qb.numel(), "Add operands must be the same size!");
     TORCH_CHECK(qa.scalar_type() == qb.scalar_type(), "Add operands should have same data type.");
     auto a = qa.dequantize();
     auto b = qb.dequantize();
@@ -22,15 +23,15 @@ class QAddInt8 final : public c10::OperatorKernel {
     auto iter = TensorIterator::binary_op(c, a, b);
 
     if (ReLUFused) {
-      binary_kernel(*iter, [&](float a_val, float b_val) -> float {
+      cpu_kernel(*iter, [&](float a_val, float b_val) -> float {
         return std::max<float>(a_val + b_val, 0);
       });
     } else {
-      binary_kernel(*iter, [&](float a_val, float b_val) -> float {
+      cpu_kernel(*iter, [&](float a_val, float b_val) -> float {
         return a_val + b_val;
       });
     }
-    return c.quantize_linear(scale, zero_point, qa.scalar_type());  // Requantize
+    return at::quantize_linear(c, scale, zero_point, qa.scalar_type());  // Requantize
   }
 };
 

@@ -2,15 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
 
-#include <ATen/native/mkldnn/TensorShape.h>
-
 namespace at { namespace native {
 
 // Methods
-
-void* data_ptr(const Tensor & self) {
-  return self.unsafeGetTensorImpl()->data();
-}
 
 Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
   // As we dispatch on self and TH is type-checked, we need different definitions.

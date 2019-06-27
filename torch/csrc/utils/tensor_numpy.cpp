@@ -69,7 +69,7 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
   return result;
 }
 
-static int aten_to_dtype(const ScalarType scalar_type);
+static int aten_to_numpy_dtype(const ScalarType scalar_type);
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (tensor.is_cuda()) {
@@ -85,7 +85,12 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (tensor.type().backend() != Backend::CPU) {
     throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString().c_str());
   }
-  auto dtype = aten_to_dtype(tensor.scalar_type());
+  if (tensor.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call numpy() on Variable that requires grad. "
+        "Use var.detach().numpy() instead.");
+  }
+  auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
   // NumPy strides use bytes. Torch strides use element counts.
@@ -110,7 +115,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
-  PyObject* py_tensor = THPVariable_Wrap(make_variable(tensor, false));
+  TORCH_INTERNAL_ASSERT(tensor.is_variable());
+  PyObject* py_tensor = THPVariable_Wrap(tensor);
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return nullptr;
@@ -171,7 +177,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   );
 }
 
-static int aten_to_dtype(const ScalarType scalar_type) {
+static int aten_to_numpy_dtype(const ScalarType scalar_type) {
   switch (scalar_type) {
     case kDouble: return NPY_DOUBLE;
     case kFloat: return NPY_FLOAT;
@@ -183,7 +189,7 @@ static int aten_to_dtype(const ScalarType scalar_type) {
     case kByte: return NPY_UINT8;
     case kBool: return NPY_BOOL;
     default:
-      throw ValueError("Got unsupported ScalarType ", toString(scalar_type));
+      throw TypeError("Got unsupported ScalarType ", toString(scalar_type));
   }
 }
 

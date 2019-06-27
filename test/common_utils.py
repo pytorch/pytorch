@@ -25,6 +25,7 @@ from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
+import numpy as np
 import tempfile
 
 import __main__
@@ -198,6 +199,12 @@ def skipCUDAMemoryLeakCheckIf(condition):
         return fn
     return dec
 
+def skipCUDANonDefaultStreamIf(condition):
+    def dec(fn):
+        if getattr(fn, '_do_cuda_non_default_stream', True):  # if current True
+            fn._do_cuda_non_default_stream = not condition
+        return fn
+    return dec
 
 def suppress_warnings(fn):
     @wraps(fn)
@@ -282,6 +289,26 @@ def is_iterable(obj):
     except TypeError:
         return False
 
+class CudaNonDefaultStream():
+    def __enter__(self):
+        # Before starting CUDA test save currently active streams on all
+        # CUDA devices and set new non default streams to all CUDA devices
+        # to ensure CUDA tests do not use default stream by mistake.
+        beforeDevice = torch.cuda.current_device()
+        self.beforeStreams = []
+        for d in range(torch.cuda.device_count()):
+            self.beforeStreams.append(torch.cuda.current_stream(d))
+            deviceStream = torch.cuda.Stream(device=d)
+            torch._C._cuda_setStream(deviceStream._cdata)
+        torch._C._cuda_setDevice(beforeDevice)
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # After completing CUDA test load previously active streams on all
+        # CUDA devices.
+        beforeDevice = torch.cuda.current_device()
+        for d in range(torch.cuda.device_count()):
+            torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
+        torch._C._cuda_setDevice(beforeDevice)
 
 class CudaMemoryLeakCheck():
     def __init__(self, testcase, name=None):
@@ -308,6 +335,7 @@ class CudaMemoryLeakCheck():
         # Don't check for leaks if an exception was thrown
         if exec_type is not None:
             return
+
         afters = self.get_cuda_memory_usage()
 
         for i, (before, after) in enumerate(zip(self.befores, afters)):
@@ -321,31 +349,45 @@ class CudaMemoryLeakCheck():
                     warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
                         self.name, after - before, i), RuntimeWarning)
 
-
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
     _do_cuda_memory_leak_check = False
+    _do_cuda_non_default_stream = False
 
     def __init__(self, method_name='runTest'):
         super(TestCase, self).__init__(method_name)
-        # Wraps the tested method if we should do CUDA memory check.
+
         test_method = getattr(self, method_name)
+        # Wraps the tested method if we should do CUDA memory check.
         self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
         # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
         if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-            # the import below may initialize CUDA context, so we do it only if
-            # self._do_cuda_memory_leak_check is True.
-            from common_cuda import TEST_CUDA
-            fullname = self.id().lower()  # class_name.method_name
-            if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
-                setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+            self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+
+        # Wraps the tested method if we should enforce non default CUDA stream.
+        self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
+        if self._do_cuda_non_default_stream and not IS_WINDOWS:
+            self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
         return CudaMemoryLeakCheck(self, name)
 
-    def wrap_with_cuda_memory_check(self, method):
+    def enforceNonDefaultStream(self):
+        return CudaNonDefaultStream()
+
+    def wrap_with_cuda_policy(self, method_name, policy):
+        test_method = getattr(self, method_name)
+        # the import below may initialize CUDA context, so we do it only if
+        # self._do_cuda_memory_leak_check or self._do_cuda_non_default_stream
+        # is True.
+        from common_cuda import TEST_CUDA
+        fullname = self.id().lower()  # class_name.method_name
+        if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
+            setattr(self, method_name, self.wrap_method_with_cuda_policy(test_method, policy))
+
+    def wrap_method_with_cuda_policy(self, method, policy):
         # Assumes that `method` is the tested function in `self`.
         # NOTE: Python Exceptions (e.g., unittest.Skip) keeps objects in scope
         #       alive, so this cannot be done in setUp and tearDown because
@@ -354,9 +396,12 @@ class TestCase(expecttest.TestCase):
         #       call in try-finally and always do the check.
         @wraps(method)
         def wrapper(self, *args, **kwargs):
-            with self.assertLeaksNoCudaTensors():
+            with policy():
                 method(*args, **kwargs)
         return types.MethodType(wrapper, self)
+
+    def wrap_with_cuda_memory_check(self, method):
+        return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
     def setUp(self):
         if TEST_SKIP_FAST:
@@ -723,6 +768,20 @@ class TestCase(expecttest.TestCase):
             else:
                 self.assertEqual(s, expected)
 
+    # returns captured stderr
+    @staticmethod
+    def runWithPytorchAPIUsageStderr(code):
+        import subprocess
+
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        pipes = subprocess.Popen(
+            [sys.executable, '-c', code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env)
+        return pipes.communicate()[1].decode('ascii')
+
     if sys.version_info < (3, 2):
         # assertRegexpMatches renamed to assertRegex in 3.2
         assertRegex = unittest.TestCase.assertRegexpMatches
@@ -805,11 +864,11 @@ def random_square_matrix_of_rank(l, rank):
     return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
 
 
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
+def random_symmetric_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
     for i in range(l):
         for j in range(i):
-            A[i, j] = A[j, i]
+            A[..., i, j] = A[..., j, i]
     return A
 
 
@@ -1016,3 +1075,29 @@ else:
                 check_test_defined_in_running_script(test)
                 test_suite.addTest(test)
         return test_suite
+
+# Quantization references
+def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
+    """Quantizes a numpy array."""
+    if qmin is None:
+        qmin = np.iinfo(dtype).min
+    if qmax is None:
+        qmax = np.iinfo(dtype).max
+    qx = np.round(x / scale + zero_point).astype(np.int64)
+    qx = np.clip(qx, qmin, qmax)
+    qx = qx.astype(dtype)
+    return qx
+
+
+def _dequantize(qx, scale, zero_point):
+    """Dequantizes a numpy array."""
+    x = (qx.astype(np.float) - zero_point) * scale
+    return x
+
+
+def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
+    """Requantizes a numpy array, i.e., intermediate int32 or int16 values are
+    converted back to given type"""
+    qx = (x * multiplier).round() + zero_point
+    qx = np.clip(qx, qmin, qmax).astype(qtype)
+    return qx

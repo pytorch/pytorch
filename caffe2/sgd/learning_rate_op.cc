@@ -47,6 +47,11 @@ Optional:
   `multiplier`: defaults to 0.5
   `multiplier_1`: defaults to 1
   `multiplier_2`: defaults to 1
+  `m1`: defaults to 0.5, the first piece lr of piece warmup
+  `n1`: defaults to 0, iter threshold of the first piece lr
+  `m2`: defaults to 0.5, the second piece lr of piece warmup
+  `n2`: defaults to 0, iter threshold of the second piece lr
+  `m3`: defaults to 0.5, the third piece lr of piece warmup
 
 
 Usage:
@@ -88,6 +93,11 @@ Example usage:
     .Arg(
         "sub_policy_num_iters",
         "(int array, default empty) number of iterations for each sub learning rate policy in composite policy")
+    .Arg("m1", "")
+    .Arg("n1", "")
+    .Arg("m2", "")
+    .Arg("n2", "")
+    .Arg("m3", "")
     .Input(0, "input", "description needed")
     .Output(0, "output", "description needed")
     .DeviceInferenceFunction([](const OperatorDef& def) {

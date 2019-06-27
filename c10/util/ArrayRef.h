@@ -43,6 +43,7 @@ class ArrayRef final {
   using iterator = const T*;
   using const_iterator = const T*;
   using size_type = size_t;
+  using value_type = T;
 
   using reverse_iterator = std::reverse_iterator<iterator>;
 
@@ -251,22 +252,22 @@ bool operator!=(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
 }
 
 template <typename T>
-bool operator==(std::vector<T> a1, c10::ArrayRef<T> a2) {
+bool operator==(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
   return c10::ArrayRef<T>(a1).equals(a2);
 }
 
 template <typename T>
-bool operator!=(std::vector<T> a1, c10::ArrayRef<T> a2) {
+bool operator!=(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
   return !c10::ArrayRef<T>(a1).equals(a2);
 }
 
 template <typename T>
-bool operator==(c10::ArrayRef<T> a1, std::vector<T> a2) {
+bool operator==(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
   return a1.equals(c10::ArrayRef<T>(a2));
 }
 
 template <typename T>
-bool operator!=(c10::ArrayRef<T> a1, std::vector<T> a2) {
+bool operator!=(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
   return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
@@ -274,6 +275,6 @@ using IntArrayRef = ArrayRef<int64_t>;
 
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!
-using IntList C10_DEPRECATED_USING = ArrayRef<int64_t>;
+C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
 
 } // namespace c10
