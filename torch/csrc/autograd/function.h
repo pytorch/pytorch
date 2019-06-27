@@ -34,7 +34,7 @@ using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
 
 // Custom deleter to prevent stack overflows.
-void deleteFunction(Function* function);
+TORCH_API void deleteFunction(Function* function);
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                               Function
