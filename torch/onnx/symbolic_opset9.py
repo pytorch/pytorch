@@ -1,3 +1,8 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import torch
 from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
