@@ -446,11 +446,11 @@ class JitTestCase(TestCase):
 
 @contextmanager
 def enable_profiling_mode():
-    torch._C._jit_set_profiling_mode(True)
+    torch._C._jit_set_graph_executor("executor::profiling")
     try:
         yield
     finally:
-        torch._C._jit_set_profiling_mode(False)
+    torch._C._jit_reset_graph_executor()
 
 _inline_everything = True
 @contextmanager

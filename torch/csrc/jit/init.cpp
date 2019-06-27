@@ -342,19 +342,13 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def(
-          "_jit_set_profiling_mode",
-          [](bool profiling_flag) {
-            getGraphExecutorName() =
-                (profiling_flag) ? kProfilingExecutor : kDefaultExecutor;
-          })
-      .def(
           "_jit_set_graph_executor",
           [](const std::string& name) {
-            getGraphExecutorName() = Symbol::fromQualString(name);
+            setGraphExecutorName(Symbol::fromQualString(name));
           })
       .def(
           "_jit_reset_graph_executor",
-          []() { getGraphExecutorName() = kDefaultExecutor; })
+          []() { setGraphExecutorName(kDefaultExecutor); })
       .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })

@@ -80,13 +80,11 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   AT_ERROR("not supported");
 }
 
-namespace {
-RegisterGraphExecutorImpl r(
+RegisterGraphExecutorImpl reg_profiling_graph_executor_impl(
     kProfilingExecutor,
     [](std::shared_ptr<Graph> graph, bool optimize) {
       return new ProfilingGraphExecutorImpl(graph, optimize);
     });
-} // namespace
 
 } // namespace jit
 } // namespace torch
