@@ -2808,7 +2808,15 @@ struct to_ir {
       Value* dict_val,
       Value* key_val) {
     auto dict_type = dict_val->type()->cast<DictType>();
-    AT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
+
+    if (!key_val->type()->isSubtypeOf(dict_type->getKeyType())) {
+      throw ErrorReport(loc)
+          << "Expected key type '" << key_val->type()->python_str()
+          << "' to subtype the key type '"
+          << dict_type->getKeyType()->python_str() << "' of the dict '"
+          << dict_type->python_str() << "'";
+    }
+
     return graph->insertNode(graph->createDictIndex(dict_val, key_val))
         ->output();
   }
