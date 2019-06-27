@@ -29,7 +29,7 @@ std::shared_ptr<Graph> createGraphByTracing(
     TypedStack inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    const std::shared_ptr<script::Module>& self = nullptr);
+    script::Module* self = nullptr);
 } // namespace tracer
 } // namespace jit
 } // namespace torch
