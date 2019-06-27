@@ -259,9 +259,12 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     return create(contained_types[0]);
   }
 
-  bool operator==(const Type& rhs) const override {
-    if (auto opt_rhs = rhs.cast<OptionalType>()) {
-      return getElementType()->isSubtypeOf(opt_rhs->getElementType());
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if (Type::isSubtypeOf(rhs)) {
+      return true;
+    }
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return getElementType()->isSubtypeOf(rhs_->getElementType());
     }
     return false;
   }
