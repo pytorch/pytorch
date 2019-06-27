@@ -129,6 +129,13 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
+    def test_reduce_log_sum_exp(self):
+        class ReduceLogSumExpModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.logsumexp(input, dim=(0, 1))
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ReduceLogSumExpModel(), x)
 
 # opset 10 tests
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
