@@ -1556,7 +1556,7 @@ class _DistTestBase(object):
             input_var.append(input_var_rank)
 
         all_input_var = torch.cat(
-            [input_var_rank.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1) for input_var_rank in input_var],
+            [x.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1) for x in input_var],
             dim=1
         ).cuda(rank)
 
