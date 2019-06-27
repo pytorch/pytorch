@@ -172,10 +172,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   * Wait on the future until it completes.
   */
   void wait() {
-    if (completed_) {
-      return;
-    }
-
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
@@ -186,14 +182,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * Explicitly mark the future as completed with the output value.
    */
   void markCompleted(IValue value) {
-    {
-      // This is not to protect completed_ but to create a barrier
-      // from possible addCallback() calls
-      std::unique_lock<std::mutex> lock(mutex_);
-      AT_ASSERT(!completed());
-      completed_ = true;
-      value_ = std::move(value);
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(!completed());
+    completed_ = true;
+    value_ = std::move(value);
 
     fireCallbacks();
     finished_cv_.notify_all();
@@ -204,15 +196,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   void markCompleted(FutureError&& error_) {
-    {
-      // This is not to protect completed_ but to create a barrier
-      // from possible addCallback() calls
-      std::unique_lock<std::mutex> lock(mutex_);
-      AT_ASSERT(!completed());
-      completed_ = true;
-      has_error = true;
-      error = std::move(error_);
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(!completed());
+    completed_ = true;
+    has_error = true;
+    error = std::move(error_);
 
     fireCallbacks();
     finished_cv_.notify_all();
@@ -335,7 +323,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type() const {
     return type_;
   }
-  // temporarily defined in class_type.cpp to 
+  // temporarily defined in class_type.cpp to
   // ensure Modules do not leak memory
   ~Object();
  private:
@@ -425,7 +413,6 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
-C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -456,7 +443,6 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
-C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
@@ -573,7 +559,7 @@ inline IValue::IValue(c10::List<int64_t> v)
 inline IValue::IValue(std::vector<int64_t> v)
 : IValue(c10::impl::toList(v)) {}
 inline IValue::IValue(c10::ArrayRef<int64_t> v)
-: IValue(c10::make_list<int64_t>(v)) {}
+: IValue(c10::List<int64_t>(v)) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 : tag(Tag::String), is_intrusive_ptr(true) {
@@ -615,7 +601,7 @@ template<class T> inline IValue::IValue(c10::List<T> v)
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
 }
 template<class T> inline IValue::IValue(std::vector<T> v)
-: IValue(impl::make_generic_list()) {
+: IValue(impl::GenericList()) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
@@ -633,7 +619,7 @@ inline IValue::IValue(c10::Dict<Key, Value> v)
 : IValue(impl::toGenericDict(std::move(v))) {}
 
 template<class Key, class Value> inline IValue::IValue(std::unordered_map<Key, Value> v)
-: IValue(impl::make_generic_dict()) {
+: IValue(impl::GenericDict()) {
   auto dict = to<c10::Dict<Key, Value>>();
   dict.reserve(v.size());
   for (auto& e : v) {

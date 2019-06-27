@@ -84,6 +84,8 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/onnx/init.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/init.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp
     ${TORCH_SRC_DIR}/csrc/serialization.cpp
     ${TORCH_SRC_DIR}/csrc/tensor/python_tensor.cpp
     ${TORCH_SRC_DIR}/csrc/utils.cpp
@@ -221,9 +223,6 @@ if (USE_ROCM)
 endif()
 
 if (USE_DISTRIBUTED)
-    list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/Module.cpp)
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${TORCH_SRC_DIR}/lib/THD)
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES THD)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if (NOT MSVC AND NOT APPLE)
       list(APPEND TORCH_PYTHON_SRCS

@@ -161,6 +161,31 @@ class ConstantWarmupLearningRate : public LearningRateFunctor<T> {
   uint64_t num_iter_;
 };
 
+// ConstantWarmup: return scale when iter < num_iter, and 1 otherwise
+template <typename T>
+class PieceWarmupLearningRate : public LearningRateFunctor<T> {
+ public:
+  PieceWarmupLearningRate(
+      const T m1,
+      const int64_t n1,
+      const T m2,
+      const int64_t n2,
+      const T m3)
+      : m1_(m1), m2_(m2), m3_(m3), n1_(n1), n2_(n2){};
+
+  T operator()(const int64_t iter) const override {
+    if (iter < n1_) {
+      return m1_;
+    } else if (iter < n2_) {
+      return m2_;
+    }
+    return m3_;
+  }
+
+  T m1_, m2_, m3_;
+  uint64_t n1_, n2_;
+};
+
 // hill: the learning rate changes according to following 3 stages
 // 1) linear warmup (increasing) at first num_iter steps from start_multiplier
 // 2) inverse shrink (decreasing) afterwards (gamma, power)
