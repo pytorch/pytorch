@@ -35,7 +35,6 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/script/module_python.h"
 
-
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it
 // probabilistically breaks the build.
@@ -94,12 +93,12 @@ REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 class ScriptModuleFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    return py::cast(blob.Get<std::shared_ptr<torch::jit::script::Module>>());
+    return py::cast(blob.Get<torch::jit::script::Module>());
   }
 };
 
 REGISTER_BLOB_FETCHER(
-    (TypeMeta::Id<std::shared_ptr<torch::jit::script::Module>>()),
+    (TypeMeta::Id<torch::jit::script::Module>()),
     caffe2::python::ScriptModuleFetcher);
 #endif
 
@@ -248,8 +247,7 @@ bool feedBlob(
   }
 #ifdef FBCODE_CAFFE2
   if (auto module = torch::jit::script::as_module(arg)) {
-    *blob->GetMutable<std::shared_ptr<torch::jit::script::Module>>() =
-        module;
+    *blob->GetMutable<torch::jit::script::Module>() = *module;
     return true;
   }
 #endif
@@ -429,10 +427,10 @@ void addObjectMethods(py::module& m) {
       .def("_wrap_tensor_impl", [](Blob* blob, void* ptr) {
         auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
             unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
-        // TODO: In the near future, a PyTorch tensor without AutogradMeta will be
-        // a valid tensor. At that point, we will only accept non-requires-grad
-        // tensor into Caffe2 workspace, and don't need to perform shallow-copying
-        // here anymore.
+        // TODO: In the near future, a PyTorch tensor without AutogradMeta will
+        // be a valid tensor. At that point, we will only accept
+        // non-requires-grad tensor into Caffe2 workspace, and don't need to
+        // perform shallow-copying here anymore.
         p = p->shallow_copy_and_detach(
             /*version_counter=*/p->version_counter(),
             /*allow_tensor_metadata_change=*/p->allow_tensor_metadata_change());
@@ -529,14 +527,13 @@ void addObjectMethods(py::module& m) {
           "Initialize this tensor to given shape and data type. "
           "Fail if the given data type cannot be accessed from python.")
       .def(
-        "_tensor_impl_raw_handle",
-        [](TensorCPU* t) -> void* {
-          auto p = t->getIntrusivePtr();
-          // We return a raw non-owning pointer here, we rely on surrounding
-          // code to keep the original tensor alive
-          return p.get();
-        }
-      )
+          "_tensor_impl_raw_handle",
+          [](TensorCPU* t) -> void* {
+            auto p = t->getIntrusivePtr();
+            // We return a raw non-owning pointer here, we rely on surrounding
+            // code to keep the original tensor alive
+            return p.get();
+          })
       .def_property_readonly(
           "_shape", [](const TensorCPU& t) { return t.sizes().vec(); })
       .def("_reshape", [](TensorCPU* t, std::vector<int64_t> dims) {
@@ -665,7 +662,7 @@ void addObjectMethods(py::module& m) {
         std::vector<py::bytes> grad_ops;
         for (const auto& op : meta.ops_) {
           grad_ops.push_back(
-            SerializeAsString_EnforceCheck(op, "addObjectMethods"));
+              SerializeAsString_EnforceCheck(op, "addObjectMethods"));
         }
         return std::pair<std::vector<py::bytes>, std::vector<GradientWrapper>>{
             grad_ops, meta.g_input_};
@@ -949,17 +946,16 @@ void addObjectMethods(py::module& m) {
           });
 
   py::class_<Predictor>(m, "Predictor")
-      .def(
-          py::init([](py::bytes init_net, py::bytes predict_net) {
-            CAFFE_ENFORCE(gWorkspace);
-            NetDef init_net_, predict_net_;
-            CAFFE_ENFORCE(ParseProtoFromLargeString(
-                init_net.cast<std::string>(), &init_net_));
-            CAFFE_ENFORCE(ParseProtoFromLargeString(
-                predict_net.cast<std::string>(), &predict_net_));
-            return new Predictor(
-                makePredictorConfig(init_net_, predict_net_, gWorkspace));
-          }))
+      .def(py::init([](py::bytes init_net, py::bytes predict_net) {
+        CAFFE_ENFORCE(gWorkspace);
+        NetDef init_net_, predict_net_;
+        CAFFE_ENFORCE(ParseProtoFromLargeString(
+            init_net.cast<std::string>(), &init_net_));
+        CAFFE_ENFORCE(ParseProtoFromLargeString(
+            predict_net.cast<std::string>(), &predict_net_));
+        return new Predictor(
+            makePredictorConfig(init_net_, predict_net_, gWorkspace));
+      }))
       .def(
           "run",
           [](Predictor& instance,
@@ -1350,8 +1346,7 @@ void addGlobalMethods(py::module& m) {
   m.def("run_net_once", [](const py::bytes& net_def) {
     CAFFE_ENFORCE(gWorkspace);
     NetDef def;
-    CAFFE_ENFORCE(
-        ParseProtoFromLargeString(net_def.cast<std::string>(), &def));
+    CAFFE_ENFORCE(ParseProtoFromLargeString(net_def.cast<std::string>(), &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunNetOnce(def));
     return true;
@@ -1399,8 +1394,8 @@ void addGlobalMethods(py::module& m) {
          int main_runs,
          double improvement_threshold) {
         NetDef def;
-        CAFFE_ENFORCE(ParseProtoFromLargeString(
-            net_def_bytes.cast<std::string>(), &def));
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(net_def_bytes.cast<std::string>(), &def));
         NetDef init_def;
         CAFFE_ENFORCE(ParseProtoFromLargeString(
             init_def_bytes.cast<std::string>(), &init_def));
@@ -1478,7 +1473,8 @@ void addGlobalMethods(py::module& m) {
           nets.push_back(std::move(def));
         }
 
-        auto blob_info = InferBlobShapesAndTypesFromWorkspace(gWorkspace, nets_ptr);
+        auto blob_info =
+            InferBlobShapesAndTypesFromWorkspace(gWorkspace, nets_ptr);
 
         std::string protob;
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
@@ -1498,7 +1494,8 @@ void addGlobalMethods(py::module& m) {
           nets.push_back(std::move(def));
         }
 
-        auto blob_info = InferBlobShapesAndTypesFromMap(blob_dimensions, nets_ptr);
+        auto blob_info =
+            InferBlobShapesAndTypesFromMap(blob_dimensions, nets_ptr);
 
         std::string protob;
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
@@ -1649,19 +1646,17 @@ void addGlobalMethods(py::module& m) {
   });
   m.def(
       "export_to_onnx",
-      [](
-        caffe2::onnx::DummyName* dummy,
-        const py::bytes& c2op,
+      [](caffe2::onnx::DummyName* dummy,
+         const py::bytes& c2op,
          const std::unordered_map<std::string, std::vector<int>>& shapes)
           -> std::pair<std::vector<py::bytes>, std::vector<py::bytes>> {
         OperatorDef op;
-        CAFFE_ENFORCE(
-            ParseProtoFromLargeString(c2op.cast<std::string>(), &op));
+        CAFFE_ENFORCE(ParseProtoFromLargeString(c2op.cast<std::string>(), &op));
         const auto& type = op.type();
         const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(type);
         CAFFE_ENFORCE(schema);
         std::unordered_map<std::string, TensorShape> tensor_shapes;
-        for (const auto& it: shapes) {
+        for (const auto& it : shapes) {
           tensor_shapes.emplace(
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
@@ -1670,12 +1665,12 @@ void addGlobalMethods(py::module& m) {
         std::pair<std::vector<py::bytes>, std::vector<py::bytes>> ret;
         auto& nodes_str = ret.first;
         auto& tensors_str = ret.second;
-        for (const auto& node: results.first) {
+        for (const auto& node : results.first) {
           std::string out;
           node.SerializeToString(&out);
           nodes_str.emplace_back(py::bytes(out));
         }
-        for (const auto& tensor: results.second) {
+        for (const auto& tensor : results.second) {
           std::string out;
           tensor.SerializeToString(&out);
           tensors_str.emplace_back(py::bytes(out));
@@ -1824,7 +1819,7 @@ void addGlobalMethods(py::module& m) {
   });
 
   auto initialize = [&]() {
-    // Initialization of the module
+  // Initialization of the module
 #ifdef USE_NUMPY
     ([]() -> void {
       // import_array1() forces a void return value.
