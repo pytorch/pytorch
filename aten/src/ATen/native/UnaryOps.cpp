@@ -69,6 +69,9 @@ Tensor& _clamp_out_cpu(
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
   return result;
 }
 
@@ -77,7 +80,11 @@ Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  return legacy::cpu::_th_clamp_max_out(result, self, max);
+  legacy::cpu::_th_clamp_max_out(result, self, max);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
@@ -85,7 +92,11 @@ Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  return legacy::cpu::_th_clamp_min_out(result, self, min);
+  legacy::cpu::_th_clamp_min_out(result, self, min);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 Tensor& fill_out(Tensor& self, const Scalar value) {
@@ -140,11 +151,9 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
   return result;
 }
 
-static void propagate_names(Tensor& result, const Tensor& src) {
+static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
 #ifdef NAMEDTENSOR_ENABLED
-  if (src.is_named()) {
-    at::internal_set_names_inplace(result, src.names());
-  }
+  at::namedinference::propagate_names(result, src);
 #endif
 }
 
@@ -165,7 +174,7 @@ static void propagate_names(Tensor& result, const Tensor& src) {
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
-    propagate_names(result, self);                              \
+    propagate_names_if_namedtensor_enabled(result, self);       \
     return result;                                              \
   }
 

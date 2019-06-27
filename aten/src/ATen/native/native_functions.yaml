@@ -399,43 +399,52 @@
   device_guard: False
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _clamp__cpu
     CUDA: _clamp__cuda
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _clamp_out_cpu
     CUDA: _clamp_out_cuda
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _clamp_max__cpu
     CUDA: _clamp_max__cuda
 
 - func: clamp_max(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _clamp_max_out_cpu
     CUDA: _clamp_max_out_cuda
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _clamp_min__cpu
     CUDA: _clamp_min__cuda
 
 - func: clamp_min(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _clamp_min_out_cpu
     CUDA: _clamp_min_out_cuda
@@ -823,9 +832,11 @@
   variants: function, method
 
 - func: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
+  named_guard: False
   variants: function, method
 
 - func: fill_(Tensor(a!) self, Tensor value) -> Tensor(a!)
+  named_guard: False
   variants: function, method
 
 - func: floor(Tensor self) -> Tensor
@@ -1556,15 +1567,18 @@
     CUDA: range_cuda_out
 
 - func: reciprocal(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _reciprocal__cpu
     CUDA: _reciprocal__cuda
 
 - func: reciprocal(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _reciprocal_out_cpu
     CUDA: _reciprocal_out_cuda
