@@ -148,6 +148,9 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
   assert_no_internal_overlap(result, "sigmoid");
   auto iter = TensorIterator::unary_op(result, self);
   sigmoid_stub(iter->device_type(), *iter);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
   return result;
 }
 
