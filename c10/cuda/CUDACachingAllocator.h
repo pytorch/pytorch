@@ -53,6 +53,8 @@ C10_CUDA_API void     resetMaxMemoryAllocated(int device);
 C10_CUDA_API uint64_t currentMemoryCached(int device);
 C10_CUDA_API uint64_t maxMemoryCached(int device);
 C10_CUDA_API void     resetMaxMemoryCached(int device);
+C10_CUDA_API uint64_t totalGlobalMemory(int device);
+C10_CUDA_API void initTotalGlobalMemory(int device);
 
 C10_CUDA_API std::mutex* getFreeMutex();
 

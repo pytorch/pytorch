@@ -68,6 +68,7 @@ struct DeviceStats {
   uint64_t   max_amount_allocated;  // max total amount allocated in bytes
   uint64_t   amount_cached;         // total amount in cache in bytes
   uint64_t   max_amount_cached;     // max total amount in cache in bytes
+  uint64_t   total_global_memory;   // total amount of global memory available on the device in bytes
 
   DeviceStats() :
       amount_allocated(0), max_amount_allocated(0),
@@ -184,6 +185,7 @@ struct THCCachingAllocator
     AT_ASSERT(device >= 0);
     if ((size_t) device >= device_stats.size()) {
       device_stats.resize(device + 1);
+      initTotalGlobalMemory(device);
     }
     return device_stats.at(device);
   }
@@ -699,6 +701,20 @@ void resetMaxMemoryCached(int device) {
   assertValidDevice(device);
   DeviceStats& stats = caching_allocator.get_stats_for_device(device);
   stats.max_amount_cached = stats.amount_cached;
+}
+
+uint64_t totalGlobalMemory(int device)
+{
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_global_memory;
+}
+
+void initTotalGlobalMemory(int device) {
+  cudaDeviceProp prop;
+  assertValidDevice(device);
+  DeviceStats& stats = caching_allocator.get_stats_for_device(device);
+  C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+  stats.total_global_memory = prop.totalGlobalMem;
 }
 
 //
