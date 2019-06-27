@@ -53,17 +53,13 @@ static void abs_kernel(TensorIterator& iter) {
 
 // Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not_int_bool wraps this operation for both Boolean
 // and integral types.
-template <typename scalar_t>
-inline
-typename std::enable_if<std::is_same<scalar_t, bool>::value, scalar_t>::type
-bitwise_not_int_bool(scalar_t a) {
+inline bool bitwise_not(bool a) {
   return !a;
 }
 
 template <typename scalar_t>
-inline
-typename std::enable_if<std::is_integral<scalar_t>::value && !std::is_same<scalar_t, bool>::value, scalar_t>::type
-bitwise_not_int_bool(scalar_t a) {
+inline typename std::enable_if<std::is_integral<scalar_t>::value, scalar_t>::type
+bitwise_not(scalar_t a) {
   return ~a;
 }
 
@@ -72,7 +68,7 @@ static void bitwise_not_kernel(TensorIterator& iter) {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t {
-          return bitwise_not_int_bool(a);
+          return bitwise_not(a);
     });
   });
 }
