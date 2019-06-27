@@ -1015,7 +1015,7 @@ def _try_compile_fn(fn):
     if not inspect.isfunction(fn) and not inspect.ismethod(fn):
         raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
                            "Python functions or methods currently.\n"
-                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn))
+                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn, fn))
 
     if isinstance(fn, torch.nn.Module):
         # Since modules are callable pybind recognizes them as functions, but

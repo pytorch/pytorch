@@ -14,12 +14,25 @@ inline std::vector<SourceRange>& get_stack() {
   return call_stack;
 }
 
+inline std::vector<std::string>& get_fn_stack() {
+  static std::vector<std::string> fns;
+  return fns;
+}
+
 inline void push_call(const SourceRange& range) {
   get_stack().push_back(range);
 }
 
 inline void pop_call() {
   get_stack().pop_back();
+}
+
+inline void push_function(const std::string& name) {
+  get_fn_stack().push_back(name);
+}
+
+inline void pop_function() {
+  get_fn_stack().pop_back();
 }
 
 struct ErrorReport : public std::exception {
@@ -44,9 +57,16 @@ struct ErrorReport : public std::exception {
     if (get_stack().size() > 0) {
       // Print the calling stack to show why this function was being compiled,
       // skip the first entry in the list since it's the current function
-      msg << "\nCalled from:\n";
-      for (auto it = get_stack().rbegin() + 1; it != get_stack().rend(); ++it) {
-        it->highlight(msg);
+      auto range_it = get_stack().rbegin() + 1;
+      auto names_it = get_fn_stack().rbegin();
+      for (;
+           range_it != get_stack().rend() && names_it != get_fn_stack().rend();
+           ++range_it, ++names_it) {
+        msg << "\n";
+        msg << "'" << *names_it
+            << "' is being compiled since it was called from '"
+            << *(names_it + 1) << "'\n";
+        range_it->highlight(msg);
       }
     }
 

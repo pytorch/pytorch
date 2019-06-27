@@ -2959,7 +2959,9 @@ std::shared_ptr<Function> CompilationUnit::define(
         std::make_shared<FunctionResolver>(resolver.get(), function_table);
   }
   auto creator = [def, _resolver, self](Function& method) {
+    push_function(def.name().name());
     to_ir(def, _resolver, self, method);
+    pop_function();
   };
   return std::make_shared<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);
