@@ -1,6 +1,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/functional.h>
+#include <thrust/iterator/constant_iterator.h>
 #include <thrust/transform.h>
 
 #include <THC/THCGeneral.h>
