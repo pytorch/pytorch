@@ -706,7 +706,7 @@ Example::
 
 add_docstr(torch.bitwise_not,
            r"""
-           abs(input, out=None) -> Tensor
+           bitwise_not(input, out=None) -> Tensor
 
 Computes the bitwise NOT of the given :attr:`input` tensor. The input must be of integer or Boolean types.
 

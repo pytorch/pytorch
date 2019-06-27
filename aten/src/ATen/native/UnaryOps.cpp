@@ -157,8 +157,6 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     return result;                                              \
   }
 
-// NB: Temp. defaulting to TH implementation of abs due to issues with Apple
-
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
