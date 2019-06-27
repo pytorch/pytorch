@@ -1,5 +1,4 @@
 from .module import Module
-from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
 
 
@@ -29,5 +28,5 @@ class Flatten(Module):
         self.end_dim = end_dim
 
     @weak_script_method
-    def forward(self, input, start_dim=1, end_dim=-1):
-        return input.flatten(start_dim, end_dim)
+    def forward(self, input):
+        return input.flatten(self.start_dim, self.end_dim)
