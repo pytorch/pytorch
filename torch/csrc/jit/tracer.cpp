@@ -419,7 +419,13 @@ void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
 }
 void addInputs(Node* n, const char* name, const at::Scalar& value) {
-  detail::genericAddInput(n, value);
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
 }
 void addInputs(
     Node* n,
@@ -463,8 +469,20 @@ void addInputs(Node* n, const char* name, at::MemoryFormat value) {
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::ScalarType>& value) {
+    const c10::optional<at::MemoryFormat>& value) {
   if (value) {
+    detail::genericAddInput(n, static_cast<int64_t>(*value));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone(IntType::get()))->output();
+    n->addInput(none);
+  }
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::ScalarType>& value) {
+  if (value.has_value()) {
     detail::genericAddInput(n, static_cast<int64_t>(*value));
   } else {
     Graph* g = n->owningGraph();
@@ -649,6 +667,8 @@ void ArgumentStash::stashValue(
     ten = g.insert(prim::Int, {ten});
   } else if (type == FloatType::get()) {
     ten = g.insert(prim::Float, {ten});
+  } else if (type == NumberType::get()) {
+    ten = g.insert(prim::ImplicitTensorToNum, {ten});
   }
 
   stash.values.emplace(arg_name, ten);
