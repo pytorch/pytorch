@@ -211,6 +211,9 @@
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   self: not_implemented("cholesky_inverse")
 
+- name: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+  self: not_implemented("fbgemm_linear_fp16_weight only supported for inference")
+
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
