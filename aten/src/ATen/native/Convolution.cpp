@@ -192,7 +192,7 @@ auto ConvParams::is_depthwise(
          weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
 }
 
-//FIXME: move to other file?
+// Check workload to activate fast depthwise FP16 cudnn conv kernels
 bool check_cudnn_depthwise_workload(const at::Tensor& input, const at::Tensor& weight, int stride) {
   int w = input.size(3);  // same as h
   int ch = input.size(1);
