@@ -103,7 +103,7 @@ namespace script {
   _(TK_IMPORT, "import", "import")               \
   _(TK_NAMED_TUPLE_DEF, "named tuple", "")
 
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
+static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|~";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters

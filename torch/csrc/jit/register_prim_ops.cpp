@@ -2068,7 +2068,7 @@ RegisterOperators reg2({
         "prim::min(int[] x) -> int",
         [](Stack& stack) {
           c10::List<int64_t> int_list = pop(stack).toIntList();
-          int64_t min_element = std::numeric_limits<int64_t>::max(); 
+          int64_t min_element = std::numeric_limits<int64_t>::max();
 
           for(int64_t ele: int_list) {
             if(ele < min_element) {
@@ -2255,6 +2255,15 @@ RegisterOperators reg2({
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 
     DEFINE_UNARY_OP(aten::neg, -a, int, float),
+    DEFINE_UNARY_INT_OP(aten::invert, ~a, int),
+    Operator(
+        "aten::invert(Tensor x) -> Tensor",
+        [](Stack& stack) {
+          at::Tensor x;
+          pop(stack, x);
+          push(stack, 1 - x);
+          return 0;
+        }),
     Operator(
         "aten::__not__(bool self) -> bool",
         [](Stack& stack) {

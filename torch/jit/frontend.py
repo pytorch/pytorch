@@ -384,6 +384,7 @@ class ExprBuilder(Builder):
     unop_map = {
         ast.Not: 'not',
         ast.USub: '-',
+        ast.Invert: '~',
     }
 
     boolop_map = {

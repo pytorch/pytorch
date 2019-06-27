@@ -494,6 +494,7 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, invert) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
