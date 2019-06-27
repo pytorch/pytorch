@@ -1686,7 +1686,9 @@ graph(%Ra, %Rb):
 
         ge = self.checkTrace(fn, [torch.randn(2, 2)] * 2)
         inputs = set(ge.graph.inputs())
-        self.assertTrue(len(inputs) == 2)
+        # three instead of 2 because the export/import in checkTrace adds a
+        # `self` module argument
+        self.assertTrue(len(inputs) == 3)
 
     def test_repeated_output(self):
         def fn(a, b):
