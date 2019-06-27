@@ -195,8 +195,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t /* groups */,
       double /* output scale */,
       int64_t /* output_zero_point */) {
-    TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
+    TORCH_CHECK(false, "This PyTorch installation was not built "
+                       "with FBGEMM operators");
   }
 #endif // USE_FBGEMM
 };
