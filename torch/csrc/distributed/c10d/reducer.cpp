@@ -119,8 +119,8 @@ Reducer::Reducer(
            variable_index++) {
         auto& variable = replicas_[replica_index][variable_index];
         const auto index = VariableIndex{
-          replica_index : replica_index,
-          variable_index : variable_index,
+            .replica_index = replica_index,
+            .variable_index = variable_index,
         };
 
         // The gradient accumulator function is lazily initialized once.
