@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn.quantized.functional as F
 import torch.nn.quantized as nnq
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, tempfile
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -37,16 +37,56 @@ class ModuleAPITest(TestCase):
         B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32)
         out_scale = 0.5
         out_zero_point = 3
-        q_linear = nnq.Linear(out_features, in_features)
-        q_linear._packed_weight = W_pack
-        q_linear.bias = B_q
-        q_linear.out_scale = torch.tensor([out_scale])
-        q_linear.out_zero_point = torch.tensor([out_zero_point])
-        Z_q = q_linear(X_q)
+        qlinear = nnq.Linear(in_features, out_features)
+        qlinear._packed_weight = W_pack
+        qlinear.bias = B_q
+        qlinear.out_scale = torch.tensor([out_scale])
+        qlinear.out_zero_point = torch.tensor([out_zero_point])
+        Z_q = qlinear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
         Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, out_scale, out_zero_point)
         self.assertEqual(Z_ref, Z_q)
+
+        # Test serialization of quantized Linear Module using state_dict
+        model_dict = qlinear.state_dict()
+        self.assertEqual(model_dict['weight'], W_q)
+        self.assertEqual(model_dict['bias'], B_q)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(model_dict, f)
+            f.seek(0)
+            loaded_dict = torch.load(f)
+        for key in model_dict:
+            self.assertEqual(model_dict[key], loaded_dict[key])
+        loaded_qlinear = nnq.Linear(in_features, out_features)
+        loaded_qlinear.load_state_dict(loaded_dict)
+
+        linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+        self.assertEqual(linear_unpack(qlinear._packed_weight),
+                         linear_unpack(loaded_qlinear._packed_weight))
+        self.assertEqual(qlinear.bias, loaded_qlinear.bias)
+        self.assertEqual(qlinear.out_scale, loaded_qlinear.out_scale)
+        self.assertEqual(qlinear.out_zero_point, loaded_qlinear.out_zero_point)
+        self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
+        self.assertTrue(hasattr(qlinear, '_packed_weight'))
+        self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
+        self.assertTrue(hasattr(qlinear, 'weight'))
+        self.assertTrue(hasattr(loaded_qlinear, 'weight'))
+        self.assertEqual(qlinear.weight, loaded_qlinear.weight)
+        self.assertEqual(qlinear.weight, torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
+        Z_q2 = qlinear(X_q)
+        self.assertEqual(Z_q, Z_q2)
+
+        # test serialization of module directly - will add this later
+        # with tempfile.NamedTemporaryFile() as f:
+        #     torch.save(qLinear, f)
+        #     f.seek(0)
+        #     loaded = torch.load(f)
+        # state = qLinear.__getstate__()
+        # compareUnpackedWeight(qLinear._packed_weight, loaded._packed_weight)
+        # self.assertEqual(qLinear.bias, loaded.bias)
+        # self.assertEqual(qLinear.out_scale, loaded.out_scale)
+        # self.assertEqual(qLinear.out_zero_point, loaded.out_zero_point)
 
 
 if __name__ == '__main__':
