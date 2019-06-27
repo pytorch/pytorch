@@ -169,8 +169,6 @@ static void propagate_names(Tensor& result, const Tensor& src) {
     return result;                                              \
   }
 
-// NB: Temp. defaulting to TH implementation of abs due to issues with Apple
-
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
