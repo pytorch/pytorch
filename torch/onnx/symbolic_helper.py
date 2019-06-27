@@ -144,6 +144,10 @@ def _scalar(x):
     return x.item()
 
 
+def _is_complete_or_dimensioned_tensor_type(tensor):
+    return tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType"
+
+
 def _if_scalar_type_as(g, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
@@ -154,7 +158,7 @@ def _if_scalar_type_as(g, self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    elif tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType":
+    elif _is_complete_or_dimensioned_tensor_type(tensor):
         ty = tensor.type().scalarType().lower()
         return getattr(self, ty)()
     else:
