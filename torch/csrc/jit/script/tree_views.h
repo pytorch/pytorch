@@ -26,6 +26,8 @@ namespace script {
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
 // ClassDef = ClassDef(Ident name, List<Def> body)                      TK_CLASS_DEF
+// NamedTupleDef = NamedTupleDef(Ident name, List<Ident> fields,
+//                               List<Maybe<Expr>> types)
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
@@ -33,7 +35,7 @@ namespace script {
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       -- NB: the only type of Expr's allowed on lhs are Var
 //          Or a tuple containing Var with an optional terminating Starred
-//       | Assign(Expr lhs, Expr rhs)                                   TK_ASSIGN
+//       | Assign(Expr lhs, Expr rhs, Maybe<Expr> type)                 TK_ASSIGN
 //       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
@@ -299,6 +301,7 @@ struct Expr : public TreeView {
       case '|':
       case TK_LIST_COMP:
       case TK_DOTS:
+      case TK_IN:
         return;
       default:
         throw ErrorReport(tree)
@@ -428,6 +431,29 @@ struct ClassDef : public TreeView {
       const Ident& name,
       const List<Def>& defs) {
     return ClassDef(Compound::create(TK_CLASS_DEF, range, {name, defs}));
+  }
+};
+
+struct NamedTupleDef : public TreeView {
+  explicit NamedTupleDef(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_NAMED_TUPLE_DEF);
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  List<Ident> fields() const {
+    return List<Ident>(subtree(1));
+  }
+  List<Maybe<Expr>> type_exprs() const {
+    return List<Maybe<Expr>>(subtree(2));
+  }
+  static NamedTupleDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const List<Ident>& fields,
+      const List<Maybe<Expr>>& type_exprs) {
+    return NamedTupleDef(Compound::create(
+        TK_NAMED_TUPLE_DEF, range, {name, fields, type_exprs}));
   }
 };
 
@@ -584,14 +610,21 @@ struct Assign : public Stmt {
   static Assign create(
       const SourceRange& range,
       const Expr& lhs,
-      const Expr& rhs) {
-    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
+      const Expr& rhs,
+      const Maybe<Expr>& type) {
+    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
   }
+
   Expr lhs() const {
     return Expr(subtree(0));
   }
+
   Expr rhs() const {
     return Expr(subtree(1));
+  }
+
+  Maybe<Expr> type() const {
+    return Maybe<Expr>(subtree(2));
   }
 };
 
@@ -695,6 +728,7 @@ struct BinOp : public Expr {
       case '^':
       case '|':
       case TK_FLOOR_DIV:
+      case TK_IN:
         if (tree->trees().size() != 2)
           throw ErrorReport(tree)
               << "BinOp expected 2 subtrees, found " << tree->trees().size();

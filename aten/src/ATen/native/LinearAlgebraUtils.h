@@ -3,6 +3,7 @@
 #include <ATen/TensorUtils.h>
 #include <limits>
 #include <sstream>
+#include <cstring>
 
 namespace at { namespace native {
 
@@ -110,7 +111,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
            " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu)
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu, symeig)
 static inline void squareCheckInputs(const Tensor& self) {
   TORCH_CHECK(self.size(-1) == self.size(-2),
            "A must be batches of square matrices, "
@@ -145,7 +146,12 @@ static inline void batchCheckErrors(const Tensor& infos, const char* name) {
     if (info < 0) {
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
-      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+      if (strstr(name, "symeig")) {
+        AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
+                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.")
+      } else {
+        AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+      }
     }
   }
 }
@@ -158,7 +164,12 @@ static inline void singleCheckErrors(int64_t info, const char* name) {
   if (info < 0) {
     AT_ERROR(name, ": Argument ", -info, " has illegal value");
   } else if (info > 0) {
-    AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
+    if (strstr(name, "symeig")) {
+      AT_ERROR(name, ": the algorithm failed to converge; ", info,
+               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.")
+    } else {
+      AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
+    }
   }
 }
 
@@ -186,6 +197,28 @@ static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tenso
   Tensor arg1_broadcasted  = arg1.expand(arg1_expand_size);
   Tensor arg2_broadcasted = arg2.expand(arg2_expand_size);
   return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
+}
+
+// Return a permutation with the given axes moved to the end.
+static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
+  const std::vector<int64_t> a = axes.vec();
+  const int64_t ndim = self.ndimension();
+  std::vector<int64_t> perm;
+
+  for (int64_t i = 0; i < ndim; i++) {
+    auto it = std::find(a.begin(), a.end(), i);
+    if (it == a.end()) {
+       perm.push_back(i);
+    }
+  }
+  for (auto i : a) {
+    perm.push_back(i);
+  }
+
+  TORCH_CHECK(perm.size() == ndim,
+    "duplicate or invalid axis in 'dim' argument for tensor with ndim==", ndim);
+
+  return self.permute(perm);
 }
 
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition

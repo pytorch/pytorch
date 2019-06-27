@@ -103,8 +103,8 @@ Tensor& max_unpooling2d_forward_out_cuda(
     const Tensor& self_,
     const Tensor& indices_,
     IntList output_size) {
-  AT_CHECK(output.is_contiguous(), "output must be contiguous");
-  AT_CHECK(
+  TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
+  TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
   auto oheight = output_size[0];
@@ -115,16 +115,16 @@ Tensor& max_unpooling2d_forward_out_cuda(
   checkAllSameGPU(
       "max_unpooling2d_forward_out_cuda", {output_arg, self_arg, indices_arg});
 
-  AT_CHECK(self_.numel() > 0, "Input must be non-empty tensor");
+  TORCH_CHECK(self_.numel() > 0, "Input must be non-empty tensor");
 
-  AT_CHECK(
+  TORCH_CHECK(
       (self_.ndimension() == 3 || self_.ndimension() == 4),
       "Input to max_unpooling2d should be a 3d or 4d Tensor",
       self_.sizes());
-  AT_CHECK(
+  TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
       "Shape of input must match shape of indices");
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (width, height) in output_size");
 
@@ -170,7 +170,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
             owidth,
             output.data<scalar_t>());
       }));
-  AT_CHECK(
+  TORCH_CHECK(
       cudaGetLastError() == cudaSuccess,
       "max_unpooling2d_forward_kernel failed with error code ",
       cudaGetLastError());
@@ -199,29 +199,29 @@ static void max_unpooling3d_shape_check(
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
-  AT_CHECK(
+  TORCH_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
-  AT_CHECK(
+  TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
       "Input to max_unpooling3d should be a 4d or 5d Tensor",
       input.sizes());
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 3,
       "There should be exactly three elements (depth, height, width) in output_size");
-  AT_CHECK(
+  TORCH_CHECK(
       stride.size() == 3,
       "There should be exactly three elements (depth, height, width) in stride");
-  AT_CHECK(
+  TORCH_CHECK(
       padding.size() == 3,
       "There should be exactly three elements (depth, height, width) in padding");
-  AT_CHECK(
+  TORCH_CHECK(
       input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
 
-  AT_CHECK(input.numel() > 0, "Input must be non-empty");
+  TORCH_CHECK(input.numel() > 0, "Input must be non-empty");
 
-  AT_CHECK(
+  TORCH_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
       "strides should be greater than zero, but got stride: ",
       stride);
@@ -257,7 +257,7 @@ static void max_unpooling3d_shape_check(
           "x",
           gradOutput.size(dimw));
     }
-    AT_CHECK(
+    TORCH_CHECK(
         gradOutput.ndimension() == input.ndimension() &&
             gradOutput.size(dimn) == nslices,
         "gradOutput and input Tensors should have same number of dimensions and also the same number of channels/slices");
@@ -271,7 +271,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(output.is_contiguous(), "output must be contiguous");
+  TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
   max_unpooling3d_shape_check(
       self_, Tensor(), indices_, output_size, stride, padding);
 
@@ -346,7 +346,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
               oH,
               oW,
               offsetZ);
-          AT_CHECK(
+          TORCH_CHECK(
               cudaGetLastError() == cudaSuccess,
               "max_unpooling3d_forward_kernel failed with error code ",
               cudaGetLastError());
@@ -377,8 +377,8 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
     IntList output_size) {
   int64_t oheight = output_size[0];
   int64_t owidth = output_size[1];
-  AT_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  AT_CHECK(
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
+  TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
@@ -388,16 +388,16 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
       "max_unpooling2d_backward_out_cuda",
       {grad_input_arg, grad_output_arg, self_arg, indices_arg});
 
-  AT_CHECK(
+  TORCH_CHECK(
       (self_.ndimension() == 3 || self_.ndimension() == 4),
       "Input to max_unpooling2d should be a 3d or 4d Tensor, instead got: ",
       self_);
 
-  AT_CHECK(
+  TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
       "Input should have same shape as indices");
 
-  AT_CHECK(output_size.size() == 2, "output_size must have two elements");
+  TORCH_CHECK(output_size.size() == 2, "output_size must have two elements");
 
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
 
@@ -455,7 +455,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
             owidth,
             grad_input.data<scalar_t>());
       }));
-  AT_CHECK(
+  TORCH_CHECK(
       cudaGetLastError() == cudaSuccess,
       "max_unpooling2d_backward_kernel failed with error code ",
       cudaGetLastError());
@@ -480,7 +480,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
@@ -561,7 +561,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
               indices.packed_accessor<int64_t, 4>(),
               grad_input_reshaped.packed_accessor<scalar_t, 4>(),
               offsetZ);
-          AT_CHECK(
+          TORCH_CHECK(
               cudaGetLastError() == cudaSuccess,
               "max_unpooling3d_backward_kernel failed with error code ",
               cudaGetLastError());
