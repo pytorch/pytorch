@@ -808,6 +808,7 @@ class Operator : public OperatorBase {
   /// required device type for the input (by default, we assert that the tensor
   /// is consistent with the device type implied by the Context parameter of an
   /// Operator.)
+  // yf225 TODO: need to assert that inputs are in fact !is_variable()
   inline const Tensor& Input(
       int idx,
       DeviceType type = Context::GetDeviceType()) {

@@ -308,6 +308,7 @@ class TestWorkspace(unittest.TestCase):
         workspace.FeedBlob('bar', z)
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
+        # yf225 TODO: change comment here!
         # NOTE: `workspace.FeedBlob('bar', z)` above creates a shallow-copy of `z`
         # and assign it to `bar` in the Caffe2 workspace. Since it's a shallow-copy,
         # any sizes or strides change to `bar` will not be propagated back to `z`,
@@ -410,6 +411,7 @@ class TestWorkspaceGPU(test_util.TestCase):
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
             device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        # yf225 TODO: change comment here!
         # NOTE: `workspace.FeedBlob('bar', z)` above creates a shallow-copy of `z`
         # and assign it to `bar` in the Caffe2 workspace. Since it's a shallow-copy,
         # any sizes or strides change to `bar` will not be propagated back to `z`,

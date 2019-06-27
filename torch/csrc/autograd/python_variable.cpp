@@ -552,8 +552,6 @@ void initTensorImplConversion(PyObject* module) {
     auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
-    // yf225 TODO: should we add a guard here?
-    TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
     // yf225 TODO: this is similar to our as_variable() implementation in VariableType
     return py::cast(tensor.is_variable() ? torch::autograd::Variable(tensor) :
