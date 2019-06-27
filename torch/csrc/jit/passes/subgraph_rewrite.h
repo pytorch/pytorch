@@ -28,8 +28,7 @@ struct Match;
  * recognized patterns (see SubgraphRewriter::RegisterDefaultPatterns for the
  * list of these patterns).
  */
-TORCH_API std::shared_ptr<script::Module> PatternBasedRewrite(
-    std::shared_ptr<script::Module>& module);
+TORCH_API script::Module PatternBasedRewrite(const script::Module& module);
 
 /** A class implementing API for pattern-based subgraph rewrites.
  *
@@ -45,8 +44,7 @@ TORCH_API std::shared_ptr<script::Module> PatternBasedRewrite(
 class TORCH_API SubgraphRewriter {
  public:
   // Run pattern-based subgraph rewrite pass on the module.
-  std::shared_ptr<script::Module> runOnModule(
-      std::shared_ptr<script::Module> module);
+  script::Module runOnModule(const script::Module& module);
 
   // Run pattern-based subgraph rewrite pass on the graph (used in testing).
   void runOnGraph(std::shared_ptr<Graph>& graph);

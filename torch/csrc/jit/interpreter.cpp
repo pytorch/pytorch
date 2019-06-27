@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
@@ -626,22 +627,42 @@ struct CodeImpl {
     }
   }
 
-  void emitBailOut(Node* node) {
-    // BailOut node has the `attr::Subgraph` which
-    // contains the original deoptimized version
-    // of a computational graph starting from the
-    // bailout point.
-    // BailOut node's first input is a guarded tensor
-    // the rest are inputs we need to be able to
-    // execute the bailout graph
-    emitLoadInputs(node->inputs().slice(0, 1));
+  size_t emitGuard(Node* node) {
+    // unoptimized graph is at index 0
+    // guarded input is at index 1
+    // the rest of args follow
+    emitLoadInputs(node->inputs().slice(1, 1));
     insertInstruction(GUARD, type_table_.size());
     type_table_.emplace_back(node->outputs().at(0)->type());
     insertInstruction(JF, 0 /* to be patched */);
-    size_t jf_index = instructions_.size() - 1;
-    emitLoadInputs(node->inputs().slice(1));
+
+    return instructions_.size() - 1;
+  }
+
+  void emitBailOut(Node* node) {
+    auto jf_index = emitGuard(node);
+    auto unoptimized_graph = node->inputs()
+                                 .at(0)
+                                 ->type()
+                                 ->expect<FunctionType>()
+                                 ->function()
+                                 ->graph();
+    // note, guaded input is already loaded onto the stack
+    // for GUARD instruction
+    emitLoadInputs(node->inputs().slice(2));
     insertInstruction(TAIL_CALL, function_table_.size());
-    auto func = std::make_shared<Function>("bailout", /*optimize=*/true, node->g(attr::Subgraph), nullptr);
+    TORCH_INTERNAL_ASSERT(node->kind() == prim::BailOut);
+    auto bailout_index = node->i(attr::index);
+    TORCH_INTERNAL_ASSERT(bailout_index >= 0);
+
+    auto build_bailout_graph = [bailout_index,
+                                unoptimized_graph](Function& func) {
+      BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
+    };
+
+    auto empty_graph = std::make_shared<Graph>();
+    auto func = std::make_shared<Function>(
+        "bailout", /*optimize=*/true, empty_graph, build_bailout_graph);
     function_table_.emplace_back(func);
     createBailoutBlock(jf_index);
   }
@@ -824,6 +845,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     return *(registers.end() - reg);
   }
 
+  void dump(std::ostream& out, const Stack& stack) const {
+    out << "Stack:\n";
+    for (const auto& val : stack) {
+      out << val;
+      out << "\n";
+    }
+  }
+
   bool runImpl(Stack& stack) {
     // if we have never run before, then we might have to return the
     // stack when we suspend, record where it starts so we return the right
@@ -981,6 +1010,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case TAIL_CALL: {
+            af.functions[inst.X]->ensure_defined();
             const Code& code =
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();

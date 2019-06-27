@@ -305,7 +305,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  c10::ListPtr<IValue> elems = c10::make_list<IValue>();
+  c10::List<IValue> elems;
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
@@ -316,7 +316,7 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
+  c10::impl::GenericDict elems = c10::impl::GenericDict();
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(
@@ -543,10 +543,15 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
-    if (tuple->type && tuple->type->hasNames() && tuple->type->unqualName()) {
+    if (tuple->type && tuple->type->schema() &&
+        tuple->type->schema()->name() != "") {
+      auto unqualName = tuple->type->basename();
+      auto fieldNames = fmap(tuple->type->schema()->arguments(), [](const Argument& arg) {
+        return arg.name();
+      });
       return py::module::import("torch.jit")
           .attr("_create_named_tuple")(
-              t, tuple->type->names(), tuple->type->unqualName().value());
+              t, unqualName, fieldNames);
     } else {
       return std::move(t);
     }
@@ -610,31 +615,36 @@ struct VISIBILITY_HIDDEN tuple_slice {
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
     const tuple_slice& args,
-    const py::kwargs& kwargs = py::kwargs()) {
-  if (args.size() + kwargs.size() > schema.arguments().size()) {
+    const py::kwargs& kwargs,
+    c10::optional<IValue> self) {
+  size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
+  if (all_arguments > schema.arguments().size()) {
     throw std::runtime_error(c10::str(
         schema.name(),
         "() expected at most ",
         schema.arguments().size(),
         " argument(s) but received ",
-        args.size() + kwargs.size(),
+        all_arguments,
         " argument(s). Declaration: ",
         schema));
   }
   Stack stack;
   stack.reserve(schema.arguments().size());
 
+  if (self) {
+    push(stack, std::move(*self));
+  }
   // First push all positional args.
   for (size_t i = 0; i < args.size(); ++i) {
     // Use the type information from the schema to convert the PyObject.
-    push(stack, argumentToIValue(schema, i, args[i]));
+    push(stack, argumentToIValue(schema, stack.size(), args[i]));
   }
 
   // Now for every remaining non-positional argument in the schema, look for it
   // in the kwargs dict and push it if found, or use its default value if it
   // has one.
   size_t consumed_kwargs = 0;
-  for (size_t i = args.size(); i < schema.arguments().size(); ++i) {
+  for (size_t i = stack.size(); i < schema.arguments().size(); ++i) {
     const auto& arg = schema.arguments()[i];
     if (kwargs.contains(arg.name().c_str())) {
       push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
@@ -700,13 +710,13 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   return result;
 }
 
-template <typename MethodOrFunction>
-inline py::object invokeScriptMethodFromPython(
-    MethodOrFunction& callee,
+inline py::object invokeScriptFunctionFromPython(
+    Function& callee,
     tuple_slice args,
-    py::kwargs kwargs) {
+    py::kwargs kwargs,
+    c10::optional<IValue> self = c10::nullopt) {
   auto stack = createStackForSchema(
-      callee.getSchema(), std::move(args), std::move(kwargs));
+      callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
   {
     AutoNoGIL no_gil_guard;
     callee.run(stack);
@@ -714,13 +724,23 @@ inline py::object invokeScriptMethodFromPython(
   return toPyObject(std::move(stack.back()));
 }
 
+inline py::object invokeScriptMethodFromPython(
+    script::Method& callee,
+    tuple_slice args,
+    py::kwargs kwargs) {
+  return invokeScriptFunctionFromPython(
+      callee.function(),
+      std::move(args),
+      std::move(kwargs),
+      callee.owner().module_object());
+}
 inline py::object invokeOperatorFromPython(
     const Operator& op,
     py::args args,
     py::kwargs kwargs) {
   // Create a stack full of the arguments and keyword arguments.
-  auto stack =
-      createStackForSchema(op.schema(), std::move(args), std::move(kwargs));
+  auto stack = createStackForSchema(
+      op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
 
   // Invoke the operation, which puts the return values onto the stack.
   op.getOperation()(stack);

@@ -17,7 +17,6 @@ def pass_name_to_python_arg_parser(name):
 
 
 class TestNamedTensor(TestCase):
-    @skipIfNamedTensorDisabled
     def test_trivial(self):
         pass
 
@@ -47,17 +46,29 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(TypeError, 'invalid combination of arguments'):
             x = factory(2, 1, names='N', device=device)
 
+        with self.assertRaisesRegex(RuntimeError, 'construct a tensor with duplicate names'):
+            x = factory(2, 1, 1, names=('N', 'C', 'N'), device=device)
 
-    @skipIfNamedTensorDisabled
+        # Tests for tagged names
+        x = factory(2, 3, 1, names=('C.in', 'H', 'C.out'), device=device)
+        self.assertEqual(x.names, ('C.in', 'H', 'C.out'))
+
+        with self.assertRaisesRegex(RuntimeError, 'construct a tensor with duplicate names'):
+            x = factory(2, 1, 1, names=('C.in', 'H', 'C.in'), device=device)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'with duplicate names unless they are tagged and have different tags'):
+            x = factory(2, 1, 1, names=('C.in', 'H', 'C'), device=device)
+
+
     def test_empty(self):
         self._test_factory(torch.empty, 'cpu')
 
-    @skipIfNamedTensorDisabled
     @unittest.skipIf(not TEST_CUDA, 'no CUDA')
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
 
-    @skipIfNamedTensorDisabled
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():
             seen_name = 'N'
@@ -72,7 +83,6 @@ class TestNamedTensor(TestCase):
         new_refcnt = sys.getrefcount(seen_name)
         self.assertEqual(new_refcnt, old_refcnt)
 
-    @skipIfNamedTensorDisabled
     def test_using_unseen_interned_string_bumps_refcount_permanently(self):
         # Please don't use this as a name in a different test.
         unseen_name = 'abcdefghi'
@@ -83,7 +93,6 @@ class TestNamedTensor(TestCase):
         new_refcnt = sys.getrefcount(unseen_name)
         self.assertEqual(new_refcnt, old_refcnt + 1)
 
-    @skipIfNamedTensorDisabled
     def test_using_unseen_uninterned_string_refcounts(self):
         # Please don't use this as a name in a different test.
         # non-compile-time constants are not interned
@@ -104,6 +113,60 @@ class TestNamedTensor(TestCase):
 
         # Instead, we should hold a new reference to the interned version.
         self.assertEqual(new_interned_refcnt, old_interned_refcnt + 1)
+
+    def _test_select(self, device):
+        x = torch.empty(2, 3, 4, 5, names=('N', 'C', 'H', 'W'), device=device)
+        y = x.select(1, 1)
+        self.assertEqual(y.names, ('N', 'H', 'W'))
+
+        y = x.select('C', 1)
+        self.assertEqual(y.names, ('N', 'H', 'W'))
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'Please look up dimensions by name'):
+            y = x.select(None, 1)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'Name \'C.in\' not found in'):
+            y = x.select('C.in', 1)
+
+        x = torch.empty(2, 3, 4, 5, names=('N', 'C.in', 'H', 'W'), device=device)
+        y = x.select('C', 1)
+        self.assertEqual(y.names, ('N', 'H', 'W'))
+
+        x = torch.empty(2, 3, 4, 5, names=('C.out', 'C.in', 'H', 'W'), device=device)
+        y = x.select('C.in', 1)
+        self.assertEqual(y.names, ('C.out', 'H', 'W'))
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'Name \'C\' could refer to multiple dimensions'):
+            y = x.select('C', 1)
+
+
+    def test_select(self):
+        self._test_select('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, 'no CUDA')
+    def test_select_cuda(self):
+        self._test_select('cuda')
+
+    def _test_as_strided(self, device):
+        x = torch.empty(2, 3, 4, 5, names=('N', 'C', 'H', 'W'), device=device)
+        y = x.as_strided([2 * 3 * 4 * 5], [1])
+        self.assertEqual(y.names, (None,))
+
+    def test_as_strided(self):
+        self._test_as_strided('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, 'no CUDA')
+    def test_as_strided_cuda(self):
+        self._test_as_strided('cuda')
+
+# Disable all tests if named tensor is not available.
+for attr in dir(TestNamedTensor):
+    if attr.startswith('test_'):
+        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
+        setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
     run_tests()

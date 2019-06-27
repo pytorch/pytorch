@@ -64,6 +64,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 
 #include <array>
 #include <cstddef>
@@ -142,9 +143,11 @@ struct PythonArgs {
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
 #ifdef NAMEDTENSOR_ENABLED
+  inline at::Dimname dimname(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
 #endif
-  inline at::MemoryFormat toMemoryFormat(int i);
+  inline at::MemoryFormat memoryformat(int i);
+  inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
@@ -236,6 +239,12 @@ inline at::Tensor PythonArgs::tensor(int i) {
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
+  if (!args[i]) return signature.params[i].default_scalar;
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::NumberType::get());
+  }
   return scalarWithDefault(i, signature.params[i].default_scalar);
 }
 
@@ -415,6 +424,11 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
 }
 
 #ifdef NAMEDTENSOR_ENABLED
+inline at::Dimname PythonArgs::dimname(int i) {
+  TORCH_INTERNAL_ASSERT(args[i] != nullptr);
+  return THPDimname_parse(args[i]);
+}
+
 inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
   if (!args[i]) return c10::nullopt;
   PyObject* arg = args[i];
@@ -430,16 +444,22 @@ inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional
 }
 #endif
 
-inline at::MemoryFormat PythonArgs::toMemoryFormat(int i) {
-  if (!args[i]) return at::MemoryFormat::Any;
+inline at::MemoryFormat PythonArgs::memoryformat(int i) {
+  if (!args[i]) return at::MemoryFormat::Contiguous;
   TORCH_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
   const auto memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
   return memory_format->memory_format;
 }
 
+inline c10::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
+  return memoryformat(i);
+}
+
 inline at::QScheme PythonArgs::toQScheme(int i) {
   if (!args[i]) return at::kPerTensorAffine;
-  AT_CHECK(THPQScheme_Check(args[i]), "qscheme arg must be an instance of the torch.qscheme");
+  TORCH_CHECK(THPQScheme_Check(args[i]), "qscheme arg must be an instance of the torch.qscheme");
   const auto qscheme = reinterpret_cast<THPQScheme*>(args[i]);
   return qscheme->qscheme;
 }

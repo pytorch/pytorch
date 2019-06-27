@@ -1,15 +1,12 @@
-The quantized folder holds the implementation of the low-level quantized ops and functions.
-The ops are implemented using `c10`, and operate on the `at::QTensor` data type.
+The quantized folder holds the implementation of the low-level quantized kernel.
+The kernels are registered in `torch::_ops` namespace, and operate on the quantized `at::Tensor` data type.
 
-*Note that the name `QTensor` is only used to distinguish from a non-quantized `Tensor` type in the current discussion.
-Otherwise, from the usage point of view, all quantized tensors are just `at::Tensor` types.*
-
-This document serves as an entry point for quantized op implementation.
+This document serves as an entry point for quantized kernel implementation.
 
 ## Implementing native quantized ops
 
 The new quantized ops are almost always located under the `ATen/native/quantized/cpu` folder.
-For the sake of an example, let us implement an element-wise quantized logical AND operation under `ATen/native/quantized/cpu/qAND.cpp`.
+For the sake of an example, let us implement an element-wise quantized logical AND operation under `ATen/native/quantized/cpu/qand.cpp`.
 
 ### Step 0. Implement the quantized function
 
@@ -21,8 +18,8 @@ The snippet below shows the implementation of a quantized AND operator, with the
 Tensor quantized_and(Tensor qa, Tensor qb) {
   // Some type checks for qa and qb should be here...
   Tensor qc;
-  const auto scale = qa.q_scale().toDouble();
-  const auto zero_point qa.q_zero_point().toLong()
+  double scale = qa.q_scale();
+  long zero_point qa.q_zero_point();
 
   auto iter = TensorIterator::binary_op(qc, qa, qb);
 
@@ -40,15 +37,17 @@ Tensor quantized_and(Tensor qa, Tensor qb) {
 
 The code above is fairly straight-forward:
 It takes two quantized tensors `qa` and `qb`, and uses `binary_kernel` to produce a quantized tensor `qc`.
-The only part that (IMHO) requires explanation is the `AT_DISPATCH_QINT_TYPES`.
+We also use the [`TensorIterator`](https://caffe2.ai/doxygen-c/html/structat_1_1_tensor_iterator.html) in this example.
+The only part that that requires explicit explanation is the `AT_DISPATCH_QINT_TYPES`.
 This macro makes sure that the underlying code works with all quantized types.
 It provides several useful "aliases":
 
-- `SCALAR_TYPE` -- quantized type option (i.e. `kQInt8`)
-- `scalar_t` -- quantized data type (i.e. `qint8`)
-- `underlying_t` -- underlying POD data type (i.e. `int8_t`)
+- `SCALAR_TYPE` -- `ScalarType` of the quantized tensor (e.g. `kQInt8`)
+- `scalar_t` -- quantized data type (dtype, e.g. `qint8`)
+- `underlying_t` -- underlying POD data type (dtype, e.g. `int8_t`)
 
 The macro takes three arguments:
+
 1. Quantized data type. This will define what the "aliases" are.
 In the example above, the resulting tensor will be the same as the `qa.scalar_type()`.
 2. Function name. This argument is currently used for error reporting.
@@ -57,12 +56,12 @@ it should also use the aliases for the quantized data types instead of the expli
 
 ### Step 1. Create the kernel
 
-All kernels must be classes inheriting from `c10::OperatorKernel`.
+All kernels must be classes inheriting from `torch::OperatorKernel`.
 The implementation itself should be under the `operator()` method.
-In the `qAND.cpp` file, we create the following
+In the `qand.cpp` file, we create the following
 
 ```c++
-class QuantizedAnd final : public c10::OperatorKernel {
+class QuantizedAnd final : public torch::OperatorKernel {
  public:
   Tensor operator(Tensor qa, Tensor qb) {
     return quantized_and(qa, qb);
@@ -72,12 +71,12 @@ class QuantizedAnd final : public c10::OperatorKernel {
 
 ### Step 2. Register the kernel
 
-The registration is done using the `c10::RegisterOperators().op(...)`.
+The registration is done using the `torch::RegisterOperators().op(...)`.
 
 ```c++
-static auto registry = c10::RegisterOperators().op(
+static auto registry = torch::RegisterOperators().op(
     "quantized::and(Tensor qa, Tensor qb) -> Tensor",
-    c10::RegisterOperators::options()
+    torch::RegisterOperators::options()
       .kernel<QuantizedAnd>(QuantizedCPUTensorId()));
 ```
 
@@ -87,13 +86,13 @@ The registry takes two arguments:
 In the example above the schema is `"quantized::and(Tensor qa, Tensor qb) -> Tensor"`.
 This translates to `torch._ops.ops.quantized.and` function in Python of the appropriate signature.
 **Note:** The arguments signature in the schema is optional, and can also be written as `"quantized::and"` (without args).
-2. **Registration options** should be of type `c10::RegisterOperators::options()`.
-To attach a kernel to it, use `.kernel<KERNEL CLASS>(DISPATCHER)`.
+2. **Registration options** should be of type `torch::RegisterOperators::options()`.
+To attach a kernel to it, use `.kernel<KERNEL_CLASS>(DISPATCH_KEY)`.
 In quantized ops you almost always want to use the `QuantizedCPUTensorId()` dispatcher.
 
 ### Putting it all together
 
-The final file `ATen/native/quantized/cpu/qAND.cpp` would look as follows
+The final file `ATen/native/quantized/cpu/qand.cpp` would look as follows
 
 ```c++
 #include <ATen/ATen.h>
@@ -101,7 +100,6 @@ The final file `ATen/native/quantized/cpu/qAND.cpp` would look as follows
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
 
 namespace at { namespace native {
 namespace {
@@ -111,16 +109,16 @@ Tensor quantized_and(Tensor qa, Tensor qb) {
   return qc;
 }
 
-class QuantizedAnd final : public c10::OperatorKernel {
+class QuantizedAnd final : public torch::OperatorKernel {
  public:
   Tensor operator(Tensor qa, Tensor qb) {
     return quantized_and(qa, qb);
   }
 };
 
-static auto registry = c10::RegisterOperators().op(
+static auto registry = torch::RegisterOperators().op(
     "quantized::and(Tensor qa, Tensor qb) -> Tensor",
-    c10::RegisterOperators::options()
+    torch::RegisterOperators::options()
       .kernel<QuantizedAnd>(QuantizedCPUTensorId()));
 
 }  // namespace
@@ -128,7 +126,7 @@ static auto registry = c10::RegisterOperators().op(
 ```
 
 Notice that we try to keep all the kernels in the anonymous namespace.
-The reason for that is that we access the kernels only through the `torch` namespace.
+The reason for that is that we access the kernels only through the `torch` namespace and this prevents symbol clashes in the linker.
 
 ### Step 3. Administrative stuff
 
@@ -167,37 +165,39 @@ def quantized_and(qa, qb):
   return ops.quantized.and(qa, qb)
 ```
 
+**Note:** If writing new pytorch functions that use quantized kernels, it is strongly encouraged to place them in the `torch/nn/quantized/functional.py`.
+
 ### C++
 
 You should not need to use the registered kernels in C++.
-However, if you are feeling really brave, you can use the following
+Although **not officially** supported, you can use the following
 
 ```c++
 namespace at { namespace native {
 namespace dispatch_tools {
 /* Creates a stack of inputs consumable by the dispatcher.*/
 template<class... Inputs>
-inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
+inline std::vector<torch::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
 }
 
 /* Given an operator handle, calls it using some arguments.*/
 template<class... Args>
-inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op,
+inline std::vector<torch::IValue> callOp(const torch::OperatorHandle& op,
                                        Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
-  auto kernel = c10::Dispatcher::singleton().lookup(op, &stack);
+  auto kernel = torch::Dispatcher::singleton().lookup(op, &stack);
   kernel.call(&stack);
   return stack;
 }
 
 /* Finds the op and calls the callOp on it.*/
 template<class... Args>
-inline std::vector<c10::IValue> callOp(const char* func_name,
+inline std::vector<torch::IValue> callOp(const char* func_name,
                                        const char* overload_name,
                                        Args... args) {
-  const c10::optional<c10::OperatorHandle> op_handle
-    = c10::Dispatcher::singleton().findSchema(func_name, overload_name);
+  const torch::optional<torch::OperatorHandle> op_handle
+    = torch::Dispatcher::singleton().findSchema(func_name, overload_name);
   assert(op_handle.has_value());
   return callOp(op_handle.value(), args...);
 }
