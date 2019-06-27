@@ -425,9 +425,11 @@ void addObjectMethods(py::module& m) {
           py::arg("arg"),
           py::arg("device_option") = py::none())
       .def("_wrap_tensor_impl", [](Blob* blob, void* ptr) {
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
         auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
             unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
         TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
+        TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
         auto at_tensor = at::Tensor::wrap_tensor_impl(std::move(p));
         BlobSetTensor(blob, Tensor(std::move(at_tensor)));
       });
