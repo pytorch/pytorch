@@ -289,7 +289,8 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
 inline Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer) {
+    QuantizerPtr quantizer,
+    MemoryFormat memory_format=MemoryFormat::Contiguous) {
   AT_ASSERT(options.device().is_cpu());
 
   native::check_size_nonnegative(sizes);
@@ -307,6 +308,7 @@ inline Tensor new_qtensor_cpu(
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage, at::QuantizedCPUTensorId(), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
+  get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;
 }
 
