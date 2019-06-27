@@ -177,10 +177,8 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
 
 static void propagate_names(THCTensor* result, THCTensor* src) {
 #ifdef NAMEDTENSOR_ENABLED
-  if (at::impl::internal_is_named(src)) {
-    const auto names = at::impl::internal_get_names(src);
-    at::impl::internal_set_names_inplace(result, names);
-  }
+  const auto names = at::impl::internal_get_names(src);
+  at::impl::internal_set_names_inplace(result, names);
 #endif
 }
 
