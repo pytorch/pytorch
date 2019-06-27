@@ -244,7 +244,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            int64_t n;
            pop(stack, n);
-           c10::List<int64_t> elems = c10::make_list<int64_t>();
+           c10::List<int64_t> elems;
            elems.reserve(n);
            for (int i = 0; i < n; i++) {
              elems.push_back(i);
@@ -946,7 +946,7 @@ RegisterOperators reg(
            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::List<at::Tensor> vals = c10::make_list<at::Tensor>();
+               c10::List<at::Tensor> vals;
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]).toTensor());
@@ -958,7 +958,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::List<IValue> vals = c10::make_list<IValue>();
+               c10::List<IValue> vals;
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -978,7 +978,7 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::impl::GenericDict vals = c10::impl::make_generic_dict();
+             c10::impl::GenericDict vals;
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
@@ -1228,7 +1228,7 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
 
 template <typename T>
 int listAppend(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   T el;
   pop(stack, list, el);
 
@@ -1240,7 +1240,7 @@ int listAppend(Stack& stack) {
 
 template <typename T>
 int listReverse(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   pop(stack, list);
 
   std::reverse(list.begin(), list.end());
@@ -1250,7 +1250,7 @@ int listReverse(Stack& stack) {
 
 template <typename T>
 int listPop(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t idx;
   pop(stack, list, idx);
 
@@ -1269,7 +1269,7 @@ int listPop(Stack& stack) {
 
 template <typename T>
 int listClear(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   pop(stack, list);
 
   list.clear();
@@ -1278,7 +1278,7 @@ int listClear(Stack& stack) {
 
 template <typename T>
 int listInsert(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t idx;
   T elem;
   pop(stack, list, idx, elem);
@@ -1301,7 +1301,7 @@ int listInsert(Stack& stack) {
 
 template <typename T>
 int listRemove(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   T elem;
   pop(stack, list, elem);
 
@@ -1318,7 +1318,7 @@ int listRemove(Stack& stack) {
 
 template <>
 int listRemove<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> list;
   at::Tensor elem;
   pop(stack, list, elem);
 
@@ -1339,7 +1339,7 @@ int listRemove<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listIndex(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   T elem;
   pop(stack, list, elem);
 
@@ -1356,7 +1356,7 @@ int listIndex(Stack& stack) {
 
 template <>
 int listIndex<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> list;
   at::Tensor elem;
   pop(stack, list, elem);
 
@@ -1377,7 +1377,7 @@ int listIndex<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listCount(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   T elem;
   pop(stack, list, elem);
 
@@ -1389,7 +1389,7 @@ int listCount(Stack& stack) {
 
 template <>
 int listCount<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> list;
   at::Tensor elem;
   pop(stack, list, elem);
 
@@ -1406,8 +1406,8 @@ int listCount<at::Tensor>(Stack& stack) {
 template <typename T>
 Operation listExtend(const Node* node) {
   return [](Stack& stack) {
-    c10::List<T> a = c10::make_list<T>();
-    c10::List<T> b = c10::make_list<T>();
+    c10::List<T> a;
+    c10::List<T> b;
     pop(stack, a, b);
 
     a.reserve(a.size() + b.size());
@@ -1421,7 +1421,7 @@ Operation listExtend(const Node* node) {
 template <typename T>
 Operation listCopy(const Node* node) {
   return [](Stack& stack) {
-    c10::List<T> list = c10::make_list<T>();
+    c10::List<T> list;
     pop(stack, list);
     push(stack, list.copy());
     return 0;
@@ -1430,7 +1430,7 @@ Operation listCopy(const Node* node) {
 
 template <typename T>
 int listSelect(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t idx;
   pop(stack, list, idx);
 
@@ -1441,7 +1441,7 @@ int listSelect(Stack& stack) {
 
 template <typename T>
 int listLen(Stack& stack) {
-  c10::List<T> a = c10::make_list<T>();
+  c10::List<T> a;
   pop(stack, a);
 
   const int64_t size = a.size();
@@ -1451,8 +1451,8 @@ int listLen(Stack& stack) {
 
 template <typename T>
 int listEq(Stack& stack) {
-  c10::List<T> a = c10::make_list<T>();
-  c10::List<T> b = c10::make_list<T>();
+  c10::List<T> a;
+  c10::List<T> b;
   pop(stack, a, b);
   push(stack, list_is_equal(a, b));
   return 0;
@@ -1460,8 +1460,8 @@ int listEq(Stack& stack) {
 
 template <typename T>
 int listNe(Stack& stack) {
-  c10::List<T> a = c10::make_list<T>();
-  c10::List<T> b = c10::make_list<T>();
+  c10::List<T> a;
+  c10::List<T> b;
   pop(stack, a, b);
   push(stack, !list_is_equal(a, b));
   return 0;
@@ -1490,8 +1490,8 @@ inline bool tensor_list_equal(const c10::List<at::Tensor>& a, const c10::List<at
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 int listEq<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> a = c10::make_list<at::Tensor>();
-  c10::List<at::Tensor> b = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> a;
+  c10::List<at::Tensor> b;
   pop(stack, a, b);
   push(stack, tensor_list_equal(a, b));
   return 0;
@@ -1500,8 +1500,8 @@ int listEq<at::Tensor>(Stack& stack) {
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 int listNe<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> a = c10::make_list<at::Tensor>();
-  c10::List<at::Tensor> b = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> a;
+  c10::List<at::Tensor> b;
   pop(stack, a, b);
   push(stack, !tensor_list_equal(a, b));
   return 0;
@@ -1517,11 +1517,11 @@ Operation listList(const Node* node) {
 
 template <class T>
 int listAdd(Stack& stack) {
-  c10::List<T> a = c10::make_list<T>();
-  c10::List<T> b = c10::make_list<T>();
+  c10::List<T> a;
+  c10::List<T> b;
   pop(stack, a, b);
 
-  c10::List<T> ret = c10::make_list<T>();
+  c10::List<T> ret;
   const auto total_size = a.size() + b.size();
   ret.reserve(total_size);
   for (T a_element : a) {
@@ -1537,11 +1537,11 @@ int listAdd(Stack& stack) {
 
 template <class T>
 int listMulIntLeft(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t n;
   pop(stack, list, n);
 
-  c10::List<T> ret = c10::make_list<T>();
+  c10::List<T> ret;
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1557,11 +1557,11 @@ int listMulIntLeft(Stack& stack) {
 
 template <class T>
 int listMulIntRight(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t n;
   pop(stack, n, list);
 
-  c10::List<T> ret = c10::make_list<T>();
+  c10::List<T> ret;
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1577,7 +1577,7 @@ int listMulIntRight(Stack& stack) {
 
 template <typename T>
 int listSlice(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t start;
   int64_t end;
   int64_t step;
@@ -1591,7 +1591,7 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  c10::List<T> sliced_list = c10::make_list<T>();
+  c10::List<T> sliced_list;
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
     push(stack, std::move(sliced_list));
@@ -1633,7 +1633,7 @@ int listSort<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listSetItem(Stack& stack) {
-  c10::List<T> list = c10::make_list<T>();
+  c10::List<T> list;
   int64_t idx;
   T value;
 
@@ -1660,7 +1660,7 @@ int dictLen(Stack& stack) {
 
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  c10::impl::GenericList keys = c10::impl::make_generic_list();
+  c10::impl::GenericList keys;
   keys.reserve(dict.size());
   for (auto& item : dict) {
     keys.push_back(item.key());
@@ -1672,7 +1672,7 @@ int dictKeys(Stack& stack) {
 template <typename Elem>
 c10::List<Elem> makeListForDictValues(
     const std::vector<std::pair<IValue, IValue>>& order) {
-  c10::List<Elem> values = c10::make_list<Elem>();
+  c10::List<Elem> values;
   values.reserve(order.size());
   for (auto item : order) {
     values.push_back(item.second.to<Elem>());
@@ -1786,7 +1786,7 @@ RegisterOperators reg2({
         "aten::list(str t) -> str[]",
         [](Stack& stack) {
           auto str = pop(stack).toStringRef();
-          c10::List<std::string> chars = c10::make_list<std::string>();
+          c10::List<std::string> chars;
           chars.reserve(str.size());
           for (auto c : str) {
             chars.push_back(std::string(1, c));
@@ -2282,7 +2282,7 @@ RegisterOperators reg2({
         [](Stack& stack) {
           at::Tensor t;
           pop(stack, t);
-          c10::List<int64_t> elems = c10::make_list<int64_t>();
+          c10::List<int64_t> elems;
           elems.reserve(t.size(0));
           for (int i = 0; i < t.size(0); i++) {
             elems.push_back(*t[i].data<int32_t>());

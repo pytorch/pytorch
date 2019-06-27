@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn.quantized.functional as F
 import torch.nn.quantized as nnq
-import numpy as np
 from common_utils import TestCase, run_tests, tempfile
 
 '''
