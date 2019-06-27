@@ -15,29 +15,27 @@
 namespace torch {
 namespace serialize {
 OutputArchive::OutputArchive()
-    : module_(std::make_shared<jit::script::Module>()) {}
+    : module_("__main__") {}
 
 void OutputArchive::write(
     const std::string& key,
     const Tensor& tensor,
     bool is_buffer) {
-  module_->register_parameter(key, tensor, is_buffer);
+  module_.register_parameter(key, tensor, is_buffer);
 }
 
 void OutputArchive::write(
     const std::string& key,
     OutputArchive& nested_archive) {
-  module_->register_module(key, nested_archive.module_);
+  module_.register_module(key, nested_archive.module_);
 }
 
 void OutputArchive::save_to(const std::string& filename) {
-  AT_ASSERT(module_ != nullptr);
-  jit::ExportModule(*module_, filename);
+  jit::ExportModule(module_, filename);
 }
 
 void OutputArchive::save_to(std::ostream& stream) {
-  AT_ASSERT(module_ != nullptr);
-  jit::ExportModule(*module_, stream);
+  jit::ExportModule(module_, stream);
 }
 } // namespace serialize
 } // namespace torch

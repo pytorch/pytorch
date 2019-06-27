@@ -1,3 +1,3 @@
-from .linear import Linear
+from .linear import Linear  # noqa: F401
 
-__all__ = [ 'Linear' ]
+__all__ = ['Linear']

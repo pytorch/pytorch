@@ -92,7 +92,7 @@ inline void _call_caffe2_op_from_c10(
   const size_t num_inputs = schema.arguments().size() -
       1; // -1 because the last argument is the list of preallocated tensors
 
-  c10::List<at::Tensor> outputs = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> outputs;
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
     // they haven't been passed in. Pass a list of uninitialized tensors to
