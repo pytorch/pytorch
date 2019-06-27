@@ -786,6 +786,7 @@ class CAFFE2_API Tensor {
   bool equal(const Tensor & other) const;
   Tensor pow(const Tensor & exponent) const;
   Tensor alias() const;
+  Tensor & requires_grad_(bool requires_grad=true);
 
   // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
   // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.

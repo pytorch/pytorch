@@ -19,6 +19,23 @@
 #include <vector>
 #include <typeinfo>
 
+namespace at {
+namespace native {
+
+Tensor & requires_grad_(Tensor & self, bool requires_grad) {
+  // should we throw if requires_grad is true?  var.requires_grad = True throws here
+  // but it's nice to let this be a no-op.
+  if (!self.is_leaf() && !requires_grad) {
+    throw std::runtime_error(torch::autograd::utils::requires_grad_leaf_error(requires_grad));
+  }
+  if (requires_grad && !self.is_floating_point()) {
+    throw std::runtime_error("only Tensors of floating point dtype can require gradients");
+  }
+  self.set_requires_grad(requires_grad);
+}
+
+}} // namespace at::native
+
 namespace torch {
 namespace autograd {
 Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge gradient_edge) {

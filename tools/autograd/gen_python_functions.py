@@ -576,7 +576,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 has_type_input_arg = True
             elif arg['simple_type'] == 'TensorOptions':
                 has_options_arg = True
-            if arg['name'] == 'requires_grad':
+            # We only allow `tensor.requires_grad_()` method to have `requires_grad` as pre-defined argument
+            if not name == 'requires_grad_' and arg['name'] == 'requires_grad':
                 raise ValueError("argument named requires_grad not supported")
 
         has_tensor_return = False

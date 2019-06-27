@@ -1738,6 +1738,10 @@ inline Tensor Tensor::alias() const {
     static auto table = globalATenDispatch().getOpTable("aten::alias(Tensor(a) self) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
+inline Tensor & Tensor::requires_grad_(bool requires_grad) {
+    static auto table = globalATenDispatch().getOpTable("aten::requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, requires_grad);
+}
 
 inline bool Tensor::is_variable() const noexcept {
   return impl_->is_variable();

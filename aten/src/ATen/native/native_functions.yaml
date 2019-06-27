@@ -1,6 +1,5 @@
 # See README.md in this directory for more guidance
 
-
 # Temporary type cast operators. These are needed to trace type-casts now since
 # Type's are not supported in the IR. Instead, we call down to these
 # specialized operators for each datatype.
@@ -5451,3 +5450,8 @@
   dispatch:
     CPU: im2col_backward_cpu
     CUDA: im2col_backward_cuda
+
+## Autograd functions
+
+- func: requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)
+  variants: method
