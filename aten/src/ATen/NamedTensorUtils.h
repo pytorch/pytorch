@@ -33,6 +33,7 @@ unify_from_right(optional<DimnameList> names, optional<DimnameList> other);
 namespace namedinference {
 
 optional<std::vector<Dimname>> erase_name(optional<DimnameList> self_names, int64_t dim);
+void propagate_names(Tensor& result, const Tensor& src);
 
 } // namespace namedinference
 

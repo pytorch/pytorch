@@ -110,6 +110,9 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('asin'),
             fn_method_and_inplace('atan'),
             fn_method_and_inplace('ceil'),
+            fn_method_and_inplace('clamp', -1, 1),
+            fn_method_and_inplace('clamp_min', -2),
+            fn_method_and_inplace('clamp_max', 2),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
             fn_method_and_inplace('erf'),
@@ -123,6 +126,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('log1p'),
             fn_method_and_inplace('log2'),
             fn_method_and_inplace('neg'),
+            fn_method_and_inplace('reciprocal'),
             fn_method_and_inplace('round'),
             fn_method_and_inplace('rsqrt'),
             fn_method_and_inplace('sin'),
@@ -130,6 +134,8 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('sqrt'),
             fn_method_and_inplace('tan'),
             fn_method_and_inplace('trunc'),
+            method('fill_', 1),
+            method('fill_', torch.tensor(3.14)),
         ]
         tests = flatten(tests)
 
