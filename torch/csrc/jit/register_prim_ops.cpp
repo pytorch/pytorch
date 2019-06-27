@@ -1534,6 +1534,14 @@ int listAdd(Stack& stack) {
   push(stack, std::move(ret));
   return 0;
 }
+template <class T>
+int listInplaceAdd(Stack& stack) {
+  c10::List<T> b = pop(stack).to<List<T>>();
+  c10::List<T> a = pop(stack).to<List<T>>();
+  a.append(std::move(b));
+  push(stack, std::move(a));
+  return 0;
+}
 
 template <class T>
 int listMulIntLeft(Stack& stack) {
@@ -1916,6 +1924,10 @@ RegisterOperators reg2({
           "[]",                                                                     \
           listAdd<c_type::value_type>),                                             \
       Operator(                                                                     \
+          "aten::add_(" decl_type "[](a!) self, " decl_type "[] b) -> " decl_type   \
+          "[]",                                                                     \
+          listInplaceAdd<c_type::value_type>),                                      \
+      Operator(                                                                     \
           "aten::slice(" decl_type                                                  \
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
@@ -2068,7 +2080,7 @@ RegisterOperators reg2({
         "prim::min(int[] x) -> int",
         [](Stack& stack) {
           c10::List<int64_t> int_list = pop(stack).toIntList();
-          int64_t min_element = std::numeric_limits<int64_t>::max(); 
+          int64_t min_element = std::numeric_limits<int64_t>::max();
 
           for(int64_t ele: int_list) {
             if(ele < min_element) {
