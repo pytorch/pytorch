@@ -31,7 +31,7 @@ Tensor& bitwise_not_out_cuda(Tensor& out, const Tensor& self) {
 
 Tensor& bitwise_not__cuda(Tensor& self) {
   return bitwise_not_out_cuda(self, self);
+}
 
-} // namespace
 } // native
 } // at
