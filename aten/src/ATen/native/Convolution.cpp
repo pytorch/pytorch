@@ -2,13 +2,23 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/utils/ParamUtils.h>
 
-#if AT_CUDNN_ENABLED
-#include <ATen/cuda/CUDAContext.h>
-#endif
+//#if AT_CUDNN_ENABLED
+//#include <ATen/cuda/CUDAContext.h>
+//#endif
 
 #include <ATen/Config.h>
 #if AT_NNPACK_ENABLED()
 #include "nnpack.h"
+#endif
+
+#include <ATen/cuda/CUDAConfig.h>
+
+#if AT_CUDNN_ENABLED()
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/CUDADevice.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
 static const int MIOPEN_DIM_MAX = 4;
@@ -307,9 +317,9 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, const at::Tensor& w
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
-  #if AT_CUDNN_ENABLED
+  #if AT_CUDNN_ENABLED()
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    long cudnn_version = detail::getCUDAHooks().versionCUDNN();
+    long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
                          use_cudnn(input) &&
                          prop->major >= 7 &&  // Volta/Tensor cores
@@ -319,14 +329,19 @@ auto ConvParams::use_cudnn_depthwise(
                          weight.size(2) == weight.size(3) && // only square kernels
                          input.size(2) >= 7 && // min width/height 7
                          !is_dilated() && // no dilation supported
+                         stride[0] == stride[1] && // equal strides
                          ((weight.size(3) == 3) || (weight.size(3) == 1)) &&
                          input.size(1) >= 32); // min 32 channels supported)
     if (kernel_cond) {
-      return check_cudnn_depthwise_workload(input, weight, params.stride);
+      bool ret = check_cudnn_depthwise_workload(input, weight, stride[0]);
+      std::cout << "kernel cond true, cudnn version " << cudnn_version << ", ret == " << ret;
+      return ret;
     } else {
+      std::cout << "kernel cond false";
       return false;
     }
   #else
+    std::cout << "cudnn condition false";
     return false;
   #endif
 }
