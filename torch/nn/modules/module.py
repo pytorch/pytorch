@@ -524,7 +524,9 @@ class Module(object):
 
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
-            hook(self, input)
+            result = hook(self, input)
+            if result:
+                input = result
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
@@ -532,9 +534,7 @@ class Module(object):
         for hook in self._forward_hooks.values():
             hook_result = hook(self, input, result)
             if hook_result is not None:
-                raise RuntimeError(
-                    "forward hooks should never return any values, but '{}'"
-                    "didn't return None".format(hook))
+                result = hook_result
         if len(self._backward_hooks) > 0:
             var = result
             while not isinstance(var, torch.Tensor):
