@@ -1108,6 +1108,20 @@ class TestCuda(TestCase):
             a.bitwise_not_()
             self.assertEqual(expected_res, a)
 
+        # test exceptions
+        for t in(torch.cuda.HalfTensor, torch.cuda.FloatTensor, torch.cuda.DoubleTensor):
+            a = torch.zeros(10, dtype=t.dtype, device='cuda')
+            # new tensor
+            with self.assertRaises(RuntimeError):
+                a.bitwise_not()
+            # out
+            b = t()
+            with self.assertRaises(RuntimeError):
+                torch.bitwise_not(a, out=b)
+            # in-place
+            with self.assertRaises(RuntimeError):
+                a.bitwise_not_()
+
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
 
