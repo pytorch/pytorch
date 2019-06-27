@@ -105,7 +105,7 @@ class Linear(NNLinear):
         qbias = torch._empty_affine_quantized(
             [out_features], scale=1, zero_point=0, dtype=torch.qint32)
         self.register_buffer('_packed_weight',
-            torch.ops.quantized.fbgemm_linear_prepack(qweight))
+                             torch.ops.quantized.fbgemm_linear_prepack(qweight))
         self.register_buffer('bias', qbias)
         self.register_buffer('out_scale', torch.Tensor([1]))
         self.register_buffer('out_zero_point', torch.Tensor([0]))
