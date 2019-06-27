@@ -3,6 +3,7 @@ import io
 import os
 import math
 import random
+import re
 import copy
 import shutil
 import torch
@@ -15,7 +16,6 @@ import pickle
 import gzip
 import types
 import textwrap
-import re
 from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
@@ -11978,6 +11978,48 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         nhwc = x.contiguous(memory_format=torch.channels_last).cuda()
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
         self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+
+    def _test_memory_format_empty_like(self, x):
+        nhwc = x.contiguous(memory_format=torch.channels_last)
+
+        like = torch.empty_like(nhwc, memory_format=torch.preserve_format)
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
+
+        like_x = torch.empty_like(x, memory_format=torch.preserve_format)
+        self.assertTrue(like_x.is_contiguous())
+        self.assertFalse(like_x.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(x, memory_format=torch.channels_last)
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(nhwc, memory_format=torch.contiguous_format)
+        self.assertTrue(like.is_contiguous())
+        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(nhwc)
+        self.assertTrue(like.is_contiguous())
+        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+
+        sparse = x.to_sparse()
+        with self.assertRaises(RuntimeError):
+            z = torch.empty_like(sparse, memory_format=torch.preserve_format)
+
+    def test_memory_format_empty(self):
+        with self.assertRaises(RuntimeError):
+            x = torch.empty((3, 3), memory_format=torch.channels_last)
+        x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_memory_format_empty_like_cuda(self):
+        x = torch.randn(10, 3, 32, 32).cuda()
+        self._test_memory_format_empty_like(x)
+
+    def test_memory_format_empty_like_cpu(self):
+        x = torch.randn(10, 3, 32, 32)
+        self._test_memory_format_empty_like(x)
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor

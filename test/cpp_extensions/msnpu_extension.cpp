@@ -24,7 +24,7 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
   return get_dtype_tensor(a.dtype());
 }
 
-Tensor sum_override(const Tensor & self) {
+Tensor sum_override(const Tensor & self, ScalarType dtype) {
   test_int = 2;
   return get_dtype_tensor(self.dtype());
 }
@@ -64,7 +64,7 @@ void init_msnpu_extension() {
     "add(Tensor self, Tensor other, Scalar alpha) -> Tensor", &add_override);
   register_extension_backend_op(
     Backend::MSNPU,
-    "sum(Tensor self) -> Tensor", &sum_override);
+    "sum(Tensor self, ScalarType dtype) -> Tensor", &sum_override);
   register_extension_backend_op(
     Backend::MSNPU,
     "expand(Tensor self, IntArrayRef size, bool implicit) -> Tensor",

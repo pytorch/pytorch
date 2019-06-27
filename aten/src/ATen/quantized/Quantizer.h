@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/QScheme.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -267,6 +268,7 @@ make_per_channel_affine_quantizer(
 CAFFE2_API Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer);
+    QuantizerPtr quantizer,
+    MemoryFormat memory_format);
 
 } // namespace at
