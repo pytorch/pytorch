@@ -45,10 +45,16 @@ PyObject* c10d_init(PyObject* _unused) {
   auto module = py::handle(c10d_module).cast<py::module>();
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
-      .def(py::init<
-           std::vector<std::vector<torch::autograd::Variable>>,
-           std::vector<std::vector<size_t>>,
-           std::shared_ptr<::c10d::ProcessGroup>>())
+      .def(
+          py::init<
+              std::vector<std::vector<torch::autograd::Variable>>,
+              std::vector<std::vector<size_t>>,
+              std::shared_ptr<::c10d::ProcessGroup>,
+              std::vector<std::vector<bool>>>(),
+          py::arg("replicas"),
+          py::arg("bucket_indices"),
+          py::arg("process_group"),
+          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>())
       .def(
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
@@ -465,11 +471,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
   // part of a sub group that is to be created.
-  processGroupMPI.def_static(
-      "create",
-      [](std::vector<int> ranks) {
-        return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-      });
+  processGroupMPI.def_static("create", [](std::vector<int> ranks) {
+    return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+  });
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
@@ -477,6 +481,15 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
       .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+      .def(
+          "result",
+          [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
+            auto tensors = work.result();
+            for (auto& tensor : tensors) {
+              tensor = autograd::make_variable(tensor);
+            }
+            return tensors;
+          })
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(
           "wait",
@@ -534,6 +547,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       &::c10d::compute_bucket_assignment_by_size,
       py::arg("tensors"),
       py::arg("bucket_size"),
+      py::arg("expect_sparse_gradient") = std::vector<bool>(),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
