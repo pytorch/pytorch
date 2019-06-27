@@ -346,10 +346,12 @@
   variants: method
   dispatch:
     CPU: _bitwise_not__cpu
+    CUDA: bitwise_not__cuda
 
 - func: bitwise_not(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _bitwise_not_out_cpu
+    CUDA: bitwise_not_out_cuda
 
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
