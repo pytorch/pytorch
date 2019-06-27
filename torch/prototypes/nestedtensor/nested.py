@@ -1,6 +1,5 @@
 import torch
 import torch.nn.functional as F
-import numbers
 
 # Use this to check mask consistency
 # Add check for 1, 1, 1, ..., 1, 0, 0, 0, ..., 0 format
@@ -336,23 +335,7 @@ def _mask_to_size(mask):
     return __mask_to_size(mask)
 
 
-# NOTE: MAJOR CONSTRAINT!
-# AT EACH LEVEL, THE DIMENSIONALITY OF ALL ENTRIES
-# MUST MATCH!
-# THIS MAKES THIS MUCH EASIER (FOR NOW).
-# IN THE FUTURE A SHAPE FIELD MIGHT BE ABLE TO ALLOW
-# SEMANTICS THAT CLOSER REFLECT NESTED LISTS
-# NOTE: The major value this structure represents
-# is the ability to represent entries of different lengths.
-# Semantically this is like a list of Tensors. We don't support
-# deletion. It's a fixed sized list. The entries however may
-# be edited.
-# NOTE: Another constraint: The number of entries, except of vectors
-# must match in a given list.
 class NestedTensor():
-    # TODO: Introduce a nested shape?
-    # XXX: For performance resaons we think about this as a wrapper
-    # around these two tensors and don't clone them.
     def __init__(self, tensor, mask):
         assert isinstance(tensor, torch.Tensor)
         assert isinstance(mask, torch.Tensor)

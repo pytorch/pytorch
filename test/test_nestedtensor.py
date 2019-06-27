@@ -364,4 +364,5 @@ if __name__ == "__main__":
     test_nested_cross_entropy_loss()
     test_nested_linear()
     test_len()
+    import pdb; pdb.set_trace()
     test_nested_lstm()

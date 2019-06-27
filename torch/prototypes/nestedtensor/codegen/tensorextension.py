@@ -11,8 +11,8 @@ def set_binary_method(cls, tfunc, pbf, func, inplace):
                         input1: torch.Tensor,
                         input2: torch.Tensor):
                 # NOTE: We are disabling broadcasting for now
-                output.size() == input1.size()
-                input2.size() == input1.size()
+                assert output.nested_size() == input1.nested_size()
+                assert input2.nested_size() == input1.nested_size()
                 getattr(torch, tfunc)(input1, input2, out=output)
             if inplace:
                 func(_t_func, self, self, other)
