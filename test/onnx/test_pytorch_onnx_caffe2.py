@@ -1434,6 +1434,14 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_model_test(MinModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_reduce_log_sum_exp(self):
+        class ReduceLogSumExpModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.logsumexp(input, dim=(0, 1))
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ReduceLogSumExpModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_argmax(self):
         class ArgmaxModel(torch.nn.Module):
             def forward(self, input):
