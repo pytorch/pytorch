@@ -554,7 +554,6 @@ at::Tensor _convolution(
       auto stride = params.stride;
       auto padding = params.padding;
       auto dilation = params.dilation;
-      //output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
       if (params.use_cudnn_depthwise(input, weight)) {
         output = at::cudnn_convolution(
             input, weight, bias,
