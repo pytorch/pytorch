@@ -16,6 +16,9 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -137,6 +140,14 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
   return result;
 }
 
+static void propagate_names(Tensor& result, const Tensor& src) {
+#ifdef NAMEDTENSOR_ENABLED
+  if (src.is_named()) {
+    at::internal_set_names_inplace(result, src.names());
+  }
+#endif
+}
+
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
@@ -154,6 +165,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
+    propagate_names(result, self);                              \
     return result;                                              \
   }
 
