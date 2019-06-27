@@ -61,13 +61,35 @@ __global__ void AdamCompute(
     float beta2,
     float eps_hat,
     float correction,
+    int apply_adagrad,
+    int reset_aux_param,
+    float adagrad_lr,
+    float adagrad_epsilon,
     const float* lr) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    float gi = g[i];
-    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    float ng = lr[0] * correction * mi / (sqrtf(vi) + eps_hat);
-    nw[i] = w[i] + ng;
+  if (apply_adagrad == true) {
+    if (reset_aux_param == false) {
+      CUDA_1D_KERNEL_LOOP(i, N) {
+        float gi = g[i];
+        float vi = nv[i] = v[i] + gi * gi;
+        float ng = adagrad_lr * gi / (sqrtf(vi) + adagrad_epsilon);
+        nw[i] = w[i] + ng;
+      }
+    } else {
+      CUDA_1D_KERNEL_LOOP(i, N) {
+        float gi = g[i];
+        float vi = nv[i] = gi * gi;
+        float ng = adagrad_lr * gi / (sqrtf(vi) + adagrad_epsilon);
+        nw[i] = w[i] + ng;
+      }
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(i, N) {
+      float gi = g[i];
+      float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+      float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+      float ng = lr[0] * correction * mi / (sqrtf(vi) + eps_hat);
+      nw[i] = w[i] + ng;
+    }
   }
 }
 
@@ -85,6 +107,10 @@ void adam_compute<CUDAContext>(
     float beta2,
     float eps_hat,
     float correction,
+    int apply_adagrad,
+    int reset_aux_param,
+    float adagrad_lr,
+    float adagrad_epsilon,
     const float* lr,
     CUDAContext* context) {
   AdamCompute<<<
@@ -92,7 +118,23 @@ void adam_compute<CUDAContext>(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(
-      N, w, g, m, v, nw, nm, nv, beta1, beta2, eps_hat, correction, lr);
+      N,
+      w,
+      g,
+      m,
+      v,
+      nw,
+      nm,
+      nv,
+      beta1,
+      beta2,
+      eps_hat,
+      correction,
+      apply_adagrad,
+      reset_aux_param,
+      adagrad_lr,
+      adagrad_epsilon,
+      lr);
 }
 
 __global__ void AdamComputeOutputGrad(
@@ -109,13 +151,35 @@ __global__ void AdamComputeOutputGrad(
     float beta2,
     float eps_hat,
     float correction,
+    int apply_adagrad,
+    int reset_aux_param,
+    float adagrad_lr,
+    float adagrad_epsilon,
     const float* lr) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    float gi = g[i];
-    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    float ngi = ng[i] = correction * mi / (sqrtf(vi) + eps_hat);
-    nw[i] = w[i] + lr[0] * ngi;
+  if (apply_adagrad == true) {
+    if (reset_aux_param == false) {
+      CUDA_1D_KERNEL_LOOP(i, N) {
+        float gi = g[i];
+        float vi = nv[i] = v[i] + gi * gi;
+        float ngi = ng[i] = gi / (sqrtf(vi) + adagrad_epsilon);
+        nw[i] = w[i] + adagrad_lr * ngi;
+      }
+    } else {
+      CUDA_1D_KERNEL_LOOP(i, N) {
+        float gi = g[i];
+        float vi = nv[i] = gi * gi;
+        float ngi = ng[i] = gi / (sqrtf(vi) + adagrad_epsilon);
+        nw[i] = w[i] + adagrad_lr * ngi;
+      }
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(i, N) {
+      float gi = g[i];
+      float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+      float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+      float ngi = ng[i] = correction * mi / (sqrtf(vi) + eps_hat);
+      nw[i] = w[i] + lr[0] * ngi;
+    }
   }
 }
 
@@ -134,6 +198,10 @@ void adam_compute_output_grad<CUDAContext>(
     float beta2,
     float eps_hat,
     float correction,
+    int apply_adagrad,
+    int reset_aux_param,
+    float adagrad_lr,
+    float adagrad_epsilon,
     const float* lr,
     CUDAContext* context) {
   AdamComputeOutputGrad<<<
@@ -141,7 +209,24 @@ void adam_compute_output_grad<CUDAContext>(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(
-      N, w, g, m, v, nw, nm, nv, ng, beta1, beta2, eps_hat, correction, lr);
+      N,
+      w,
+      g,
+      m,
+      v,
+      nw,
+      nm,
+      nv,
+      ng,
+      beta1,
+      beta2,
+      eps_hat,
+      correction,
+      apply_adagrad,
+      reset_aux_param,
+      adagrad_lr,
+      adagrad_epsilon,
+      lr);
 }
 
 template <typename SIndex>

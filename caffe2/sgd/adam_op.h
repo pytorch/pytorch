@@ -41,13 +41,33 @@ void adam_compute(
     float beta2,
     float eps_hat,
     float correction,
+    int apply_adagrad,
+    int reset_aux_param,
+    float adagrad_lr,
+    float adagrad_epsilon,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    nw[i] = w[i] + lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
+  if (apply_adagrad == 1) {
+    if (reset_aux_param == 0) {
+      for (auto i = 0; i < N; ++i) {
+        float gi = g[i];
+        float vi = nv[i] = v[i] + gi * gi;
+        nw[i] = w[i] + adagrad_lr * gi / (std::sqrt(vi) + adagrad_epsilon);
+      }
+    } else {
+      for (auto i = 0; i < N; ++i) {
+        float gi = g[i];
+        float vi = nv[i] = gi * gi;
+        nw[i] = w[i] + adagrad_lr * gi / (std::sqrt(vi) + adagrad_epsilon);
+      }
+    }
+  } else {
+    for (auto i = 0; i < N; ++i) {
+      float gi = g[i];
+      float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+      float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+      nw[i] = w[i] + lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
+    }
   }
 }
 
@@ -66,14 +86,36 @@ void adam_compute_output_grad(
     float beta2,
     float eps_hat,
     float correction,
+    int apply_adagrad,
+    int reset_aux_param,
+    float adagrad_lr,
+    float adagrad_epsilon,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    float ngi = ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
-    nw[i] = w[i] + lr[0] * ngi;
+  if (apply_adagrad == 1) {
+    if (reset_aux_param == 0) {
+      for (auto i = 0; i < N; ++i) {
+        float gi = g[i];
+        float vi = nv[i] = v[i] + gi * gi;
+        float ngi = ng[i] = gi / (std::sqrt(vi) + adagrad_epsilon);
+        nw[i] = w[i] + adagrad_lr * ngi;
+      }
+    } else {
+      for (auto i = 0; i < N; ++i) {
+        float gi = g[i];
+        float vi = nv[i] = gi * gi;
+        float ngi = ng[i] = gi / (std::sqrt(vi) + adagrad_epsilon);
+        nw[i] = w[i] + adagrad_lr * ngi;
+      }
+    }
+  } else {
+    for (auto i = 0; i < N; ++i) {
+      float gi = g[i];
+      float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+      float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+      float ngi = ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
+      nw[i] = w[i] + lr[0] * ngi;
+    }
   }
 }
 
@@ -93,16 +135,42 @@ void adam_update_output_grad_and_effective_lr(
     float beta2,
     float eps_hat,
     float correction,
+    int apply_adagrad,
+    int reset_aux_param,
+    float adagrad_lr,
+    float adagrad_epsilon,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
-    float effectiveLRi = effectiveLR[i] =
-        lr[0] * correction / (std::sqrt(vi) + eps_hat);
-    nw[i] = w[i] + effectiveLRi * mi;
+  if (apply_adagrad == 1) {
+    if (reset_aux_param == 0) {
+      for (auto i = 0; i < N; ++i) {
+        float gi = g[i];
+        float vi = nv[i] = v[i] + gi * gi;
+        ng[i] = gi / (std::sqrt(vi) + adagrad_epsilon);
+        float effectiveLRi = effectiveLR[i] =
+            adagrad_lr / (std::sqrt(vi) + adagrad_epsilon);
+        nw[i] = w[i] + effectiveLRi * gi;
+      }
+    } else {
+      for (auto i = 0; i < N; ++i) {
+        float gi = g[i];
+        float vi = nv[i] = gi * gi;
+        ng[i] = gi / (std::sqrt(vi) + adagrad_epsilon);
+        float effectiveLRi = effectiveLR[i] =
+            adagrad_lr / (std::sqrt(vi) + adagrad_epsilon);
+        nw[i] = w[i] + effectiveLRi * gi;
+      }
+    }
+  } else {
+    for (auto i = 0; i < N; ++i) {
+      float gi = g[i];
+      float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+      float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+      ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
+      float effectiveLRi = effectiveLR[i] =
+          lr[0] * correction / (std::sqrt(vi) + eps_hat);
+      nw[i] = w[i] + effectiveLRi * mi;
+    }
   }
 }
 
@@ -123,17 +191,45 @@ void adam_update_output_grad_and_effective_lr_and_update(
     float beta2,
     float eps_hat,
     float correction,
+    int apply_adagrad,
+    int reset_aux_param,
+    float adagrad_lr,
+    float adagrad_epsilon,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
-    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
-    float effectiveLRi = effectiveLR[i] =
-        lr[0] * correction / (std::sqrt(vi) + eps_hat);
-    float updatei = update[i] = effectiveLRi * mi;
-    nw[i] = w[i] + updatei;
+  if (apply_adagrad == 1) {
+    if (reset_aux_param == 0) {
+      for (auto i = 0; i < N; ++i) {
+        float gi = g[i];
+        float vi = nv[i] = v[i] + gi * gi;
+        ng[i] = gi / (std::sqrt(vi) + adagrad_epsilon);
+        float effectiveLRi = effectiveLR[i] =
+            adagrad_lr / (std::sqrt(vi) + adagrad_epsilon);
+        float updatei = update[i] = effectiveLRi * gi;
+        nw[i] = w[i] + updatei;
+      }
+    } else {
+      for (auto i = 0; i < N; ++i) {
+        float gi = g[i];
+        float vi = nv[i] = gi * gi;
+        ng[i] = gi / (std::sqrt(vi) + adagrad_epsilon);
+        float effectiveLRi = effectiveLR[i] =
+            adagrad_lr / (std::sqrt(vi) + adagrad_epsilon);
+        float updatei = update[i] = effectiveLRi * gi;
+        nw[i] = w[i] + updatei;
+      }
+    }
+  } else {
+    for (auto i = 0; i < N; ++i) {
+      float gi = g[i];
+      float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+      float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+      ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
+      float effectiveLRi = effectiveLR[i] =
+          lr[0] * correction / (std::sqrt(vi) + eps_hat);
+      float updatei = update[i] = effectiveLRi * mi;
+      nw[i] = w[i] + updatei;
+    }
   }
 }
 
@@ -145,7 +241,17 @@ class AdamOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
         beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        composite_optimizer_(
+            this->template GetSingleArgument<int>("composite_optimizer", 1)),
+        initial_iter_(
+            this->template GetSingleArgument<int>("initial_iter", -1)),
+        adagrad_alpha_(
+            this->template GetSingleArgument<float>("adagrad_alpha", 0.01f)),
+        adagrad_epsilon_(
+            this->template GetSingleArgument<float>("adagrad_epsilon", 0.1f)),
+        load_aux_param_(
+            this->template GetSingleArgument<bool>("load_aux_param", false)) {}
   bool RunOnDevice() override {
     // Iter live on the CPU
     CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
@@ -163,6 +269,11 @@ class AdamOp final : public Operator<Context> {
     const auto t = iter + 1;
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
+    const auto apply_adagrad =
+        (composite_optimizer_ == 2 && initial_iter_ > 0 && t >= initial_iter_);
+    const auto reset_aux_param =
+        (load_aux_param_ == false && t == initial_iter_);
+
     if (OutputSize() == 3) {
       adam_compute<Context>(
           Input(GRAD).numel(),
@@ -177,6 +288,10 @@ class AdamOp final : public Operator<Context> {
           beta2_,
           epsilon_,
           correction,
+          apply_adagrad,
+          reset_aux_param,
+          adagrad_alpha_,
+          adagrad_epsilon_,
           Input(LR).template data<T>(),
           &context_);
     } else if (OutputSize() == 4) {
@@ -195,6 +310,10 @@ class AdamOp final : public Operator<Context> {
           beta2_,
           epsilon_,
           correction,
+          apply_adagrad,
+          reset_aux_param,
+          adagrad_alpha_,
+          adagrad_epsilon_,
           Input(LR).template data<T>(),
           &context_);
     } else if (OutputSize() == 5) {
@@ -215,6 +334,10 @@ class AdamOp final : public Operator<Context> {
           beta2_,
           epsilon_,
           correction,
+          apply_adagrad,
+          reset_aux_param,
+          adagrad_alpha_,
+          adagrad_epsilon_,
           Input(LR).template data<T>(),
           &context_);
     } else {
@@ -237,6 +360,10 @@ class AdamOp final : public Operator<Context> {
           beta2_,
           epsilon_,
           correction,
+          apply_adagrad,
+          reset_aux_param,
+          adagrad_alpha_,
+          adagrad_epsilon_,
           Input(LR).template data<T>(),
           &context_);
     }
@@ -248,6 +375,11 @@ class AdamOp final : public Operator<Context> {
   T beta1_{0.9};
   T beta2_{0.999};
   T epsilon_{1e-8};
+  T composite_optimizer_{1};
+  T initial_iter_{-1};
+  T adagrad_alpha_{0.01};
+  T adagrad_epsilon_{1e-1};
+  T load_aux_param_{false};
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, GRAD, LR, ITER);
   OUTPUT_TAGS(
       OUTPUT_PARAM,
@@ -266,7 +398,17 @@ class SparseAdamOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
         beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        composite_optimizer_(
+            this->template GetSingleArgument<int>("composite_optimizer", 1)),
+        initial_iter_(
+            this->template GetSingleArgument<int>("initial_iter", -1)),
+        adagrad_alpha_(
+            this->template GetSingleArgument<float>("adagrad_alpha", 0.01f)),
+        adagrad_epsilon_(
+            this->template GetSingleArgument<float>("adagrad_epsilon", 0.1f)),
+        load_aux_param_(
+            this->template GetSingleArgument<bool>("load_aux_param", false)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -290,9 +432,10 @@ class SparseAdamOp final : public Operator<Context> {
     const auto t = iter + 1;
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
-
-    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
-    auto n = Input(GRAD).numel() / block_size;
+    const auto apply_adagrad =
+        (composite_optimizer_ == 2 && initial_iter_ > 0 && t >= initial_iter_);
+    const auto reset_aux_param =
+        (load_aux_param_ == false && t == initial_iter_);
 
     const auto* paramIn = Input(PARAM).template data<T>();
     const auto* indices = Input(INDICES).template data<SIndex>();
@@ -304,18 +447,37 @@ class SparseAdamOp final : public Operator<Context> {
     auto* moment2Out = Output(OUTPUT_MOMENT_2)->template mutable_data<T>();
 
     if (OutputSize() == 3) {
+      auto n = Input(INDICES).numel();
+      if (n == 0) {
+        return true;
+      }
+
+      auto block_size = Input(GRAD).numel() / n;
       for (auto i = 0; i < n; ++i) {
         auto idx = indices[i];
 
         if (block_size == 1) {
-          float gi = gradIn[i];
-          float mi = moment1Out[idx] =
-              moment1In[idx] * beta1_ + gi * (1 - beta1_);
-          float vi = moment2Out[idx] =
-              moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
-          paramOut[idx] = paramIn[idx] +
-              lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
-
+          if (apply_adagrad == 1) {
+            if (reset_aux_param == 0) {
+              float gi = gradIn[i];
+              float vi = moment2Out[idx] = moment2In[idx] + gi * gi;
+              paramOut[idx] = paramIn[idx] +
+                  adagrad_alpha_ * gi / (std::sqrt(vi) + adagrad_epsilon_);
+            } else {
+              float gi = gradIn[i];
+              float vi = moment2Out[idx] = gi * gi;
+              paramOut[idx] = paramIn[idx] +
+                  adagrad_alpha_ * gi / (std::sqrt(vi) + adagrad_epsilon_);
+            }
+          } else {
+            float gi = gradIn[i];
+            float mi = moment1Out[idx] =
+                moment1In[idx] * beta1_ + gi * (1 - beta1_);
+            float vi = moment2Out[idx] =
+                moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
+            paramOut[idx] = paramIn[idx] +
+                lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
+          }
         } else {
           auto offsetI = i * block_size;
           auto offsetIdx = idx * block_size;
@@ -354,6 +516,10 @@ class SparseAdamOp final : public Operator<Context> {
               beta2_,
               epsilon_,
               correction,
+              apply_adagrad,
+              reset_aux_param,
+              adagrad_alpha_,
+              adagrad_epsilon_,
               lr,
               &context_);
         }
@@ -361,18 +527,39 @@ class SparseAdamOp final : public Operator<Context> {
     } else if (OutputSize() == 4) {
       Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
       auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
+
+      auto n = Input(INDICES).numel();
+      if (n == 0) {
+        return true;
+      }
+
+      auto block_size = Input(GRAD).numel() / n;
       for (auto i = 0; i < n; ++i) {
         auto idx = indices[i];
 
         if (block_size == 1) {
-          float gi = gradIn[i];
-          float mi = moment1Out[idx] =
-              moment1In[idx] * beta1_ + gi * (1 - beta1_);
-          float vi = moment2Out[idx] =
-              moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
-          float ngi = gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
-          paramOut[idx] = paramIn[idx] + lr[0] * ngi;
-
+          if (apply_adagrad == 1) {
+            if (reset_aux_param == 0) {
+              float gi = gradIn[i];
+              float vi = moment2Out[idx] = moment2In[idx] + gi * gi;
+              float ngi = gradOut[i] = gi / (std::sqrt(vi) + adagrad_epsilon_);
+              paramOut[idx] = paramIn[idx] + adagrad_alpha_ * ngi;
+            } else {
+              float gi = gradIn[i];
+              float vi = moment2Out[idx] = gi * gi;
+              float ngi = gradOut[i] = gi / (std::sqrt(vi) + adagrad_epsilon_);
+              paramOut[idx] = paramIn[idx] + adagrad_alpha_ * ngi;
+            }
+          } else {
+            float gi = gradIn[i];
+            float mi = moment1Out[idx] =
+                moment1In[idx] * beta1_ + gi * (1 - beta1_);
+            float vi = moment2Out[idx] =
+                moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
+            float ngi = gradOut[i] =
+                correction * mi / (std::sqrt(vi) + epsilon_);
+            paramOut[idx] = paramIn[idx] + lr[0] * ngi;
+          }
         } else {
           auto offsetI = i * block_size;
           auto offsetIdx = idx * block_size;
@@ -412,6 +599,10 @@ class SparseAdamOp final : public Operator<Context> {
               beta2_,
               epsilon_,
               correction,
+              apply_adagrad,
+              reset_aux_param,
+              adagrad_alpha_,
+              adagrad_epsilon_,
               lr,
               &context_);
         }
@@ -422,19 +613,44 @@ class SparseAdamOp final : public Operator<Context> {
       auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
       auto* effectivelrOut =
           Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>();
+
+      auto n = Input(INDICES).numel();
+      if (n == 0) {
+        return true;
+      }
+
+      auto block_size = Input(GRAD).numel() / n;
       for (auto i = 0; i < n; ++i) {
         auto idx = indices[i];
 
         if (block_size == 1) {
-          float gi = gradIn[i];
-          float mi = moment1Out[idx] =
-              moment1In[idx] * beta1_ + gi * (1 - beta1_);
-          float vi = moment2Out[idx] =
-              moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
-          gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
-          float ei = effectivelrOut[idx] =
-              lr[0] * correction / (std::sqrt(vi) + epsilon_);
-          paramOut[idx] = paramIn[idx] + ei * mi;
+          if (apply_adagrad == 1) {
+            if (reset_aux_param == 0) {
+              float gi = gradIn[i];
+              float vi = moment2Out[idx] = moment2In[idx] + gi * gi;
+              gradOut[i] = gi / (std::sqrt(vi) + adagrad_epsilon_);
+              float ei = effectivelrOut[idx] =
+                  adagrad_alpha_ / (std::sqrt(vi) + adagrad_epsilon_);
+              paramOut[idx] = paramIn[idx] + ei * gi;
+            } else {
+              float gi = gradIn[i];
+              float vi = moment2Out[idx] = gi * gi;
+              gradOut[i] = gi / (std::sqrt(vi) + adagrad_epsilon_);
+              float ei = effectivelrOut[idx] =
+                  adagrad_alpha_ / (std::sqrt(vi) + adagrad_epsilon_);
+              paramOut[idx] = paramIn[idx] + ei * gi;
+            }
+          } else {
+            float gi = gradIn[i];
+            float mi = moment1Out[idx] =
+                moment1In[idx] * beta1_ + gi * (1 - beta1_);
+            float vi = moment2Out[idx] =
+                moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
+            gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
+            float ei = effectivelrOut[idx] =
+                lr[0] * correction / (std::sqrt(vi) + epsilon_);
+            paramOut[idx] = paramIn[idx] + ei * mi;
+          }
         } else {
           auto offsetI = i * block_size;
           auto offsetIdx = idx * block_size;
@@ -475,6 +691,10 @@ class SparseAdamOp final : public Operator<Context> {
               beta2_,
               epsilon_,
               correction,
+              apply_adagrad,
+              reset_aux_param,
+              adagrad_alpha_,
+              adagrad_epsilon_,
               lr,
               &context_);
         }
@@ -487,20 +707,47 @@ class SparseAdamOp final : public Operator<Context> {
       auto* effectivelrOut =
           Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>();
       auto* updateOut = Output(OUTPUT_UPDATE)->template mutable_data<T>();
+
+      auto n = Input(INDICES).numel();
+      if (n == 0) {
+        return true;
+      }
+
+      auto block_size = Input(GRAD).numel() / n;
       for (auto i = 0; i < n; ++i) {
         auto idx = indices[i];
 
         if (block_size == 1) {
-          float gi = gradIn[i];
-          float mi = moment1Out[idx] =
-              moment1In[idx] * beta1_ + gi * (1 - beta1_);
-          float vi = moment2Out[idx] =
-              moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
-          gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
-          float ei = effectivelrOut[idx] =
-              lr[0] * correction / (std::sqrt(vi) + epsilon_);
-          float ui = updateOut[idx] = ei * mi;
-          paramOut[idx] = paramIn[idx] + ui;
+          if (apply_adagrad == 1) {
+            if (reset_aux_param == 0) {
+              float gi = gradIn[i];
+              float vi = moment2Out[idx] = moment2In[idx] + gi * gi;
+              gradOut[i] = gi / (std::sqrt(vi) + adagrad_epsilon_);
+              float ei = effectivelrOut[idx] =
+                  adagrad_alpha_ / (std::sqrt(vi) + adagrad_epsilon_);
+              float ui = updateOut[idx] = ei * gi;
+              paramOut[idx] = paramIn[idx] + ui;
+            } else {
+              float gi = gradIn[i];
+              float vi = moment2Out[idx] = moment2In[idx] + gi * gi;
+              gradOut[i] = gi / (std::sqrt(vi) + adagrad_epsilon_);
+              float ei = effectivelrOut[idx] =
+                  adagrad_alpha_ / (std::sqrt(vi) + adagrad_epsilon_);
+              float ui = updateOut[idx] = ei * gi;
+              paramOut[idx] = paramIn[idx] + ui;
+            }
+          } else {
+            float gi = gradIn[i];
+            float mi = moment1Out[idx] =
+                moment1In[idx] * beta1_ + gi * (1 - beta1_);
+            float vi = moment2Out[idx] =
+                moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
+            gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
+            float ei = effectivelrOut[idx] =
+                lr[0] * correction / (std::sqrt(vi) + epsilon_);
+            float ui = updateOut[idx] = ei * mi;
+            paramOut[idx] = paramIn[idx] + ui;
+          }
 
         } else {
           auto offsetI = i * block_size;
@@ -543,6 +790,10 @@ class SparseAdamOp final : public Operator<Context> {
               beta2_,
               epsilon_,
               correction,
+              apply_adagrad,
+              reset_aux_param,
+              adagrad_alpha_,
+              adagrad_epsilon_,
               lr,
               &context_);
         }
@@ -555,6 +806,11 @@ class SparseAdamOp final : public Operator<Context> {
   T beta1_;
   T beta2_;
   T epsilon_;
+  T composite_optimizer_{1};
+  T initial_iter_{-1};
+  T adagrad_alpha_{0.01};
+  T adagrad_epsilon_{1e-1};
+  T load_aux_param_{false};
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, INDICES, GRAD, LR, ITER);
   OUTPUT_TAGS(
       OUTPUT_PARAM,

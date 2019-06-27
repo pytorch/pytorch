@@ -17,6 +17,8 @@ from caffe2.python import core, scope, utils, workspace
 from caffe2.python.modeling import parameter_info
 from caffe2.proto import caffe2_pb2
 
+NOOPTIMIZER = 1
+ADAGRAD = 2
 
 _LEARNING_RATE_INJECTION = "lr_injection"
 
@@ -938,6 +940,18 @@ class AdamOptimizer(Optimizer):
         self.engine = engine
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
+
+        self.composite_optimizer = kwargs.get("composite_optimizer", NOOPTIMIZER)
+        self.initial_iter = -1
+        self.adagrad_alpha = 0.01
+        self.adagrad_epsilon = 1e-1
+        self.load_aux_param = False
+        if self.composite_optimizer == "adagrad":
+            self.composite_optimizer = ADAGRAD
+            self.initial_iter = kwargs["initial_iter"]
+            self.adagrad_alpha = kwargs["adagrad_alpha"]
+            self.adagrad_epsilon = kwargs["adagrad_epsilon"]
+            self.load_aux_param = kwargs["load_aux_param"]
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -1025,7 +1039,12 @@ class AdamOptimizer(Optimizer):
                 output_blobs,
                 beta1=self.beta1,
                 beta2=self.beta2,
-                epsilon=self.epsilon)
+                epsilon=self.epsilon,
+                composite_optimizer=self.composite_optimizer,
+                initial_iter=self.initial_iter,
+                adagrad_alpha=self.adagrad_alpha,
+                adagrad_epsilon=self.adagrad_epsilon,
+                load_aux_param=self.load_aux_param)
             if self.use_lr_adaption:
                 net.LearningRateAdaption(
                     [lr, grad.values, effective_grad],
@@ -1039,7 +1058,12 @@ class AdamOptimizer(Optimizer):
                 output_blobs,
                 beta1=self.beta1,
                 beta2=self.beta2,
-                epsilon=self.epsilon)
+                epsilon=self.epsilon,
+                composite_optimizer=self.composite_optimizer,
+                initial_iter=self.initial_iter,
+                adagrad_alpha=self.adagrad_alpha,
+                adagrad_epsilon=self.adagrad_epsilon,
+                load_aux_param=self.load_aux_param)
             if self.use_lr_adaption:
                 net.LearningRateAdaption(
                     [lr, grad, effective_grad],

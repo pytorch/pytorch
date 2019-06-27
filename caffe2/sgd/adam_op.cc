@@ -51,7 +51,12 @@ in which grad_o, effective_lr, and update are optional outputs.
     .Output(5, "output_update", "(optional) Actual update that is applied.")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .Arg("composite_optimizer", "Default 1")
+    .Arg("initial_iter", "Default -1")
+    .Arg("adagrad_alpha", "Default 0")
+    .Arg("adagrad_epsilon", "Default 1e-8")
+    .Arg("load_aux_param", "Default false");
 
 REGISTER_CPU_OPERATOR(SparseAdam, SparseAdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdam)
@@ -83,7 +88,12 @@ OPERATOR_SCHEMA(SparseAdam)
     .Output(5, "output_update", "(optional) Actual update that is applied.")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .Arg("composite_optimizer", "Default 1")
+    .Arg("initial_iter", "Default -1")
+    .Arg("adagrad_alpha", "Default 0")
+    .Arg("adagrad_epsilon", "Default 1e-8")
+    .Arg("load_aux_param", "Default false");
 
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdam,
@@ -117,7 +127,12 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
     .Output(3, "output_grad", "Optional Effective gradient")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .Arg("composite_optimizer", "Default 1")
+    .Arg("initial_iter", "Default -1")
+    .Arg("adagrad_alpha", "Default 0")
+    .Arg("adagrad_epsilon", "Default 1e-8")
+    .Arg("load_aux_param", "Default false");
 
 SHOULD_NOT_DO_GRADIENT(Adam);
 SHOULD_NOT_DO_GRADIENT(SparseAdam);
