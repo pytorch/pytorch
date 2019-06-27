@@ -311,8 +311,7 @@ struct TORCH_API Module {
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    if (auto fn =
-            class_compilation_unit()->find_function(getNameForMethod(name))) {
+    if (class_compilation_unit()->find_function(getNameForMethod(name))) {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
