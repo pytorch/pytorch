@@ -94,7 +94,7 @@ class TestONNXOpset(TestCase):
                     {"name": "strides", "ints": [1], "type": 7}]}]
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.randn(20, 16, 50)
-        check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[9, 10])
 
         # add test with dilations
         module = torch.nn.MaxPool1d(2, stride=1, dilation=2)
@@ -106,7 +106,7 @@ class TestONNXOpset(TestCase):
                     {"name": "kernel_shape", "ints": [2], "type": 7},
                     {"name": "pads", "ints": [0, 0], "type": 7},
                     {"name": "strides", "ints": [1], "type": 7}]}]
-        ops = {9 : ops_9, 10 : ops_10}
+        ops = {10 : ops_10}
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
 
