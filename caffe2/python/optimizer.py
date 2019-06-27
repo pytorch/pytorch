@@ -621,6 +621,20 @@ class AdagradOptimizer(Optimizer):
                 'If SparseAdagrad with rowWise=True, gradient must be '\
                 'a gradientslice. PLease ensure that rowWise is not enabled '\
                 'for the dense Adagrad optimizer, as it is not supported.'
+        output_args = [param, param_squared_sum]
+        if self.output_effective_lr_and_update:
+            assert (
+                self.engine is None and not self.rowWise
+            ), 'output_effective_lr_and_update is only supported when rowWise '\
+               'is not enabled and engine is None.'
+            output_args.append(str(param) + '_effective_lr')
+            output_args.append(str(param) + '_update')
+        elif self.output_effective_lr:
+            assert (
+                self.engine is None and not self.rowWise
+            ), 'output_effective_lr is only supported when rowWise '\
+               'is not enabled and engine is None.'
+            output_args.append(str(param) + '_effective_lr')
         if isinstance(grad, core.GradientSlice):
             assert self.decay == 1.,\
                 'Decay is not implemented for SparseAdagrad and must be set to 1'
@@ -631,18 +645,11 @@ class AdagradOptimizer(Optimizer):
                 op = 'SparseAdagrad'
             net.__getattr__(op)(
                 [param, param_squared_sum, grad.indices, grad.values, lr],
-                [param, param_squared_sum],
+                output_args,
                 epsilon=self.epsilon,
                 engine=self.engine,
             )
         else:
-            output_args = [param, param_squared_sum]
-            if self.output_effective_lr_and_update:
-                output_args.append(str(param) + '_effective_lr')
-                output_args.append(str(param) + '_update')
-            elif self.output_effective_lr:
-                output_args.append(str(param) + '_effective_lr')
-
             net.Adagrad(
                 [param, param_squared_sum, grad, lr],
                 output_args,
@@ -913,7 +920,10 @@ class AdamOptimizer(Optimizer):
     def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
                  policy='fixed', use_lr_adaption=False, lr_alpha=0.01,
                  normalized_lr_adaption=True, sparse_dedup_aggregator=None,
-                 rowWise=False, engine='', **kwargs):
+                 rowWise=False, engine='', output_effective_lr=False,
+                 output_effective_lr_and_update=False, **kwargs):
+        assert output_effective_lr + output_effective_lr_and_update <= 1
+
         super(AdamOptimizer, self).__init__()
         self.alpha = alpha
         self.beta1 = beta1
@@ -926,6 +936,8 @@ class AdamOptimizer(Optimizer):
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.rowWise = rowWise
         self.engine = engine
+        self.output_effective_lr = output_effective_lr
+        self.output_effective_lr_and_update = output_effective_lr_and_update
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -977,6 +989,29 @@ class AdamOptimizer(Optimizer):
         if self.use_lr_adaption:
             effective_grad = str(param) + '_effective_grad'
             output_blobs.append(effective_grad)
+        # need to enable use_lr_adaption to plot effective_lr and update.
+        # If you dont want to apply use_lr_adaption, set lr_alpha = 0.
+        if self.output_effective_lr_and_update:
+            assert (
+                self.engine is None and not self.rowWise
+            ), 'output_effective_lr_and_update is only supported when rowWise '\
+               'is not enabled and engine is None.'
+            assert (
+                self.use_lr_adaption
+            ), 'to enable output_effective_lr_and_update, pls check use_lr_adaption.'\
+               'If you dont want to apply lr_adaption, set lr_alpha = 0.'
+            output_blobs.append(str(param) + '_effective_lr')
+            output_blobs.append(str(param) + '_update')
+        elif self.output_effective_lr:
+            assert (
+                self.engine is None and not self.rowWise
+            ), 'output_effective_lr is only supported when rowWise '\
+               'is not enabled and engine is None.'
+            assert (
+                self.use_lr_adaption
+            ), 'to enable output_effective_lr, pls check use_lr_adaption.'\
+               'If you dont want to apply lr_adaption, set lr_alpha = 0.'
+            output_blobs.append(str(param) + '_effective_lr')
 
         if isinstance(grad, core.GradientSlice):
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)

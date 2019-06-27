@@ -216,3 +216,55 @@ class TestAdagrad(serial.SerializedTestCase):
             dc,
             row_wise=True,
         )
+
+    # Suppress filter_too_much health check.
+    # Likely caused by `assume` call falling through too often.
+    @settings(suppress_health_check=[HealthCheck.filter_too_much])
+    @given(
+        inputs=hu.tensors(n=3),
+        lr=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        epsilon=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        **hu.gcs
+    )
+    def test_sparse_adagrad_output_effective_lr(self, inputs, lr, epsilon, gc, dc):
+        adagrad_sparse_test_helper(
+            self,
+            inputs,
+            lr,
+            epsilon,
+            None,
+            functools.partial(ref_adagrad, output_effective_lr=True),
+            gc,
+            dc,
+            output_effective_lr=True,
+        )
+
+    # Suppress filter_too_much health check.
+    # Likely caused by `assume` call falling through too often.
+    @settings(suppress_health_check=[HealthCheck.filter_too_much])
+    @given(
+        inputs=hu.tensors(n=3),
+        lr=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        epsilon=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+        **hu.gcs
+    )
+    def test_sparse_adagrad_output_effective_lr_and_update(self, inputs, lr, epsilon, gc, dc):
+        adagrad_sparse_test_helper(
+            self,
+            inputs,
+            lr,
+            epsilon,
+            None,
+            functools.partial(ref_adagrad, output_effective_lr_and_update=True),
+            gc,
+            dc,
+            output_effective_lr_and_update=True,
+        )

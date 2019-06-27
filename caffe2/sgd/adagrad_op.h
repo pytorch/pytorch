@@ -179,53 +179,173 @@ class SparseAdagradOp final : public Operator<Context> {
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<T>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
 
-    auto n = Input(INDICES).numel();
-    if (n == 0) {
-      return true;
-    }
+    if (OutputSize() == 2) {
+      auto n = Input(INDICES).numel();
+      if (n == 0) {
+        return true;
+      }
 
-    auto block_size = Input(GRAD).numel() / n;
-    for (auto i = 0; i < n; ++i) {
-      auto idx = indices[i];
-      if (block_size == 1) {
-        float gi = gradIn[i];
-        float hi = momentOut[idx] = momentIn[idx] + gi * gi;
-        paramOut[idx] = paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
-      } else {
-        auto offsetI = i * block_size;
-        auto offsetIdx = idx * block_size;
+      auto block_size = Input(GRAD).numel() / n;
+      for (auto i = 0; i < n; ++i) {
+        auto idx = indices[i];
+        if (block_size == 1) {
+          float gi = gradIn[i];
+          float hi = momentOut[idx] = momentIn[idx] + gi * gi;
+          paramOut[idx] =
+              paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
+        } else {
+          auto offsetI = i * block_size;
+          auto offsetIdx = idx * block_size;
 
 #ifndef NDEBUG
-        CAFFE_ENFORCE_GE(
-            Input(PARAM).numel(),
-            block_size + offsetIdx,
-            this->debug_def().input(PARAM),
-            ", out of bound,  idx:",
-            idx,
-            " for input i:",
-            i,
-            " and block size:",
-            block_size);
-        CAFFE_ENFORCE_GE(
-            Input(GRAD).numel(),
-            block_size + offsetI,
-            this->debug_def().input(GRAD),
-            ", out of bound idx, idx:",
-            idx,
-            " for input i:",
-            i);
+          CAFFE_ENFORCE_GE(
+              Input(PARAM).numel(),
+              block_size + offsetIdx,
+              this->debug_def().input(PARAM),
+              ", out of bound,  idx:",
+              idx,
+              " for input i:",
+              i,
+              " and block size:",
+              block_size);
+          CAFFE_ENFORCE_GE(
+              Input(GRAD).numel(),
+              block_size + offsetI,
+              this->debug_def().input(GRAD),
+              ", out of bound idx, idx:",
+              idx,
+              " for input i:",
+              i);
 #endif
-        adagrad_update(
-            block_size,
-            paramIn + offsetIdx,
-            gradIn + offsetI,
-            momentIn + offsetIdx,
-            paramOut + offsetIdx,
-            momentOut + offsetIdx,
-            epsilon_,
-            1.0f,
-            lr,
-            &context_);
+          adagrad_update(
+              block_size,
+              paramIn + offsetIdx,
+              gradIn + offsetI,
+              momentIn + offsetIdx,
+              paramOut + offsetIdx,
+              momentOut + offsetIdx,
+              epsilon_,
+              1.0f,
+              lr,
+              &context_);
+        }
+      }
+    } else if (OutputSize() == 3) {
+      Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(PARAM));
+      auto* effectivelrOut =
+          Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>();
+
+      auto n = Input(INDICES).numel();
+      if (n == 0) {
+        return true;
+      }
+
+      auto block_size = Input(GRAD).numel() / n;
+      for (auto i = 0; i < n; ++i) {
+        auto idx = indices[i];
+        if (block_size == 1) {
+          float gi = gradIn[i];
+          float hi = momentOut[idx] = momentIn[idx] + gi * gi;
+          float ei = effectivelrOut[idx] = lr[0] / (std::sqrt(hi) + epsilon_);
+          paramOut[idx] = paramIn[idx] + ei * gi;
+        } else {
+          auto offsetI = i * block_size;
+          auto offsetIdx = idx * block_size;
+
+#ifndef NDEBUG
+          CAFFE_ENFORCE_GE(
+              Input(PARAM).numel(),
+              block_size + offsetIdx,
+              this->debug_def().input(PARAM),
+              ", out of bound,  idx:",
+              idx,
+              " for input i:",
+              i,
+              " and block size:",
+              block_size);
+          CAFFE_ENFORCE_GE(
+              Input(GRAD).numel(),
+              block_size + offsetI,
+              this->debug_def().input(GRAD),
+              ", out of bound idx, idx:",
+              idx,
+              " for input i:",
+              i);
+#endif
+          adagrad_update_output_effective_lr(
+              block_size,
+              paramIn + offsetIdx,
+              gradIn + offsetI,
+              momentIn + offsetIdx,
+              paramOut + offsetIdx,
+              momentOut + offsetIdx,
+              effectivelrOut + offsetIdx,
+              epsilon_,
+              1.0f,
+              lr,
+              &context_);
+        }
+      }
+
+    } else {
+      Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(PARAM));
+      Output(OUTPUT_UPDATE)->ResizeLike(Input(PARAM));
+      auto* effectivelrOut =
+          Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>();
+      auto* updateOut = Output(OUTPUT_UPDATE)->template mutable_data<T>();
+
+      auto n = Input(INDICES).numel();
+      if (n == 0) {
+        return true;
+      }
+
+      auto block_size = Input(GRAD).numel() / n;
+      for (auto i = 0; i < n; ++i) {
+        auto idx = indices[i];
+        if (block_size == 1) {
+          float gi = gradIn[i];
+          float hi = momentOut[idx] = momentIn[idx] + gi * gi;
+          float ei = effectivelrOut[idx] = lr[0] / (std::sqrt(hi) + epsilon_);
+          float ui = updateOut[idx] = ei * gi;
+          paramOut[idx] = paramIn[idx] + ui;
+        } else {
+          auto offsetI = i * block_size;
+          auto offsetIdx = idx * block_size;
+
+#ifndef NDEBUG
+          CAFFE_ENFORCE_GE(
+              Input(PARAM).numel(),
+              block_size + offsetIdx,
+              this->debug_def().input(PARAM),
+              ", out of bound,  idx:",
+              idx,
+              " for input i:",
+              i,
+              " and block size:",
+              block_size);
+          CAFFE_ENFORCE_GE(
+              Input(GRAD).numel(),
+              block_size + offsetI,
+              this->debug_def().input(GRAD),
+              ", out of bound idx, idx:",
+              idx,
+              " for input i:",
+              i);
+#endif
+          adagrad_update_output_effective_lr_and_update(
+              block_size,
+              paramIn + offsetIdx,
+              gradIn + offsetI,
+              momentIn + offsetIdx,
+              paramOut + offsetIdx,
+              momentOut + offsetIdx,
+              effectivelrOut + offsetIdx,
+              updateOut + offsetIdx,
+              epsilon_,
+              1.0f,
+              lr,
+              &context_);
+        }
       }
     }
     return true;
@@ -234,7 +354,11 @@ class SparseAdagradOp final : public Operator<Context> {
  protected:
   T epsilon_;
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
-  OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
+  OUTPUT_TAGS(
+      OUTPUT_PARAM,
+      OUTPUT_MOMENT_1,
+      OUTPUT_EFFECTIVE_LR,
+      OUTPUT_UPDATE);
 };
 
 template <typename T, class Context>
@@ -330,4 +454,4 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
-}
+} // namespace caffe2

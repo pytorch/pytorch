@@ -69,8 +69,20 @@ def ref_adagrad(
 
 
 def adagrad_sparse_test_helper(
-    parent_test, inputs, lr, epsilon, engine, ref_adagrad, gc, dc, row_wise=False
+    parent_test,
+    inputs,
+    lr,
+    epsilon,
+    engine,
+    ref_adagrad,
+    gc,
+    dc,
+    row_wise=False,
+    output_effective_lr=False,
+    output_effective_lr_and_update=False,
 ):
+    assert output_effective_lr + output_effective_lr_and_update < 1
+
     param, momentum, grad = inputs
     if row_wise:
         # For row-wise adagrad, only take the first element of each row
@@ -92,34 +104,106 @@ def adagrad_sparse_test_helper(
     # Sparsify grad
     grad = grad[indices]
 
-    op = core.CreateOperator(
-        "RowWiseSparseAdagrad" if row_wise else "SparseAdagrad",
-        ["param", "momentum", "indices", "grad", "lr"],
-        ["param", "momentum"],
-        epsilon=epsilon,
-        engine=engine,
-        device_option=gc,
-    )
+    if engine is None and not row_wise and output_effective_lr:
+        op = core.CreateOperator(
+            "SparseAdagrad",
+            ["param", "momentum", "indices", "grad", "lr"],
+            ["param", "momentum", "effective_lr"],
+            epsilon=epsilon,
+            engine=engine,
+            device_option=gc,
+        )
+    elif engine is None and not row_wise and output_effective_lr_and_update:
+        op = core.CreateOperator(
+            "SparseAdagrad",
+            ["param", "momentum", "indices", "grad", "lr"],
+            ["param", "momentum", "effective_lr", "update"],
+            epsilon=epsilon,
+            engine=engine,
+            device_option=gc,
+        )
+    else:
+        op = core.CreateOperator(
+            "RowWiseSparseAdagrad" if row_wise else "SparseAdagrad",
+            ["param", "momentum", "indices", "grad", "lr"],
+            ["param", "momentum"],
+            epsilon=epsilon,
+            engine=engine,
+            device_option=gc,
+        )
 
-    def ref_sparse(param, momentum, indices, grad, lr, ref_using_fp16=False):
+    def ref_sparse(
+        param,
+        momentum,
+        indices,
+        grad,
+        lr,
+        ref_using_fp16=False,
+        output_effective_lr=False,
+        output_effective_lr_and_update=False,
+    ):
         param_out = np.copy(param)
         momentum_out = np.copy(momentum)
+        effective_lr = np.copy(param)
+        effective_lr.fill(np.nan)
+        update = np.copy(param)
+        update.fill(np.nan)
         # Need to do this because it's possible ref_adagrad's using_fp16 could
         # have been already specialized.
         ref_adagrad_temp = (
-            partial(ref_adagrad, using_fp16=ref_using_fp16)
-            if ref_using_fp16
-            else ref_adagrad
-        )
-        for i, index in enumerate(indices):
-            param_out[index], momentum_out[index] = ref_adagrad_temp(
-                param[index],
-                momentum[index],
-                grad[i],
-                lr,
-                epsilon,
+            partial(
+                ref_adagrad,
+                using_fp16=ref_using_fp16,
+                output_effective_lr=output_effective_lr,
+                output_effective_lr_and_update=output_effective_lr_and_update
             )
-        return (param_out, momentum_out)
+            if ref_using_fp16
+            else partial(
+                ref_adagrad,
+                output_effective_lr=output_effective_lr,
+                output_effective_lr_and_update=output_effective_lr_and_update
+            )
+        )
+
+        if output_effective_lr:
+            for i, index in enumerate(indices):
+                (
+                    param_out[index],
+                    momentum_out[index],
+                    effective_lr[index],
+                ) = ref_adagrad_temp(
+                    param[index],
+                    momentum[index],
+                    grad[i],
+                    lr,
+                    epsilon,
+                )
+            return (param_out, momentum_out, effective_lr)
+        elif output_effective_lr_and_update:
+            for i, index in enumerate(indices):
+                (
+                    param_out[index],
+                    momentum_out[index],
+                    effective_lr[index],
+                    update[index],
+                ) = ref_adagrad_temp(
+                    param[index],
+                    momentum[index],
+                    grad[i],
+                    lr,
+                    epsilon,
+                )
+            return (param_out, momentum_out, effective_lr, update)
+        else:
+            for i, index in enumerate(indices):
+                param_out[index], momentum_out[index] = ref_adagrad_temp(
+                    param[index],
+                    momentum[index],
+                    grad[i],
+                    lr,
+                    epsilon,
+                )
+            return (param_out, momentum_out)
 
     ref_using_fp16_values = [False]
     if gc == hu.gpu_do and not row_wise:
@@ -136,5 +220,13 @@ def adagrad_sparse_test_helper(
             param_i = param.astype(np.float32)
 
         parent_test.assertReferenceChecks(
-            gc, op, [param_i, momentum_i, indices, grad, lr, ref_using_fp16], ref_sparse
+            gc,
+            op,
+            [param_i, momentum_i, indices, grad, lr],
+            partial(
+                ref_sparse,
+                ref_using_fp16=ref_using_fp16,
+                output_effective_lr=output_effective_lr,
+                output_effective_lr_and_update=output_effective_lr_and_update,
+            )
         )

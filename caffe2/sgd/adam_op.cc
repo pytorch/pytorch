@@ -5,7 +5,7 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(Adam, AdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(Adam)
     .NumInputs(6)
-    .NumOutputs(3, 4)
+    .NumOutputs(3, 6)
     .AllowInplace({{0, 0}, {1, 1}, {2, 2}})
     .DeviceInferenceFunction([](const OperatorDef& def) {
       auto op_device =
@@ -29,9 +29,12 @@ input gradient and momentum parameters. Concretely, given inputs
     m2_o = (beta2 * m2) + (1 - beta2) * np.square(grad)
     grad_o = correction_multiplier * m1_o / \
         (sqrt(m2_o) + epsilon)
-    param_o = param + lr * grad_o
+    effective_lr = lr * correction_multiplier / (sqrt(m2_o) + epsilon)
+    update = effective_lr * m1_o
+    param_o = param + lr * grad_o = param + update
 
-and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
+and returns (param_o, m1_o, m2_o, grad_o, effective_lr, update),
+in which grad_o, effective_lr, and update are optional outputs.
 
 )DOC")
     .Input(0, "param", "Parameters to be updated")
@@ -44,6 +47,8 @@ and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
     .Output(1, "output_moment_1", "Updated first moment")
     .Output(2, "output_moment_2", "Updated second moment")
     .Output(3, "output_grad", "Optional Effective gradient")
+    .Output(4, "output_effective_lr", "(optional) Effective learning rate")
+    .Output(5, "output_update", "(optional) Actual update that is applied.")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
@@ -51,7 +56,7 @@ and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
 REGISTER_CPU_OPERATOR(SparseAdam, SparseAdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdam)
     .NumInputs(7)
-    .NumOutputs(3, 4)
+    .NumOutputs(3, 6)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
     .SetDoc(R"DOC(
 
@@ -59,6 +64,8 @@ OPERATOR_SCHEMA(SparseAdam)
     Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the dense
     Adam on (param, moment1[indices], momemnt2[indices], lr, iter) and returns
     (new_param, new_moment1, new_moment2) as in dense case
+    Optionally returns (output_grad, effective_lr and update) as well
+
 
     )DOC")
     .Input(0, "param", "Parameters to be updated")
@@ -72,6 +79,8 @@ OPERATOR_SCHEMA(SparseAdam)
     .Output(1, "output_moment_1", "Updated first moment")
     .Output(2, "output_moment_2", "Updated second moment")
     .Output(3, "output_grad", "Optional Effective gradient")
+    .Output(4, "output_effective_lr", "(optional) Effective learning rate")
+    .Output(5, "output_update", "(optional) Actual update that is applied.")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
