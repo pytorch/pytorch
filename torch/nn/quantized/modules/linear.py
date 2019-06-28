@@ -2,9 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
-from ...._jit_internal import weak_module
 
-@weak_module
 class Quantize(Module):
     r"""Quantizes an incoming tensor
     Args:
@@ -39,7 +37,6 @@ class Quantize(Module):
     def from_float(mod):
         return Quantize(mod.qparams[0].item(), mod.qparams[1].item(), torch.quint8)
 
-@weak_module
 class DeQuantize(Module):
     r"""Dequantizes an incoming tensor
 
@@ -65,7 +62,6 @@ class DeQuantize(Module):
     def from_float(mod):
         return DeQuantize()
 
-@weak_module
 class Linear(NNLinear):
     r"""
     A quantized linear module with quantized tensor as inputs

@@ -5,9 +5,7 @@ from __future__ import unicode_literals
 
 from .. import functional as F
 from ...modules.module import Module
-from ...._jit_internal import weak_module, weak_script_method
 
-@weak_module
 class ReLU(Module):
     r"""Applies quantized rectified linear unit function element-wise:
 
@@ -37,7 +35,6 @@ class ReLU(Module):
         assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
 
 
-    @weak_script_method
     def forward(self, input):
         return F.relu(input)
 
