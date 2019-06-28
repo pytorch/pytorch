@@ -66,7 +66,6 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   out << substr;
   if (!substr.empty() && substr.back() != '\n')
     out << "\n";
-#ifndef __ANDROID__
   // Retrieve original SourceRange, if present.
   if (source_) {
     if (auto orig_source_range = findSourceRangeThatGenerated()) {
@@ -74,7 +73,6 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
       orig_source_range->highlight(out);
     }
   }
-#endif // __ANDROID__
 }
 
 } // namespace jit
