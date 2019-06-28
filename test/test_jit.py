@@ -33,7 +33,6 @@ import tempfile
 import shutil
 import warnings
 import math
-import numbers
 import types
 import pickle
 import pickletools
@@ -6138,27 +6137,18 @@ a")
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    if isinstance(res_python, numbers.Number) and isinstance(res_script, numbers.Number):
-                        mx_val = max(abs(res_python), abs(res_script))
-                        prec = 1e-4 * mx_val
-                    else:
-                        prec = (1e-4)
-                    self.assertEqual(res_python, res_script, message=msg, prec=prec)
-
-        unimplemented = ["fsum", "isclose", "trunc", "hypot", "log2"]
+                    self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
+        unimplemented = ["fsum", "hypot", "isclose", "log2", "trunc"]
         ops = [x for x in dir(math) if callable(getattr(math, x))]
         for op in ops:
             if op in unimplemented:
                 continue
-            elif op == "__loader__":    # Weird windows behavior...
-                continue
-            elif op == "modf":
+            if op == "modf":
                 checkMath("modf", 1, ret_type="Tuple[float, float]")
             elif op in ["isnan", "isinf", "isfinite"]:
                 checkMath(op, 1, ret_type="bool")
             elif op in ["floor", "ceil"]:
-                if not PY2:
-                    checkMathWrap(op, ret_type="int")
+                checkMathWrap(op, ret_type="int")
             elif op == "factorial":
                 checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
             elif op == "frexp":
@@ -6175,12 +6165,15 @@ a")
                 checkMath("pow", 2, is_float=True, ret_type="float")
             else:
                 func = getattr(math, op)
-
+                param_count = 0
                 def num_args(f):  # Parses the docstring for builtin functions
                     spec = f.__doc__.split('\n')[0]
-                    args = spec[spec.find('(') + 1 : spec.find(')')]
-                    return args.count(',') + 1 if args else 0
-                param_count = num_args(func)
+                    args = spec[spec.find('(')+1:spec.find(')')]
+                    return args.count(',')+1 if args else 0
+                if PY2:
+                    param_count = num_args(func)
+                else:
+                    param_count = len(inspect.signature(func).parameters)
                 if param_count == 1:
                     checkMathWrap(op, 1)
                 else:
