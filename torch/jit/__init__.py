@@ -1108,6 +1108,22 @@ def _enable_recursive_script():
     torch._C._jit_recursive_script(False)
 
 
+def script_wrapper(module_class):
+    """
+    Wraps the `__new__` of a class so that construction always returns a
+    ScriptModule
+    """
+    original_new = getattr(module_class, '__new__', lambda self: None)
+    @functools.wraps(original_new)
+    def new_new(cls, *args, **kwargs):
+        x = original_new(cls)
+        x.__init__(*args, **kwargs)
+        return torch.jit.script(x)
+
+    module_class.__new__ = new_new
+    return module_class
+
+
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
@@ -1115,6 +1131,9 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
 
     if torch._C._jit_recursive_script():
+        if inspect.isclass(obj):
+            if inspect.isclass(obj) and issubclass(obj, torch.nn.Module):
+                return script_wrapper(obj)
         if isinstance(obj, torch.nn.Module):
             return _convert_to_script_module(obj)
 
