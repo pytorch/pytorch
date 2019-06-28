@@ -187,6 +187,15 @@ void List<T>::push_back(T&& value) const {
 }
 
 template<class T>
+void List<T>::append(List<T> b) const {
+  if (b.use_count() == 1) {
+    impl_->list.insert(impl_->list.end(), make_move_iterator(b.impl_->list.begin()), make_move_iterator(b.impl_->list.end()));
+  } else {
+    impl_->list.insert(impl_->list.end(), b.impl_->list.begin(), b.impl_->list.end());
+  }
+}
+
+template<class T>
 template<class... Args>
 void List<T>::emplace_back(Args&&... args) const {
   // TODO Use list_element_from?

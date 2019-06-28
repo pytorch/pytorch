@@ -6478,6 +6478,73 @@ a")
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
 
+    def _dtype_to_expect(self, dtype, dim=0):
+        param = ', '.join(['*'] * dim)
+        param = '(' + param + ')'
+        if(dtype == torch.float32):
+            return "Float" + param
+        if(dtype == torch.float64):
+            return "Double" + param
+        if(dtype == torch.int64):
+            return "Long" + param
+        if(dtype == torch.int32):
+            return "Int" + param
+
+    def _test_dtype_op_shape(self, ops, args, input_dims=1):
+        if input_dims < 1:
+            raise 'input dims must be at least 1'
+        dtypes = [torch.float32, torch.float64, torch.int64, torch.int32]
+        str_args = ', '.join([str(arg) for arg in args]) + (', ' if len(args) else '')
+        tensor_data = ('[' * input_dims) + '1, 2, 3' + (input_dims * ']')
+        template = dedent('''
+        def func():
+            return {return_line}
+        ''')
+
+        for op in ops:
+            for dtype in (dtypes + [None]):
+                for tensor_type in dtypes:
+                    # a couple of ops aren't implemented for non-floating types
+                    if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
+                        if op in ['mean', 'softmax', 'log_softmax']:
+                            continue
+                    return_line = "torch.tensor({}, dtype={}).{}({}dtype={})".format(tensor_data, tensor_type, op, str_args, dtype)
+                    # uncomment for debugging a failed test:
+                    # print("testing {}".format(return_line))
+                    code = template.format(return_line=return_line)
+                    scope = {}
+                    exec(code, globals(), scope)
+                    cu = torch.jit.CompilationUnit(code)
+                    graph = cu.func.graph
+                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
+                    input_array = [1, 2, 3]
+                    for _ in range(1, input_dims):
+                        input_array = [input_array]
+                    t = torch.tensor(input_array, dtype=tensor_type)
+                    attr = getattr(t, op)
+                    kwargs = {'dtype': dtype}
+                    result = attr(*args, **kwargs)
+                    expect = self._dtype_to_expect(result.dtype, result.dim())
+                    FileCheck().check("aten::tensor").check(expect).run(graph)
+
+    def test_dtype_op_shape(self):
+        ops = ['sum', 'mean', 'prod']
+        self._test_dtype_op_shape(ops, args=[])
+        self._test_dtype_op_shape(ops, args=[0, False])
+
+        ops = ['sum', 'mean']
+        self._test_dtype_op_shape(ops, args=[[0, 1], False], input_dims=4)
+
+        ops = ['prod']
+        self._test_dtype_op_shape(ops, args=[0, False])
+        self._test_dtype_op_shape(ops, args=[0, True])
+
+    def test_dtype_op_shape2(self):
+        ops = ['cumprod', 'cumsum', 'softmax', 'log_softmax']
+        self._test_dtype_op_shape(ops, args=[0])
+
+        self._test_dtype_op_shape(ops, args=[1], input_dims=4)
+
     def test_filecheck_parse(self):
         def test_check():
             file = """
@@ -15807,7 +15874,10 @@ class TestList(JitTestCase):
 
 class TestDict(JitTestCase):
     def dict(self):
-        return {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}
+
+    def dict2(self):
+        return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
 
     def test_keys(self):
         @torch.jit.script
@@ -15832,6 +15902,118 @@ class TestDict(JitTestCase):
             return len(x)
 
         self.checkScript(length, (self.dict(),))
+
+    def test_copy(self):
+        def func(x):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            return x.copy()
+
+        self.checkScript(func, (self.dict(),))
+
+    def test_items(self):
+        def func(x):
+            # type: (Dict[str, Tensor]) -> List[Tuple[str, Tensor]]
+            return x.items()
+
+        # The value returned by Python is in arbitrary order, so we can't use
+        # checkScript
+        scripted_func = torch.jit.script(func)
+
+        eager_out = (func(self.dict()))
+        script_out = (scripted_func(self.dict()))
+
+        self.assertEqual(len(eager_out), len(script_out))
+        for item in eager_out:
+            self.assertTrue(item in script_out)
+
+    def test_pop(self):
+        def pop(x, key):
+            # type: (Dict[str, Tensor], str) -> Tuple[Tensor, Dict[str, Tensor]]
+            return x.pop(key), x
+
+        # checkScript doesn't copy the inputs, so we can't use it since this mutates
+        # the dict
+        def tester(fn, *args):
+            eager_out = fn(self.dict(), *args)
+            script_out = torch.jit.script(fn)(self.dict(), *args)
+            self.assertEqual(eager_out, script_out)
+
+        tester(pop, 'a')
+
+        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+            torch.jit.script(pop)(self.dict(), 'x')
+
+
+        def default_pop(x, key, default):
+            # type: (Dict[str, Tensor], str, Tensor) -> Tuple[Tensor, Dict[str, Tensor]]
+            return x.pop(key, default), x
+
+        tester(default_pop, 'a', torch.randn(2, 2))
+        tester(default_pop, 'x', torch.randn(2, 2))
+
+    def test_setdefault(self):
+        def setdefault(x, key, default):
+            # type: (Dict[str, Tensor], str, Tensor) -> Dict[str, Tensor]
+            x.setdefault(key, default)
+            return x
+
+        self.checkScript(setdefault, (self.dict(), 'a', torch.randn(2, 2)))
+        self.checkScript(setdefault, (self.dict(), 'nonexistant', torch.randn(2, 2)))
+
+    def test_update(self):
+        def update(a, b):
+            # type: (Dict[str, Tensor], Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]
+            a.update(b)
+            return a, b
+
+        self.checkScript(update, (self.dict(), self.dict()))
+        self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_popitem(self):
+        @torch.jit.script
+        def popitem(x):
+            # type: (Dict[str, Tensor]) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]
+            item = x.popitem()
+            return item, x
+
+        # The value returned by Python is arbitrary, so we can't use checkScript
+        eager_in = self.dict()
+        eager_out = (eager_in.popitem(), eager_in)
+
+        script_out = popitem(self.dict())
+
+        # Check that an item was removed
+        self.assertEqual(len(eager_out[1]), len(script_out[1]))
+
+        # Check that the item is the correct types
+        if PY2:
+            self.assertTrue(isinstance(script_out[0][0], unicode))
+        else:
+            self.assertTrue(isinstance(script_out[0][0], str))
+        self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
+
+    def test_clear(self):
+        def clear(x):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            x.clear()
+            return x
+
+        self.checkScript(clear, (self.dict(),))
+
+    def test_get(self):
+        def get(x, key):
+            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+            return x.get(key)
+
+        self.checkScript(get, (self.dict(), 'a'))
+        self.checkScript(get, (self.dict(), "doesn't exist"))
+
+        def get_default(x, key):
+            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+            return x.get(key, torch.randn(2, 2))
+
+        self.checkScript(get, (self.dict(), 'a'))
+        self.checkScript(get, (self.dict(), "doesn't exist"))
 
     def test_basic(self):
         def simple(x):
@@ -15891,6 +16073,13 @@ class TestDict(JitTestCase):
             return a
 
         self.assertEqual(fn(), {'ok': 10})
+
+    def test_key_type(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected key type 'None' to subtype"):
+            @torch.jit.script
+            def fn(a):
+                # type: (Dict[str, int]) -> int
+                return a[None]
 
     def test_loop(self):
         @torch.jit.script

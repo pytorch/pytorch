@@ -3,6 +3,7 @@ import io
 import os
 import math
 import random
+import re
 import copy
 import shutil
 import torch
@@ -15,7 +16,6 @@ import pickle
 import gzip
 import types
 import textwrap
-import re
 from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
@@ -7921,6 +7921,10 @@ class _TestTorchMixin(object):
         actual = torch.gather(src, 2, idx)
         self.assertEqual(actual, expected, 0)
 
+        # Bool test case
+        t = torch.tensor([[False, True], [True, True]])
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]])), torch.tensor([[False, False], [True, True]]))
+
     def test_gather(self):
         self._test_gather(self, lambda t: t)
 
@@ -7974,6 +7978,24 @@ class _TestTorchMixin(object):
 
     def test_scatterFill(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
+
+    def test_scatter_bool(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([[True, True, True], [True, True, True]], device=device)
+            res = torch.zeros(3, 3, dtype=torch.bool, device=device)
+            res = res.scatter_(0, torch.tensor([[0, 1, 2], [0, 1, 2]], device=device), x)
+            self.assertEqual(res, torch.tensor([[True, False, False], 
+                                                [False, True, False], 
+                                                [False, False, True]], device=device))
+
+    def test_scatter_add_bool(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([[True, True, True, True, True], [True, True, True, True, True]], device=device)
+            res = torch.zeros(3, 5, dtype=torch.bool, device=device)
+            res = res.scatter_add_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]], device=device), x)
+            self.assertEqual(res, torch.tensor([[True, True, True, True, True], 
+                                                [False, True, False, True, False], 
+                                                [True, False, True, False, True]], device=device))
 
     def test_masked_scatter(self):
         for dtype in [torch.uint8, torch.bool]:
@@ -10853,6 +10875,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             for i in range(len(array)):
                 self.assertEqual(tensor_from_array[i], array[i])
 
+        # Test unsupported type
+        array = np.array([1, 2, 3, 4], dtype=np.complex)
+        with self.assertRaises(TypeError):
+            tensor_from_array = torch.from_numpy(array)
+
         # check storage offset
         x = np.linspace(1, 125, 125)
         x.shape = (5, 5, 5)
@@ -11978,6 +12005,48 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         nhwc = x.contiguous(memory_format=torch.channels_last).cuda()
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
         self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+
+    def _test_memory_format_empty_like(self, x):
+        nhwc = x.contiguous(memory_format=torch.channels_last)
+
+        like = torch.empty_like(nhwc, memory_format=torch.preserve_format)
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
+
+        like_x = torch.empty_like(x, memory_format=torch.preserve_format)
+        self.assertTrue(like_x.is_contiguous())
+        self.assertFalse(like_x.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(x, memory_format=torch.channels_last)
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(nhwc, memory_format=torch.contiguous_format)
+        self.assertTrue(like.is_contiguous())
+        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(nhwc)
+        self.assertTrue(like.is_contiguous())
+        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+
+        sparse = x.to_sparse()
+        with self.assertRaises(RuntimeError):
+            z = torch.empty_like(sparse, memory_format=torch.preserve_format)
+
+    def test_memory_format_empty(self):
+        with self.assertRaises(RuntimeError):
+            x = torch.empty((3, 3), memory_format=torch.channels_last)
+        x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_memory_format_empty_like_cuda(self):
+        x = torch.randn(10, 3, 32, 32).cuda()
+        self._test_memory_format_empty_like(x)
+
+    def test_memory_format_empty_like_cpu(self):
+        x = torch.randn(10, 3, 32, 32)
+        self._test_memory_format_empty_like(x)
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
