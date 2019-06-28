@@ -71,6 +71,20 @@ def main():
     )
 
     parser.add_argument(
+        "--omp_num_threads",
+        help="Number of OpenMP threads used in PyTorch/Caffe2 runtime",
+        default=None,
+        type=int
+    )
+
+    parser.add_argument(
+        "--mkl_num_threads",
+        help="Number of MKL threads used in PyTorch/Caffe2 runtime",
+        default=None,
+        type=int
+    )
+
+    parser.add_argument(
         "--ai_pep_format",
         help="Print result when running on AI-PEP",
         default=False,
@@ -93,6 +107,10 @@ def main():
     if benchmark_utils.is_caffe2_enabled(args.framework):
         workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
         workspace.ClearGlobalNetObserver()
+    if args.omp_num_threads:
+        benchmark_utils.set_omp_threads(args.omp_num_threads)
+    if args.mkl_num_threads:
+        benchmark_utils.set_mkl_threads(args.mkl_num_threads)
 
     benchmark_core.BenchmarkRunner(args).run()
 
