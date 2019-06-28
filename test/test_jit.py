@@ -6138,7 +6138,13 @@ a")
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
+                    if isinstance(res_python, numbers.Number) and isinstance(res_script, numbers.Number):
+                        mx_val = max(abs(res_python), abs(res_script))
+                        prec = 1e-4 * mx_val
+                    else:
+                        prec = (1e-4)
+                    self.assertEqual(res_python, res_script, message=msg, prec=prec)
+
         ops = [x for x in dir(math) if callable(getattr(math, x))]
         for op in ops:
             if op in unimplemented_math_ops:
@@ -6150,7 +6156,8 @@ a")
             elif op in ["isnan", "isinf", "isfinite"]:
                 checkMath(op, 1, ret_type="bool")
             elif op in ["floor", "ceil"]:
-                checkMathWrap(op, ret_type="int")
+                if not PY2:
+                    checkMathWrap(op, ret_type="int")
             elif op == "factorial":
                 checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
             elif op == "frexp":
