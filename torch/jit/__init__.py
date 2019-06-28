@@ -1937,10 +1937,9 @@ def _get_builtin_table():
         _builtin_table[id(builtin)] = aten_op
     math_ops = [x for x in dir(math) if callable(getattr(math, x))]
     unimplemented_math_ops = ["fsum", "isclose", "trunc"]
-    special_math_ops = ["remainder"]    # We bound this to aten::mathremainder.
+    special_math_ops = ["remainder"]    # We bound this to aten::mathremainder, as there already exists
+                                        # aten::remainder used for other purposes
     for op in math_ops:
-        if op == "__loader__":  # Weird windows behavior...
-            continue
         if op in unimplemented_math_ops + special_math_ops:
             continue
         _builtin_table[id(getattr(math, op))] = "aten::" + op
