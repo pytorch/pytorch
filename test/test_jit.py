@@ -12767,7 +12767,6 @@ class TestRecursiveScript(JitTestCase):
 
         strong_mod = torch.jit.script(Strong())
 
-    # @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_copying(self):
         class Submodule(torch.nn.Module):
             def __init__(self):
@@ -12840,6 +12839,43 @@ class TestRecursiveScript(JitTestCase):
                 tester.assertEqual(self.linear.in_features, 2)
 
         m = torch.jit.script(M())
+
+    def test_overloading(self):
+        class W(torch.nn.Module):
+            __overloads__ = {'forward': ['forward_tuple', 'forward_tensor']}
+
+            def __init__(self):
+                super(W, self).__init__()
+
+            @torch.jit.export
+            def forward_tuple(self, x):
+                # type: (Tuple[Tensor, Tensor]) -> Tensor
+                return x[0] + 5
+
+            @torch.jit.ignore
+            def forward(self, x):
+                # manually do argument switching
+                if isinstance(x, tuple):
+                    return self.forward_tuple(x)
+                else:
+                    return self.forward_tensor(x)
+
+            @torch.jit.export
+            def forward_tensor(self, x):
+                # type: (Tensor) -> Tensor
+                return x + 20
+
+        class S(torch.nn.Module):
+            def __init__(self):
+                super(S, self).__init__()
+                self.weak = W()
+
+            def forward(self, x):
+                return self.weak(x) + self.weak((x, x))
+
+        s = torch.jit.script(S())
+        x = torch.ones(1)
+        self.assertEqual(s(x), x + 20 + 5 + x)
 
 
 class MnistNet(nn.Module):
