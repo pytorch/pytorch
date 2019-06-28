@@ -1819,8 +1819,9 @@ def _convert_to_script_module(mod, methods=None):
         proxy = WeakScriptModuleProxy(mod, stubs)
         return proxy
     except RuntimeError as e:
-        # Catching and re-raising the error erases the Python traceback and keeps
-        # it from filling up with recursive calls to this function that the
+        # Catching and re-raising the error erases the Python traceback of
+        # recursive calls to this function and only shows 1 entry. This keeps the
+        # traceback from filling up with recursive calls to this function that the
         # compiler makes (but that aren't useful to users)
         raise e
 

@@ -2198,9 +2198,12 @@ struct to_ir {
         return sv->attr(select.range(), method, select.selector().name());
       }
       case TK_APPLY: {
+        // Push the source range of a call in case compiling this function
+        // triggers an error
         push_call(tree.range());
         auto apply = Apply(tree);
         auto sv = emitApplyExpr(apply, n_binders);
+        // Compilation was successful, so remove the function call from the stack
         pop_call();
         return sv;
       } break;
@@ -2967,8 +2970,11 @@ std::shared_ptr<Function> CompilationUnit::define(
         std::make_shared<FunctionResolver>(resolver.get(), function_table);
   }
   auto creator = [def, _resolver, self](Function& method) {
+    // Store the function name so that it can be referenced if there is an error
+    // while compiling this function
     push_function(def.name().name());
     to_ir(def, _resolver, self, method);
+    // Compilation was successful, so remove the function def info
     pop_function();
   };
   return std::make_shared<Function>(

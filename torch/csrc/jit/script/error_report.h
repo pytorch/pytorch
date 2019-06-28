@@ -1,12 +1,15 @@
 #pragma once
 
-#include <torch/csrc/jit/script/tree.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/jit/script/tree.h>
 
 namespace torch {
 namespace jit {
 namespace script {
 
+// These functions are used to report why a function was being compiled (i.e.
+// what was the call stack of user functions at compilation time that led to
+// this error)
 void push_call(const SourceRange& range);
 void pop_call();
 void push_function(const std::string& name);
@@ -17,10 +20,10 @@ struct CAFFE2_API ErrorReport : public std::exception {
       : ss(e.ss.str()), context(e.context), the_message(e.the_message) {}
 
   ErrorReport() : context(c10::nullopt) {}
-  explicit ErrorReport(SourceRange r)
-      : context(std::move(r)) {}
+  explicit ErrorReport(SourceRange r) : context(std::move(r)) {}
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
+
   const char* what() const noexcept override;
 
  private:
