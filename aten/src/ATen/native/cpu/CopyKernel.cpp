@@ -19,9 +19,8 @@ void copy_kernel_cast(TensorIterator& iter) {
       "copy_kernel_cast",
       [&] {
         cpu_kernel(iter, [=](scalar_t a) -> self_T {
-          self_T res = static_cast<self_T>(
+          return static_cast<self_T>(
               static_cast<at::native::inter_copy_type_t<self_T>>(a));
-          return res;
         });
       });
 }

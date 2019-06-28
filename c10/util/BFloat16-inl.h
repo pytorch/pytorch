@@ -26,10 +26,10 @@ class numeric_limits<c10::BFloat16> {
     static constexpr bool has_infinity = true;
     static constexpr bool has_quiet_NaN = true;
     static constexpr c10::BFloat16 lowest() {
-      return at::BFloat16(0xFBFF, at::BFloat16::from_bits());
+      return at::BFloat16(0x0080, at::BFloat16::from_bits());
     }
     static constexpr c10::BFloat16 max() {
-      return at::BFloat16(0x7BFF, at::BFloat16::from_bits());
+      return at::BFloat16(0x7F7F, at::BFloat16::from_bits());
     }
 };
 

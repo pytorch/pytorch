@@ -2859,7 +2859,7 @@ class _TestTorchMixin(object):
         all_dtypes = torch.testing.get_all_dtypes()
         do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
         if torch.cuda.is_available():
-            all_dtypes.remove(torch.bfloat16) # Remove once _th_zero_ is enabled on cuda for bfloat16
+            all_dtypes.remove(torch.bfloat16)  # Remove once _th_zero_ is enabled on cuda for bfloat16
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
     def test_copy_dtypes(self):
@@ -3339,7 +3339,7 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 if dt == torch.bfloat16:
-                    continue # fix once random is implemented for bfloat16 on cuda
+                    continue  # fix once random is implemented for bfloat16 on cuda
 
                 if dt == torch.half and device == 'cpu':
                     # fix once random is implemented for Half on CPU
@@ -3432,7 +3432,7 @@ class _TestTorchMixin(object):
             for shape in shapes:
                 for dt in torch.testing.get_all_dtypes():
                     if dt == torch.bfloat16:
-                        continue # Remove once random is supported for bfloat16 on cuda
+                        continue  # Remove once random is supported for bfloat16 on cuda
 
                     if (device == 'cuda' and dt == torch.bfloat16):
                         continue  # Remove once cuda available for bfloat16
@@ -10420,9 +10420,9 @@ class _TestTorchMixin(object):
             if t.is_cuda and not torch.cuda.is_available():
                 continue
             if t == torch.cuda.BFloat16Tensor:
-                continue # TODO: remove once bfloat16 is available on cuda
+                continue  # TODO: remove once bfloat16 is available on cuda
             if t == torch.BFloat16Tensor:
-                continue # TODO: Fix in the future PRs regarding bfloat16
+                continue  # TODO: Fix in the future PRs regarding bfloat16
             obj = t(100, 100).fill_(1)
             obj.__repr__()
             str(obj)
