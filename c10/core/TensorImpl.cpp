@@ -196,7 +196,11 @@ std::unique_ptr<NamedTensorMetaInterface> NamedTensorMetaInterface::clone() cons
 /// `at::NonVariableTypeMode`.
 #ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
 
+#ifdef USE_STATIC_DISPATCH
+thread_local bool NonVariableTypeMode_enabled = true;
+#else
 thread_local bool NonVariableTypeMode_enabled = false;
+#endif
 
 bool NonVariableTypeMode::is_enabled() {
   return NonVariableTypeMode_enabled;

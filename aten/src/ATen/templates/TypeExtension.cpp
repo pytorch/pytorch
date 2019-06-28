@@ -1,6 +1,7 @@
 #include <ATen/${Type}.h>
 
 #include <ATen/core/ATenDispatch.h>
+#include <ATen/Tensor.h>
 
 namespace at {
 

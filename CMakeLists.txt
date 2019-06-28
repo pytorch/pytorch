@@ -81,6 +81,7 @@ option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
+option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -284,6 +285,10 @@ endif()
 
 if(NAMEDTENSOR_ENABLED)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMEDTENSOR_ENABLED")
+endif()
+
+if(USE_STATIC_DISPATCH)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_STATIC_DISPATCH")
 endif()
 
 # ---[ Whitelist file if whitelist is specified

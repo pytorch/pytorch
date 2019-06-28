@@ -3,8 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/CPUTypeDefault.h>
-#include <ATen/Context.h>
-#include <ATen/Utils.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 $extra_cuda_headers
 
@@ -16,7 +15,7 @@ $extra_cuda_headers
 
 namespace at {
 
-struct ${Type} final : public ${DeviceType}TypeDefault {
+struct TORCH_API ${Type} final : public ${DeviceType}TypeDefault {
   explicit ${Type}();
   virtual Backend backend() const override;
   virtual const char * toString() const override;
