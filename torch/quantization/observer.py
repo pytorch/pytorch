@@ -21,8 +21,8 @@ class Observer(nn.Module):
         self.qscheme = kwargs.get('qscheme', torch.per_tensor_affine)
         assert self.qscheme == torch.per_tensor_affine, \
             'Default Observer only works for per_tensor_affine quantization scheme'
-        self.stats = torch.tensor([-1, 1], dtype=torch.float)
         # Symmetric range for initialization
+        self.stats = torch.tensor([-1, 1], dtype=torch.float)
         self.avg_constant = kwargs.get('avg_constant', 0.9)
 
     def forward(self, x):
@@ -30,9 +30,9 @@ class Observer(nn.Module):
             self.avg_constant * torch.tensor([torch.min(x), torch.max(x)], dtype=torch.float)
 
     def calculate_qparams(self):
+        qparams = torch.zeros(2).float()
+        nLevels = 255.0
         if self.dtype == torch.qint8:
-            qparams = torch.zeros(2).float()
-            nLevels = 255.0
             qparams[0] = 2 * torch.max(self.stats[1], -self.stats[0]) / nLevels
             qparams[1] = 0
         else:
@@ -59,3 +59,9 @@ class WeightObserver(Observer):
 
 def observer(observer_cls, kwargs):
     return partial(observer_cls, **kwargs)
+
+def default_observer(kwargs):
+    return partial(Observer, **kwargs)
+
+def default_weight_observer(kwargs):
+    return partial(WeightObserver, **kwargs)

@@ -5,9 +5,8 @@ import torch
 from .observer import *
 import heapq
 
-def _forward_hook(self, input, output):
-    for module in self.children():
-        module.forward(output)
+def _observer_forward_hook(self, input, output):
+    self.observer(output)
 
 def add_observer(module, qconfig_dict, qconfig_parent=None, prefix=''):
     r"""Transform a module to a quantized module according to qconfig_dict
@@ -36,80 +35,51 @@ def add_observer(module, qconfig_dict, qconfig_parent=None, prefix=''):
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if module.qconfig is not None and len(module._modules) == 0:
-        # observer will be when we swap the module
+        # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
-        # when do we remove hooks?
-        module.observer_hook_handle = module.register_forward_hook(_forward_hook)
+        module.register_forward_hook(_observer_forward_hook)
 
     for name, child in module.named_children():
         if name != 'observer':
             module_prefix = prefix + '.' + name if prefix else name
             add_observer(child, qconfig_dict, module.qconfig, module_prefix)
 
-def add_quant_dequant_call(base_fn):
-    r"""Insert calls to quant and dequant around base_fn calls
-
-    Given a `base_fn` function, insert a call to `quant` before the function
-    call which is supposed to quantize the input and a call to `dequant` after
-    the function call which will dequantize the output of the function.
-
-    Args:
-        base_fn: base function we want to call
-
-    Returns:
-        new_fn: a modified function which calls quant -> base_bn -> dequant
-    """
-    def new_fn(x):
-        x = base_fn.__self__.quant(x)
-        x = base_fn(x)
-        x = base_fn.__self__.dequant(x)
-        return x
-    return new_fn
-
-class QuantWrapper(nn.Module):
-    def __init__(self, module, qconfig):
-        super(QuantWrapper, self).__init__()
-        self.quant = QuantStub(qconfig)
-        self.dequant = DeQuantStub()
-        self.module = module
-
-    def forward(self, X):
-        X = self.quant(X)
-        self.module.forward(X)
-        X = self.dequant(X)
-        return X
-
 def get_config_key(name, qconfig_dict):
     if name in qconfig_dict:
         return name
-    elif name:
-        parent = '.'.join(name.split('.')[:-1])
+    elif '.' in name:
+        parent = name.rsplit('.', 1)[0]
         return get_config_key(parent, qconfig_dict)
     else:
-        return '' if '' in qconfig_dict else None
+        return None
 
-def get_module(mod, name):
+def get_module(model, name):
     if name == '':
-        return mod
+        return model
     splits = name.split('.')
-    for split in splits:
-        mod = mod._modules[split]
-    return mod
+    child = model._modules[splits[0]]
+    for i in range(1, len(splits)):
+        child = child._modules[splits[i]]
+    return child
 
-def add_quant_dequant_module(module, qconfig_dict, name):
-    assert name != ''
-    qconfig = qconfig_dict[name]
-    splits = name.split('.')
-    print('splits:', splits)
-    for split in splits:
-        parent_module = module
-        module = module._modules[split]
-    assert parent_module is not module
-    parent_module._modules[splits[-1]] = QuantWrapper(module, qconfig)
+def _quant_forward_pre_hook(self, input):
+    return self.quant(input[0])
+
+def _dequant_forward_hook(self, input, output):
+    return self.dequant(output)
+
+def add_quant_dequant_hooks(module):
+    module.register_forward_pre_hook(_quant_forward_pre_hook)
+    module.register_forward_hook(_dequant_forward_hook)
+
+def add_quant_dequant_module(module, qconfig):
+    module.add_module('quant', QuantStub(qconfig))
+    module.add_module('dequant', DeQuantStub())
+    add_quant_dequant_hooks(module)
 
 def add_quant_dequant(module, qconfig_dict):
-    r"""Add QuantStub and DeQuantStub module and Wrap the module in QuantWrapper
-    according to qconfig_dict
+    r"""Add QuantStub and DeQuantStub module and add quant dequant calls using
+    forward hooks
     """
     mod_key_set = set()
     for name, _ in module.named_modules():
@@ -118,18 +88,8 @@ def add_quant_dequant(module, qconfig_dict):
         if dict_key is not None:
             mod_key_set.add(dict_key)
 
-    # We need to update the modules from inner most
-    # module to outer modules(in decreasing order of number of '.')
-    print('mod_key_set', mod_key_set)
-    mod_key_heap = []
     for name in mod_key_set:
-        heapq.heappush(mod_key_heap, (-name.count('.'), name))
-    while mod_key_heap:
-        _, name = heapq.heappop(mod_key_heap)
-        if name == '':
-            module = QuantWrapper(module, qconfig_dict[name])
-        else:
-            add_quant_dequant_module(module, qconfig_dict, name)
+        add_quant_dequant_module(get_module(module, name), qconfig_dict[name])
     return module
 
 def prepare(module, qconfig_dict):
@@ -143,7 +103,7 @@ def prepare(module, qconfig_dict):
                      configuration
     """
     add_observer(module, qconfig_dict)
-    return add_quant_dequant(module, qconfig_dict)
+    add_quant_dequant(module, qconfig_dict)
 
 class QuantStub(nn.Module):
     r"""Quantize stub module which will be replace to actual Quantize module
@@ -167,7 +127,7 @@ class DeQuantStub(nn.Module):
     def forward(self, x):
         return x
 
-def quantize(module, qconfig_dict, eval_fn, *eval_args):
+def quantize(module, qconfig_dict, eval_fn, eval_args):
     r"""Given a float module and qconfig_dict, convert it to a quantized module
 
     First it will prepare the module to add observer and quant
@@ -175,7 +135,7 @@ def quantize(module, qconfig_dict, eval_fn, *eval_args):
     step and observers will record the stats of the tensors, after that we will
     call `convert` which will convert the module to a quantized module.
     """
-    module = prepare(module, qconfig_dict)
+    prepare(module, qconfig_dict)
     eval_fn(module, *eval_args)
     convert_to_quantized(module)
     return module
@@ -215,6 +175,9 @@ def swap_module(mod, mapping=DEFAULT_MODULE_MAPPING):
     if hasattr(mod, 'observer'):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
+            # TODO: should we do this?
+            if hasattr(mod, 'quant') and hasattr(mod, 'dequant'):
+                add_quant_dequant_hooks(new_mod)
 
     if type(mod) in STUB_MODULE_MAPPING:
         new_mod = STUB_MODULE_MAPPING[type(mod)].from_float(mod)

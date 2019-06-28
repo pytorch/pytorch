@@ -495,7 +495,6 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def extra_args(self):
         return self._get_arg('extra_args', False)
 
-
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = False
@@ -714,29 +713,11 @@ class TestNN(NNTestCase):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
 
-        def fw_fail1(self, input, output):
-            return output
-
-        def fw_fail2(self, input, output):
-            return input
-
         def bw_fail1(self, grad_input, grad_output):
             return grad_input[:-1]
 
         def bw_fail2(self, grad_input, grad_output):
             return grad_input + (torch.randn(2, 2),)
-
-        with module.register_forward_hook(fw_fail1):
-            with self.assertRaises(RuntimeError) as err:
-                module(input)
-            self.assertIn("fw_fail", err.exception.args[0])
-            self.assertIn("didn't return None", err.exception.args[0])
-
-        with module.register_forward_hook(fw_fail2):
-            with self.assertRaises(RuntimeError) as err:
-                module(input)
-            self.assertIn("fw_fail2", err.exception.args[0])
-            self.assertIn("didn't return None", err.exception.args[0])
 
         with module.register_backward_hook(bw_fail1):
             with self.assertRaises(RuntimeError) as err:
@@ -765,6 +746,28 @@ class TestNN(NNTestCase):
         module(input).backward(torch.ones(5, 5))
         expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
         self.assertEqual(input.grad.data, expected_grad)
+
+    def test_hook_mutations(self):
+        module = nn.Linear(5, 5)
+        input = torch.randn(5, 5, requires_grad=True)
+
+        def forward_pre_hook(m, input):
+            return torch.nn.functional.relu(input[0])
+
+        def forward_hook(m, input, output):
+            return -output
+
+        module.register_forward_pre_hook(forward_pre_hook)
+        module.register_forward_hook(forward_hook)
+        output = module(input)
+        expected_res = -torch.nn.functional.linear(torch.nn.functional.relu(input), module.weight, module.bias)
+        self.assertEqual(output, expected_res)
+        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        mask = (input > 0).double()
+        expected_grad = -torch.ones(5, 5).mm(module.weight.data) * 2 * mask
+        self.assertEqual(input.grad, expected_grad)
+
+
 
     def test_to(self):
         m = nn.Linear(3, 5)
@@ -1603,8 +1606,6 @@ class TestNN(NNTestCase):
             pgm.backward(torch.randn(10, 20))
 
     def test_overwrite_module_params_on_conversion(self):
-        torch.__future__.set_overwrite_module_params_on_conversion(False)
-
         # Test that if the conversion function passed to `module._apply()`
         # changes the TensorImpl type of `module`'s parameters, the `module`'s
         # parameters are always overwritten, regardless of the value of
@@ -1628,82 +1629,81 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected object of scalar type Float but got scalar type Double"):
             mw[0][0] == mw._base[0][0]
 
-        torch.__future__.set_overwrite_module_params_on_conversion(True)
+        try:
+            torch.__future__.set_overwrite_module_params_on_conversion(True)
 
-        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
-        # a view to a module's parameters is still pointing to the same storage as
-        # its base variable after converting the module to a different dtype.
-        m = nn.Linear(20, 10).float()
-        mw = m.weight[:]
-        m.double()
-        mw[0][0] = 5
-        self.assertTrue(mw[0][0] == mw._base[0][0])
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # a view to a module's parameters is still pointing to the same storage as
+            # its base variable after converting the module to a different dtype.
+            m = nn.Linear(20, 10).float()
+            mw = m.weight[:]
+            m.double()
+            mw[0][0] = 5
+            self.assertTrue(mw[0][0] == mw._base[0][0])
 
-        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
-        # `float_module.double()` doesn't preserve previous references to
-        # `float_module`'s parameters or gradients.
-        m = nn.Linear(20, 10).float()
-        m.weight.grad = torch.randn(10, 20).float()
-        weight_ref = m.weight
-        weight_grad_ref = m.weight.grad
-        m.double()
-        self.assertNotEqual(weight_ref.dtype, m.weight.dtype)
-        self.assertNotEqual(weight_grad_ref.dtype, m.weight.grad.dtype)
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # `float_module.double()` doesn't preserve previous references to
+            # `float_module`'s parameters or gradients.
+            m = nn.Linear(20, 10).float()
+            m.weight.grad = torch.randn(10, 20).float()
+            weight_ref = m.weight
+            weight_grad_ref = m.weight.grad
+            m.double()
+            self.assertNotEqual(weight_ref.dtype, m.weight.dtype)
+            self.assertNotEqual(weight_grad_ref.dtype, m.weight.grad.dtype)
 
-        def add_one_inplace(t):
-            return t.add_(1.0)
+            def add_one_inplace(t):
+                return t.add_(1.0)
 
-        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
-        # applying an in-place operation to a module would bump the module's
-        # original parameters' version counter.
-        m = nn.Linear(20, 10)
-        pvm = m.weight.mul(m.weight)
-        weight_ref = m.weight
-        m_weight_version_saved = weight_ref._version
-        m = m._apply(add_one_inplace)
-        # Test that the in-place operation bumps the original parameter's version counter
-        self.assertGreater(weight_ref._version, m_weight_version_saved)
-        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            pvm.backward(torch.randn(10, 20))
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # applying an in-place operation to a module would bump the module's
+            # original parameters' version counter.
+            m = nn.Linear(20, 10)
+            pvm = m.weight.mul(m.weight)
+            weight_ref = m.weight
+            m_weight_version_saved = weight_ref._version
+            m = m._apply(add_one_inplace)
+            # Test that the in-place operation bumps the original parameter's version counter
+            self.assertGreater(weight_ref._version, m_weight_version_saved)
+            with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+                pvm.backward(torch.randn(10, 20))
 
-        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
-        # applying an in-place operation to a module would bump the module's
-        # original parameters' gradients' version counter.
-        m = nn.Linear(20, 10)
-        m.weight.grad = torch.randn(10, 20).requires_grad_()
-        pgm = m.weight.grad.mul(m.weight.grad)
-        weight_grad_ref = m.weight.grad
-        m_weight_grad_version_saved = weight_grad_ref._version
-        m = m._apply(add_one_inplace)
-        self.assertGreater(weight_grad_ref._version, m_weight_grad_version_saved)
-        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            pgm.backward(torch.randn(10, 20))
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # applying an in-place operation to a module would bump the module's
+            # original parameters' gradients' version counter.
+            m = nn.Linear(20, 10)
+            m.weight.grad = torch.randn(10, 20).requires_grad_()
+            pgm = m.weight.grad.mul(m.weight.grad)
+            weight_grad_ref = m.weight.grad
+            m_weight_grad_version_saved = weight_grad_ref._version
+            m = m._apply(add_one_inplace)
+            self.assertGreater(weight_grad_ref._version, m_weight_grad_version_saved)
+            with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+                pgm.backward(torch.randn(10, 20))
 
-        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
-        # applying an out-of-place operation to a module doesn't bump
-        # the module's original parameters' version counter.
-        m = nn.Linear(20, 10)
-        weight_ref = m.weight
-        m_weight_version_saved = weight_ref._version
-        m = m._apply(lambda t: torch.randn(t.shape))
-        self.assertEqual(weight_ref._version, m_weight_version_saved)
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # applying an out-of-place operation to a module doesn't bump
+            # the module's original parameters' version counter.
+            m = nn.Linear(20, 10)
+            weight_ref = m.weight
+            m_weight_version_saved = weight_ref._version
+            m = m._apply(lambda t: torch.randn(t.shape))
+            self.assertEqual(weight_ref._version, m_weight_version_saved)
 
-        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
-        # applying an out-of-place operation to a module doesn't bump
-        # the module's original parameters' gradients' version counter.
-        m = nn.Linear(20, 10)
-        m.weight.grad = torch.randn(10, 20).requires_grad_()
-        weight_grad_ref = m.weight.grad
-        m_weight_grad_version_saved = weight_grad_ref._version
-        m = m._apply(lambda t: torch.randn(t.shape))
-        self.assertEqual(weight_grad_ref._version, m_weight_grad_version_saved)
-
-        torch.__future__.set_overwrite_module_params_on_conversion(False)
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # applying an out-of-place operation to a module doesn't bump
+            # the module's original parameters' gradients' version counter.
+            m = nn.Linear(20, 10)
+            m.weight.grad = torch.randn(10, 20).requires_grad_()
+            weight_grad_ref = m.weight.grad
+            m_weight_grad_version_saved = weight_grad_ref._version
+            m = m._apply(lambda t: torch.randn(t.shape))
+            self.assertEqual(weight_grad_ref._version, m_weight_grad_version_saved)
+        finally:
+            torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_overwrite_module_params_on_conversion_cpu_cuda(self):
-        torch.__future__.set_overwrite_module_params_on_conversion(False)
-
         # Test that under the current default settings
         # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
         # a view to a module's parameters is not pointing to the same storage as
@@ -1718,27 +1718,30 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA"):
             mw[0][0] == mw._base[0][0]
 
-        torch.__future__.set_overwrite_module_params_on_conversion(True)
+        try:
+            torch.__future__.set_overwrite_module_params_on_conversion(True)
 
-        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
-        # a view to a module's parameters is still pointing to the same storage as
-        # its base variable after converting the module to a different device.
-        m = nn.Linear(20, 10)
-        mw = m.weight[:]
-        m.to('cuda')
-        mw[0][0] = 5
-        self.assertTrue(mw[0][0] == mw._base[0][0])
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # a view to a module's parameters is still pointing to the same storage as
+            # its base variable after converting the module to a different device.
+            m = nn.Linear(20, 10)
+            mw = m.weight[:]
+            m.to('cuda')
+            mw[0][0] = 5
+            self.assertTrue(mw[0][0] == mw._base[0][0])
 
-        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
-        # `cpu_module.to("cuda")` doesn't preserve previous references to
-        # `cpu_module`'s parameters or gradients.
-        m = nn.Linear(20, 10)
-        m.weight.grad = torch.randn(10, 20)
-        weight_ref = m.weight
-        weight_grad_ref = m.weight.grad
-        m.to('cuda')
-        self.assertNotEqual(weight_ref.device, m.weight.device)
-        self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # `cpu_module.to("cuda")` doesn't preserve previous references to
+            # `cpu_module`'s parameters or gradients.
+            m = nn.Linear(20, 10)
+            m.weight.grad = torch.randn(10, 20)
+            weight_ref = m.weight
+            weight_grad_ref = m.weight.grad
+            m.to('cuda')
+            self.assertNotEqual(weight_ref.device, m.weight.device)
+            self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
+        finally:
+            torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     def test_type(self):
         l = nn.Linear(10, 20)
@@ -4581,6 +4584,8 @@ class TestNN(NNTestCase):
         incompatible_keys = net.load_state_dict(state_dict)
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
+        self.assertNotIn('Incompatible', str(incompatible_keys))
+        self.assertNotIn('Incompatible', repr(incompatible_keys))
         self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
         self.assertEqual(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
@@ -4592,6 +4597,8 @@ class TestNN(NNTestCase):
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
         self.assertIn('extra', incompatible_keys.unexpected_keys)
+        self.assertIn('Incompatible', str(incompatible_keys))
+        self.assertIn('Incompatible', repr(incompatible_keys))
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
@@ -5305,6 +5312,21 @@ class TestNN(NNTestCase):
         log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
         with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+    def test_CTCLoss_empty_target_cpu(self):
+        target_lengths = [0, 0, 0]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (0,), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+        self.assertTrue((loss >= 0).all().item())
+
+        target_lengths = [0, 9, 0]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (9,), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+        self.assertTrue((loss >= 0).all().item())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -7335,7 +7357,7 @@ class TestNN(NNTestCase):
                             [[3.4500, 6.0000000000, 5.0000, 4.8340, 9.0000],
                              [2.2500, 6.3332500450, 5.0000, 5.1000, 7.7500]]).view(1, 1, 2, 5)
                     else:
-                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                        raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
                 elif mode == 'nearest':
                     if padding_mode == 'zeros':
                         groundtruth = torch.tensor(
@@ -7350,9 +7372,9 @@ class TestNN(NNTestCase):
                             [[1., 8., 5., 7., 9.],
                              [1., 8., 5., 8., 9.]]).view(1, 1, 2, 5)
                     else:
-                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                        raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
                 else:
-                    assert False, "missing groundtruth test for interpolation mode '{}'".format(mode)
+                    raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
                 output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode)
                 self.assertEqual(output, groundtruth,
                                  "groundtruth comparison failed for mode={}, "
@@ -9070,6 +9092,54 @@ for test_params in module_tests + new_module_tests:
 
         test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
         test = NewModuleTest(**test_params)
+        add_test(test, decorator)
+    if 'check_with_long_tensor' in test_params:
+        fullname = test_params.get('fullname', None)
+        if fullname:
+            test_params['fullname'] = fullname + '_with_long_tensor'
+        else:
+            desc = test_params.get('desc', None)
+            test_params['desc'] = 'with_long_tensor' if desc is None else desc + '_with_long_tensor'
+
+        def double_equivalent_of_long_tensor(size):
+            return torch.randint(-1000, 1000, size=size).double()
+
+        def apply_to_cons(t):
+            if t.is_floating_point():
+                if isinstance(t, Parameter):
+                    return Parameter(double_equivalent_of_long_tensor(t.size()))
+                elif isinstance(t, torch.Tensor):
+                    return double_equivalent_of_long_tensor(t.size())
+            else:
+                return t
+
+        def gen_long_tensor_constructor(constructor):
+            def long_tensor_constructor(*args, **kwargs):
+                cons = constructor(*args, **kwargs)
+                cons._apply(apply_to_cons)
+                return cons
+            long_tensor_constructor.__name__ = constructor.__name__
+            return long_tensor_constructor
+
+        def gen_long_tensor_input(input_size):
+            def input_func():
+                return double_equivalent_of_long_tensor(input_size)
+            return input_func
+
+        def reference_fn(i, p, m):
+            m._apply(lambda t: t.long())
+            input = i.long()
+            out = m.forward(input)
+            return out
+
+        test_params['constructor'] = gen_long_tensor_constructor(test_params['constructor'])
+        test_params['input_fn'] = gen_long_tensor_input(test_params['input_size'])
+        test_params['reference_fn'] = reference_fn
+        test_params['check_forward_only'] = True
+        # Currently we don't support conv2d/conv3d for LongTensor in CUDA
+        test_params['test_cuda'] = False
+        test = NewModuleTest(**test_params)
+
         add_test(test, decorator)
 
 for test_params in criterion_tests + new_criterion_tests:

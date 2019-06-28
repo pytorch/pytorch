@@ -3,8 +3,14 @@ from .convert_modules import *  # noqa: F401
 from .observer import *  # noqa: F401
 from .QConfig import *  # noqa: F401
 
+def default_eval_fn(model, calib_data):
+    r"""
+    Default evaluation function takes a torch.utils.data.Dataset or a list of
+    input Tensors and run the model on the dataset
+    """
+    for data in calib_data:
+        model(data)
+
 _all__ = [
-    'weight_observer_fn', 'activation_observer_fn', 'qparam_fn_int8',
-    'qparam_fn_uint8', 'AbstractQuant', 'AbstractDeQuant',
-    'calculateQParams', 'quantizeModel', 'swapModule', 'quantizeWeightAndBias'
+
 ]
