@@ -1,6 +1,7 @@
 from __future__ import division
 import torch
 import torch.jit
+from torch.jit import unimplemented_math_ops
 import torch.jit._logging
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6138,12 +6139,13 @@ a")
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
-        unimplemented = ["fsum", "hypot", "isclose", "log2", "trunc"]
         ops = [x for x in dir(math) if callable(getattr(math, x))]
         for op in ops:
-            if op in unimplemented:
+            if op in unimplemented_math_ops:
                 continue
-            if op == "modf":
+            if op.startswith("__"):
+                continue
+            elif op == "modf":
                 checkMath("modf", 1, ret_type="Tuple[float, float]")
             elif op in ["isnan", "isinf", "isfinite"]:
                 checkMath(op, 1, ret_type="bool")
