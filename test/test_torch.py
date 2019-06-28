@@ -10875,6 +10875,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             for i in range(len(array)):
                 self.assertEqual(tensor_from_array[i], array[i])
 
+        # Test unsupported type
+        array = np.array([1, 2, 3, 4], dtype=np.complex)
+        with self.assertRaises(TypeError):
+            tensor_from_array = torch.from_numpy(array)
+
         # check storage offset
         x = np.linspace(1, 125, 125)
         x.shape = (5, 5, 5)
