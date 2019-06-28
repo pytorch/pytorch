@@ -893,7 +893,7 @@ struct PythonPrintPass {
       case aten::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
-      case aten::Str: {
+      case aten::str: {
         printValueList(stmt, node->inputs(), "str(", ")");
       } break;
       case aten::__getitem__: {
