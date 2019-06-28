@@ -10,10 +10,8 @@ namespace jit {
 using GraphExecutorImplCreator =
     std::function<GraphExecutorImplBase*(std::shared_ptr<Graph>, bool)>;
 
-static const Symbol kDefaultExecutor =
-    Symbol::fromQualString("executor::default");
-static const Symbol kProfilingExecutor =
-    Symbol::fromQualString("executor::profiling");
+extern const Symbol kDefaultExecutor;
+extern const Symbol kProfilingExecutor;
 
 struct TORCH_API RegisterGraphExecutorImpl {
   RegisterGraphExecutorImpl(Symbol name, GraphExecutorImplCreator creator);

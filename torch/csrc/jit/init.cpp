@@ -3,7 +3,6 @@
 
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/autodiff.h>
-#include <torch/csrc/jit/custom_graph_executor_impl.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
@@ -348,7 +347,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_reset_graph_executor",
-          []() { setGraphExecutorName(kDefaultExecutor); })
+          []() {
+            setGraphExecutorName(Symbol::fromQualString("executor::default"));
+          })
       .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
