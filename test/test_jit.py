@@ -12741,7 +12741,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return x + self.x
 
-        self.assertExportImportModule(M())
+        self.assertExportImportModule(M(2), (torch.randn(2, 2),))
 
     @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
