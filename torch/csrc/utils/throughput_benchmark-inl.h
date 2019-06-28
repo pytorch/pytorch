@@ -115,9 +115,9 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
                             end_time - start_time)
                             .count() /
       1000.0 / 1000.0;
-  // We use config.num_iters instead of num_attempted_iters as it is repsesatative
-  // of the real work done. Last attempted iteration on each calling threads
-  // doesn't represent the real work (i.e. running the model)
+  // We use config.num_iters instead of num_attempted_iters as it is
+  // repsesatative of the real work done. Last attempted iteration on each
+  // calling threads doesn't represent the real work (i.e. running the model)
   stats.latency_avg_ms =
       total_time_ms * config.num_calling_threads / config.num_iters;
   stats.num_iters = config.num_iters;

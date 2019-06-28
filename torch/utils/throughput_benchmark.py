@@ -11,7 +11,7 @@ def format_time(time_us=None, time_ms=None, time_s=None):
         elif time_s is not None:
             time_us = time_s * 1000.0 * 1000.0
         else:
-            assert "Incorrect code :)"
+            assert False, "Incorrect code :)"
 
     US_IN_SECOND = 1000.0 * 1000.0
     US_IN_MS = 1000.0
