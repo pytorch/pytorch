@@ -9,7 +9,7 @@ import torch
 import numpy as np
 import io
 
-from test_pytorch_onnx_caffe2 import skipIfUnsupportedMinOpsetVersion
+from test_pytorch_onnx_caffe2 import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
 
 class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
@@ -129,6 +129,8 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
+    # TODO: enable for opset 10 when ONNXRuntime version will be updated 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_topk(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
