@@ -114,6 +114,7 @@ def type_to_python(typename, size=None):
         'BoolTensor': 'Tensor',
         'IndexTensor': 'Tensor',
         'Tensor': 'Tensor',
+        'MemoryFormat': 'memory_format',
         'IntArrayRef': '_size',
         'IntArrayRef[]': 'Union[_int, _size]',
         'TensorList': 'Union[Tuple[Tensor, ...], List[Tensor]]',
@@ -159,6 +160,8 @@ def arg_to_type_hint(arg):
                 default = '(' + default[1:-1] + ')'
             else:
                 raise Exception("Unexpected default constructor argument of type {}".format(arg['dynamic_type']))
+        elif default == 'MemoryFormat::Contiguous':
+            default = 'contiguous_format'
         elif default == 'QScheme::PER_TENSOR_AFFINE':
             default = 'per_tensor_affine'
         default = '={}'.format(default)
