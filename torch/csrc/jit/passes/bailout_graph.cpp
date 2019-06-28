@@ -132,6 +132,10 @@ struct BailOutGraphBuilderForNode {
   std::unordered_map<Value*, Value*> old_to_new_;
 };
 
+// `BailOutInserter` replaces prim::Guard nodes with
+// prim::BailOut nodes that allow interpreter to
+// resume execution of the unoptimized(deoptimized)
+// version of an original graph from a particular point
 struct BailOutInserter {
   explicit BailOutInserter(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
@@ -144,6 +148,10 @@ struct BailOutInserter {
     addUnoptimizedFuncToBailouts();
   }
 
+  // Packs the original unoptimized graph into a Function constant
+  // and add it as the first input to every prim::BailOut point
+  // This graph will be used to compute a bailout graph for
+  // any given bailout point
   void addUnoptimizedFuncToBailouts() {
     auto unoptimized_graph = graph_->copy();
     auto func = std::make_shared<Function>(
@@ -156,6 +164,9 @@ struct BailOutInserter {
     }
   }
 
+  // Removes guards by hooking up the guarded tensor
+  // directly to its users and also clears
+  // profiling information on it.
   void removeGuards(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
@@ -172,6 +183,8 @@ struct BailOutInserter {
     }
   }
 
+  // replace each prim::Guard
+  // with its corresponding prim::BailOut
   void replaceGuardsWithBailouts() {
     for (auto e : replacements_) {
       e.first->replaceAllUsesWith(e.second);
@@ -180,6 +193,11 @@ struct BailOutInserter {
     }
   }
 
+  // Inserts prim::BailOut nodes for every prim::Guard
+  // Each BailOut point takes the set of inputs live
+  // at that particular execution point.
+  // An input is live if it's used beyond the guard/BailOut
+  // point to compute graph's outputs
   void insertBailOuts(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
@@ -232,6 +250,8 @@ void InsertBailOuts(std::shared_ptr<Graph> graph) {
   ibo.run();
 }
 
+// linearly scans through graph's nodes to locate prim::BailOut whose
+// index matches the given `index`
 static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
   for (auto n : b->nodes()) {
     if (n->kind() == prim::BailOut && n->hasAttribute(attr::index) &&
@@ -247,9 +267,13 @@ static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
   return nullptr;
 }
 
+// Removes prim::BailOuts and hooks the guarded input directly
+// to its users
 static void removeBailouts(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::BailOut) {
+      // clear profiling information
+      it->inputs().at(0)->setType(TensorType::create());
       it->output()->replaceAllUsesWith(it->inputs().at(0));
       it.destroyCurrent();
     } else {
@@ -260,6 +284,7 @@ static void removeBailouts(Block* b) {
   }
 }
 
+// see `bailout_graph.h`
 TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
     int64_t bailout_index,
     const std::shared_ptr<Graph>& orig,
