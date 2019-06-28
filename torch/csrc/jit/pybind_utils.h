@@ -582,7 +582,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return pyObj;
   } else {
-    AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
+    AT_ERROR(
+        "Missing cases in 'toPyObject'! Can't convert ",
+        ivalue.tagKind(),
+        " to a Python object");
   }
 }
 
@@ -721,6 +724,9 @@ inline py::object invokeScriptFunctionFromPython(
     AutoNoGIL no_gil_guard;
     callee.run(stack);
   }
+  AT_CHECK(
+      stack.size() > 0,
+      "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
 
