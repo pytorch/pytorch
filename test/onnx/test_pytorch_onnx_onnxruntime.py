@@ -132,7 +132,9 @@ class TestONNXRuntime(unittest.TestCase):
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
             def forward(self, input):
-                return torch.logsumexp(input, dim=(0, 1))
+                a = torch.logsumexp(input, dim=0)
+                b = torch.logsumexp(input, dim=(0, 1))
+                return a + b
 
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
