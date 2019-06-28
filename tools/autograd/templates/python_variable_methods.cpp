@@ -166,7 +166,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  auto memory_format = r.toMemoryFormat(0);
+  auto memory_format = r.memoryformat(0);
   // avoids touching the GIL or current device if self is already contiguous
   if (self_.is_contiguous(memory_format)) {
     // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
@@ -428,12 +428,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
-  }
-  return torch::utils::tensor_to_numpy(self_.tensor_data());
+  return torch::utils::tensor_to_numpy(self_);
   END_HANDLE_TH_ERRORS
 }
 
@@ -490,7 +485,7 @@ static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyO
   });
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto memory_format = r.toMemoryFormat(0);
+  auto memory_format = r.memoryformat(0);
   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
   return wrap(dispatch_is_contiguous(self, memory_format));
   END_HANDLE_TH_ERRORS

@@ -21,7 +21,8 @@
 
 namespace at {
 
-static Tensor empty_complex(IntArrayRef size, const TensorOptions & options) {
+static Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(!optional_memory_format.has_value(), "memory format is not supported")
   AT_ASSERT(options.device().is_cpu());
 
   for (auto x: size) {
@@ -47,7 +48,7 @@ static Tensor empty_complex(IntArrayRef size, const TensorOptions & options) {
 
 static auto& complex_empty_registration = globalATenDispatch().registerOp(
     Backend::ComplexCPU,
-    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
+    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
     &empty_complex);
 
 }
