@@ -5,8 +5,6 @@ namespace jit {
 
 extern const Symbol kDefaultExecutor =
     Symbol::fromQualString("executor::default");
-extern const Symbol kProfilingExecutor =
-    Symbol::fromQualString("executor::profiling");
 
 namespace {
 

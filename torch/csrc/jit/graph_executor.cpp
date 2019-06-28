@@ -598,7 +598,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 RegisterGraphExecutorImpl reg_graph_executor_impl(
     kDefaultExecutor,
     [](const std::shared_ptr<Graph>& graph, bool optimize) {
-      return new GraphExecutorImpl(graph, optimize);
+      return new GraphExecutorImpl(std::move(graph), optimize);
     });
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)

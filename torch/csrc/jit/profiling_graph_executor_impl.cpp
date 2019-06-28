@@ -81,7 +81,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
 }
 
 RegisterGraphExecutorImpl reg_profiling_graph_executor_impl(
-    kProfilingExecutor,
+    Symbol::fromQualString("executor::profiling"),
     [](const std::shared_ptr<Graph>& graph, bool optimize) {
       return new ProfilingGraphExecutorImpl(graph, optimize);
     });
