@@ -189,7 +189,7 @@ struct PythonPrintPass {
 
   class TaggedStringStream {
    public:
-    TaggedStringStream(const SourceRangeStack* srs) : srs(srs) {}
+    TaggedStringStream(const SourceRangeStack* srs) : srs_(srs) {}
     TaggedStringStream(TaggedStringStream&& rhs) = default;
 
     TaggedStringStream& operator<<(const std::string& s) {
@@ -199,16 +199,21 @@ struct PythonPrintPass {
       if (s.size() == 0) {
         return *this;
       }
-      ranges_.emplace_back((size_t)oss.tellp(), srs->back());
-      oss << s;
+
+      if (!ranges_.size() || ranges_.back().range != srs_->back()) {
+        ranges_.emplace_back((size_t)oss_.tellp(), srs_->back());
+      }
+      oss_ << s;
       return *this;
     }
 
     TaggedStringStream& operator<<(const TaggedStringStream& rhs) {
       for (const auto& range : rhs.ranges_) {
-        ranges_.emplace_back((size_t)oss.tellp() + range.bytes, range.range);
+        if (!ranges_.size() || ranges_.back().range != range.range) {
+          ranges_.emplace_back((size_t)oss_.tellp() + range.bytes, range.range);
+        }
       }
-      oss << rhs.oss.str();
+      oss_ << rhs.oss_.str();
       return *this;
     }
 
@@ -223,14 +228,15 @@ struct PythonPrintPass {
 
     template <typename T>
     TaggedStringStream& operator<<(const T& t) {
-      std::stringstream ss;
-      ss << t;
-      (*this) << ss.str();
+      if (!ranges_.size() || ranges_.back().range != srs_->back()) {
+        ranges_.emplace_back((size_t)oss_.tellp(), srs_->back());
+      }
+      oss_ << t;
       return *this;
     }
 
     std::string str() const {
-      return oss.str();
+      return oss_.str();
     }
 
     const std::vector<TaggedRange>& ranges() const {
@@ -238,9 +244,9 @@ struct PythonPrintPass {
     }
 
    private:
-    std::ostringstream oss;
+    std::ostringstream oss_;
     std::vector<TaggedRange> ranges_;
-    const SourceRangeStack* srs;
+    const SourceRangeStack* srs_;
   };
 
   TaggedStringStream body_;
@@ -713,14 +719,13 @@ struct PythonPrintPass {
     // first place
     for (size_t i = 0; i < long_inline_slice; ++i) {
       if (isNonConstantInline(inputs[i])) {
-        printOutputDefinition(inputs[i]->node(), useOf(inputs[i]));
+        printOutputDefinition(inputs[i]->node(), *useOf(inputs[i]));
       }
     }
   }
 
-  void printOutputDefinition(
-      Node* node,
-      const std::shared_ptr<TaggedStringStream>& expr) {
+  template <typename T>
+  void printOutputDefinition(Node* node, const T& expr) {
     assignValuesToTheirUniqueNames(node->outputs());
     indent();
     // Print outputs
@@ -728,7 +733,7 @@ struct PythonPrintPass {
       printValueList(body_, node->outputs());
       body_ << " = ";
     }
-    body_ << *expr << "\n";
+    body_ << expr << "\n";
   }
 
   // Recursively check contained types for any class dependencies
@@ -811,9 +816,9 @@ struct PythonPrintPass {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
-        auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
-        (*ss) << "fork(" << name << ")";
-        printOutputDefinition(node, ss);
+        std::stringstream ss;
+        ss << "fork(" << name << ")";
+        printOutputDefinition(node, ss.str());
       } break;
       case prim::Function: {
         if (enforce_importable_) {
@@ -845,7 +850,7 @@ struct PythonPrintPass {
         // because of [reordering of inlines]
         if (output_inline_.count(node) == 0 ||
             (node->kind() == prim::Constant && isLongLine(ss->str()))) {
-          printOutputDefinition(node, ss);
+          printOutputDefinition(node, *ss);
         } else {
           // this node is safe to inline, so assign the output value
           // to that expression directly

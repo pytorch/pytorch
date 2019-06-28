@@ -23,6 +23,7 @@ struct Source {
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
       : text_(std::move(text)),
         filename_(c10::nullopt),
+        starting_line_no_(0),
         gen_ranges_(std::move(gen_ranges)) {
     calc_line_start_offsets();
   }
@@ -145,6 +146,15 @@ struct CAFFE2_API SourceRange {
         (size_t)col_offset);
   }
 
+  bool operator==(const SourceRange& rhs) const {
+    return start() == rhs.start() && end() == rhs.end() &&
+        source() == rhs.source();
+  }
+
+  bool operator!=(const SourceRange& rhs) const {
+    return !(*this == rhs);
+  }
+  
   c10::optional<SourceRange> findSourceRangeThatGenerated() const {
     if (!source_) {
       return c10::nullopt;

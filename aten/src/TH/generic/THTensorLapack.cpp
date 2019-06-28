@@ -259,53 +259,6 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   c10::raw::intrusive_ptr::decref(work);
 }
 
-void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz, const char *uplo)
-{
-  if (a == NULL) a = rv_;
-  THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 1,"A should be square");
-
-  int n, lda, lwork, info;
-  THTensor *work = nullptr;
-  scalar_t wkopt;
-
-  THTensor *rv__ = NULL;
-  THTensor *re__ = NULL;
-
-  rv__ = THTensor_(cloneColumnMajor)(rv_, a);
-
-  n = THTensor_sizeLegacyNoScalars(rv__, 0);
-  lda = n;
-
-  THTensor_(resize1d)(re_,n);
-  re__ = THTensor_(newContiguous)(re_);
-
-  /* get optimal workspace size */
-  if (n != 0) {
-    THLapack_(syev)(jobz[0], uplo[0], n, rv__->data<scalar_t>(), lda,
-                    re_->data<scalar_t>(), &wkopt, -1, &info);
-    lwork = (int)wkopt;
-    work = THTensor_(newWithSize1d)(lwork);
-    THLapack_(syev)(jobz[0], uplo[0], n, rv__->data<scalar_t>(), lda,
-                    re_->data<scalar_t>(), work->data<scalar_t>(), lwork, &info);
-
-    THLapackCheckWithCleanup("Lapack Error %s : %d off-diagonal elements didn't converge to zero",
-                             THCleanup(c10::raw::intrusive_ptr::decref(rv__);
-                                       c10::raw::intrusive_ptr::decref(re__);
-                                       c10::raw::intrusive_ptr::decref(work);),
-                             "syev", info,"");
-  }
-
-  // No eigenvectors specified
-  if (*jobz == 'N') {
-    THTensor_(fill)(rv_, 0);
-  }
-
-  THTensor_(freeCopyTo)(rv__, rv_);
-  THTensor_(freeCopyTo)(re__, re_);
-  c10::raw::intrusive_ptr::decref(work);
-}
-
 void THTensor_(gesdd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* some, const char* compute_uv)
 {
   THTensor *ra_ = THTensor_(new)();

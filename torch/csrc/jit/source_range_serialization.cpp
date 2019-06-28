@@ -52,7 +52,7 @@ class SourceRangeDeserializer {
 c10::IValue SourceRangeSerializer::serialize(const SourceRange& sr) {
   std::vector<c10::IValue> elements = {
       serialize_source(sr.source()), (int64_t)sr.start(), (int64_t)sr.end()};
-  return c10::ivalue::Tuple::create(elements);
+  return c10::ivalue::Tuple::create(std::move(elements));
 }
 
 c10::IValue SourceRangeSerializer::serialize_source(
@@ -62,7 +62,7 @@ c10::IValue SourceRangeSerializer::serialize_source(
   }
   std::vector<c10::IValue> elements{
       s->text(), s->filename(), (int64_t)s->starting_line_no()};
-  auto serialized = c10::ivalue::Tuple::create(elements);
+  auto serialized = c10::ivalue::Tuple::create(std::move(elements));
   serialized_sources[s] = serialized;
   return serialized;
 }
@@ -76,7 +76,7 @@ void SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
   for (const auto& range : ranges) {
     std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
                                        srs->serialize(range.range)};
-    p->addIValue(c10::ivalue::Tuple::create(row_elems));
+    p->addIValue(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
   p->endTuple();
   p->finish();
@@ -114,7 +114,7 @@ c10::optional<SourceRange> SourceRangeUnpickler::findSourceRangeThatGenerated(
   unpickle();
 
   auto query = TaggedRange(range.start(), SourceRange{""});
-  auto entry = std::lower_bound(
+  auto entry = std::upper_bound(
       unpickled_records->begin(),
       unpickled_records->end(),
       query,
@@ -122,8 +122,10 @@ c10::optional<SourceRange> SourceRangeUnpickler::findSourceRangeThatGenerated(
         return a.bytes < b.bytes;
       });
 
-  if (entry != unpickled_records->end()) {
-    return entry->range;
+  // NB: must decrement iterator since upper_bound finds the element
+  // *greater than* the query.
+  if (entry != unpickled_records->begin()) {
+    return (entry - 1)->range;
   }
 
   return c10::nullopt;
