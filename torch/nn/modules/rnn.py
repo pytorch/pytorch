@@ -7,14 +7,13 @@ from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence, get_packed_sequence
 from .. import init
-from .. import _VF
 from ..._jit_internal import weak_module, weak_script_method, weak_script, \
     _parameter_list
 
 _rnn_impls = {
-    'GRU': _VF.gru,
-    'RNN_TANH': _VF.rnn_tanh,
-    'RNN_RELU': _VF.rnn_relu,
+    'GRU': torch.gru,
+    'RNN_TANH': torch.rnn_tanh,
+    'RNN_RELU': torch.rnn_relu,
 }
 
 
@@ -518,11 +517,11 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
-                              self.dropout, self.training, self.bidirectional, self.batch_first)
+            result = torch.lstm(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
+                                self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
-                              self.num_layers, self.dropout, self.training, self.bidirectional)
+            result = torch.lstm(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
+                                self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]
 
@@ -792,13 +791,13 @@ class RNNCell(RNNCellBase):
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
         self.check_forward_hidden(input, hx, '')
         if self.nonlinearity == "tanh":
-            ret = _VF.rnn_tanh_cell(
+            ret = torch.rnn_tanh_cell(
                 input, hx,
                 self.weight_ih, self.weight_hh,
                 self.bias_ih, self.bias_hh,
             )
         elif self.nonlinearity == "relu":
-            ret = _VF.rnn_relu_cell(
+            ret = torch.rnn_relu_cell(
                 input, hx,
                 self.weight_ih, self.weight_hh,
                 self.bias_ih, self.bias_hh,
@@ -884,7 +883,7 @@ class LSTMCell(RNNCellBase):
             hx = (zeros, zeros)
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
-        return _VF.lstm_cell(
+        return torch.lstm_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
@@ -964,7 +963,7 @@ class GRUCell(RNNCellBase):
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
         self.check_forward_hidden(input, hx, '')
-        return _VF.gru_cell(
+        return torch.gru_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,

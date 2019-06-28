@@ -59,7 +59,7 @@ def broadcast_tensors(*tensors):
         tensor([[0, 1, 2],
                 [0, 1, 2]])
     """
-    return torch._C._VariableFunctions.broadcast_tensors(tensors)
+    return torch.broadcast_tensors(tensors)
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -208,7 +208,7 @@ Examples::
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
-    return torch._C._VariableFunctions.einsum(equation, operands)
+    return torch.einsum(equation, operands)
 
 
 def isfinite(tensor):
@@ -292,7 +292,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]
-    return torch._C._VariableFunctions.meshgrid(tensors)
+    return torch.meshgrid(tensors)
 
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
@@ -386,7 +386,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         pad = int(n_fft // 2)
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
-    return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
+    return torch.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
 del torch.unique_dim
@@ -444,7 +444,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
 
     """
     if dim is not None:
-        output, inverse_indices, counts = torch._C._VariableFunctions.unique_dim(
+        output, inverse_indices, counts = torch.unique_dim(
             input,
             dim,
             sorted=sorted,
@@ -518,7 +518,7 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         >>> counts
         tensor([2, 2, 1, 2, 1])
     """
-    output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
+    output, inverse_indices, counts = torch.unique_consecutive(
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
     if return_inverse and return_counts:
         return output, inverse_indices, counts
@@ -581,7 +581,7 @@ def tensordot(a, b, dims=2):
             dims = dims.item()
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-    return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
+    return torch.tensordot(a, b, dims_a, dims_b)
 
 
 def cartesian_prod(*tensors):
@@ -612,7 +612,7 @@ def cartesian_prod(*tensors):
                 [3, 4],
                 [3, 5]])
     """
-    return torch._C._VariableFunctions.cartesian_prod(tensors)
+    return torch.cartesian_prod(tensors)
 
 
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
@@ -680,9 +680,9 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     # catch default case
     if dim is None and out is None and dtype is None:
         if p == "fro":
-            return torch._C._VariableFunctions.frobenius_norm(input)
+            return torch.frobenius_norm(input)
         elif p != "nuc":
-            return torch._C._VariableFunctions.norm(input, p)
+            return torch.norm(input, p)
 
     if p == "fro":
         if dtype is not None:
@@ -690,26 +690,26 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         if dim is None:
             dim = tuple(range(ndim))
         if out is None:
-            return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
-        return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
+            return torch.frobenius_norm(input, dim, keepdim=keepdim)
+        return torch.frobenius_norm(input, dim, keepdim=keepdim, out=out)
     elif p == "nuc":
         if dtype is not None:
             raise ValueError("dtype argument is not supported in nuclear norm")
         if dim is None:
             if out is None:
-                return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
-            return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
-        return torch._C._VariableFunctions.nuclear_norm(input, dim, keepdim=keepdim, out=out)
+                return torch.nuclear_norm(input, keepdim=keepdim)
+            return torch.nuclear_norm(input, keepdim=keepdim, out=out)
+        return torch.nuclear_norm(input, dim, keepdim=keepdim, out=out)
     else:
         if dim is None:
             dim = tuple(range(ndim))
         if out is None and dtype is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
+            return torch.norm(input, p, dim, keepdim=keepdim)
         elif out is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype)
+            return torch.norm(input, p, dim, keepdim=keepdim, dtype=dtype)
         elif dtype is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
-    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype, out=out)
+            return torch.norm(input, p, dim, keepdim=keepdim, out=out)
+    return torch.norm(input, p, dim, keepdim=keepdim, dtype=dtype, out=out)
 
 
 def chain_matmul(*matrices):
@@ -741,7 +741,7 @@ def chain_matmul(*matrices):
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
-    return torch._C._VariableFunctions.chain_matmul(matrices)
+    return torch.chain_matmul(matrices)
 
 
 def pstrf(a, upper=True, out=None):
@@ -786,7 +786,7 @@ def pstrf(a, upper=True, out=None):
     """
     warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
                   "in the next release.", stacklevel=2)
-    return torch._C._VariableFunctions.pstrf(a, upper=upper, out=out)
+    return torch.pstrf(a, upper=upper, out=out)
 
 
 def potrf(a, upper=True, out=None):

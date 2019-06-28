@@ -11,7 +11,6 @@ from .modules import utils
 from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
-from . import _VF
 from .._jit_internal import weak_script, List
 
 
@@ -822,9 +821,9 @@ def dropout(input, p=0.5, training=True, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.dropout_(input, p, training)
+    return (torch.dropout_(input, p, training)
             if inplace
-            else _VF.dropout(input, p, training))
+            else torch.dropout(input, p, training))
 
 
 @weak_script
@@ -837,9 +836,9 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.alpha_dropout_(input, p, training)
+    return (torch.alpha_dropout_(input, p, training)
             if inplace
-            else _VF.alpha_dropout(input, p, training))
+            else torch.alpha_dropout(input, p, training))
 
 
 @weak_script
@@ -862,9 +861,9 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.feature_dropout_(input, p, training)
+    return (torch.feature_dropout_(input, p, training)
             if inplace
-            else _VF.feature_dropout(input, p, training))
+            else torch.feature_dropout(input, p, training))
 
 
 @weak_script
@@ -889,9 +888,9 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.feature_dropout_(input, p, training)
+    return (torch.feature_dropout_(input, p, training)
             if inplace
-            else _VF.feature_dropout(input, p, training))
+            else torch.feature_dropout(input, p, training))
 
 
 @weak_script
@@ -900,9 +899,9 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.feature_alpha_dropout_(input, p, training)
+    return (torch.feature_alpha_dropout_(input, p, training)
             if inplace
-            else _VF.feature_alpha_dropout(input, p, training))
+            else torch.feature_alpha_dropout(input, p, training))
 
 
 @weak_script
@@ -913,13 +912,13 @@ def threshold(input, threshold, value, inplace=False):
     See :class:`~torch.nn.Threshold` for more details.
     """
     if inplace:
-        result = _VF.threshold_(input, threshold, value)
+        result = torch.threshold_(input, threshold, value)
     else:
-        result = _VF.threshold(input, threshold, value)
+        result = torch.threshold(input, threshold, value)
     return result
 
 
-threshold_ = _add_docstr(_VF.threshold_, r"""
+threshold_ = _add_docstr(torch.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
 
 In-place version of :func:`~threshold`.
@@ -2796,7 +2795,7 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        ret = _VF.constant_pad_nd(input, pad, value)
+        ret = torch.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:

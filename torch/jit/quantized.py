@@ -2,7 +2,6 @@ import torch
 from typing import Tuple, Optional, List  # noqa: F401
 
 from torch import Tensor  # noqa
-from torch.nn import _VF
 
 from torch._jit_internal import _parameter_list
 from torch.nn.utils.rnn import PackedSequence, get_packed_sequence
@@ -147,14 +146,14 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
         self.check_forward_hidden(input, hx, '')
         if self.nonlinearity == "tanh":
-            ret = _VF.quantized_rnn_tanh_cell(
+            ret = torch.quantized_rnn_tanh_cell(
                 input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
                 self.bias_hh, self.packed_ih, self.packed_hh, self.col_offsets_ih,
                 self.col_offsets_hh, self.scale_ih, self.scale_hh, self.zero_point_ih,
                 self.zero_point_hh
             )
         elif self.nonlinearity == "relu":
-            ret = _VF.quantized_rnn_relu_cell(
+            ret = torch.quantized_rnn_relu_cell(
                 input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
                 self.bias_hh, self.packed_ih, self.packed_hh, self.col_offsets_ih,
                 self.col_offsets_hh, self.scale_ih, self.scale_hh, self.zero_point_ih,
@@ -180,7 +179,7 @@ class QuantizedLSTMCell(QuantizedRNNCellBase):
             hx = (zeros, zeros)
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
-        return _VF.quantized_lstm_cell(
+        return torch.quantized_lstm_cell(
             input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
             self.bias_hh, self.packed_ih, self.packed_hh, self.col_offsets_ih,
             self.col_offsets_hh, self.scale_ih, self.scale_hh, self.zero_point_ih,
@@ -199,7 +198,7 @@ class QuantizedGRUCell(QuantizedRNNCellBase):
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
         self.check_forward_hidden(input, hx, '')
-        return _VF.quantized_gru_cell(
+        return torch.quantized_gru_cell(
             input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
             self.bias_hh, self.packed_ih, self.packed_hh, self.col_offsets_ih,
             self.col_offsets_hh, self.scale_ih, self.scale_hh, self.zero_point_ih,
@@ -377,9 +376,9 @@ class QuantizedLSTM(QuantizedRNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         assert batch_sizes is None
-        result = _VF.quantized_lstm(input, hx, self._get_all_weights(), self.bias, self.num_layers,
-                                    float(self.dropout), self.training, self.bidirectional,
-                                    self.batch_first)
+        result = torch.quantized_lstm(input, hx, self._get_all_weights(), self.bias, self.num_layers,
+                                      float(self.dropout), self.training, self.bidirectional,
+                                      self.batch_first)
 
         output = result[0]
         hidden = result[1:]
