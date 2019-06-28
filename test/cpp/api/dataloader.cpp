@@ -2110,19 +2110,19 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       if (new_size.has_value()) {
         size_ = *new_size;
       }
-      indices.resize(size_);
+      indices_.resize(size_);
       size_t index = 0;
 
       // Repeatly sample every 5 indices.
       for (size_t i = 0; i < batch_size; ++i) {
         for (size_t j = 0; j < size_ / batch_size; ++j) {
-          indices[index++] = i + batch_size * j;
+          indices_[index++] = i + batch_size * j;
         }
       }
       index_ = 0;
     }
 
-    /// Returns the next batch of indices.
+    // Returns the next batch of indices.
     torch::optional<std::vector<size_t>> next(size_t batch_size) override {
       const auto remaining_indices = size_ - index_;
       if (remaining_indices == 0) {
@@ -2130,7 +2130,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       }
       auto return_size = std::min(batch_size, remaining_indices);
       std::vector<size_t> index_batch(
-          indices.begin() + index_, indices.begin() + index_ + return_size);
+          indices_.begin() + index_, indices_.begin() + index_ + return_size);
       index_ += return_size;
 
       return index_batch;
@@ -2141,7 +2141,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
 
    private:
     size_t size_;
-    std::vector<size_t> indices;
+    std::vector<size_t> indices_;
     size_t index_{0};
   };
 
