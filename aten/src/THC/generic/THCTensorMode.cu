@@ -46,7 +46,7 @@ void THCTensor_(calculateMode)(THCState *state,
     thrust::device,
 #endif
     iter.begin(), iter.end(), seq.begin()
-#if defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     , ThrustHalfLess()
 #endif
   );
@@ -60,7 +60,7 @@ void THCTensor_(calculateMode)(THCState *state,
     thrust::device,
 #endif
     iter.begin(), iter.end() - 1, iter.begin() + 1, 0, thrust::plus<int>(),
-#if defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     ThrustHalfNotEqualTo()
 #else
     thrust::not_equal_to<scalar_t>()
@@ -78,7 +78,7 @@ void THCTensor_(calculateMode)(THCState *state,
 #endif
     iter.begin(), iter.end(),
     thrust::constant_iterator<int>(1), keys.begin(), counts.begin()
-#if defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     , ThrustHalfEqualTo()
 #endif
   );
@@ -94,7 +94,7 @@ void THCTensor_(calculateMode)(THCState *state,
   scalar_t mode = keys[it - counts.begin()];
 
   // Find first index within which it occurs
-#if defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   thrust::device_vector<scalar_t>::iterator positionIter = thrust::find_if(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),

@@ -2859,7 +2859,6 @@ class _TestTorchMixin(object):
         all_dtypes = torch.testing.get_all_dtypes()
         do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
         if torch.cuda.is_available():
-            all_dtypes.remove(torch.bfloat16)  # Remove once _th_zero_ is enabled on cuda for bfloat16
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
     def test_copy_dtypes(self):
@@ -3338,11 +3337,8 @@ class _TestTorchMixin(object):
     def test_unfold_all_devices_and_dtypes(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if dt == torch.bfloat16:
-                    continue  # fix once random is implemented for bfloat16 on cuda
-
-                if dt == torch.half and device == 'cpu':
-                    # fix once random is implemented for Half on CPU
+                if (dt == torch.half or dt == torch.bfloat16) and device == 'cpu':
+                    # fix once random is implemented for Half and BFloat16 on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
                 else:
                     x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
@@ -3352,8 +3348,6 @@ class _TestTorchMixin(object):
         from copy import copy
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
                 x_clone = x.clone()
 
@@ -3368,8 +3362,6 @@ class _TestTorchMixin(object):
         shape = (2, 2)
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 x.resize_(shape)
                 self.assertEqual(shape, x.shape)
@@ -3377,8 +3369,6 @@ class _TestTorchMixin(object):
     def test_resize_as_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
                 x.resize_as_(y)
@@ -3387,16 +3377,12 @@ class _TestTorchMixin(object):
     def test_view_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 self.assertEqual(x.view(6).shape, [6])
 
     def test_fill_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor((1, 1), dtype=dt, device=device)
                 x.fill_(1)
 
@@ -3406,8 +3392,6 @@ class _TestTorchMixin(object):
     def test_clone_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor((1, 1), dtype=dt, device=device)
                 y = x.clone()
                 self.assertEqual(x, y)
@@ -3415,8 +3399,6 @@ class _TestTorchMixin(object):
     def test_cat_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
                 expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
                 self.assertEqual(torch.cat((x, x), 0), expected1)
@@ -3431,11 +3413,6 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for shape in shapes:
                 for dt in torch.testing.get_all_dtypes():
-                    if dt == torch.bfloat16:
-                        continue  # Remove once random is supported for bfloat16 on cuda
-
-                    if (device == 'cuda' and dt == torch.bfloat16):
-                        continue  # Remove once cuda available for bfloat16
                     self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
@@ -10419,10 +10396,6 @@ class _TestTorchMixin(object):
                 continue
             if t.is_cuda and not torch.cuda.is_available():
                 continue
-            if t == torch.cuda.BFloat16Tensor:
-                continue  # TODO: remove once bfloat16 is available on cuda
-            if t == torch.BFloat16Tensor:
-                continue  # TODO: Fix in the future PRs regarding bfloat16
             obj = t(100, 100).fill_(1)
             obj.__repr__()
             str(obj)
@@ -10431,8 +10404,6 @@ class _TestTorchMixin(object):
         obj.__repr__()
         str(obj)
         for t in torch._storage_classes:
-            if t == torch.BFloat16Storage:
-                continue  # Fix once fill is enabled for bfloat16
             if t.is_cuda and not torch.cuda.is_available():
                 continue
             if t == torch.BoolStorage or t == torch.cuda.BoolStorage:

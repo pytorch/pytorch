@@ -132,7 +132,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
     if (bias != NULL) {
 #ifdef THC_REAL_IS_FLOAT
       THCudaBlas_Sgemm(
-#elif defined(THC_REAL_IS_HALF)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
       THCudaBlas_Hgemm(
 #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
@@ -398,7 +398,7 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
           THCTensor_(data)(state, ones), 1, ScalarConvert<int, scalar_t>::to(1),
           THCTensor_(data)(state, gradBias), 1);
 #endif
-#ifdef THC_REAL_IS_HALF // half not supported due to baddbmm
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16) // half and bfloat16 are not supported due to baddbmm
       THCudaBlas_Hgemm(state, 't', 'n', m_, 1, k_, scale,
                        THCTensor_(data)(state, gradOutput_n), k_,
                        THCTensor_(data)(state, ones), k_,

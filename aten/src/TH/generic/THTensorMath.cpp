@@ -23,7 +23,7 @@
 
 void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
 {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF) || defined(TH_REAL_IS_BFLOAT16)
   (void)r_;
   (void)t;
   (void)src;
@@ -57,7 +57,7 @@ void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
 
 void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
 {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF) || defined(TH_REAL_IS_BFLOAT16)
   (void)r_;
   (void)t;
   (void)src;
@@ -91,7 +91,7 @@ void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
 
 void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
 {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF) || defined(TH_REAL_IS_BFLOAT16)
   (void)r_;
   (void)t;
   (void)src;
@@ -125,7 +125,7 @@ void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
 
 void THTensor_(bitxor)(THTensor *r_, THTensor *t, scalar_t value)
 {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF) || defined(TH_REAL_IS_BFLOAT16)
   (void)r_;
   (void)t;
   (void)value;
@@ -152,7 +152,7 @@ void THTensor_(bitxor)(THTensor *r_, THTensor *t, scalar_t value)
 
 void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
 {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF) || defined(TH_REAL_IS_BFLOAT16)
   (void)r_;
   (void)t;
   (void)value;
@@ -253,7 +253,7 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
 }
 
 scalar_t THTensor_(powOne)(scalar_t x, scalar_t y) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_HALF) || defined(TH_REAL_IS_BFLOAT16)
   return powf(x, y);
 #elif defined(TH_REAL_IS_DOUBLE)
   return pow(x, y);
@@ -365,6 +365,8 @@ void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
 {
 #if defined(TH_REAL_IS_HALF)
   return THError("clshift is not supported for torch.HalfTensor");
+#elif defined(TH_REAL_IS_BFLOAT16)
+  return THError("clshift is not supported for torch.BFloat16Tensor");
 #endif
   THTensor_(resizeAs)(r_, t);
   int64_t r_Size = THTensor_(nElement)(r_);
@@ -419,6 +421,8 @@ void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
 {
 #if defined(TH_REAL_IS_HALF)
   return THError("crshift is not supported for torch.HalfTensor");
+#elif defined(TH_REAL_IS_BFLOAT16)
+  return THError("crshift is not supported for torch.BFloat16Tensor");
 #endif
   THTensor_(resizeAs)(r_, t);
   int64_t r_Size = THTensor_(nElement)(r_);

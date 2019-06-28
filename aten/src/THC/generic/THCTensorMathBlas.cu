@@ -14,7 +14,7 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
        THTensor_nDimension(self), THTensor_nDimension(src));
   }
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   THArgCheck(THCTensor_(nElement)(state, self) ==
              THCTensor_(nElement)(state, src), 2, "sizes do not match");
@@ -32,7 +32,7 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
                                 THCTensor_(nElement)(state, self),
                                 THCTensor_(data)(state, self), 1,
                                 THCTensor_(data)(state, src), 1);
-#elif defined(THC_REAL_IS_HALF)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   accreal result = THCudaBlas_Hdot(state,
                                 THCTensor_(nElement)(state, self),
                                 THCTensor_(data)(state, self), 1,
@@ -51,7 +51,7 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 
 void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *t, scalar_t alpha, THCTensor *mat, THCTensor *vec)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
   if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
@@ -136,7 +136,7 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
     }
   }
 
-#elif defined(THC_REAL_IS_HALF)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     // Currently no Hgemv/SgemvEx in Cublas
     THCTensor *vecAsMatrix = THCTensor_(newWithTensor)(state, vec);
     THCTensor_(resize2d)(state, vecAsMatrix, vec_size, 1);
@@ -158,7 +158,7 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 
 void THCTensor_(addr)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *t, scalar_t alpha, THCTensor *vec1, THCTensor *vec2)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
   if ( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
@@ -235,7 +235,7 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *
 
     THCTensor_(freeCopyTo)(state, cr, r_);
   }
-#elif defined(THC_REAL_IS_HALF)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   // currently no Hger/SgerEx in Cublas.
   THCTensor *vec2T = THCTensor_(newWithTensor)(state, vec2);
   THCTensor_(resize2d)(state, vec2T, vec2_size, 1);
@@ -255,7 +255,7 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *
 
 void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *t, scalar_t alpha, THCTensor *m1, THCTensor *m2)
 {
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_BFLOAT16)
 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, m1, m2));
   char transpose_r, transpose_m1, transpose_m2;
@@ -352,7 +352,7 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
     m2_ = THCTensor_(newContiguous)(state, m2);
   }
 
-#ifdef THC_REAL_IS_HALF
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   THCudaBlas_Hgemm(state,
                    transpose_m1,
                    transpose_m2,
@@ -418,7 +418,7 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 
 void THCTensor_(addbmm)(THCState *state, THCTensor *result, scalar_t beta, THCTensor *t,
                         scalar_t alpha, THCTensor *batch1, THCTensor *batch2) {
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, t) == 2, 4, "expected 2D tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, batch1) == 3, 6, "expected 3D tensor");
@@ -482,7 +482,7 @@ __global__ void createBatchGemmBuffer3(const scalar_t** buffer1, const scalar_t 
 
 void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCTensor *t,
                          scalar_t alpha, THCTensor *batch1, THCTensor *batch2) {
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, t) == 3, 4, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, batch1) == 3, 6, "expected 3D tensor");
@@ -675,7 +675,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
 #endif //THC_REAL
 #endif //CUDA_VERSION
 
-#elif defined(THC_REAL_IS_HALF)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
 
 #if CUDA_VERSION < 9010
   // Currently no HgemmBatched in Cublas

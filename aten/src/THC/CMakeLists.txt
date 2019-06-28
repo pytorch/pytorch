@@ -7,7 +7,7 @@ CONFIGURE_FILE(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
 set(extra_src)
 # loop over all types
-foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
+foreach(THC_TYPE Byte Char Short Int Long Half Float Double BFloat16)
    # loop over files which need to be split between types (because of long compile times)
    foreach(THC_FILE TensorSort TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
       if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")

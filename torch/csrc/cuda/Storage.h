@@ -49,7 +49,4 @@
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
 #include <THC/THCGenerateBoolType.h>
 
-#define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
-#include <THC/THCGenerateBFloat16Type.h>
-
 #endif

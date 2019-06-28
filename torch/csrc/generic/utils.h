@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/utils.h"
 #else
 
-#if defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_HALF) || defined(TH_REAL_IS_BFLOAT16)
 #define GENERATE_SPARSE 0
 #else
 #define GENERATE_SPARSE 1
@@ -21,7 +21,7 @@ template<>
 struct THPUtils_typeTraits<scalar_t> {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || \
     defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || \
-    defined(THC_REAL_IS_HALF)
+    defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   static constexpr char *python_type_str = "float";
 #else
   static constexpr char *python_type_str = "int";

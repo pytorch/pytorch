@@ -8,6 +8,7 @@
 #include <TH/THHalf.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/NumericLimits.cuh>
+#include <c10/util/BFloat16.h>
 
 // WARNING: THCNumerics is being deprecated. Please follow the comments
 // in this file to learn about new usages.
@@ -194,6 +195,50 @@ struct THCNumerics<int64_t> {
 
 // DEPRECATED: use math functions from std and NumericLimits.cuh
 template <>
+struct THCNumerics<at::BFloat16> {
+  static inline __host__ __device__ at::BFloat16 min() { return at::numeric_limits<at::BFloat16>::lowest(); }
+  static inline __host__ __device__ at::BFloat16 max() { return at::numeric_limits<at::BFloat16>::max(); }
+  static inline __host__ __device__ at::BFloat16 lower_bound() { return at::numeric_limits<at::BFloat16>::lower_bound(); }
+  static inline __host__ __device__ at::BFloat16 upper_bound() { return at::numeric_limits<at::BFloat16>::upper_bound(); }
+
+  static inline __host__ __device__ bool lt(at::BFloat16 a, at::BFloat16 b) { return a < b; }
+  static inline __host__ __device__ bool le(at::BFloat16 a, at::BFloat16 b) { return a <= b; }
+  static inline __host__ __device__ bool gt(at::BFloat16 a, at::BFloat16 b) { return a > b; }
+  static inline __host__ __device__ bool ge(at::BFloat16 a, at::BFloat16 b) { return a >= b; }
+  static inline __host__ __device__ bool eq(at::BFloat16 a, at::BFloat16 b) { return a == b; }
+  static inline __host__ __device__ bool ne(at::BFloat16 a, at::BFloat16 b) { return a != b; }
+
+  static inline __host__ __device__ at::BFloat16 cinv(at::BFloat16 a) { return 1.0f / a; }
+  static inline __host__ __device__ at::BFloat16 add(at::BFloat16 a, at::BFloat16 b) { return a + b; }
+  static inline __host__ __device__ at::BFloat16 div(at::BFloat16 a, at::BFloat16 b) { return a / b; }
+  static inline __host__ __device__ at::BFloat16 mul(at::BFloat16 a, at::BFloat16 b) { return a * b; }
+  static inline __host__ __device__ at::BFloat16 sub(at::BFloat16 a, at::BFloat16 b) { return a - b; }
+  static inline __host__ __device__ at::BFloat16 pow(at::BFloat16 a, at::BFloat16 b) { return ::pow(a, b); }
+  static inline __host__ __device__ at::BFloat16 atan2(at::BFloat16 a, at::BFloat16 b) { return ::atan2(a, b); }
+
+  static inline __host__ __device__ bool isnan(at::BFloat16 a) {
+    #ifdef _MSC_VER
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
+      return ::isnan((float) a);
+    #else
+      return ::isnan(a);
+    #endif
+  }
+
+  static inline __host__ __device__ bool isinf(at::BFloat16 a) {
+    #ifdef _MSC_VER
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
+      return ::isinf((float) a);
+    #else
+      return ::isinf(a);
+    #endif
+  }
+};
+
+// DEPRECATED: use math functions from std and NumericLimits.cuh
+template <>
 struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half min() { return at::numeric_limits<at::Half>::lowest(); }
   static inline __host__ __device__ at::Half max() { return at::numeric_limits<at::Half>::max(); }
@@ -272,7 +317,6 @@ struct THCNumerics<at::Half> {
       return ::isinf(a);
     #endif
   }
-
 };
 
 // DEPRECATED: use math functions from std and cuda math API (if needed)

@@ -31,7 +31,7 @@ int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
 
 void THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   return THError("bitand only supported for integer type tensors");
 #else
   if (self_ == src_) {
@@ -52,7 +52,7 @@ void THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scal
 
 void THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   return THError("bitor only supported for integer type tensors");
 #else
   if (self_ == src_) {
@@ -73,7 +73,7 @@ void THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scala
 
 void THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   return THError("bitxor only supported for integer type tensors");
 #else
   if (self_ == src_) {

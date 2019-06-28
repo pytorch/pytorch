@@ -1,0 +1,1774 @@
+[1/1277] Building CXX object c10/CMakeFiles/c10.dir/core/DefaultDtype.cpp.o
+[2/1277] Building CXX object c10/CMakeFiles/c10.dir/core/Scalar.cpp.o
+[3/1277] Building CXX object c10/CMakeFiles/c10.dir/core/StorageImpl.cpp.o
+[4/1277] Building CXX object c10/CMakeFiles/c10.dir/core/Storage.cpp.o
+[5/1277] Building CXX object c10/CMakeFiles/c10.dir/core/TensorOptions.cpp.o
+[6/1277] Building CXX object c10/test/CMakeFiles/c10_bfloat16_test.dir/util/bfloat16_test.cpp.o
+[7/1277] Building CXX object c10/CMakeFiles/c10.dir/util/typeid.cpp.o
+[8/1277] Building CXX object c10/CMakeFiles/c10.dir/core/UndefinedTensorImpl.cpp.o
+[9/1277] Building CXX object c10/CMakeFiles/c10.dir/core/TensorImpl.cpp.o
+[10/1277] Linking CXX shared library lib/libc10.so
+[11/1277] Linking CXX shared library lib/libc10_cuda.so
+[12/1277] Building CXX object c10/test/CMakeFiles/c10_typeid_test.dir/util/typeid_test.cpp.o
+[13/1277] Linking CXX executable bin/c10_tempfile_test
+[14/1277] Linking CXX executable bin/c10_InlineDeviceGuard_test
+[15/1277] Linking CXX executable bin/c10_either_test
+[16/1277] Linking CXX executable bin/c10_bfloat16_test
+[17/1277] Linking CXX executable bin/c10_registry_test
+[18/1277] Linking CXX executable bin/c10_TensorTypeId_test
+[19/1277] Linking CXX executable bin/c10_StreamGuard_test
+[20/1277] Linking CXX executable bin/c10_DeviceGuard_test
+[21/1277] Linking CXX executable bin/c10_Half_test
+[22/1277] Linking CXX executable bin/c10_LeftRight_test
+[23/1277] Linking CXX executable bin/c10_Array_test
+[24/1277] Linking CXX executable bin/c10_Metaprogramming_test
+[25/1277] Linking CXX executable bin/c10_TypeList_test
+[26/1277] Linking CXX executable bin/c10_InlineStreamGuard_test
+[27/1277] Linking CXX executable bin/c10_flags_test
+[28/1277] Linking CXX executable bin/c10_TypeTraits_test
+[29/1277] Linking CXX executable bin/c10_logging_test
+[30/1277] Linking CXX executable bin/c10_intrusive_ptr_test
+[31/1277] Linking CXX executable bin/c10_cuda_CUDATest
+[32/1277] Linking CXX executable bin/c10_typeid_test
+[33/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/UndefinedType.cpp.o
+[34/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/TensorGeometry.cpp.o
+[35/1277] Building CXX object caffe2/CMakeFiles/backend_cutting_test.dir/opt/backend_cutting_test.cc.o
+[36/1277] Building CXX object caffe2/CMakeFiles/cpu_generator_test.dir/__/aten/src/ATen/test/cpu_generator_test.cpp.o
+[37/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/TensorUtils.cpp.o
+[38/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/ParallelThreadPoolNative.cpp.o
+[39/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/SparseTensorImpl.cpp.o
+[40/1277] Building CXX object caffe2/CMakeFiles/cuda_stream_test.dir/__/aten/src/ATen/test/cuda_stream_test.cpp.o
+[41/1277] Building CXX object caffe2/CMakeFiles/cuda_cudnn_test.dir/__/aten/src/ATen/test/cuda_cudnn_test.cpp.o
+[42/1277] Building CXX object caffe2/CMakeFiles/event_gpu_test.dir/core/event_gpu_test.cc.o
+[43/1277] Building CXX object caffe2/CMakeFiles/dead_code_elim_test.dir/opt/dead_code_elim_test.cc.o
+[44/1277] Building CXX object caffe2/lib_c10d/test/CMakeFiles/TCPStoreTest.dir/TCPStoreTest.cpp.o
+[45/1277] Building CXX object caffe2/CMakeFiles/common_subexpression_elimination_test.dir/transforms/common_subexpression_elimination_test.cc.o
+[46/1277] Building CXX object caffe2/CMakeFiles/converter_nomigraph_test.dir/opt/converter_nomigraph_test.cc.o
+[47/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state_gpu.dir/python/pybind_state_dlpack.cc.o
+[48/1277] Building CXX object caffe2/CMakeFiles/reshape_op_gpu_test.dir/operators/reshape_op_gpu_test.cc.o
+[49/1277] Building CXX object caffe2/CMakeFiles/depthwise3x3_conv_op_test.dir/share/contrib/depthwise/depthwise3x3_conv_op_test.cc.o
+[50/1277] Building CXX object caffe2/CMakeFiles/context_gpu_test.dir/core/context_gpu_test.cc.o
+[51/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/ftrl_op.cc.o
+[52/1277] Building CXX object caffe2/CMakeFiles/batch_matmul_op_test.dir/operators/batch_matmul_op_test.cc.o
+[53/1277] Building CXX object caffe2/CMakeFiles/int8_roi_align_op_test.dir/operators/quantized/int8_roi_align_op_test.cc.o
+[54/1277] Building CXX object caffe2/CMakeFiles/tensor_iterator_test.dir/__/aten/src/ATen/test/tensor_iterator_test.cpp.o
+[55/1277] Building CXX object caffe2/CMakeFiles/boolean_unmask_ops_test.dir/operators/boolean_unmask_ops_test.cc.o
+[56/1277] Building CXX object caffe2/CMakeFiles/scalar_tensor_test.dir/__/aten/src/ATen/test/scalar_tensor_test.cpp.o
+[57/1277] Building CXX object caffe2/CMakeFiles/batch_matmul_op_gpu_test.dir/operators/batch_matmul_op_gpu_test.cc.o
+[58/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/LegacyTHDispatch.cpp.o
+[59/1277] Building CXX object caffe2/CMakeFiles/utility_ops_gpu_test.dir/operators/utility_ops_gpu_test.cc.o
+[60/1277] Building CXX object caffe2/CMakeFiles/nnpack_test.dir/share/contrib/nnpack/nnpack_test.cc.o
+[61/1277] Building CXX object caffe2/CMakeFiles/time_observer_test.dir/observers/time_observer_test.cc.o
+[62/1277] Building CXX object caffe2/CMakeFiles/verify_api_visibility.dir/__/aten/src/ATen/test/verify_api_visibility.cpp.o
+[63/1277] Building CXX object caffe2/CMakeFiles/half_float_ops_test.dir/operators/half_float_ops_test.cc.o
+[64/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/gftrl_op.cc.o
+[65/1277] Building CXX object caffe2/CMakeFiles/math_gpu_test.dir/utils/math_gpu_test.cc.o
+[66/1277] Building CXX object caffe2/CMakeFiles/undefined_tensor_test.dir/__/aten/src/ATen/test/undefined_tensor_test.cpp.o
+[67/1277] Building CXX object caffe2/CMakeFiles/net_gpu_test.dir/core/net_gpu_test.cc.o
+[68/1277] Building CXX object caffe2/CMakeFiles/broadcast_test.dir/__/aten/src/ATen/test/broadcast_test.cpp.o
+[69/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp.o
+[70/1277] Building CXX object caffe2/CMakeFiles/net_dag_utils_test.dir/core/net_dag_utils_test.cc.o
+[71/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/CPUTypeDefault.cpp.o
+[72/1277] Building CXX object caffe2/CMakeFiles/extension_backend_test.dir/__/aten/src/ATen/test/extension_backend_test.cpp.o
+[73/1277] Building CXX object caffe2/CMakeFiles/string_ops_test.dir/operators/string_ops_test.cc.o
+[74/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/blob.cpp.o
+[75/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/ExpandUtils.cpp.o
+[76/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/LegacyDeviceTypeInit.cpp.o
+[77/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state_gpu.dir/python/pybind_state_int8.cc.o
+[78/1277] Building CXX object caffe2/CMakeFiles/quantized_test.dir/__/aten/src/ATen/test/quantized_test.cpp.o
+[79/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/Utils.cpp.o
+[80/1277] Building CXX object caffe2/CMakeFiles/pattern_net_transform_test.dir/transforms/pattern_net_transform_test.cc.o
+[81/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/VariableHooksInterface.cpp.o
+[82/1277] Building CXX object caffe2/CMakeFiles/elementwise_op_gpu_test.dir/operators/elementwise_op_gpu_test.cc.o
+[83/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/context_base.cpp.o
+[84/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/LegacyTypeDispatch.cpp.o
+[85/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/MemoryOverlap.cpp.o
+[86/1277] Building CXX object caffe2/CMakeFiles/elementwise_op_test.dir/operators/elementwise_op_test.cc.o
+[87/1277] Building CXX object caffe2/CMakeFiles/wrapdim_test.dir/__/aten/src/ATen/test/wrapdim_test.cpp.o
+[88/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/DeprecatedTypeProperties.cpp.o
+[89/1277] Building CXX object caffe2/CMakeFiles/generate_proposals_op_gpu_test.dir/operators/generate_proposals_op_gpu_test.cc.o
+[90/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/Tensor.cpp.o
+[91/1277] Building CXX object caffe2/CMakeFiles/half_test.dir/__/aten/src/ATen/test/half_test.cpp.o
+[92/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/DLConvertor.cpp.o
+[93/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/Formatting.cpp.o
+[94/1277] Building CXX object caffe2/CMakeFiles/generate_proposals_op_util_nms_gpu_test.dir/operators/generate_proposals_op_util_nms_gpu_test.cc.o
+[95/1277] Building CXX object caffe2/CMakeFiles/operator_fallback_gpu_test.dir/operators/operator_fallback_gpu_test.cc.o
+[96/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/ParallelCommon.cpp.o
+[97/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/Context.cpp.o
+[98/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/ParallelOpenMP.cpp.o
+[99/1277] Building CXX object caffe2/CMakeFiles/operator_test.dir/core/operator_test.cc.o
+[100/1277] Building CXX object caffe2/CMakeFiles/roi_align_op_gpu_test.dir/operators/roi_align_op_gpu_test.cc.o
+[101/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/Version.cpp.o
+[102/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/DispatchStub.cpp.o
+[103/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/op_registration/infer_schema.cpp.o
+[104/1277] Building CXX object caffe2/CMakeFiles/native_test.dir/__/aten/src/ATen/test/native_test.cpp.o
+[105/1277] Building CXX object caffe2/CMakeFiles/generate_proposals_op_util_nms_test.dir/operators/generate_proposals_op_util_nms_test.cc.o
+[106/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/AdaptiveAveragePooling3d.cpp.o
+[107/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/dispatch/Dispatcher.cpp.o
+[108/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/AdaptiveAveragePooling.cpp.o
+[109/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/AdaptiveMaxPooling2d.cpp.o
+[110/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/function_schema_parser.cpp.o
+[111/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/dispatch/OperatorEntry.cpp.o
+[112/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/iter_op.cc.o
+[113/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/op_registration/op_registration.cpp.o
+[114/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/AffineGridGenerator.cpp.o
+[115/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Cross.cpp.o
+[116/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Activation.cpp.o
+[117/1277] Building CXX object caffe2/CMakeFiles/tensor_interop_test.dir/__/aten/src/ATen/test/tensor_interop_test.cpp.o
+[118/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/AdaptiveMaxPooling3d.cpp.o
+[119/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/BinaryOps.cpp.o
+[120/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/ConstantPadNd.cpp.o
+[121/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Col2Im.cpp.o
+[122/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/AveragePool2d.cpp.o
+[123/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/ivalue.cpp.o
+[124/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/ConvolutionTranspose2d.cpp.o
+[125/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Convolution.cpp.o
+[126/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/ConvolutionTBC.cpp.o
+[127/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/AveragePool3d.cpp.o
+[128/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/schema_type_parser.cpp.o
+[129/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/DilatedConvolution.cpp.o
+[130/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state_gpu.dir/python/pybind_state_gpu.cc.o
+[131/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/BatchLinearAlgebra.cpp.o
+[132/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Copy.cpp.o
+[133/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Distance.cpp.o
+[134/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/core/type.cpp.o
+[135/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/DilatedMaxPool3d.cpp.o
+[136/1277] Building CXX object caffe2/CMakeFiles/generate_proposals_op_test.dir/operators/generate_proposals_op_test.cc.o
+[137/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/FractionalMaxPool2d.cpp.o
+[138/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/LegacyDefinitions.cpp.o
+[139/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/DilatedMaxPool2d.cpp.o
+[140/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Dropout.cpp.o
+[141/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Integration.cpp.o
+[142/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Embedding.cpp.o
+[143/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Im2Col.cpp.o
+[144/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/LegacyBridge.cpp.o
+[145/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Itertools.cpp.o
+[146/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/QuantizedLinear.cpp.o
+[147/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/PixelShuffle.cpp.o
+[148/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Memory.cpp.o
+[149/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/LegacyNNDefinitions.cpp.o
+[150/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/FractionalMaxPool3d.cpp.o
+[151/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/EmbeddingBag.cpp.o
+[152/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Onehot.cpp.o
+[153/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Linear.cpp.o
+[154/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/NNPACK.cpp.o
+[155/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Pooling.cpp.o
+[156/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Lerp.cpp.o
+[157/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Loss.cpp.o
+[158/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Resize.cpp.o
+[159/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state_gpu.dir/python/pybind_state_ideep.cc.o
+[160/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/GridSampler.cpp.o
+[161/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/MaxUnpooling.cpp.o
+../aten/src/ATen/native/MaxUnpooling.cpp:80:24: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList output_size) {
+                        ^
+In file included from ../aten/src/ATen/ATen.h:9:0,
+                 from ../aten/src/ATen/native/MaxUnpooling.cpp:1:
+../aten/src/ATen/native/MaxUnpooling.cpp: In lambda function:
+../aten/src/ATen/Dispatch.h:128:56: warning: ‘c10::ScalarType detail::scalar_type(const at::DeprecatedTypeProperties&)’ is deprecated (declared at ../aten/src/ATen/Dispatch.h:56) [-Wdeprecated-declarations]
+     at::ScalarType _st = ::detail::scalar_type(the_type);                    \
+                                                        ^
+../aten/src/ATen/native/MaxUnpooling.cpp:113:3: note: in expansion of macro ‘AT_DISPATCH_FLOATING_TYPES’
+   AT_DISPATCH_FLOATING_TYPES(
+   ^
+../aten/src/ATen/native/MaxUnpooling.cpp: At global scope:
+../aten/src/ATen/native/MaxUnpooling.cpp:124:24: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList output_size) {
+                        ^
+../aten/src/ATen/native/MaxUnpooling.cpp:219:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList padding) {
+                    ^
+../aten/src/ATen/native/MaxUnpooling.cpp:219:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+../aten/src/ATen/native/MaxUnpooling.cpp:219:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+../aten/src/ATen/native/MaxUnpooling.cpp:294:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList padding) {
+                    ^
+../aten/src/ATen/native/MaxUnpooling.cpp:294:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+../aten/src/ATen/native/MaxUnpooling.cpp:294:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+In file included from ../aten/src/ATen/ATen.h:9:0,
+                 from ../aten/src/ATen/native/MaxUnpooling.cpp:1:
+../aten/src/ATen/native/MaxUnpooling.cpp: In lambda function:
+../aten/src/ATen/Dispatch.h:128:56: warning: ‘c10::ScalarType detail::scalar_type(const at::DeprecatedTypeProperties&)’ is deprecated (declared at ../aten/src/ATen/Dispatch.h:56) [-Wdeprecated-declarations]
+     at::ScalarType _st = ::detail::scalar_type(the_type);                    \
+                                                        ^
+../aten/src/ATen/native/MaxUnpooling.cpp:313:3: note: in expansion of macro ‘AT_DISPATCH_FLOATING_TYPES’
+   AT_DISPATCH_FLOATING_TYPES(
+   ^
+../aten/src/ATen/native/MaxUnpooling.cpp: At global scope:
+../aten/src/ATen/native/MaxUnpooling.cpp:337:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList padding) {
+                    ^
+../aten/src/ATen/native/MaxUnpooling.cpp:337:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+../aten/src/ATen/native/MaxUnpooling.cpp:337:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+../aten/src/ATen/native/MaxUnpooling.cpp:397:24: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList output_size) {
+                        ^
+In file included from ../aten/src/ATen/ATen.h:9:0,
+                 from ../aten/src/ATen/native/MaxUnpooling.cpp:1:
+../aten/src/ATen/native/MaxUnpooling.cpp: In lambda function:
+../aten/src/ATen/Dispatch.h:128:56: warning: ‘c10::ScalarType detail::scalar_type(const at::DeprecatedTypeProperties&)’ is deprecated (declared at ../aten/src/ATen/Dispatch.h:56) [-Wdeprecated-declarations]
+     at::ScalarType _st = ::detail::scalar_type(the_type);                    \
+                                                        ^
+../aten/src/ATen/native/MaxUnpooling.cpp:445:3: note: in expansion of macro ‘AT_DISPATCH_FLOATING_TYPES’
+   AT_DISPATCH_FLOATING_TYPES(
+   ^
+../aten/src/ATen/native/MaxUnpooling.cpp: At global scope:
+../aten/src/ATen/native/MaxUnpooling.cpp:469:24: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList output_size) {
+                        ^
+../aten/src/ATen/native/MaxUnpooling.cpp:536:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList padding) {
+                    ^
+../aten/src/ATen/native/MaxUnpooling.cpp:536:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+../aten/src/ATen/native/MaxUnpooling.cpp:536:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+In file included from ../aten/src/ATen/ATen.h:9:0,
+                 from ../aten/src/ATen/native/MaxUnpooling.cpp:1:
+../aten/src/ATen/native/MaxUnpooling.cpp: In lambda function:
+../aten/src/ATen/Dispatch.h:128:56: warning: ‘c10::ScalarType detail::scalar_type(const at::DeprecatedTypeProperties&)’ is deprecated (declared at ../aten/src/ATen/Dispatch.h:56) [-Wdeprecated-declarations]
+     at::ScalarType _st = ::detail::scalar_type(the_type);                    \
+                                                        ^
+../aten/src/ATen/native/MaxUnpooling.cpp:575:3: note: in expansion of macro ‘AT_DISPATCH_FLOATING_TYPES’
+   AT_DISPATCH_FLOATING_TYPES(
+   ^
+../aten/src/ATen/native/MaxUnpooling.cpp: At global scope:
+../aten/src/ATen/native/MaxUnpooling.cpp:603:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+     IntList padding) {
+                    ^
+../aten/src/ATen/native/MaxUnpooling.cpp:603:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+../aten/src/ATen/native/MaxUnpooling.cpp:603:20: warning: ‘IntList’ is deprecated (declared at ../c10/util/ArrayRef.h:41) [-Wdeprecated-declarations]
+[162/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Repeat.cpp.o
+[163/1277] Building CXX object caffe2/CMakeFiles/int8_test.dir/operators/quantized/int8_test.cc.o
+[164/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Indexing.cpp.o
+[165/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/PackedSequence.cpp.o
+[166/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Normalization.cpp.o
+[167/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/SobolEngineOps.cpp.o
+[168/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/ReflectionPad.cpp.o
+[169/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/SpectralOps.cpp.o
+[170/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Scalar.cpp.o
+[171/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TensorProperties.cpp.o
+[172/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/RangeFactories.cpp.o
+[173/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/LossCTC.cpp.o
+[174/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/SoftMax.cpp.o
+[175/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TensorConversions.cpp.o
+[176/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/LinearAlgebra.cpp.o
+[177/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/ReplicationPadding.cpp.o
+[178/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Distributions.cpp.o
+[179/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/ReduceOps.cpp.o
+[180/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/SummaryOps.cpp.o
+[181/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TensorIteratorReduce.cpp.o
+[182/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Sorting.cpp.o
+[183/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state_gpu.dir/python/pybind_state_nomni.cc.o
+[184/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TensorIterator.cpp.o
+[185/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/UpSampleBilinear2d.cpp.o
+[186/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TensorTransformations.cpp.o
+[187/1277] Building CXX object caffe2/CMakeFiles/kernel_function_test.dir/__/aten/src/ATen/core/op_registration/kernel_function_test.cpp.o
+[188/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TypeProperties.cpp.o
+[189/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/UpSampleBicubic2d.cpp.o
+[190/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/UpSampleNearest1d.cpp.o
+[191/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/layer_norm.cpp.o
+[192/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/RNN.cpp.o
+[193/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/UpSampleNearest2d.cpp.o
+[194/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/UpSampleLinear1d.cpp.o
+[195/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/Copy.cpp.o
+[196/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/TensorCompare.cpp.o
+[197/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TensorFactories.cpp.o
+[198/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/UpSampleNearest3d.cpp.o
+[199/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/UpSampleTrilinear3d.cpp.o
+[200/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/TensorFactories.cpp.o
+[201/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TensorShape.cpp.o
+[202/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/QTensor.cpp.o
+[203/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/WeightNorm.cpp.o
+[204/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/TensorCompare.cpp.o
+[205/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/UnaryOps.cpp.o
+[206/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkl/SpectralOps.cpp.o
+[207/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/sparse/SparseTensor.cpp.o
+[208/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkl/LinearAlgebra.cpp.o
+[209/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/RegisterCPU.cpp.o
+[210/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/qlinear.cpp.o
+[211/1277] Building CXX object caffe2/CMakeFiles/blob_test.dir/core/blob_test.cc.o
+[212/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/qconv.cpp.o
+[213/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/SparseCPUType.cpp.o
+[214/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/MKLDNNCommon.cpp.o
+[215/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THStorageFunctions.cpp.o
+[216/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp.o
+[217/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/MkldnnCPUType.cpp.o
+[218/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/QuantizedCPUType.cpp.o
+[219/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THFile.cpp.o
+[220/1277] Building CXX object caffe2/CMakeFiles/kernel_lambda_test.dir/__/aten/src/ATen/core/op_registration/kernel_lambda_test.cpp.o
+[221/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THDiskFile.cpp.o
+[222/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/fake_quantize_per_tensor_affine.cpp.o
+[223/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/sparse/SparseTensorMath.cpp.o
+[224/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THMemoryFile.cpp.o
+[225/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/Unique.cpp.o
+[226/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/qadd.cpp.o
+[227/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp.o
+[228/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/TensorFactories.cpp.o
+[229/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/qconv_prepack.cpp.o
+[230/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/MkldnnTensorMath.cpp.o
+[231/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/qrelu.cpp.o
+[232/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/Relu.cpp.o
+[233/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/BinaryOps.cpp.o
+[234/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/quantized/QTensorImpl.cpp.o
+[235/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/Normalization.cpp.o
+[236/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/vector/AVX2.cpp.o
+[237/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/SoftMax.cpp.o
+[238/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/Linear.cpp.o
+[239/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/MKLDNNConversions.cpp.o
+[240/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/TensorShape.cpp.o
+[241/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THTensorFill.cpp.o
+[242/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/quantized/cpu/qpool.cpp.o
+[243/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/Pooling.cpp.o
+[244/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THTensorLapack.cpp.o
+[245/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/UnaryOps.cpp.o
+[246/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THVector.cpp.o
+[247/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/mkldnn/Conv.cpp.o
+[248/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/SoftMaxKernel.cpp.AVX2.cpp.o
+[249/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/TensorCompareKernel.cpp.AVX2.cpp.o
+[250/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THTensorRandom.cpp.o
+[251/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/LerpKernel.cpp.AVX2.cpp.o
+[252/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/CrossKernel.cpp.AVX2.cpp.o
+[253/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/quantized/Quantizer.cpp.o
+[254/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/IndexKernel.cpp.AVX2.cpp.o
+[255/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/TensorCompareKernel.cpp.AVX.cpp.o
+[256/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/layer_norm_kernel.cpp.AVX2.cpp.o
+[257/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/SoftMaxKernel.cpp.AVX.cpp.o
+[258/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/LerpKernel.cpp.AVX.cpp.o
+[259/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THTensor.cpp.o
+[260/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/Activation.cpp.AVX2.cpp.o
+[261/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/IndexKernel.cpp.AVX.cpp.o
+[262/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/TensorCompareKernel.cpp.DEFAULT.cpp.o
+[263/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/CrossKernel.cpp.AVX.cpp.o
+[264/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/layer_norm_kernel.cpp.AVX.cpp.o
+[265/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/BinaryOpsKernel.cpp.AVX2.cpp.o
+[266/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/context.cc.o
+[267/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/layer_norm_kernel.cpp.DEFAULT.cpp.o
+[268/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/SoftMaxKernel.cpp.DEFAULT.cpp.o
+[269/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/LerpKernel.cpp.DEFAULT.cpp.o
+[270/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/Activation.cpp.AVX.cpp.o
+[271/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/TypeDefault.cpp.o
+[272/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/DistanceOpsKernel.cpp.AVX2.cpp.o
+[273/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/CrossKernel.cpp.DEFAULT.cpp.o
+[274/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_ops.cc.o
+[275/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/IndexKernel.cpp.DEFAULT.cpp.o
+[276/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/context_base.cc.o
+[277/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/BinaryOpsKernel.cpp.AVX.cpp.o
+[278/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/DistanceOpsKernel.cpp.AVX.cpp.o
+[279/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/common.cc.o
+[280/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/context.cc.o
+[281/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/blob_stats.cc.o
+[282/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/CPUType.cpp.o
+[283/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/module.cc.o
+[284/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/Activation.cpp.DEFAULT.cpp.o
+[285/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/ReduceOpsKernel.cpp.AVX2.cpp.o
+[286/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/GridSamplerKernel.cpp.AVX2.cpp.o
+[287/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/CopyKernel.cpp.AVX2.cpp.o
+[288/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/barrier_ops.cc.o
+[289/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/UnaryOpsKernel.cpp.AVX.cpp.o
+[290/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/UnaryOpsKernel.cpp.AVX2.cpp.o
+[291/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/db.cc.o
+[292/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/CopyKernel.cpp.AVX.cpp.o
+[293/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/common_world_ops.cc.o
+[294/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/graph.cc.o
+[295/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/BinaryOpsKernel.cpp.DEFAULT.cpp.o
+[296/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/allgather_ops.cc.o
+[297/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/int8_serialization.cc.o
+[298/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/blob_serialization.cc.o
+[299/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/init.cc.o
+[300/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/DistanceOpsKernel.cpp.DEFAULT.cpp.o
+[301/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/UnaryOpsKernel.cpp.DEFAULT.cpp.o
+[302/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/allreduce_ops.cc.o
+[303/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THTensorConv.cpp.o
+[304/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/qtensor.cc.o
+[305/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/broadcast_ops.cc.o
+[306/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/types.cc.o
+[307/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/ReduceOpsKernel.cpp.AVX.cpp.o
+[308/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_async_task.cc.o
+[309/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_async_scheduling.cc.o
+[310/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/prof_dag_counters.cc.o
+[311/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/GridSamplerKernel.cpp.AVX.cpp.o
+[312/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/export_c10_op_to_caffe2.cc.o
+[313/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/memonger.cc.o
+[314/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/reduce_scatter_ops.cc.o
+[315/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/operator_schema.cc.o
+[316/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/CopyKernel.cpp.DEFAULT.cpp.o
+[317/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net.cc.o
+[318/1277] Building CXX object caffe2/CMakeFiles/torch.dir/utils/string_utils.cc.o
+[319/1277] Building CXX object caffe2/CMakeFiles/torch.dir/distributed/store_handler.cc.o
+[320/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/tensor_int8.cc.o
+[321/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_async_task_graph.cc.o
+[322/1277] Building CXX object caffe2/CMakeFiles/torch.dir/utils/math/broadcast.cc.o
+[323/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_simple_refcount.cc.o
+[324/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_async_tracing.cc.o
+[325/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_simple.cc.o
+[326/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/tensor.cc.o
+[327/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/qtensor_serialization.cc.o
+[328/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_dag_utils.cc.o
+[329/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_async_base.cc.o
+[330/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/test_utils.cc.o
+[331/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/ReduceOpsKernel.cpp.DEFAULT.cpp.o
+[332/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/plan_executor.cc.o
+[333/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/net_parallel.cc.o
+[334/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/transform.cc.o
+[335/1277] Building CXX object caffe2/CMakeFiles/torch.dir/utils/signal_handler.cc.o
+[336/1277] Building CXX object caffe2/CMakeFiles/torch.dir/predictor/predictor_config.cc.o
+[337/1277] Building CXX object caffe2/CMakeFiles/torch.dir/utils/math/transpose.cc.o
+[338/1277] Building CXX object caffe2/CMakeFiles/torch.dir/db/protodb.cc.o
+[339/1277] Building CXX object caffe2/CMakeFiles/torch.dir/predictor/predictor_utils.cc.o
+[340/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/workspace.cc.o
+[341/1277] Building CXX object caffe2/CMakeFiles/torch.dir/predictor/predictor.cc.o
+[342/1277] Building CXX object caffe2/CMakeFiles/torch.dir/utils/smart_tensor_printer.cc.o
+[343/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state_gpu.dir/python/pybind_state.cc.o
+[344/1277] Building CXX object caffe2/CMakeFiles/torch.dir/distributed/file_store_handler.cc.o
+[345/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cpu/GridSamplerKernel.cpp.DEFAULT.cpp.o
+[346/1277] Building CXX object caffe2/CMakeFiles/torch.dir/distributed/file_store_handler_op.cc.o
+[347/1277] Building CXX object caffe2/CMakeFiles/torch.dir/utils/math/elementwise.cc.o
+[348/1277] Building CXX object caffe2/CMakeFiles/torch.dir/predictor/emulator/data_filler.cc.o
+[349/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/MSNPUType.cpp.o
+[350/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/XLAType.cpp.o
+[351/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/operator.cc.o
+[352/1277] Building CXX object caffe2/CMakeFiles/torch.dir/db/create_db_op.cc.o
+[353/1277] Building CXX object caffe2/CMakeFiles/torch.dir/distributed/store_ops.cc.o
+[354/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/adam_op.cc.o
+[355/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/LegacyTHFunctionsCPU.cpp.o
+[356/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/channel_shuffle_op.cc.o
+[357/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/momentum_sgd_op.cc.o
+[358/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/dropout_op.cc.o
+[359/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/quantization/int8_dequantize_op.cc.o
+[360/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/order_switch_ops.cc.o
+[361/1277] Building CXX object caffe2/CMakeFiles/torch.dir/observers/runcnt_observer.cc.o
+[362/1277] Building CXX object caffe2/CMakeFiles/torch.dir/observers/time_observer.cc.o
+[363/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/local_response_normalization_op.cc.o
+[364/1277] Building CXX object caffe2/CMakeFiles/torch.dir/onnx/backend_rep.cc.o
+[365/1277] Building CXX object caffe2/CMakeFiles/torch.dir/observers/profile_observer.cc.o
+[366/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/utils/ideep_register.cc.o
+[367/1277] Building CXX object caffe2/CMakeFiles/torch.dir/onnx/onnxifi_graph_info.cc.o
+[368/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/quantization/int8_given_tensor_fill_op.cc.o
+[369/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/quantization/int8_quantize_op.cc.o
+[370/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/shape_op.cc.o
+[371/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/quantization/int8_pool_op.cc.o
+[372/1277] Building CXX object caffe2/CMakeFiles/torch.dir/onnx/helper.cc.o
+[373/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/queue_ops.cc.o
+[374/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/pool_op.cc.o
+[375/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/quantization/int8_fully_connected_op.cc.o
+[376/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/expand_squeeze_dims_op.cc.o
+[377/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/relu_op.cc.o
+[378/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/quantization/int8_add_op.cc.o
+[379/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/fully_connected_op.cc.o
+[380/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/sigmoid_op.cc.o
+[381/1277] Building CXX object caffe2/CMakeFiles/torch.dir/utils/math/reduce.cc.o
+[382/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/transpose_op.cc.o
+[383/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/quantization/int8_relu_op.cc.o
+[384/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/conv_op.cc.o
+[385/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/concat_split_op.cc.o
+[386/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/reshape_op.cc.o
+[387/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/spatial_batch_norm_op.cc.o
+[388/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/quantization/int8_conv_op.cc.o
+[389/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/conv_transpose_op.cc.o
+[390/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/THNN/init.cpp.o
+[391/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/accumulate_op.cc.o
+[392/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/accuracy_op.cc.o
+[393/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/utility_ops.cc.o
+[394/1277] Building CXX object caffe2/CMakeFiles/torch.dir/onnx/onnx_exporter.cc.o
+[395/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/elementwise_sum_op.cc.o
+[396/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/assert_op.cc.o
+[397/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/batch_bucketize_op.cc.o
+[398/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/abs_op.cc.o
+[399/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/acos_op.cc.o
+[400/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/arg_ops.cc.o
+[401/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/apmeter_op.cc.o
+[402/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/affine_channel_op.cc.o
+[403/1277] Building CXX object caffe2/CMakeFiles/torch.dir/onnx/backend.cc.o
+[404/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/batch_box_cox_op.cc.o
+[405/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/bisect_percentile_op.cc.o
+[406/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/batch_sparse_to_dense_op.cc.o
+[407/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/boolean_unmask_ops.cc.o
+[408/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/batch_gather_ops.cc.o
+[409/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/asin_op.cc.o
+[410/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/bucketize_op.cc.o
+[411/1277] Building CXX object caffe2/CMakeFiles/torch.dir/utils/math_cpu.cc.o
+[412/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/atan_op.cc.o
+[413/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/batch_matmul_op.cc.o
+[414/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/ceil_op.cc.o
+[415/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/cc_bmm_bg_op.cc.o
+[416/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/boolean_mask_ops.cc.o
+[417/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_op_shared.cc.o
+[418/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/communicator_op.cc.o
+[419/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/byte_weight_dequant_op.cc.o
+[420/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/batch_moments_op.cc.o
+[421/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/cast_op.cc.o
+[422/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/cbrt_op.cc.o
+[423/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conditional_op.cc.o
+[424/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/channel_backprop_stats_op.cc.o
+[425/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/channel_shuffle_op.cc.o
+[426/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/clip_op.cc.o
+[427/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/channel_stats_op.cc.o
+[428/1277] Building CXX object caffe2/CMakeFiles/op_registration_test.dir/__/aten/src/ATen/core/op_registration/op_registration_test.cpp.o
+[429/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/atomic_ops.cc.o
+[430/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_transpose_op.cc.o
+[431/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/concat_split_op.cc.o
+[432/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_transpose_gradient_op.cc.o
+[433/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/crash_op.cc.o
+[434/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_gradient_op.cc.o
+[435/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THTensorEvenMoreMath.cpp.o
+[436/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/copy_op.cc.o
+[437/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/deform_conv_op.cc.o
+[438/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/data_couple.cc.o
+[439/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/deform_conv_gradient_op.cc.o
+[440/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/cosine_embedding_criterion_op.cc.o
+[441/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_ops_utils.cc.o
+[442/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/ctc_greedy_decoder_op.cc.o
+[443/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/create_scope_op.cc.o
+[444/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_op.cc.o
+[445/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/dense_vector_to_id_list_op.cc.o
+[446/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/counter_ops.cc.o
+[447/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/cosh_op.cc.o
+[448/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/bbox_transform_op.cc.o
+[449/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/ctc_beam_search_decoder_op.cc.o
+[450/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/cos_op.cc.o
+[451/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/while_op_gpu.cc.o
+[452/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/dropout_op.cc.o
+[453/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/crf_viterbi_op.cc.o
+[454/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/do_op.cc.o
+[455/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_linear_op.cc.o
+[456/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/collect_and_distribute_fpn_rpn_proposals_op.cc.o
+[457/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_add_op.cc.o
+[458/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_add_gradient_op.cc.o
+[459/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_div_op.cc.o
+[460/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/cube_op.cc.o
+[461/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/cross_entropy_op.cc.o
+[462/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/box_with_nms_limit_op.cc.o
+[463/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_mul_op.cc.o
+[464/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_ops_schema.cc.o
+[465/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/tensor_protos_db_input_gpu.cc.o
+[466/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/fc_inference.cc.o
+[467/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_mul_gradient_op.cc.o
+[468/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/enforce_finite_op.cc.o
+[469/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_op_eigen.cc.o
+[470/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_sum_op.cc.o
+[471/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_logical_ops.cc.o
+[472/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_div_gradient_op.cc.o
+[473/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/ensure_cpu_output_op.cc.o
+[474/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/feed_blob_op.cc.o
+[475/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_sub_gradient_op.cc.o
+[476/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/dataset_ops.cc.o
+[477/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/expand_op.cc.o
+[478/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_sub_op.cc.o
+[479/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/find_op.cc.o
+[480/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/free_op.cc.o
+[481/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/ensure_clipped_op.cc.o
+[482/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/exp_op.cc.o
+[483/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/expand_squeeze_dims_op.cc.o
+[484/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/flatten_op.cc.o
+[485/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/floor_op.cc.o
+[486/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elu_op.cc.o
+[487/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/find_duplicate_elements_op.cc.o
+[488/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/flexible_top_k.cc.o
+[489/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/erf_op.cc.o
+[490/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/distance_op.cc.o
+[491/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/filler_op.cc.o
+[492/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/glu_op.cc.o
+[493/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/gather_op.cc.o
+[494/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/if_op.cc.o
+[495/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/fully_connected_op.cc.o
+[496/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/fused_rowwise_8bit_conversion_ops.cc.o
+[497/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/gru_unit_op.cc.o
+[498/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/gather_fused_8bit_rowwise_op.cc.o
+[499/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/fused_rowwise_random_quantization_ops.cc.o
+[500/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/given_tensor_byte_string_to_uint8_fill_op.cc.o
+[501/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/gather_ranges_to_dense_op.cc.o
+[502/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/half_float_ops.cc.o
+[503/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/locally_connected_op_util.cc.o
+[504/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/index_hash_ops.cc.o
+[505/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/is_empty_op.cc.o
+[506/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/jsd_op.cc.o
+[507/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/im2col_op.cc.o
+[508/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/key_split_ops.cc.o
+[509/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/h_softmax_op.cc.o
+[510/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/hard_sigmoid_op.cc.o
+[511/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/given_tensor_fill_op.cc.o
+[512/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/integral_image_op.cc.o
+[513/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/feature_maps_ops.cc.o
+[514/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/group_norm_op.cc.o
+[515/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/length_split_op.cc.o
+[516/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lengths_pad_op.cc.o
+[517/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lengths_tile_op.cc.o
+[518/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/last_n_window_collector.cc.o
+[519/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/instance_norm_op.cc.o
+[520/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/index_ops.cc.o
+[521/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/leaky_relu_op.cc.o
+[522/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lengths_top_k_op.cc.o
+[523/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/gelu_op.cc.o
+[524/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lengths_reducer_fused_8bit_rowwise_ops.cc.o
+[525/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lengths_reducer_rowwise_8bit_ops.cc.o
+[526/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/local_response_normalization_op.cc.o
+[527/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/load_save_op.cc.o
+[528/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/loss_op.cc.o
+[529/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/instance_norm_gradient_op.cc.o
+[530/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lstm_unit_op.cc.o
+[531/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/log_op.cc.o
+[532/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/minmax_ops.cc.o
+[533/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/matmul_op.cc.o
+[534/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/margin_ranking_criterion_op.cc.o
+[535/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/mod_op.cc.o
+[536/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/mean_op.cc.o
+[537/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/merge_id_lists_op.cc.o
+[538/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/multi_class_accuracy_op.cc.o
+[539/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/heatmap_max_keypoint_op.cc.o
+[540/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lp_pool_op.cc.o
+[541/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lengths_reducer_ops.cc.o
+[542/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/moments_op.cc.o
+[543/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/logit_op.cc.o
+[544/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/lpnorm_op.cc.o
+[545/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/pool_op_util.cc.o
+[546/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/inference_lstm_op.cc.o
+[547/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/ngram_ops.cc.o
+[548/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/locally_connected_op.cc.o
+[549/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/negate_gradient_op.cc.o
+[550/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/minmax_gradient_ops.cc.o
+[551/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/map_ops.cc.o
+[552/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/listwise_l2r_op.cc.o
+[553/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/numpy_tile_op.cc.o
+[554/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/negative_op.cc.o
+[555/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/normalize_l1_op.cc.o
+[556/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/order_switch_ops.cc.o
+[557/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/one_hot_ops.cc.o
+[558/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/norm_planar_yuv_op.cc.o
+[559/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/perplexity_op.cc.o
+[560/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/percentile_op.cc.o
+[561/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/normalize_op.cc.o
+[562/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/pack_rnn_sequence_op.cc.o
+[563/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/onnx_while_op.cc.o
+[564/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/piecewise_linear_transform_op.cc.o
+[565/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/layer_norm_op.cc.o
+[566/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/partition_ops.cc.o
+[567/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/generate_proposals_op.cc.o
+[568/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/pad_op.cc.o
+[569/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/prepend_dim_op.cc.o
+[570/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rank_loss_op.cc.o
+[571/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/pack_segments.cc.o
+[572/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quant_decode_op.cc.o
+[573/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/replace_nan_op.cc.o
+[574/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reciprocal_gradient_op.cc.o
+[575/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reduce_front_back_max_ops.cc.o
+[576/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/remove_data_blocks_op.cc.o
+[577/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reciprocal_op.cc.o
+[578/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/pow_op.cc.o
+[579/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THTensorMath.cpp.o
+[580/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rmac_regions_op.cc.o
+[581/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/roi_align_rotated_gradient_op.cc.o
+[582/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reverse_packed_segs_op.cc.o
+[583/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reduction_ops.cc.o
+[584/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/prelu_op.cc.o
+[585/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/pool_op.cc.o
+[586/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reduce_front_back_mean_ops.cc.o
+[587/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/roi_align_gradient_op.cc.o
+[588/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/scale_blobs_op.cc.o
+[589/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/relu_n_op.cc.o
+[590/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reshape_op.cc.o
+[591/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/roi_align_rotated_op.cc.o
+[592/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rowmul_op.cc.o
+[593/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/relu_op.cc.o
+[594/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/pool_gradient_op.cc.o
+[595/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reduce_front_back_sum_ops.cc.o
+[596/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reservoir_sampling.cc.o
+[597/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/scale_op.cc.o
+[598/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reduce_ops.cc.o
+[599/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/shape_op.cc.o
+[600/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/roi_pool_op.cc.o
+[601/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rsqrt_op.cc.o
+[602/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/softmax_utils.cc.o
+[603/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/roi_align_op.cc.o
+[604/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/selu_op.cc.o
+[605/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sigmoid_gradient_op.cc.o
+[606/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/softmax_op.cc.o
+[607/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sigmoid_op.cc.o
+[608/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sinusoid_position_encoding_op.cc.o
+[609/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sin_op.cc.o
+[610/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sinh_op.cc.o
+[611/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sequence_ops.cc.o
+[612/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/slice_op.cc.o
+[613/1277] Building CXX object caffe2/CMakeFiles/torch.dir/ideep/operators/operator_fallback_ideep.cc.o
+[614/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/space_batch_op.cc.o
+[615/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/softmax_with_loss_op.cc.o
+[616/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/square_root_divide_op.cc.o
+[617/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/softplus_op.cc.o
+[618/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/stats_put_ops.cc.o
+[619/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sparse_normalize_op.cc.o
+[620/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/summarize_op.cc.o
+[621/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/stop_gradient.cc.o
+[622/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/stump_func_op.cc.o
+[623/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/spatial_softmax_with_loss_op.cc.o
+[624/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sparse_to_dense_op.cc.o
+[625/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sqr_op.cc.o
+[626/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sqrt_op.cc.o
+[627/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/softsign_op.cc.o
+[628/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/stats_ops.cc.o
+[629/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/spatial_batch_norm_op.cc.o
+[630/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sparse_to_dense_mask_op.cc.o
+[631/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/tanh_op.cc.o
+[632/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/text_file_reader.cc.o
+[633/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/resize_op.cc.o
+[634/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/tensor_protos_db_input.cc.o
+[635/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/spatial_batch_norm_gradient_op.cc.o
+[636/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/tanh_gradient_op.cc.o
+[637/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/tan_op.cc.o
+[638/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/swish_op.cc.o
+[639/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/transpose_op.cc.o
+[640/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/string_ops.cc.o
+[641/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/top_k.cc.o
+[642/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/while_op.cc.o
+[643/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/unique_ops.cc.o
+[644/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/thresholded_relu_op.cc.o
+[645/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/zero_gradient_op.cc.o
+[646/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/weighted_multi_sampling_op.cc.o
+[647/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/weighted_sample_op.cc.o
+[648/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/upsample_op.cc.o
+[649/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/tt_linear_op.cc.o
+[650/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/workspace_ops.cc.o
+[651/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/variable_length_sequence_padding.cc.o
+[652/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/stylizer_ops.cc.o
+[653/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/tile_op.cc.o
+[654/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rnn/recurrent_network_executor.cc.o
+[655/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/averaged_loss_cpu.cc.o
+[656/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/flatten_cpu.cc.o
+[657/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/mul_cpu.cc.o
+[658/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rnn/recurrent_network_blob_fetcher_op.cc.o
+[659/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_dequantize_op.cc.o
+[660/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_add_op.cc.o
+[661/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_flatten_op.cc.o
+[662/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_channel_shuffle_op.cc.o
+[663/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/expand_dims_cpu.cc.o
+[664/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_average_pool_op.cc.o
+[665/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_quantize_op.cc.o
+[666/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/sparse_lengths_sum_cpu.cc.o
+[667/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_concat_op.cc.o
+[668/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_fc_op.cc.o
+[669/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_leaky_relu_op.cc.o
+[670/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/backend_transformer_base.cc.o
+[671/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_given_tensor_fill_op.cc.o
+[672/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/sigmoid_cross_entropy_with_logits_cpu.cc.o
+[673/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/concat_cpu.cc.o
+[674/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/dead_code_elim.cc.o
+[675/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/batch_gather_cpu.cc.o
+[676/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/stop_gradient_cpu.cc.o
+[677/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/enforce_finite_cpu.cc.o
+[678/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_relu_op.cc.o
+[679/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_conv_op_relu.cc.o
+[680/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/sigmoid_cpu.cc.o
+[681/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/fc_cpu.cc.o
+[682/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_softmax_op.cc.o
+[683/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/relu_cpu.cc.o
+[684/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/batch_matmul_cpu.cc.o
+[685/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_resize_nearest_op.cc.o
+[686/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_sigmoid_op.cc.o
+[687/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/filler_cpu.cc.o
+[688/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_conv_op.cc.o
+[689/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/add_cpu.cc.o
+[690/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_conv_transpose_op.cc.o
+[691/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_roi_align_op.cc.o
+[692/1277] Building CXX object caffe2/CMakeFiles/torch.dir/perfkernels/typed_axpy.cc.o
+[693/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/experimental/c10/cpu/cast_cpu.cc.o
+[694/1277] Building CXX object caffe2/CMakeFiles/torch.dir/perfkernels/fused_8bit_rowwise_embedding_lookup.cc.o
+[695/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_max_pool_op.cc.o
+[696/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/bound_shape_inferencer.cc.o
+[697/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_reshape_op.cc.o
+[698/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/quantized/int8_slice_op.cc.o
+[699/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/utility_ops.cc.o
+[700/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/mobile.cc.o
+[701/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/fusion.cc.o
+[702/1277] Building CXX object caffe2/CMakeFiles/torch.dir/perfkernels/embedding_lookup.cc.o
+[703/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/optimizer.cc.o
+[704/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/passes.cc.o
+[705/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/shape_info.cc.o
+[706/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/segment_reduction_op.cc.o
+[707/1277] Building CXX object caffe2/CMakeFiles/torch.dir/transforms/single_op_transform.cc.o
+[708/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rnn/recurrent_network_op.cc.o
+[709/1277] Building CXX object caffe2/CMakeFiles/torch.dir/queue/blobs_queue.cc.o
+[710/1277] Building CXX object caffe2/CMakeFiles/torch.dir/queue/rebatching_queue.cc.o
+[711/1277] Building CXX object caffe2/CMakeFiles/torch.dir/transforms/conv_to_nnpack_transform.cc.o
+[712/1277] Building CXX object caffe2/CMakeFiles/torch.dir/transforms/common_subexpression_elimination.cc.o
+[713/1277] Building CXX object caffe2/CMakeFiles/torch.dir/transforms/pattern_net_transform.cc.o
+[714/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/clip_tensor_op.cc.o
+[715/1277] Building CXX object caffe2/CMakeFiles/torch.dir/queue/rebatching_queue_ops.cc.o
+[716/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/lars_op.cc.o
+[717/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/functions/accumulate_grad.cpp.o
+[718/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/function.cpp.o
+[719/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/functions/basic_ops.cpp.o
+[720/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/onnxifi_transformer.cc.o
+[721/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/input_buffer.cpp.o
+[722/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/learning_rate_adaption_op.cc.o
+[723/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/adadelta_op.cc.o
+[724/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/wngrad_op.cc.o
+[725/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/momentum_sgd_op.cc.o
+[726/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/functions/utils.cpp.o
+[727/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/adagrad_op.cc.o
+[728/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/learning_rate_op.cc.o
+[729/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/adam_op.cc.o
+[730/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/saved_variable.cpp.o
+[731/1277] Building CXX object caffe2/CMakeFiles/torch.dir/share/contrib/nnpack/conv_op.cc.o
+[732/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/onnxifi_op.cc.o
+[733/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/functions/tensor.cpp.o
+[734/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/rmsprop_op.cc.o
+[735/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/yellowfin_op.cc.o
+[736/1277] Building CXX object caffe2/CMakeFiles/torch.dir/share/contrib/depthwise/depthwise3x3_conv_op.cc.o
+[737/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/record_function.cpp.o
+[738/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/profiler.cpp.o
+[739/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/variable.cpp.o
+[740/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/engine.cpp.o
+[741/1277] Building CXX object caffe2/CMakeFiles/torch.dir/queue/queue_ops.cc.o
+[742/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/aten/aten_op.cc.o
+[743/1277] Building CXX object caffe2/CMakeFiles/torch.dir/opt/optimize_ideep.cc.o
+[744/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/attributes.cpp.o
+[745/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/pass_manager.cpp.o
+[746/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/argument_spec.cpp.o
+[747/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/pickler.cpp.o
+[748/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/VariableTypeManual.cpp.o
+[749/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/node_hashing.cpp.o
+[750/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/subgraph_matcher.cpp.o
+[751/1277] Building CXX object caffe2/CMakeFiles/torch.dir/queue/blobs_queue_db.cc.o
+[752/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/profiling_record.cpp.o
+[753/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp.o
+[754/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/operator.cpp.o
+[755/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/canonicalize.cpp.o
+[756/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/constant_pooling.cpp.o
+[757/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/irparser.cpp.o
+[758/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/bailout_graph.cpp.o
+[759/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/constants.cpp.o
+[760/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/create_autodiff_subgraphs.cpp.o
+[761/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/register_c10_ops.cpp.o
+[762/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/insert_guards.cpp.o
+[763/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/netdef_converter.cpp.o
+[764/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/common_subexpression_elimination.cpp.o
+[765/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/batch_mm.cpp.o
+[766/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/constant_propagation.cpp.o
+[767/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/autodiff.cpp.o
+[768/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/import_source.cpp.o
+[769/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/profiling_graph_executor_impl.cpp.o
+[770/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/TH/THTensorMoreMath.cpp.o
+[771/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/dead_code_elimination.cpp.o
+[772/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/alias_analysis.cpp.o
+[773/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/inliner.cpp.o
+[774/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/symbolic_script.cpp.o
+[775/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/interpreter.cpp.o
+[776/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/export.cpp.o
+[777/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/lift_closures.cpp.o
+[778/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/canonicalize_ops.cpp.o
+[779/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/inline_forked_closures.cpp.o
+[780/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/ir.cpp.o
+[781/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/inline_fork_wait.cpp.o
+[782/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/erase_number_types.cpp.o
+[783/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/import.cpp.o
+[784/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/graph_executor.cpp.o
+[785/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/decompose_ops.cpp.o
+[786/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/inplace_check.cpp.o
+[787/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/guard_elimination.cpp.o
+[788/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/liveness.cpp.o
+[789/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/remove_expands.cpp.o
+[790/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/lower_grad_of.cpp.o
+[791/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/loop_unrolling.cpp.o
+[792/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/lower_tuples.cpp.o
+[793/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/remove_inplace_ops.cpp.o
+[794/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/requires_grad_analysis.cpp.o
+[795/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/utils/subgraph_utils.cpp.o
+[796/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/specialize_autogradzero.cpp.o
+[797/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/subgraph_rewrite.cpp.o
+[798/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/fuser/interface.cpp.o
+[799/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/peephole.cpp.o
+[800/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/cuda.cpp.o
+[801/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/testing/file_check.cpp.o
+[802/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/utils/tensor_flatten.cpp.o
+[803/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/final_returns.cpp.o
+[804/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/utils/check_alias_annotation.cpp.o
+[805/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/jit.cpp.o
+[806/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/quantization.cpp.o
+[807/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/python_print.cpp.o
+[808/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/class_type.cpp.o
+[809/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/graph_fuser.cpp.o
+[810/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/convert_to_ssa.cpp.o
+[811/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/hooks_for_testing.cpp.o
+[812/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/fuser/kernel_cache.cpp.o
+[813/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/register_quantized_ops.cpp.o
+[814/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/builtin_functions.cpp.o
+[815/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/register_special_ops.cpp.o
+[816/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/schema_matching.cpp.o
+[817/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/script_type_parser.cpp.o
+[818/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/generated/Functions.cpp.o
+[819/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/function.cpp.o
+[820/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/fuser/executor.cpp.o
+[821/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/fuser/cpu/fused_kernel.cpp.o
+[822/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/fuser/compiler.cpp.o
+[823/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/fuser/fallback.cpp.o
+[824/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/data/datasets/mnist.cpp.o
+[825/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/sugared_value.cpp.o
+[826/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/data/samplers/distributed.cpp.o
+[827/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/passes/shape_analysis.cpp.o
+[828/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/data/samplers/random.cpp.o
+[829/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/fuser/codegen.cpp.o
+[830/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/data/samplers/sequential.cpp.o
+[831/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/data/samplers/stream.cpp.o
+[832/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/generated/register_aten_ops_2.cpp.o
+[833/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/generated/register_aten_ops_0.cpp.o
+[834/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/register_string_ops.cpp.o
+../torch/csrc/jit/register_string_ops.cpp:142:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda47; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:144:20: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = std::basic_string<char> (&)(std::basic_string<char>, long int, long int, long int); std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         stringSlice)
+                    ^
+../torch/csrc/jit/register_string_ops.cpp:158:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda48; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:169:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda49; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:184:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda50; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:203:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda51; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:232:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda52; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:260:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda53; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:281:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda54; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:301:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda55; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:322:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda56; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:327:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda57; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:332:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda58; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:341:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda59; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:350:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda60; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:366:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda61; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:396:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda63; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:405:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda64; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:423:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda66; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:440:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda67; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:453:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda68; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:464:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda69; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:475:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda70; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:492:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda71; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:507:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda72; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:524:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda73; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:548:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda74; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:569:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda75; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         })
+          ^
+../torch/csrc/jit/register_string_ops.cpp:596:10: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::{anonymous}::__lambda76; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         });
+          ^
+[835/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/tracer.cpp.o
+[836/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/init.cpp.o
+[837/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/modules/batchnorm.cpp.o
+[838/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/module.cpp.o
+[839/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/generated/register_aten_ops_1.cpp.o
+[840/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/modules/embedding.cpp.o
+[841/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/miopen/BatchNorm_miopen.cpp.o
+[842/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/modules/functional.cpp.o
+[843/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/modules/dropout.cpp.o
+[844/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/miopen/Conv_miopen.cpp.o
+[845/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/cuda/CUDATypeDefault.cpp.o
+[846/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/cuda/CUDAContext.cpp.o
+[847/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cudnn/BatchNorm.cpp.o
+[848/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cudnn/AffineGridGenerator.cpp.o
+[849/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/cuda/CUDABlas.cpp.o
+[850/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/modules/named_any.cpp.o
+[851/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cuda/CUDAUnaryOps.cpp.o
+[852/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/module.cpp.o
+[853/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/modules/conv.cpp.o
+[854/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/modules/linear.cpp.o
+[855/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/optim/adam.cpp.o
+[856/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cuda/LegacyDefinitions.cpp.o
+[857/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/RegisterCUDA.cpp.o
+[858/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cudnn/LossCTC.cpp.o
+[859/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/cuda/PinnedMemoryAllocator.cpp.o
+[860/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/optim/sgd.cpp.o
+[861/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cudnn/GridSampler.cpp.o
+[862/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp.o
+[863/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/optim/adagrad.cpp.o
+[864/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/optim/serialize.cpp.o
+[865/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/optim/optimizer.cpp.o
+[866/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/optim/rmsprop.cpp.o
+[867/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/optim/lbfgs.cpp.o
+[868/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/SparseCUDAType.cpp.o
+[869/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/cuda/detail/CUDAHooks.cpp.o
+[870/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cudnn/Conv.cpp.o
+[871/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/cudnn/Types.cpp.o
+[872/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/nn/modules/rnn.cpp.o
+[873/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/serialize/input-archive.cpp.o
+[874/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/api/src/serialize/output-archive.cpp.o
+[875/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_op_cache_cudnn.cc.o
+[876/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/THC/THCStorageCopy.cpp.o
+[877/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/cudnn/Descriptors.cpp.o
+[878/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/common_cudnn.cc.o
+[879/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/THC/THCGeneral.cpp.o
+[880/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/blob_serialization_gpu.cc.o
+[881/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/native/cudnn/RNN.cpp.o
+[882/1277] Building CXX object caffe2/CMakeFiles/torch.dir/core/event_gpu.cc.o
+[883/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/script/compiler.cpp.o
+[884/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/common_world_ops_gpu.cc.o
+[885/1277] Building CXX object caffe2/CMakeFiles/torch.dir/distributed/file_store_handler_op_gpu.cc.o
+[886/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_op_shared_gpu.cc.o
+[887/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/nccl/cuda_nccl_gpu.cc.o
+[888/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/communicator_op_gpu.cc.o
+[889/1277] Building CXX object caffe2/CMakeFiles/torch.dir/db/create_db_op_gpu.cc.o
+[890/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/broadcast_ops_gpu.cc.o
+[891/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/gloo/allreduce_ops_gpu.cc.o
+[892/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/THC/THCTensor.cpp.o
+[893/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/nccl/cuda_nccl_op_gpu.cc.o
+[894/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/softmax_op_cudnn.cc.o
+[895/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/counter_ops_gpu.cc.o
+[896/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/local_response_normalization_op_cudnn.cc.o
+[897/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/transpose_op_cudnn.cc.o
+[898/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/dropout_op_cudnn.cc.o
+[899/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/order_switch_ops_cudnn.cc.o
+[900/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elu_op_cudnn.cc.o
+[901/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sigmoid_op_cudnn.cc.o
+[902/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/free_op_gpu.cc.o
+[903/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/do_op_gpu.cc.o
+[904/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/concat_split_op_gpu.cc.o
+[905/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/tanh_op_cudnn.cc.o
+[906/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_transpose_op_cudnn.cc.o
+[907/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/pool_op_cudnn.cc.o
+[908/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/expand_op_gpu.cc.o
+[909/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/if_op_gpu.cc.o
+[910/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/expand_squeeze_dims_op_gpu.cc.o
+[911/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_transpose_op_gpu.cc.o
+[912/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/exp_op_gpu.cc.o
+[913/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_sub_op_gpu.cc.o
+[914/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/im2col_op_gpu.cc.o
+[915/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/elementwise_add_op_gpu.cc.o
+[916/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/generated/VariableType_3.cpp.o
+[917/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_op_gpu.cc.o
+[918/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/matmul_op_gpu.cc.o
+[919/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/negate_gradient_op_gpu.cc.o
+[920/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/order_switch_ops_gpu.cc.o
+[921/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/CUDAType.cpp.o
+[922/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/conv_op_cudnn.cc.o
+[923/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/fully_connected_op_gpu.cc.o
+[924/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/log_op_gpu.cc.o
+[925/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/scale_op_gpu.cc.o
+[926/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/load_save_op_gpu.cc.o
+[927/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/prepend_dim_op_gpu.cc.o
+[928/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/shape_op_gpu.cc.o
+[929/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/profiler_cuda.cpp.o
+[930/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/zero_gradient_op_gpu.cc.o
+[931/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/negative_op_gpu.cc.o
+[932/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/locally_connected_op_gpu.cc.o
+[933/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/functions/comm.cpp.o
+[934/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rnn/recurrent_network_executor_gpu.cc.o
+[935/1277] Building CXX object caffe2/CMakeFiles/xla_tensor_test.dir/__/aten/src/ATen/test/xla_tensor_test.cpp.o
+[936/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/stop_gradient_gpu.cc.o
+[937/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/reshape_op_gpu.cc.o
+[938/1277] Building CXX object caffe2/CMakeFiles/cuda_apply_test.dir/__/aten/src/ATen/test/cuda_apply_test.cpp.o
+[939/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/cuda/comm.cpp.o
+[940/1277] Building CXX object caffe2/CMakeFiles/data_filler_test.dir/predictor/emulator/data_filler_test.cc.o
+[941/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rnn/recurrent_network_blob_fetcher_op_gpu.cc.o
+[942/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sqrt_op_gpu.cc.o
+[943/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/sqr_op_gpu.cc.o
+[944/1277] Building CXX object caffe2/CMakeFiles/dlconvertor_test.dir/__/aten/src/ATen/test/dlconvertor_test.cpp.o
+[945/1277] Building CXX object caffe2/CMakeFiles/torch.dir/queue/queue_ops_gpu.cc.o
+[946/1277] Building CXX object caffe2/CMakeFiles/conv_op_cache_cudnn_test.dir/operators/conv_op_cache_cudnn_test.cc.o
+[947/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/iter_op_gpu.cc.o
+[948/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/fuser/cuda/fused_kernel.cpp.o
+[949/1277] Building CXX object caffe2/CMakeFiles/weakref_test.dir/__/aten/src/ATen/test/weakref_test.cpp.o
+[950/1277] Building CXX object caffe2/CMakeFiles/torch.dir/sgd/learning_rate_op_gpu.cc.o
+[951/1277] Building CXX object caffe2/CMakeFiles/math_test.dir/utils/math_test.cc.o
+[952/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/jit/register_prim_ops.cpp.o
+../torch/csrc/jit/register_prim_ops.cpp:2727:24: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = at::Tensor (*)(const at::Tensor&, double); std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+             &leaky_relu)
+                        ^
+../torch/csrc/jit/register_prim_ops.cpp:2728:58: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = at::Tensor (*)(const std::vector<at::Tensor>&); std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         .op("_test::cat(Tensor[] inputs) -> Tensor", &cat)
+                                                          ^
+../torch/csrc/jit/register_prim_ops.cpp:2729:43: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = std::basic_string<char> (*)(const std::vector<std::vector<std::basic_string<char> > >&); std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+         .op("_test::get_first", &get_first);
+                                           ^
+[953/1277] Building CXX object caffe2/CMakeFiles/operator_schema_test.dir/core/operator_schema_test.cc.o
+[954/1277] Building CXX object caffe2/CMakeFiles/torch.dir/operators/rnn/recurrent_op_cudnn.cc.o
+[955/1277] Building CXX object caffe2/CMakeFiles/apply_utils_test.dir/__/aten/src/ATen/test/apply_utils_test.cpp.o
+[956/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/generated/VariableType_4.cpp.o
+[957/1277] Building CXX object caffe2/CMakeFiles/scalar_test.dir/__/aten/src/ATen/test/scalar_test.cpp.o
+[958/1277] Building CXX object caffe2/CMakeFiles/context_test.dir/core/context_test.cc.o
+[959/1277] Building CXX object caffe2/CMakeFiles/event_test.dir/core/event_test.cc.o
+[960/1277] Building CXX object caffe2/CMakeFiles/observer_test.dir/core/observer_test.cc.o
+[961/1277] Building CXX object caffe2/CMakeFiles/test_parallel.dir/__/aten/src/ATen/test/test_parallel.cpp.o
+[962/1277] Building CXX object caffe2/CMakeFiles/generate_proposals_op_util_boxes_test.dir/operators/generate_proposals_op_util_boxes_test.cc.o
+[963/1277] Building CXX object caffe2/CMakeFiles/thread_init_test.dir/__/aten/src/ATen/test/thread_init_test.cpp.o
+[964/1277] Building CXX object caffe2/CMakeFiles/TensorImpl_test.dir/__/aten/src/ATen/core/TensorImpl_test.cpp.o
+[965/1277] Building CXX object caffe2/CMakeFiles/ssa_test.dir/onnx/ssa_test.cc.o
+[966/1277] Building CXX object caffe2/CMakeFiles/bound_shape_inference_test.dir/opt/bound_shape_inference_test.cc.o
+[967/1277] Building CXX object caffe2/CMakeFiles/basic.dir/__/aten/src/ATen/test/basic.cpp.o
+[968/1277] Building CXX object caffe2/CMakeFiles/Dict_test.dir/__/aten/src/ATen/core/Dict_test.cpp.o
+[969/1277] Building CXX object caffe2/CMakeFiles/net_test.dir/core/net_test.cc.o
+[970/1277] Building CXX object caffe2/CMakeFiles/predictor_test.dir/predictor/predictor_test.cc.o
+[971/1277] Building CXX object caffe2/CMakeFiles/atest.dir/__/aten/src/ATen/test/atest.cpp.o
+[972/1277] Building CXX object caffe2/CMakeFiles/cuda_tensor_interop_test.dir/__/aten/src/ATen/test/cuda_tensor_interop_test.cpp.o
+[973/1277] Building CXX object caffe2/CMakeFiles/kernel_stackbased_test.dir/__/aten/src/ATen/core/op_registration/kernel_stackbased_test.cpp.o
+[974/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state.dir/python/pybind_state_dlpack.cc.o
+[975/1277] Building CXX object caffe2/CMakeFiles/conv_to_nnpack_transform_test.dir/transforms/conv_to_nnpack_transform_test.cc.o
+[976/1277] Building CXX object caffe2/CMakeFiles/text_file_reader_utils_test.dir/operators/text_file_reader_utils_test.cc.o
+[977/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/generated/VariableType_2.cpp.o
+[978/1277] Building CXX object caffe2/CMakeFiles/smart_tensor_printer_test.dir/utils/smart_tensor_printer_test.cc.o
+[979/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/generated/VariableType_0.cpp.o
+[980/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state.dir/python/pybind_state_int8.cc.o
+[981/1277] Building CXX object caffe2/CMakeFiles/proto_utils_test.dir/utils/proto_utils_test.cc.o
+[982/1277] Building CXX object caffe2/CMakeFiles/net_async_tracing_test.dir/core/net_async_tracing_test.cc.o
+[983/1277] Building CXX object caffe2/CMakeFiles/module_test.dir/core/module_test.cc.o
+[984/1277] Building CXX object caffe2/CMakeFiles/net_simple_refcount_test.dir/core/net_simple_refcount_test.cc.o
+[985/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/torch/csrc/autograd/generated/VariableType_1.cpp.o
+[986/1277] Building CXX object caffe2/CMakeFiles/operator_gpu_test.dir/core/operator_gpu_test.cc.o
+[987/1277] Building CXX object caffe2/CMakeFiles/workspace_test.dir/core/workspace_test.cc.o
+[988/1277] Building CXX object caffe2/CMakeFiles/utility_ops_test.dir/operators/utility_ops_test.cc.o
+[989/1277] Building CXX object caffe2/CMakeFiles/graph_test.dir/core/graph_test.cc.o
+[990/1277] Building CXX object caffe2/CMakeFiles/parallel_net_test.dir/core/parallel_net_test.cc.o
+[991/1277] Building CXX object caffe2/CMakeFiles/conv_transpose_op_mobile_test.dir/operators/conv_transpose_op_mobile_test.cc.o
+[992/1277] Building CXX object caffe2/CMakeFiles/blob_gpu_test.dir/core/blob_gpu_test.cc.o
+[993/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/ChannelUtils.cpp.o
+[994/1277] Building CXX object test_api/CMakeFiles/test_api.dir/tensor_options_cuda.cpp.o
+[995/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/Cuda.cpp.o
+[996/1277] Building CXX object caffe2/CMakeFiles/List_test.dir/__/aten/src/ATen/core/List_test.cpp.o
+[997/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/DataChannelRequest.cpp.o
+[998/1277] Building CXX object test_api/CMakeFiles/test_api.dir/tensor_cuda.cpp.o
+[999/1277] Building CXX object caffe2/CMakeFiles/transform_test.dir/core/transform_test.cc.o
+[1000/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/init_methods/InitMethod.cpp.o
+[1001/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/init_methods/InitMethodEnv.cpp.o
+[1002/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/DataChannel.cpp.o
+[1003/1277] Building CXX object test_api/CMakeFiles/test_api.dir/expanding-array.cpp.o
+[1004/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/data_channels/Store.cpp.o
+[1005/1277] Building CXX object caffe2/lib_c10d/CMakeFiles/c10d.dir/ProcessGroup.cpp.o
+[1006/1277] Building CXX object test_api/CMakeFiles/test_api.dir/misc.cpp.o
+[1007/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/init_methods/InitMethodUtils.cpp.o
+[1008/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/init_methods/InitMethodFile.cpp.o
+[1009/1277] Building CXX object test_api/CMakeFiles/test_api.dir/init.cpp.o
+[1010/1277] Building CXX object test_api/CMakeFiles/test_api.dir/static.cpp.o
+[1011/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/data_channels/DataChannelTCP.cpp.o
+[1012/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/init_methods/InitMethodTCP.cpp.o
+[1013/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/process_group/General.cpp.o
+[1014/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/process_group/Collectives.cpp.o
+[1015/1277] Building CXX object test_api/CMakeFiles/test_api.dir/jit.cpp.o
+[1016/1277] Building CXX object test_api/CMakeFiles/test_api.dir/torch_include.cpp.o
+[1017/1277] Building CXX object test_api/CMakeFiles/test_api.dir/tensor_options.cpp.o
+[1018/1277] Building CXX object caffe2/lib_c10d/CMakeFiles/c10d.dir/Utils.cpp.o
+[1019/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/data_channels/DataChannelNccl.cpp.o
+[1020/1277] Building CXX object caffe2/lib_c10d/CMakeFiles/c10d.dir/TCPStore.cpp.o
+[1021/1277] Building CXX object test_api/CMakeFiles/test_api.dir/ordered_dict.cpp.o
+[1022/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/PtrWrapper.cpp.o
+[1023/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/Dtype.cpp.o
+[1024/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/generated/python_functions.cpp.o
+[1025/1277] Building CXX object test_api/CMakeFiles/test_api.dir/rnn.cpp.o
+[1026/1277] Building CXX object test_api/CMakeFiles/test_api.dir/tensor.cpp.o
+[1027/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/DynamicTypes.cpp.o
+[1028/1277] Building CXX object test_api/CMakeFiles/test_api.dir/integration.cpp.o
+[1029/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state.dir/python/pybind_state_ideep.cc.o
+[1030/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/DataLoader.cpp.o
+[1031/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/test/cpp/jit/test.cpp.o
+In file included from ../test/cpp/jit/test.cpp:20:0:
+../test/cpp/jit/test_custom_operators.h: In function ‘void torch::jit::test::testCustomOperators()’:
+../test/cpp/jit/test_custom_operators.h:18:83: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda89; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+     RegisterOperators reg("foo::bar", [](double a, at::Tensor b) { return a + b; });
+                                                                                   ^
+../test/cpp/jit/test_custom_operators.h:43:53: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda90; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+         [](double a, at::Tensor b) { return a + b; });
+                                                     ^
+../test/cpp/jit/test_custom_operators.h:75:63: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda91; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+            std::vector<at::Tensor> tensors) { return floats; });
+                                                               ^
+../test/cpp/jit/test_custom_operators.h:113:64: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda92; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+         [](std::vector<at::Tensor> tensors) { return tensors; });
+                                                                ^
+../test/cpp/jit/test_custom_operators.h: In function ‘void torch::jit::test::testCustomOperatorAliasing()’:
+../test/cpp/jit/test_custom_operators.h:146:8: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperatorAliasing()::__lambda93; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+       });
+        ^
+In file included from ../test/cpp/jit/test_alias_analysis.h:6:0,
+                 from ../test/cpp/jit/test.cpp:12:
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda89; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:18:83:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda89; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+     op(name, std::forward<Implementation>(implementation));
+     ^
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda90; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:43:53:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda90; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda91; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:75:63:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda91; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda92; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:113:64:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda92; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperatorAliasing()::__lambda93; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:146:8:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperatorAliasing()::__lambda93; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+[1032/1277] Building CXX object test_api/CMakeFiles/test_api.dir/any.cpp.o
+[1033/1277] Building CXX object caffe2/CMakeFiles/kernel_functor_test.dir/__/aten/src/ATen/core/op_registration/kernel_functor_test.cpp.o
+[1034/1277] Building CXX object test_api/CMakeFiles/test_api.dir/modules.cpp.o
+[1035/1277] Building CXX object test_api/CMakeFiles/test_api.dir/serialize.cpp.o
+[1036/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/Exceptions.cpp.o
+[1037/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/Size.cpp.o
+[1038/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_cpp_function.cpp.o
+[1039/1277] Building CXX object caffe2/lib_c10d/CMakeFiles/c10d.dir/ProcessGroupNCCL.cpp.o
+[1040/1277] Building CXX object test_api/CMakeFiles/test_api.dir/optim.cpp.o
+[1041/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state.dir/python/pybind_state_nomni.cc.o
+[1042/1277] Building CXX object caffe2/CMakeFiles/torch.dir/__/aten/src/ATen/LegacyTHFunctionsCUDA.cpp.o
+[1043/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_legacy_variable.cpp.o
+[1044/1277] Building CXX object caffe2/CMakeFiles/kernel_function_legacy_test.dir/__/aten/src/ATen/core/op_registration/kernel_function_legacy_test.cpp.o
+[1045/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_engine.cpp.o
+[1046/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_hook.cpp.o
+[1047/1277] Building CXX object test_api/CMakeFiles/test_api.dir/parallel.cpp.o
+[1048/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/TypeInfo.cpp.o
+[1049/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/functions/init.cpp.o
+[1050/1277] Building CXX object test_api/CMakeFiles/test_api.dir/module.cpp.o
+[1051/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_layouts.cpp.o
+[1052/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_memoryformats.cpp.o
+[1053/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/Device.cpp.o
+[1054/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_variable_indexing.cpp.o
+[1055/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp.o
+[1056/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_qschemes.cpp.o
+[1057/1277] Building CXX object caffe2/lib_c10d/CMakeFiles/c10d.dir/ProcessGroupGloo.cpp.o
+In file included from ../c10/core/Device.h:5:0,
+                 from ../c10/core/Allocator.h:6,
+                 from ../aten/src/ATen/core/Type.h:4,
+                 from ../aten/src/ATen/core/Tensor.h:3,
+                 from ../aten/src/ATen/Tensor.h:2,
+                 from ../aten/src/ATen/Context.h:4,
+                 from ../aten/src/ATen/cuda/CUDAContext.h:4,
+                 from ../aten/src/ATen/cuda/CUDAEvent.h:4,
+                 from ../torch/lib/c10d/../c10d/ProcessGroupGloo.hpp:19,
+                 from ../torch/lib/c10d/ProcessGroupGloo.cpp:1:
+../torch/lib/c10d/ProcessGroupGloo.cpp: In member function ‘at::Tensor c10d::{anonymous}::AsyncSparseAllreduceWork::allreduce(std::vector<at::Tensor>&)’:
+../c10/util/Exception.h:339:20: warning: ‘void c10::detail::deprecated_AT_CHECK()’ is deprecated (declared at ../c10/util/Exception.h:314) [-Wdeprecated-declarations]
+     ::c10::detail::deprecated_AT_CHECK();                 \
+                    ^
+../torch/lib/c10d/ProcessGroupGloo.cpp:676:9: note: in expansion of macro ‘AT_CHECK’
+         AT_CHECK(actual == expected, "Sparse dimensions do not match");
+         ^
+../c10/util/Exception.h:339:40: warning: ‘void c10::detail::deprecated_AT_CHECK()’ is deprecated (declared at ../c10/util/Exception.h:314) [-Wdeprecated-declarations]
+     ::c10::detail::deprecated_AT_CHECK();                 \
+                                        ^
+../torch/lib/c10d/ProcessGroupGloo.cpp:676:9: note: in expansion of macro ‘AT_CHECK’
+         AT_CHECK(actual == expected, "Sparse dimensions do not match");
+         ^
+[1058/1277] Building CXX object test_api/CMakeFiles/test_api.dir/sequential.cpp.o
+[1059/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/nn/THNN.cpp.o
+[1060/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/passes/onnx/fixup_onnx_loop.cpp.o
+[1061/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/Generator.cpp.o
+[1062/1277] Building CXX object caffe2/lib_THD/CMakeFiles/THD.dir/base/data_channels/DataChannelGloo.cpp.o
+[1063/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_dtypes.cpp.o
+[1064/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/passes/onnx/constant_fold.cpp.o
+[1065/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/passes/onnx/peephole.cpp.o
+[1066/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/Module.cpp.o
+[1067/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_apply.cpp.o
+[1068/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils.cpp.o
+[1069/1277] Building CXX object caffe2/CMakeFiles/kernel_lambda_legacy_test.dir/__/aten/src/ATen/core/op_registration/kernel_lambda_legacy_test.cpp.o
+[1070/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_types.cpp.o
+[1071/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_numpy.cpp.o
+[1072/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/serialization.cpp.o
+[1073/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_list.cpp.o
+[1074/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/tensor/python_tensor.cpp.o
+[1075/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/multiprocessing/init.cpp.o
+[1076/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tuple_parser.cpp.o
+[1077/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_function.cpp.o
+[1078/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/generated/python_nn_functions.cpp.o
+[1079/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_variable.cpp.o
+[1080/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/init.cpp.o
+[1081/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/c10d/comm.cpp.o
+[1082/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/python_arg_parser.cpp.o
+[1083/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/passes/onnx.cpp.o
+[1084/1277] Building CXX object modules/observers/CMakeFiles/caffe2_observers.dir/observer_config.cc.o
+[1085/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/Stream.cpp.o
+[1086/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/utils.cpp.o
+[1087/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/c10d/ddp.cpp.o
+[1088/1277] Building CXX object caffe2/torch/lib/libshm/CMakeFiles/shm.dir/core.cpp.o
+[1089/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/nccl.cpp.o
+[1090/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/python_arg_flatten.cpp.o
+[1091/1277] Building CXX object modules/observers/CMakeFiles/caffe2_observers.dir/net_observer_reporter_print.cc.o
+[1092/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/api/src/python/init.cpp.o
+[1093/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/serialization.cpp.o
+[1094/1277] Building CXX object modules/module_test/CMakeFiles/caffe2_module_test_dynamic.dir/module_test_dynamic.cc.o
+[1095/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/Module.cpp.o
+[1096/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/onnx/init.cpp.o
+[1097/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/python_nccl.cpp.o
+[1098/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/c10d/reducer.cpp.o
+[1099/1277] Building CXX object modules/observers/CMakeFiles/caffe2_observers.dir/perf_observer.cc.o
+[1100/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/utils/tensor_new.cpp.o
+[1101/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/Event.cpp.o
+[1102/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/python_interpreter.cpp.o
+[1103/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/python_comm.cpp.o
+[1104/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/script/python_sugared_value.cpp.o
+[1105/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/Storage.cpp.o
+[1106/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/Module.cpp.o
+[1107/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/python_tracer.cpp.o
+[1108/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/cuda/Storage.cpp.o
+[1109/1277] Building CXX object test_jit/CMakeFiles/test_jit.dir/test.cpp.o
+In file included from ../test/cpp/jit/test.cpp:20:0:
+../test/cpp/jit/test_custom_operators.h: In function ‘void torch::jit::test::testCustomOperators()’:
+../test/cpp/jit/test_custom_operators.h:18:83: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda89; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+     RegisterOperators reg("foo::bar", [](double a, at::Tensor b) { return a + b; });
+                                                                                   ^
+../test/cpp/jit/test_custom_operators.h:43:53: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda90; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+         [](double a, at::Tensor b) { return a + b; });
+                                                     ^
+../test/cpp/jit/test_custom_operators.h:75:63: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda91; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+            std::vector<at::Tensor> tensors) { return floats; });
+                                                               ^
+../test/cpp/jit/test_custom_operators.h:113:64: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda92; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+         [](std::vector<at::Tensor> tensors) { return tensors; });
+                                                                ^
+../test/cpp/jit/test_custom_operators.h: In function ‘void torch::jit::test::testCustomOperatorAliasing()’:
+../test/cpp/jit/test_custom_operators.h:146:8: warning: ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperatorAliasing()::__lambda93; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:28) [-Wdeprecated-declarations]
+       });
+        ^
+In file included from ../test/cpp/jit/test_alias_analysis.h:6:0,
+                 from ../test/cpp/jit/test.cpp:12:
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda89; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:18:83:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda89; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+     op(name, std::forward<Implementation>(implementation));
+     ^
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda90; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:43:53:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda90; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda91; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:75:63:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda91; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda92; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:113:64:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperators()::__lambda92; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+../torch/csrc/jit/custom_operator.h: In instantiation of ‘torch::jit::RegisterOperators::RegisterOperators(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperatorAliasing()::__lambda93; std::string = std::basic_string<char>]’:
+../test/cpp/jit/test_custom_operators.h:146:8:   required from here
+../torch/csrc/jit/custom_operator.h:29:5: warning: ‘torch::jit::RegisterOperators& torch::jit::RegisterOperators::op(const string&, Implementation&&) [with Implementation = torch::jit::test::testCustomOperatorAliasing()::__lambda93; std::string = std::basic_string<char>]’ is deprecated (declared at ../torch/csrc/jit/custom_operator.h:34) [-Wdeprecated-declarations]
+[1110/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/init.cpp.o
+[1111/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/generated/python_variable_methods.cpp.o
+[1112/1277] Building CXX object caffe2/CMakeFiles/caffe2_pybind11_state.dir/python/pybind_state.cc.o
+[1113/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/nn/THCUNN.cpp.o
+[1114/1277] Building CXX object test_api/CMakeFiles/test_api.dir/dataloader.cpp.o
+[1115/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/c10d/init.cpp.o
+[1116/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/python_ir.cpp.o
+[1117/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/jit/script/init.cpp.o
+[1118/1277] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/generated/python_torch_functions.cpp.o
+[1119/1277] Building CXX object caffe2/CMakeFiles/torch.dir/contrib/aten/aten_op_gpu.cc.o
+[1120/1277] Linking CXX shared library lib/libtorch.so
+[1121/1277] Linking CXX executable bin/cuda_integer_divider_test
+[1122/1277] Linking CXX executable bin/batch_matmul_op_gpu_test
+[1123/1277] Linking CXX executable bin/generate_proposals_op_util_nms_gpu_test
+[1124/1277] Linking CXX executable bin/generate_proposals_op_util_nms_test
+[1125/1277] Linking CXX executable bin/common_subexpression_elimination_test
+[1126/1277] Linking CXX executable bin/device_test
+[1127/1277] Linking CXX executable bin/string_ops_test
+[1128/1277] Linking CXX executable bin/reshape_op_gpu_test
+[1129/1277] Linking CXX executable bin/utility_ops_gpu_test
+[1130/1277] Linking CXX executable bin/cuda_generator_test
+[1131/1277] Linking CXX executable bin/pattern_net_transform_test
+[1132/1277] Linking CXX executable bin/context_gpu_test
+[1133/1277] Linking CXX executable bin/operator_fallback_gpu_test
+[1134/1277] Linking CXX executable bin/cuda_distributions_test
+[1135/1277] Linking CXX executable bin/dead_code_elim_test
+[1136/1277] Linking CXX executable bin/cuda_half_test
+[1137/1277] Linking CXX executable bin/depthwise3x3_conv_op_test
+[1138/1277] Linking CXX executable bin/boolean_unmask_ops_test
+[1139/1277] Linking CXX shared module caffe2/python/caffe2_pybind11_state_gpu.cpython-36m-x86_64-linux-gnu.so
+[1140/1277] Linking CXX executable bin/generate_proposals_op_gpu_test
+[1141/1277] Linking CXX executable bin/cuda_cudnn_test
+[1142/1277] Linking CXX executable bin/math_gpu_test
+[1143/1277] Linking CXX executable bin/cuda_stream_test
+[1144/1277] Linking CXX executable bin/event_gpu_test
+[1145/1277] Linking CXX executable bin/time_observer_test
+[1146/1277] Linking CXX executable bin/extension_backend_test
+[1147/1277] Linking CXX executable bin/cuda_optional_test
+[1148/1277] Linking CXX executable bin/converter_nomigraph_test
+[1149/1277] Linking CXX executable bin/elementwise_op_test
+[1150/1277] Linking CXX executable bin/elementwise_op_gpu_test
+[1151/1277] Linking CXX executable bin/generate_proposals_op_test
+[1152/1277] Linking CXX executable bin/cuda_tensor_interop_test
+[1153/1277] Linking CXX executable bin/tensor_iterator_test
+[1154/1277] Linking CXX executable bin/TopoSortTest
+[1155/1277] Linking CXX executable bin/half_float_ops_test
+[1156/1277] Linking CXX executable bin/batch_matmul_op_test
+[1157/1277] Linking CXX executable bin/distributed_test
+[1158/1277] Linking CXX executable bin/inline_container_test
+[1159/1277] Linking CXX executable bin/int8_roi_align_op_test
+[1160/1277] Linking CXX executable bin/net_gpu_test
+[1161/1277] Linking CXX executable bin/roi_align_op_gpu_test
+[1162/1277] Linking CXX executable bin/NeuralNetTest
+[1163/1277] Linking CXX executable bin/nnpack_test
+[1164/1277] Linking CXX executable bin/verify_api_visibility
+[1165/1277] Linking CXX executable bin/TarjansImplTest
+[1166/1277] Linking CXX executable bin/quantized_test
+[1167/1277] Linking CXX executable bin/backend_cutting_test
+[1168/1277] Linking CXX executable bin/broadcast_test
+[1169/1277] Linking CXX executable bin/observer_test
+[1170/1277] Linking CXX executable bin/op_registration_test
+[1171/1277] Linking CXX executable bin/cuda_packedtensoraccessor_test
+[1172/1277] Linking CXX executable bin/net_test
+[1173/1277] Linking CXX executable bin/timer_test
+[1174/1277] Linking CXX executable bin/native_test
+[1175/1277] Linking CXX executable bin/GraphTest
+[1176/1277] Linking CXX executable bin/operator_test
+[1177/1277] Linking CXX executable bin/kernel_function_test
+[1178/1277] Linking CXX executable bin/apply_utils_test
+[1179/1277] Linking CXX executable bin/cpu_generator_test
+[1180/1277] Linking CXX executable bin/wrapdim_test
+[1181/1277] Linking CXX executable bin/blob_gpu_test
+[1182/1277] Linking CXX executable bin/half_test
+[1183/1277] Linking CXX executable bin/math_test
+[1184/1277] Linking CXX executable bin/cast_test
+[1185/1277] Linking CXX executable bin/dlconvertor_test
+[1186/1277] Linking CXX executable bin/kernel_lambda_legacy_test
+[1187/1277] Linking CXX executable bin/NamedTensor_test
+[1188/1277] Linking CXX executable bin/generate_proposals_op_util_boxes_test
+[1189/1277] Linking CXX executable bin/tensor_interop_test
+[1190/1277] Linking CXX executable bin/int8_test
+[1191/1277] Linking CXX executable bin/Dimname_test
+[1192/1277] Linking CXX executable bin/kernel_stackbased_test
+[1193/1277] Linking CXX executable bin/scalar_tensor_test
+[1194/1277] Linking CXX executable bin/cuda_apply_test
+[1195/1277] Linking CXX executable bin/simple_queue_test
+[1196/1277] Linking CXX executable bin/Dict_test
+[1197/1277] Linking CXX executable bin/scalar_test
+[1198/1277] Linking CXX executable bin/kernel_lambda_test
+[1199/1277] Linking CXX executable bin/xla_tensor_test
+[1200/1277] Linking CXX executable bin/weakref_test
+[1201/1277] Linking CXX executable bin/TensorImpl_test
+[1202/1277] Linking CXX executable bin/conv_to_nnpack_transform_test
+[1203/1277] Linking CXX executable bin/conv_op_cache_cudnn_test
+[1204/1277] Linking CXX executable bin/basic
+[1205/1277] Linking CXX shared module caffe2/python/caffe2_pybind11_state.cpython-36m-x86_64-linux-gnu.so
+[1206/1277] Linking CXX executable bin/List_test
+[1207/1277] Linking CXX executable bin/operator_schema_test
+[1208/1277] Linking CXX executable bin/bound_shape_inference_test
+[1209/1277] Linking CXX static library lib/libTHD.a
+[1210/1277] Linking CXX static library lib/libc10d.a
+[1211/1277] Linking CXX executable bin/net_simple_refcount_test
+[1212/1277] Linking CXX executable bin/test_parallel
+[1213/1277] Linking CXX executable bin/ssa_test
+[1214/1277] Linking CXX executable bin/thread_init_test
+[1215/1277] Linking CXX executable bin/atest
+[1216/1277] Linking CXX executable bin/AlgorithmsTest
+[1217/1277] Linking CXX executable bin/kernel_function_legacy_test
+[1218/1277] Linking CXX executable bin/common_test
+[1219/1277] Linking CXX executable bin/test_jit
+[1220/1277] Linking CXX executable bin/kernel_functor_test
+[1221/1277] Linking CXX executable bin/text_file_reader_utils_test
+caffe2/CMakeFiles/text_file_reader_utils_test.dir/operators/text_file_reader_utils_test.cc.o: In function `caffe2::TextFileReaderUtilsTest_TokenizeTest_Test::TestBody()':
+text_file_reader_utils_test.cc:(.text+0x193d): warning: the use of `tmpnam' is dangerous, better use `mkstemp'
+[1222/1277] Linking CXX executable bin/net_dag_utils_test
+[1223/1277] Linking CXX executable bin/TCPStoreTest
+[1224/1277] Linking CXX executable bin/event_test
+[1225/1277] Linking CXX executable bin/FileStoreTest
+[1226/1277] Linking CXX shared library lib/libshm.so
+[1227/1277] Linking CXX executable bin/graph_test
+[1228/1277] Linking CXX executable bin/init_test
+[1229/1277] Linking CXX executable bin/stats_test
+[1230/1277] Linking CXX executable bin/cpuid_test
+[1231/1277] Linking CXX executable bin/parallel_net_test
+[1232/1277] Linking CXX executable bin/smart_tensor_printer_test
+[1233/1277] Linking CXX executable bin/fixed_divisor_test
+[1234/1277] Linking CXX executable bin/SubgraphMatcherTest
+[1235/1277] Linking CXX executable bin/transform_test
+[1236/1277] Linking CXX executable bin/operator_gpu_test
+[1237/1277] Linking CXX shared library lib/libc10d_cuda_test.so
+[1238/1277] Linking CXX executable bin/BinaryMatchImplTest
+[1239/1277] Linking CXX executable bin/fatal_signal_asan_no_sig_test
+[1240/1277] Linking CXX executable bin/net_async_tracing_test
+[1241/1277] Linking CXX executable bin/data_filler_test
+[1242/1277] Linking CXX executable bin/proto_utils_test
+caffe2/CMakeFiles/proto_utils_test.dir/utils/proto_utils_test.cc.o: In function `caffe2::ProtoUtilsTest_SimpleReadWrite_Test::TestBody()':
+proto_utils_test.cc:(.text+0x31): warning: the use of `tmpnam' is dangerous, better use `mkstemp'
+[1243/1277] Linking CXX executable bin/module_test
+[1244/1277] Linking CXX executable bin/test_api
+[1245/1277] Linking CXX executable bin/workspace_test
+[1246/1277] Linking CXX executable bin/MatchTest
+[1247/1277] Linking CXX executable bin/conv_transpose_op_mobile_test
+[1248/1277] Linking CXX executable bin/blob_test
+caffe2/CMakeFiles/blob_test.dir/core/blob_test.cc.o: In function `caffe2::(anonymous namespace)::TypedTensorTest_BigTensorSerialization_Test<float>::TestBody()':
+blob_test.cc:(.text+0x3dd9e): warning: the use of `tmpnam' is dangerous, better use `mkstemp'
+[1249/1277] Linking CXX executable bin/mobile_test
+[1250/1277] Linking CXX executable bin/context_test
+[1251/1277] Linking CXX executable bin/undefined_tensor_test
+[1252/1277] Linking CXX executable bin/predictor_test
+[1253/1277] Linking CXX executable bin/torch_shm_manager
+[1254/1277] Linking CXX shared library lib/libcaffe2_module_test_dynamic.so
+[1255/1277] Linking CXX executable bin/utility_ops_test
+[1256/1277] Linking CXX shared library lib/libcaffe2_observers.so
+[1257/1277] Linking CXX shared library lib/libtorch_python.so
+[1258/1277] Building CXX object caffe2/lib_c10d/test/CMakeFiles/ProcessGroupNCCLTest.dir/ProcessGroupNCCLTest.cpp.o
+[1259/1277] Building CXX object caffe2/lib_c10d/test/CMakeFiles/ProcessGroupGlooTest.dir/ProcessGroupGlooTest.cpp.o
+[1260/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/sample_as_op.cc.o
+[1261/1277] Linking CXX executable bin/ProcessGroupNCCLTest
+[1262/1277] Building CXX object caffe2/lib_c10d/test/CMakeFiles/ProcessGroupGlooAsyncTest.dir/ProcessGroupGlooAsyncTest.cpp.o
+[1263/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/roi_pool_f_op.cc.o
+[1264/1277] Linking CXX executable bin/ProcessGroupGlooTest
+[1265/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/sigmoid_cross_entropy_loss_op.cc.o
+[1266/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/ps_roi_pool_op.cc.o
+[1267/1277] Linking CXX executable bin/ProcessGroupGlooAsyncTest
+[1268/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/select_smooth_l1_loss_op.cc.o
+[1269/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/group_spatial_softmax_op.cc.o
+[1270/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/sigmoid_focal_loss_op.cc.o
+[1271/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/spatial_narrow_as_op.cc.o
+[1272/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/softmax_focal_loss_op.cc.o
+[1273/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/smooth_l1_loss_op.cc.o
+[1274/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/batch_permutation_op.cc.o
+[1275/1277] Building CXX object modules/detectron/CMakeFiles/caffe2_detectron_ops_gpu.dir/upsample_nearest_op.cc.o
+[1276/1277] Linking CXX shared library lib/libcaffe2_detectron_ops_gpu.so
+[1276/1277] Install the project...
+-- Install configuration: "Release"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/libc10.so" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_DeviceGuard_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_StreamGuard_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_TensorTypeId_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_InlineDeviceGuard_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_InlineStreamGuard_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_Array_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_Half_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_LeftRight_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_Metaprogramming_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_TypeList_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_TypeTraits_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_bfloat16_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_either_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_flags_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_intrusive_ptr_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_logging_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_registry_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_tempfile_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_typeid_test" to "$ORIGIN"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/libc10_cuda.so" to "$ORIGIN:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/c10_cuda_CUDATest" to "$ORIGIN:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/libtorch.so" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/scalar_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/apply_utils_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/basic" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/atest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/Dimname_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/NamedTensor_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/half_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/broadcast_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/wrapdim_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/dlconvertor_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/native_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/scalar_tensor_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/tensor_interop_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/test_parallel" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/undefined_tensor_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/verify_api_visibility" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/thread_init_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/weakref_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/quantized_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/extension_backend_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/xla_tensor_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/tensor_iterator_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cpu_generator_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/Dict_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/List_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/TensorImpl_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/kernel_function_legacy_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/kernel_function_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/kernel_functor_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/kernel_lambda_legacy_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/kernel_lambda_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/kernel_stackbased_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/op_registration_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/blob_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/common_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/context_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/event_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/graph_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/init_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/module_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/net_async_tracing_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/net_dag_utils_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/net_simple_refcount_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/net_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/observer_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/operator_schema_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/operator_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/parallel_net_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/stats_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/timer_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/transform_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/workspace_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/fixed_divisor_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/math_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/fatal_signal_asan_no_sig_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/simple_queue_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/proto_utils_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cpuid_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/smart_tensor_printer_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cast_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/predictor_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/data_filler_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/AlgorithmsTest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/BinaryMatchImplTest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/GraphTest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/MatchTest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/NeuralNetTest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/SubgraphMatcherTest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/TarjansImplTest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/TopoSortTest" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/inline_container_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/time_observer_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/ssa_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/batch_matmul_op_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/boolean_unmask_ops_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/conv_transpose_op_mobile_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/elementwise_op_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/generate_proposals_op_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/generate_proposals_op_util_boxes_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/generate_proposals_op_util_nms_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/half_float_ops_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/string_ops_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/text_file_reader_utils_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/utility_ops_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/int8_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/int8_roi_align_op_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/backend_cutting_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/bound_shape_inference_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/converter_nomigraph_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/dead_code_elim_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/device_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/distributed_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/mobile_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/nnpack_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/depthwise3x3_conv_op_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/common_subexpression_elimination_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/conv_to_nnpack_transform_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/pattern_net_transform_test" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_integer_divider_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_apply_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_stream_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_half_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_distributions_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_optional_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_packedtensoraccessor_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_tensor_interop_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_generator_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/cuda_cudnn_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/blob_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/context_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/event_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/net_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/operator_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/math_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/conv_op_cache_cudnn_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/batch_matmul_op_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/elementwise_op_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/generate_proposals_op_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/generate_proposals_op_util_nms_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/operator_fallback_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/reshape_op_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/roi_align_op_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/test/utility_ops_gpu_test" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/python3.6/site-packages/caffe2/python/caffe2_pybind11_state.cpython-36m-x86_64-linux-gnu.so" to "$ORIGIN/../../torch/lib:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/python3.6/site-packages/caffe2/python/caffe2_pybind11_state_gpu.cpython-36m-x86_64-linux-gnu.so" to "$ORIGIN/../../torch/lib:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/bin/test_jit" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/bin/test_api" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/libtorch_python.so" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/libshm.so" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/bin/torch_shm_manager" to "$ORIGIN/../lib:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/libcaffe2_detectron_ops_gpu.so" to "$ORIGIN:/usr/local/cuda/lib64:/home/iuriiz/anaconda3/lib"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/libcaffe2_module_test_dynamic.so" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+-- Set runtime path of "/data/users/iuriiz/pytorch2/pytorch/torch/lib/libcaffe2_observers.so" to "$ORIGIN:/home/iuriiz/anaconda3/lib:/usr/local/cuda/lib64"
+Building wheel torch-1.2.0a0+4803f19
+-- Building version 1.2.0a0+4803f19
+cmake --build . --target install --config Release -- -j 48
+copying third_party/pybind11/include/pybind11/attr.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/buffer_info.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/cast.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/chrono.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/common.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/complex.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/detail/class.h -> torch/include/pybind11/detail
+copying third_party/pybind11/include/pybind11/detail/common.h -> torch/include/pybind11/detail
+copying third_party/pybind11/include/pybind11/detail/descr.h -> torch/include/pybind11/detail
+copying third_party/pybind11/include/pybind11/detail/init.h -> torch/include/pybind11/detail
+copying third_party/pybind11/include/pybind11/detail/internals.h -> torch/include/pybind11/detail
+copying third_party/pybind11/include/pybind11/detail/typeid.h -> torch/include/pybind11/detail
+copying third_party/pybind11/include/pybind11/eigen.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/embed.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/eval.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/functional.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/iostream.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/numpy.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/operators.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/options.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/pybind11.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/pytypes.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/stl.h -> torch/include/pybind11
+copying third_party/pybind11/include/pybind11/stl_bind.h -> torch/include/pybind11
+running develop
+running egg_info
+writing torch.egg-info/PKG-INFO
+writing dependency_links to torch.egg-info/dependency_links.txt
+writing entry points to torch.egg-info/entry_points.txt
+writing top-level names to torch.egg-info/top_level.txt
+reading manifest file 'torch.egg-info/SOURCES.txt'
+writing manifest file 'torch.egg-info/SOURCES.txt'
+running build_ext
+-- Building with NumPy bindings
+-- Detected cuDNN at /usr/local/cuda/lib64/libcudnn.so.7, /usr/local/cuda/include
+-- Not using MIOpen
+-- Detected CUDA at /usr/local/cuda
+-- Using MKLDNN
+-- Building NCCL library
+-- Building with THD distributed package 
+-- Building with c10d distributed package 
+
+Copying extension caffe2.python.caffe2_pybind11_state
+Copying caffe2.python.caffe2_pybind11_state from torch/lib/python3.6/site-packages/caffe2/python/caffe2_pybind11_state.cpython-36m-x86_64-linux-gnu.so to /data/users/iuriiz/pytorch2/pytorch/build/lib.linux-x86_64-3.6/caffe2/python/caffe2_pybind11_state.cpython-36m-x86_64-linux-gnu.so
+copying torch/lib/python3.6/site-packages/caffe2/python/caffe2_pybind11_state.cpython-36m-x86_64-linux-gnu.so -> /data/users/iuriiz/pytorch2/pytorch/build/lib.linux-x86_64-3.6/caffe2/python
+
+Copying extension caffe2.python.caffe2_pybind11_state_gpu
+Copying caffe2.python.caffe2_pybind11_state_gpu from torch/lib/python3.6/site-packages/caffe2/python/caffe2_pybind11_state_gpu.cpython-36m-x86_64-linux-gnu.so to /data/users/iuriiz/pytorch2/pytorch/build/lib.linux-x86_64-3.6/caffe2/python/caffe2_pybind11_state_gpu.cpython-36m-x86_64-linux-gnu.so
+copying torch/lib/python3.6/site-packages/caffe2/python/caffe2_pybind11_state_gpu.cpython-36m-x86_64-linux-gnu.so -> /data/users/iuriiz/pytorch2/pytorch/build/lib.linux-x86_64-3.6/caffe2/python
+copying build/lib.linux-x86_64-3.6/torch/_C.cpython-36m-x86_64-linux-gnu.so -> torch
+copying build/lib.linux-x86_64-3.6/torch/_dl.cpython-36m-x86_64-linux-gnu.so -> torch
+copying build/lib.linux-x86_64-3.6/caffe2/python/caffe2_pybind11_state.cpython-36m-x86_64-linux-gnu.so -> caffe2/python
+copying build/lib.linux-x86_64-3.6/caffe2/python/caffe2_pybind11_state_gpu.cpython-36m-x86_64-linux-gnu.so -> caffe2/python
+Creating /home/iuriiz/anaconda3/lib/python3.6/site-packages/torch.egg-link (link to .)
+torch 1.2.0a0+4803f19 is already the active version in easy-install.pth
+Installing convert-caffe2-to-onnx script to /home/iuriiz/anaconda3/bin
+Installing convert-onnx-to-caffe2 script to /home/iuriiz/anaconda3/bin
+
+Installed /data/users/iuriiz/pytorch2/pytorch
+Processing dependencies for torch==1.2.0a0+4803f19
+Finished processing dependencies for torch==1.2.0a0+4803f19

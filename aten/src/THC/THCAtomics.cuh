@@ -120,6 +120,10 @@ static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
 
 }
 
+static inline  __device__ void atomicAdd(at::BFloat16 *address, at::BFloat16 val) {
+  atomicAdd(reinterpret_cast<at::BFloat16*>(address), val);
+}
+
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
 static inline  __device__  void atomicAdd(double *address, double val) {

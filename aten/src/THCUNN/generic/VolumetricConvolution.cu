@@ -194,7 +194,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
     if (bias) {
       #ifdef THC_REAL_IS_FLOAT
       THCudaBlas_Sgemm(
-      #elif defined(THC_REAL_IS_HALF)
+      #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
@@ -229,7 +229,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
     THCudaBlas_Sgemm(
-    #elif defined(THC_REAL_IS_HALF)
+    #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
@@ -329,7 +329,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
     THCudaBlas_Sgemm(
-    #elif defined(THC_REAL_IS_HALF)
+    #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
@@ -456,7 +456,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
     THCudaBlas_Sgemm(
-    #elif defined(THC_REAL_IS_HALF)
+    #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
@@ -495,7 +495,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
         THCTensor_(data)(state, gradBias), 1
       );
       #endif
-      #ifdef THC_REAL_IS_HALF
+      if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
       THCudaBlas_Hgemm(
         state,
         't', 'n',

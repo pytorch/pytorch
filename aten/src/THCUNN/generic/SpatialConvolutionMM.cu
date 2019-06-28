@@ -181,7 +181,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     if (bias) {
       #ifdef THC_REAL_IS_FLOAT
       THCudaBlas_Sgemm(
-      #elif defined(THC_REAL_IS_HALF)
+      #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
@@ -206,7 +206,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
-      1, 1, 
+      1, 1,
       columns->data<scalar_t>()
     );
 
@@ -219,7 +219,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
     THCudaBlas_Sgemm(
-    #elif defined(THC_REAL_IS_HALF)
+    #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
@@ -316,7 +316,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     #ifdef THC_REAL_IS_FLOAT
     THCudaBlas_Sgemm(
-    #elif defined(THC_REAL_IS_HALF)
+    #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
@@ -437,7 +437,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
         nInputPlane, inputHeight, inputWidth,
         outputHeight, outputWidth,
         kH, kW, padH, padW, dH, dW,
-        1, 1, 
+        1, 1,
         columns->data<scalar_t>()
       );
 
@@ -450,7 +450,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
       #ifdef THC_REAL_IS_FLOAT
       THCudaBlas_Sgemm(
-      #elif defined(THC_REAL_IS_HALF)
+      #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
@@ -490,7 +490,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           THCTensor_(data)(state, gradBias), 1
       );
       #endif
-      #ifdef THC_REAL_IS_HALF
+      #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
       THCudaBlas_Hgemm(
           state,
           't', 'n',

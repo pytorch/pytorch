@@ -135,7 +135,7 @@ __global__ void lstm_cell_forward(
         b2c = DEVICE_BIAS_GET(bias2, linearIndex % hsz + 2 * hsz);
         b2o = DEVICE_BIAS_GET(bias2, linearIndex % hsz + 3 * hsz);
       } else {
-#ifndef THC_REAL_IS_HALF
+#if !defined(THC_REAL_IS_HALF) && !defined(THC_REAL_IS_BFLOAT16)
         b1i = 0.0; b1f = 0.0; b1c = 0.0; b1o = 0.0;
         b2i = 0.0; b2f = 0.0; b2c = 0.0; b2o = 0.0;
 #else
@@ -273,7 +273,7 @@ __global__ void gru_cell_forward(
         b2i = DEVICE_BIAS_GET(Bias2, linearIndex%hsz+1*hsz);
         b2n = DEVICE_BIAS_GET(Bias2, linearIndex%hsz+2*hsz);
       } else {
-#ifndef THC_REAL_IS_HALF
+#if !defined(THC_REAL_IS_HALF) && !defined(THC_REAL_IS_BFLOAT16)
         b1r = 0.0; b1i = 0.0; b1n = 0.0;
         b2r = 0.0; b2i = 0.0; b2n = 0.0;
 #else

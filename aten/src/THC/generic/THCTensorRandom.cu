@@ -7,7 +7,7 @@
 #include <ATen/Utils.h>
 #include <utility>
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
 
 void THCTensor_(renormRows)(struct THCState* state,
                              THCTensor* t) {
@@ -130,7 +130,7 @@ void THCTensor_(multinomial)(struct THCState *state,
 
     // Prefix sum along rows
     THCTensor_(cumsum)(state, prefixSum, normDist, 1);
- 
+
     std::pair<uint64_t, uint64_t> rng_engine_inputs;
     if (with_replacement) {
       {
@@ -187,7 +187,7 @@ void THCTensor_(multinomial)(struct THCState *state,
         {
           // See Note [Acquire lock when using random generators]
           std::lock_guard<std::mutex> lock(gen->mutex_);
-  
+
           // each thread will utilize one random, however, since we have to use
           // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
           // offset is 4.

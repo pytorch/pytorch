@@ -86,7 +86,7 @@ inline void increment_version(Tensor & t) {
 }
 
 inline bool isFloatingPoint(ScalarType s) {
-  return s == kFloat || s == kDouble || s == kHalf;
+  return s == kFloat || s == kDouble || s == kHalf || s == kBFloat16;
 }
 
 struct Flatten : IterArgs<Flatten> {
