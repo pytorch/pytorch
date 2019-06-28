@@ -132,6 +132,7 @@ option(USE_SYSTEM_EIGEN_INSTALL
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+option(USE_CBLAS_IN_MKLDNN "Use CBLAS in MKLDNN" OFF)
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86 and x86_64." ON
   "CPU_INTEL" OFF)

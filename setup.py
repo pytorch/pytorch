@@ -388,6 +388,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Not using CUDA')
         if cmake_cache_vars['USE_MKLDNN']:
             report('-- Using MKLDNN')
+            if cmake_cache_vars['USE_CBLAS_IN_MKLDNN']:
+                report('-- Using CBLAS in MKLDNN')
+            else:
+                report('-- Not using CBLAS in MKLDNN')
         else:
             report('-- Not using MKLDNN')
         if cmake_cache_vars['USE_NCCL'] and cmake_cache_vars['USE_SYSTEM_NCCL']:

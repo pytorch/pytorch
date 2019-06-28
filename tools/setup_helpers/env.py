@@ -59,3 +59,6 @@ hotpatch_build_env_vars()
 DEBUG = check_env_flag('DEBUG')
 REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
 NAMEDTENSOR_ENABLED = check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')
+USE_CBLAS_IN_MKLDNN = 'OFF'
+if check_env_flag('USE_MKLDNN'):
+    USE_CBLAS_IN_MKLDNN = check_env_flag('USE_CBLAS_IN_MKLDNN')
