@@ -195,11 +195,10 @@ auto ConvParams::is_depthwise(
 }
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
-bool check_cudnn_depthwise_workload(const at::Tensor& input, const at::Tensor& weight, int stride) {
+bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
   int w = input.size(3);  // same as h
   int ch = input.size(1);
   int bs = input.size(0);
-  int k = weight.size(2); // kernel size
   if (stride==1) {
     if (w >= 7) {
       // All batch sizes and nb_channels
@@ -325,7 +324,7 @@ auto ConvParams::use_cudnn_depthwise(
                          ((weight.size(3) == 3) || (weight.size(3) == 1)) &&
                          input.size(1) >= 32); // min 32 channels supported)
     if (kernel_cond) {
-      return check_cudnn_depthwise_workload(input, weight, stride[0]);
+      return check_cudnn_depthwise_workload(input, stride[0]);
     } else {
       return false;
     }
