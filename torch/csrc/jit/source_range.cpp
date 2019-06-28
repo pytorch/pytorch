@@ -62,14 +62,15 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   size_t len = std::min(size(), end_line - start());
   out << std::string(len, '~')
       << (len < size() ? "...  <--- HERE" : " <--- HERE");
-  out << str.substr(end_line, end_highlight - end_line);
-  if (!str.empty() && str.back() != '\n')
+  auto substr = str.substr(end_line, end_highlight - end_line);
+  out << substr;
+  if (!substr.empty() && substr.back() != '\n')
     out << "\n";
 #ifndef __ANDROID__
   // Retrieve original SourceRange, if present.
   if (source_) {
     if (auto orig_source_range = findSourceRangeThatGenerated()) {
-      out << "\nCompiled from code ";
+      out << "Compiled from code ";
       orig_source_range->highlight(out);
     }
   }
