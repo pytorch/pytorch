@@ -11247,8 +11247,17 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(x_clone, xor_result)
 
     def test_invert(self):
-        x = torch.ByteTensor([0, 1, 1])
-        self.assertEqual((~x).tolist(), [1, 0, 0])
+        for t in (torch.ByteTensor, torch.ShortTensor, torch.IntTensor, torch.LongTensor):
+            a = torch.arange(127, dtype=t.dtype)
+            self.assertEqual(~a, a.bitwise_not())
+        a = torch.BoolTensor([True, False])
+        self.assertEqual(~a, a.bitwise_not())
+
+        # test exceptions
+        for t in(torch.HalfTensor, torch.FloatTensor, torch.DoubleTensor):
+            a = torch.zeros(10, dtype=t.dtype)
+            with self.assertRaises(TypeError):
+                b = ~a
 
     def test_apply(self):
         x = torch.arange(1, 6)
