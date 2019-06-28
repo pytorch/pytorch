@@ -474,27 +474,42 @@ struct PythonPrintPass {
   }
 
   // map from Value to how it should be printed at each use
-  std::unordered_map<Value*, std::shared_ptr<TaggedStringStream>> value_names_;
+  std::unordered_map<Value*, std::shared_ptr<TaggedStringStream>> expr_table_;
+  std::unordered_map<Value*, std::string> ident_refs_;
 
   // NB: we MUST pass around the shared pointers to these streams by value.
   // There is an interaction in splitLongInlines where the string value for
   // both the RHS and the LHS of an expression are live at the same time,
   // however the value for the RHS is overwritten in the table.
   std::shared_ptr<TaggedStringStream> useOf(Value* v) const {
-    return value_names_.at(v);
+    // Ident refs take precedent over expression refs, since presence in
+    // the ident ref table indicates we have already emitted a statement
+    // assigning the given value.
+    if (ident_refs_.count(v)) {
+      auto rv = std::make_shared<TaggedStringStream>(&source_range_stack_);
+      (*rv) << ident_refs_.at(v);
+      return rv;
+    }
+    if (expr_table_.count(v)) {
+      return expr_table_.at(v);
+    }
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Value was not present in either expressions"
+        " table or ident refs table");
+  }
+  void assignValue(Value* v, const std::string& s) {
+    ident_refs_[v] = s;
   }
   void assignValue(Value* v, std::shared_ptr<TaggedStringStream> s) {
-    value_names_[v] = std::move(s);
+    expr_table_[v] = std::move(s);
   }
   void assignValue(Value* v, Value* w) {
     assignValue(v, useOf(w));
   }
   void assignValuesToTheirUniqueNames(at::ArrayRef<Value*> values) {
     for (auto v : values) {
-      auto name_stream =
-          std::make_shared<TaggedStringStream>(&source_range_stack_);
-      (*name_stream) << genUniqueNameFor(v);
-      assignValue(v, std::move(name_stream));
+      assignValue(v, genUniqueNameFor(v));
     }
   }
 
@@ -1155,10 +1170,7 @@ struct PythonPrintPass {
       if (arg.default_value()) {
         printDefaultValue(arg.type(), body_, *arg.default_value());
       }
-      auto arg_stream =
-          std::make_shared<TaggedStringStream>(&source_range_stack_);
-      (*arg_stream) << arg_name;
-      assignValue(*param_it++, arg_stream);
+      assignValue(*param_it++, arg_name);
     }
 
     body_ << ") -> " << resultType(graph)->python_str() << ":\n";
