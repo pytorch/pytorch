@@ -6168,10 +6168,11 @@ a")
             else:
                 func = getattr(math, op)
                 param_count = 0
+
                 def num_args(f):  # Parses the docstring for builtin functions
                     spec = f.__doc__.split('\n')[0]
-                    args = spec[spec.find('(')+1:spec.find(')')]
-                    return args.count(',')+1 if args else 0
+                    args = spec[spec.find('(') + 1:spec.find(')')]
+                    return args.count(',') + 1 if args else 0
                 if PY2:
                     param_count = num_args(func)
                 else:
