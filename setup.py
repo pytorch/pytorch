@@ -105,8 +105,8 @@
 #     then the build will fail if the requested BLAS is not found, otherwise
 #     the BLAS will be chosen based on what is found on your system.
 #
-#   MKL_SEQ=1
-#     chooses a sequential version of MKL library (in case of BLAS=MKL)
+#   MKL_THREADING
+#     MKL flavor: SEQ, TBB or OMP (default)
 #
 #   USE_FBGEMM
 #     Enables use of FBGEMM

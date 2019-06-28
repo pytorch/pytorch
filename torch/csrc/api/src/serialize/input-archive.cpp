@@ -25,7 +25,7 @@ bool InputArchive::try_read(
     bool is_buffer) {
   auto param = module_->find_parameter(key);
   auto buffer = module_->find_buffer(key);
-  if (param == nullptr && buffer == nullptr) return false;
+  if (!param && !buffer) return false;
 
   // clang-format off
   auto read_param = is_buffer ? buffer : param;

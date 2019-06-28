@@ -46,80 +46,80 @@ inline intrusive_ptr<DictImpl> DictImpl::copy() const {
 }
 
 template<class Key, class Value>
-DictPtr<Key, Value> make_dict() {
-  return DictPtr<Key, Value>(make_intrusive<detail::DictImpl>());
+Dict<Key, Value> make_dict() {
+  return Dict<Key, Value>(make_intrusive<detail::DictImpl>());
 }
 
 template<class Key, class Value>
-DictPtr<Key, Value>::DictPtr(DictPtr&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
+Dict<Key, Value>::Dict(Dict&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
   rhs.impl_ = make_intrusive<detail::DictImpl>();
 }
 
 template<class Key, class Value>
-DictPtr<Key, Value>::DictPtr(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
+Dict<Key, Value>::Dict(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
 
 template<class Key, class Value>
-DictPtr<Key, Value>& DictPtr<Key, Value>::operator=(DictPtr&& rhs) noexcept {
+Dict<Key, Value>& Dict<Key, Value>::operator=(Dict&& rhs) noexcept {
   impl_ = std::move(rhs.impl_);
   rhs.impl_ = make_intrusive<detail::DictImpl>();
   return *this;
 }
 
 template<class Key, class Value>
-DictPtr<Key, Value> DictPtr<Key, Value>::copy() const {
-  return DictPtr<Key, Value>(impl_->copy());
+Dict<Key, Value> Dict<Key, Value>::copy() const {
+  return Dict<Key, Value>(impl_->copy());
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::iterator DictPtr<Key, Value>::begin() {
+typename Dict<Key, Value>::iterator Dict<Key, Value>::begin() {
   return iterator{impl_->dict.begin()};
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::const_iterator DictPtr<Key, Value>::begin() const {
+typename Dict<Key, Value>::const_iterator Dict<Key, Value>::begin() const {
   return const_iterator{impl_->dict.begin()};
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::const_iterator DictPtr<Key, Value>::cbegin() const {
+typename Dict<Key, Value>::const_iterator Dict<Key, Value>::cbegin() const {
   return const_iterator{impl_->dict.cbegin()};
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::iterator DictPtr<Key, Value>::end() {
+typename Dict<Key, Value>::iterator Dict<Key, Value>::end() {
   return iterator{impl_->dict.end()};
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::const_iterator DictPtr<Key, Value>::end() const {
+typename Dict<Key, Value>::const_iterator Dict<Key, Value>::end() const {
   return const_iterator{impl_->dict.end()};
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::const_iterator DictPtr<Key, Value>::cend() const {
+typename Dict<Key, Value>::const_iterator Dict<Key, Value>::cend() const {
   return const_iterator{impl_->dict.cend()};
 }
 
 template<class Key, class Value>
-bool DictPtr<Key, Value>::empty() const {
+bool Dict<Key, Value>::empty() const {
   return impl_->dict.empty();
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::size_type DictPtr<Key, Value>::size() const {
+typename Dict<Key, Value>::size_type Dict<Key, Value>::size() const {
   return impl_->dict.size();
 }
 
 template<class Key, class Value>
-void DictPtr<Key, Value>::clear() {
+void Dict<Key, Value>::clear() {
   impl_->dict.clear();
 }
 
 template<class Key, class Value>
 template<class Key_, class Value_>
-std::pair<typename DictPtr<Key, Value>::iterator, bool> DictPtr<Key, Value>::insert(Key_&& key, Value_&& value) {
-  static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of DictPtr::insert");
-  static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of DictPtr::insert");
+std::pair<typename Dict<Key, Value>::iterator, bool> Dict<Key, Value>::insert(Key_&& key, Value_&& value) {
+  static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert");
+  static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert");
   auto inserted = impl_->dict.insert(std::pair<IValue, IValue>{
     Key(std::forward<Key_>(key)),
     Value(std::forward<Value_>(value))});
@@ -128,9 +128,9 @@ std::pair<typename DictPtr<Key, Value>::iterator, bool> DictPtr<Key, Value>::ins
 
 template<class Key, class Value>
 template<class Key_, class Value_>
-std::pair<typename DictPtr<Key, Value>::iterator, bool> DictPtr<Key, Value>::insert_or_assign(Key_&& key, Value_&& value) {
-  static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of DictPtr::insert_or_assign");
-  static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of DictPtr::insert_or_assign");
+std::pair<typename Dict<Key, Value>::iterator, bool> Dict<Key, Value>::insert_or_assign(Key_&& key, Value_&& value) {
+  static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert_or_assign");
+  static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert_or_assign");
   auto inserted = impl_->dict.insert_or_assign(
     Key(std::forward<Key_>(key)),
     Value(std::forward<Value_>(value)));
@@ -138,37 +138,37 @@ std::pair<typename DictPtr<Key, Value>::iterator, bool> DictPtr<Key, Value>::ins
 }
 
 template<class Key, class Value>
-void DictPtr<Key, Value>::erase(const_iterator iter) {
+void Dict<Key, Value>::erase(const_iterator iter) {
   impl_->dict.erase(iter.entryRef_.iterator_);
 }
 
 template<class Key, class Value>
-C10_NODISCARD size_t DictPtr<Key, Value>::erase(const Key& key) {
+C10_NODISCARD size_t Dict<Key, Value>::erase(const Key& key) {
   return impl_->dict.erase(key);
 }
 
 template<class Key, class Value>
-Value DictPtr<Key, Value>::at(const Key& key) const {
+Value Dict<Key, Value>::at(const Key& key) const {
   return impl_->dict.at(key).template to<Value>();
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::iterator DictPtr<Key, Value>::find(const Key& key) {
+typename Dict<Key, Value>::iterator Dict<Key, Value>::find(const Key& key) {
   return iterator{impl_->dict.find(key)};
 }
 
 template<class Key, class Value>
-typename DictPtr<Key, Value>::const_iterator DictPtr<Key, Value>::find(const Key& key) const {
+typename Dict<Key, Value>::const_iterator Dict<Key, Value>::find(const Key& key) const {
   return const_iterator{impl_->dict.find(key)};
 }
 
 template<class Key, class Value>
-bool DictPtr<Key, Value>::contains(const Key& key) const {
+bool Dict<Key, Value>::contains(const Key& key) const {
   return end() != find(key);
 }
 
 template<class Key, class Value>
-void DictPtr<Key, Value>::reserve(size_type count) {
+void Dict<Key, Value>::reserve(size_type count) {
   impl_->dict.reserve(count);
 }
 

@@ -4,8 +4,8 @@
 
 namespace caffe2 {
 
-template <typename T>
-SpatialBNDNNLowPOp<T>::SpatialBNDNNLowPOp(
+template <typename T, bool ReluFused>
+SpatialBNDNNLowPOp<T, ReluFused>::SpatialBNDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : DNNLowPOp<T, SpatialBNOp<CPUContext>>(operator_def, ws),
@@ -23,8 +23,8 @@ SpatialBNDNNLowPOp<T>::SpatialBNDNNLowPOp(
   CAFFE_ENFORCE_GT(epsilon_, 0);
 }
 
-template <typename T>
-void SpatialBNDNNLowPOp<T>::ComputeFusedParam_(
+template <typename T, bool ReluFused>
+void SpatialBNDNNLowPOp<T, ReluFused>::ComputeFusedParam_(
     const int C,
     const float* scale,
     const float* bias,
@@ -44,8 +44,23 @@ void SpatialBNDNNLowPOp<T>::ComputeFusedParam_(
   beta_arr = beta_arr / out_qparams_.scale;
 }
 
-template <typename T>
-bool SpatialBNDNNLowPOp<T>::RunOnDevice() {
+template <typename T, bool ReluFused>
+bool SpatialBNDNNLowPOp<T, ReluFused>::RunOnDevice() {
+  if (!this->arguments_parsed_) {
+    dnnlowp::ParseDNNLowPOperatorArguments(
+        this, &dequantize_output_, &measure_quantization_error_, &followed_by_);
+
+    if (ReluFused) {
+      // It's actually fused with Relu not followed by but setting this to make
+      // sure quantization error is correctly measured in
+      // this->MeasureQuantizationError_
+      followed_by_ = "Relu";
+      dnnlowp::AdjustOutputTensorQuantizationParamsWithFollowedBy(
+          this, followed_by_);
+    }
+    this->arguments_parsed_ = true;
+  }
+
   const auto& X = InputTensorCPU_(INPUT);
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
@@ -106,6 +121,10 @@ bool SpatialBNDNNLowPOp<T>::RunOnDevice() {
                               (X_data[(i * C + c) * HxW + j] -
                                in_qparams_[0].zero_point) +
                           beta_data[c]);
+          if (ReluFused) {
+            quantized_down =
+                std::max<long>(quantized_down, out_qparams_.zero_point);
+          }
           Y_data[(i * C + c) * HxW + j] =
               fbgemm::clamp<long, T>(quantized_down, 8);
         }
@@ -122,7 +141,8 @@ bool SpatialBNDNNLowPOp<T>::RunOnDevice() {
           X_data,
           alpha_data,
           beta_data,
-          Y_data);
+          Y_data,
+          ReluFused);
     } else {
       for (int i = 0; i < N * HxW; ++i) {
         for (int c = 0; c < C; ++c) {
@@ -130,6 +150,10 @@ bool SpatialBNDNNLowPOp<T>::RunOnDevice() {
               std::lrintf(alpha_data[c] *
                               (X_data[i * C + c] - in_qparams_[0].zero_point) +
                           beta_data[c]);
+          if (ReluFused) {
+            quantized_down =
+                std::max<long>(quantized_down, out_qparams_.zero_point);
+          }
           Y_data[i * C + c] = fbgemm::clamp<long, T>(quantized_down, 8);
         }
       }
@@ -151,6 +175,12 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     DNNLOWP,
     SpatialBNDNNLowPOp<uint8_t>);
 
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    Int8SpatialBNRelu,
+    DNNLOWP,
+    SpatialBNDNNLowPOp<uint8_t, true>);
+
 OPERATOR_SCHEMA(Int8SpatialBN).NumInputs(5).NumOutputs(1);
+OPERATOR_SCHEMA(Int8SpatialBNRelu).NumInputs(5).NumOutputs(1);
 
 } // namespace caffe2
