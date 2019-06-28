@@ -35,8 +35,12 @@ class SourceRangeDeserializer {
 
  private:
   std::shared_ptr<Source> deserialize_source(const c10::IValue& iv) {
-    // TODO: cache these?
-    auto tup_elems = iv.toTuple()->elements();
+    auto tup = iv.toTuple();
+    if (cached_sources.count(tup)) {
+      return cached_sources.at(tup);
+    }
+
+    auto tup_elems = tup->elements();
     TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
     std::string text_ = tup_elems[0].toString()->string();
     c10::optional<std::string> filename_ =
@@ -45,8 +49,14 @@ class SourceRangeDeserializer {
 
     auto source = std::make_shared<Source>(
         std::move(text_), std::move(filename_), starting_line_no_);
+    cached_sources[tup] = source;
     return source;
   }
+
+  std::unordered_map<
+      c10::intrusive_ptr<c10::ivalue::Tuple>,
+      std::shared_ptr<Source>>
+      cached_sources;
 };
 
 c10::IValue SourceRangeSerializer::serialize(const SourceRange& sr) {

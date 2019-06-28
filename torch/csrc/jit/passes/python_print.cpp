@@ -243,6 +243,21 @@ struct PythonPrintPass {
       return ranges_;
     }
 
+    // Write out this TaggedStringStream's text and source ranges to
+    // os and source_ranges_out, respectively. stream_pos gives
+    // the byte offset into the current stream, so we can accurately
+    // record source ranges as byte offsets.
+    void print(
+        std::ostream& os,
+        SourceRangeRecords* source_ranges_out,
+        int64_t stream_pos) {
+      os << str();
+      for (const auto& x : ranges()) {
+        source_ranges_out->push_back(x);
+        source_ranges_out->back().bytes += stream_pos;
+      }
+    }
+
    private:
     std::ostringstream oss_;
     std::vector<TaggedRange> ranges_;
@@ -1249,11 +1264,7 @@ struct PythonPrintPass {
   void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
     out << getImports();
     int64_t source_offset = out.tellp();
-    out << body_.str();
-    for (const auto& x : body_.ranges()) {
-      source_ranges_out.push_back(x);
-      source_ranges_out.back().bytes += source_offset;
-    }
+    body_.print(out, &source_ranges_out, source_offset);
   }
 };
 
