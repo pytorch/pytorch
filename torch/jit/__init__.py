@@ -1108,7 +1108,7 @@ def _enable_recursive_script():
     torch._C._jit_recursive_script(False)
 
 
-def script_wrapper(module_class):
+def script_module_decorator(module_class):
     """
     Wraps the `__new__` of a class so that construction always returns a
     ScriptModule
@@ -1143,7 +1143,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         if inspect.isclass(obj) and issubclass(obj, torch.nn.Module):
             if not _is_new_style_class(obj):
                 raise RuntimeError("TorchScript modules must be new-style classes. Please inherit from 'nn.Module'")
-            return script_wrapper(obj)
+            return script_module_decorator(obj)
         if isinstance(obj, torch.nn.Module):
             return _convert_to_script_module(obj)
 
