@@ -131,27 +131,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
-
-    # There is a difference between PyTorch and ONNX/numpy w.r.t index_select by a scaler index.
-    # With an input tensor of rank r and a scaler index, PyTorch index_select returns a tensor of rank = r.
-    # However, corresponding op in ONNX(Gather) and numpy returns a tensor of rank = r - 1.
-    # To maintain a parity between ONNX and PyTorch, scaler index is converted to a 1D tensor
-    # before applying an ONNX gather op during ONNX export. 
-    # Following test_index_select_* tests are to confirm that equivalence between PyTorch and ONNX 
-    # is maintained in the above case.
     def test_index_select_constant_scaler_index(self):
-        index = 2
-
         class IndexSelectScalerIndexModel(torch.nn.Module):
             def forward(self, x):
+                index = 2
                 return torch.index_select(x, 1, torch.tensor(index))
-
         x = torch.randn(3, 4)
         self.run_test(IndexSelectScalerIndexModel(), x)
 
-
     def test_index_select_scaler_index(self):
-
         class IndexSelectScalerIndexModel(torch.nn.Module):
             def __init__(self, index_base):
                 super(IndexSelectScalerIndexModel, self).__init__()
@@ -160,7 +148,6 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, index_offset):
                 index = self.index_base + index_offset
                 return torch.index_select(x, 1, index)
-
         x = torch.randn(3, 4)
         offset = 2
         index_offset = torch.tensor(offset)
