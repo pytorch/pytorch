@@ -97,14 +97,14 @@ class _LRScheduler(object):
         elif (
                 (self.last_epoch > 0 or epoch != 0)
                 and epoch != self.last_epoch + 1
-                ):
+        ):
             compute_lr = self._compute_lr_closed_form
             warnings.warn(
-                    "If an epoch parameter different from the current epoch is passed, "
-                    "the recursive form of the scheduler is overridden by its closed form "
-                    "whenever available, and will be deprecated.",
-                    DeprecationWarning,
-                    )
+                "If an epoch parameter different from the current epoch is passed, "
+                "the recursive form of the scheduler is overridden by its closed form "
+                "whenever available, and will be deprecated.",
+                DeprecationWarning,
+            )
 
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, compute_lr()):
