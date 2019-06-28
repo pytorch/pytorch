@@ -26,18 +26,10 @@ namespace script {
 
 namespace tracer {
 
-using ::c10::ivalue::List;
 using ::c10::ivalue::Shared;
 
 using ::c10::IValue;
 using ::c10::ivalue::Future;
-using ::c10::ivalue::Tuple;
-
-using ::c10::ivalue::BoolList;
-using ::c10::ivalue::DoubleList;
-using ::c10::ivalue::GenericList;
-using ::c10::ivalue::IntList;
-using ::c10::ivalue::TensorList;
 
 using ::c10::ivalue::ConstantString;
 using ::c10::TupleTypePtr;
@@ -73,28 +65,21 @@ struct TORCH_API TracingState
   bool hasValue(const IValue& var) const;
 
 private:
-  using WeakTensor = at::WeakTensor;
+  using WeakIValue = at::WeakIValue;
 
-  struct WeakTensorHasher {
-    size_t operator()(const WeakTensor& t) const {
-      return std::hash<void*>()(t.unsafeGetTensorImpl());
+  struct WeakIValueHasher {
+    size_t operator()(const WeakIValue& t) const {
+      return t.hash();
     }
   };
 
-  struct WeakTensorEq {
-    bool operator()(const WeakTensor& t1, const WeakTensor& t2) const {
-      return t1.is_same(t2);
+  struct WeakIValueEq {
+    bool operator()(const WeakIValue& t1, const WeakIValue& t2) const {
+      return t1.isSameIdentity(t2);
     }
   };
 
-  struct Frame {
-    std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq>
-        value_map;
-    // TODO weak refcount
-    std::unordered_map<c10::intrusive_ptr<c10::ivalue::Future>, Value*>
-        future_map;
-  };
-
+  using Frame = std::unordered_map<WeakIValue, Value*, WeakIValueHasher, WeakIValueEq>;
   std::vector<Frame> env_stack;
 
 };
@@ -241,7 +226,9 @@ struct TypedStack : public std::pair<Stack, TupleTypePtr>
   }
 };
 
-TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self=nullptr);
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(
+    TypedStack inputs,
+    script::Module* self = nullptr);
 
 TORCH_API void exit(const Stack& outputs);
 
@@ -293,28 +280,29 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::MemoryFormat>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
 
-template<typename T>
+template <typename T>
 TORCH_API void addInputs(
     Node* n,
     const char* name,
     const std::vector<T>& value);
 
-template<typename K, typename V>
+template <typename K, typename V>
 TORCH_API void addInputs(
     Node* n,
     const char* name,
     const std::unordered_map<K, V>& value);
 
-template<typename T>
-void addInputs(
-    Node* n,
-    const char* name,
-    const std::vector<T>& value) {
+template <typename T>
+void addInputs(Node* n, const char* name, const std::vector<T>& value) {
   AT_ERROR("Tracing a list of arbitrary type is currently not supported!");
 }
-template<typename K, typename V>
+template <typename K, typename V>
 void addInputs(
     Node* n,
     const char* name,

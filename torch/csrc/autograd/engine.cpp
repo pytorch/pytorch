@@ -117,22 +117,15 @@ struct ReadyQueue {
 // because then all of our backward executions (including the one we
 // just started) will deadlock!
 //
-// Here's our cunning idea: instead of blocking, just get back to work
-// on whatever task queue you should have been working on previously
-// (this is saved via the thread local variable worker_device)!  There are
-// "simply" two things you have to arrange for:
+// We maintain a pool of threads waiting for work to do
+// When a reentrant backwards call occurs, the current thread blocks
+// and a thread from the pool is woken up to complete the blocking tasks and an
+// any other tasks that would have been assigned to that worker. If there are no
+// threads available, a new thread is spawned. The new thread will continue
+// processing tasks from the same ReadyQueue as the parent worker
 //
-//  - We have to promptly kick ourselves out of the thread_main() loop
-//    when our graph_task complete, because we need to unblock the
-//    parent function tasks that started the reentrant execution in
-//    the first place.  This is why thread_main() takes an optional
-//    graph_task as input.
-//
-//  - When we finish a GraphTask, we have to make sure we wake up the worker
-//    thread so that it actually has a chance to exit the thread_main()
-//    loop.  Thus the faffing about in thread_main() after
-//    evaluate_function() completes.
-
+// When the GraphTask is finished, the parent worker thread that is waiting on
+// the task is notified and the current thread returns to the pool.
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
@@ -242,6 +235,26 @@ Engine::~Engine() {
   // Othewise threads are leaked
 }
 
+void Engine::set_device(int device) {
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with cuda, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  //
+  // Don't use DeviceGuard here because its destructor may be called before the
+  // device is reset. This is fine because the device is thread local.
+  if (device != -1) {
+    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      if (impl && device < impl->deviceCount()) {
+        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
+      }
+    }
+  }
+  worker_device = device;
+}
+
 auto Engine::thread_init(int device) -> void {
   at::init_num_threads();
   // Note [Allocating GPUs to autograd threads]
@@ -261,31 +274,7 @@ auto Engine::thread_init(int device) -> void {
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
-  //
-  // NB: We MUST NOT construct the guard for device -1,
-  // as in some settings we compile with cuda, but
-  // have lazy stubs for CUDA functionality (so actually
-  // attempting to setup a guard(-1) will cause an
-  // error, because it will still query cudaGetDevice).
-  //
-  // NB: These are not OptionalCUDAGuard/etc because engine.cpp
-  // is built as part of the CPU-only library; so we need to
-  // dynamic dispatch.
-  //
-  // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
-  // are movable.
-
-  // Don't use DeviceGuard here because its destructor may be called before the
-  // device is reset. This is fine because the device is thread local.
-  if (device != -1) {
-    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
-      auto* impl = c10::impl::device_guard_impl_registry[i].load();
-      if (impl && device < impl->deviceCount()) {
-        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
-      }
-    }
-  }
-  worker_device = device;
+  set_device(device);
   thread_main(nullptr);
 }
 
@@ -351,6 +340,26 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         }
       }
     }
+  }
+
+  if (graph_task) {
+    graph_task->not_done_.notify_all();
+  }
+}
+
+void Engine::reentrant_thread_init() {
+  at::init_num_threads();
+  auto tp_shared= thread_pool_shared_;
+  while(true) {
+    std::unique_lock<std::mutex> lk(tp_shared->mutex_);
+    ++thread_pool_shared_->num_workers_;
+    tp_shared->work_.wait(lk, [&tp_shared]{ return !tp_shared->graphtasks_queue_.empty();});
+    --thread_pool_shared_->num_workers_;
+    auto graph_task = tp_shared->graphtasks_queue_.front();
+    tp_shared->graphtasks_queue_.pop();
+    lk.unlock();
+    set_device(graph_task->owner_);
+    thread_main(graph_task);
   }
 }
 
@@ -645,9 +654,12 @@ auto Engine::execute(const edge_list& roots,
     // Get back to work while we wait for our new graph_task to
     // complete!
     // See Note [Reentrant backwards]
+    // If no extra threads remaining, create a new thread for reentrant call
     graph_task.owner_ = worker_device;
-    lock.unlock();
-    thread_main(&graph_task);
+    add_thread_pool_task(&graph_task);
+    graph_task.not_done_.wait(lock, [&graph_task]{
+      return graph_task.outstanding_tasks_.load() == 0;
+    });
   }
 
   // Check for an exception while running backwards
@@ -736,10 +748,31 @@ auto Engine::start_threads() -> void {
   ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues_)
     queue.reset(new ReadyQueue());
+
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+
   for (int i = 0; i < num_threads; ++i) {
     std::thread t(&Engine::thread_init, this, i - 1);
     t.detach();
   }
+}
+
+void Engine::add_thread_pool_task(GraphTask *graph_task) {
+  std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
+  // There may already be some items on the graphtasks_queue_ added by other
+  // threads but not enough workers to get to the the new task that will be
+  // added
+  bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
+  thread_pool_shared_->graphtasks_queue_.push(graph_task);
+  // Don't need to be holding the lock while actually creating the thread
+  lck.unlock();
+  if (create_thread) {
+    std::thread t(&Engine::reentrant_thread_init, this);
+    t.detach();
+  }
+  // This works even if new thread is created because wait() will test the
+  // predicate before waiting
+  thread_pool_shared_->work_.notify_one();
 }
 
 void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) {

@@ -347,6 +347,31 @@ except ImportError:
         return isinstance(ann, OptionalInstance)
 
 
+try:
+    import typing_extensions
+    from typing_extensions import Final
+
+    def is_final(ann):
+        return ann.__module__ == 'typing_extensions' and \
+            (getattr(ann, '__origin__', None) is typing_extensions.Final)
+except ImportError:
+    # Same as above, this polyfill is only for `typing_extensions`
+    class FinalInstance(object):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    class FinalCls(object):
+        def __getitem__(self, types):
+            return FinalInstance(types)
+
+    Final = FinalCls()  # noqa: T484
+
+    def is_final(ann):
+        return isinstance(ann, FinalInstance)
+
+
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
     def __getitem__(self, types):
