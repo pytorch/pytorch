@@ -92,28 +92,34 @@
 
 - func: abs(Tensor self) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  named_guard: False
   dispatch:
     CPU: _abs__cpu
     CUDA: _abs__cuda
 
 - func: abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _abs_out_cpu
     CUDA: _abs_out_cuda
 
 - func: acos(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _acos__cpu
     CUDA: _acos__cuda
 
 - func: acos(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _acos_out_cpu
     CUDA: _acos_out_cuda
@@ -242,29 +248,35 @@
   device_guard: False
 
 - func: asin(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _asin__cpu
     CUDA: _asin__cuda
 
 - func: asin(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _asin_out_cpu
     CUDA: _asin_out_cuda
 
 - func: atan(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _atan__cpu
     CUDA: _atan__cuda
 
 - func: atan(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _atan_out_cpu
     CUDA: _atan_out_cuda
@@ -363,15 +375,18 @@
 - func: cat(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: ceil(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _ceil__cpu
     CUDA: _ceil__cuda
 
 - func: ceil(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _ceil_out_cpu
     CUDA: _ceil_out_cuda
@@ -384,43 +399,52 @@
   device_guard: False
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _clamp__cpu
     CUDA: _clamp__cuda
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _clamp_out_cpu
     CUDA: _clamp_out_cuda
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _clamp_max__cpu
     CUDA: _clamp_max__cuda
 
 - func: clamp_max(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _clamp_max_out_cpu
     CUDA: _clamp_max_out_cuda
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _clamp_min__cpu
     CUDA: _clamp_min__cuda
 
 - func: clamp_min(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _clamp_min_out_cpu
     CUDA: _clamp_min_out_cuda
@@ -467,29 +491,35 @@
   dispatch: {}
 
 - func: cos(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _cos__cpu
     CUDA: _cos__cuda
 
 - func: cos(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _cos_out_cpu
     CUDA: _cos_out_cuda
 
 - func: cosh(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _cosh__cpu
     CUDA: _cosh__cuda
 
 - func: cosh(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _cosh_out_cpu
     CUDA: _cosh_out_cuda
@@ -709,57 +739,69 @@
     CUDA: empty_strided_cuda
 
 - func: erf(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _erf__cpu
     CUDA: _erf__cuda
 
 - func: erf(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _erf_out_cpu
     CUDA: _erf_out_cuda
 
 - func: erfc(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _erfc__cpu
     CUDA: _erfc__cuda
 
 - func: erfc(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _erfc_out_cpu
     CUDA: _erfc_out_cuda
 
 - func: exp(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _exp__cpu
     CUDA: _exp__cuda
 
 - func: exp(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _exp_out_cpu
     CUDA: _exp_out_cuda
 
 - func: expm1(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _expm1__cpu
     CUDA: _expm1__cuda
 
 - func: expm1(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _expm1_out_cpu
     CUDA: _expm1_out_cuda
@@ -790,35 +832,43 @@
   variants: function, method
 
 - func: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
+  named_guard: False
   variants: function, method
 
 - func: fill_(Tensor(a!) self, Tensor value) -> Tensor(a!)
+  named_guard: False
   variants: function, method
 
 - func: floor(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _floor__cpu
     CUDA: _floor__cuda
 
 - func: floor(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _floor_out_cpu
     CUDA: _floor_out_cuda
 
 - func: frac(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _frac__cpu
     CUDA: _frac__cuda
 
 - func: frac(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _frac_out_cpu
     CUDA: _frac_out_cuda
@@ -1038,37 +1088,45 @@
     CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: log_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _log__cpu
     CUDA: _log__cuda
 
 - func: log(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _log_out_cpu
     CUDA: _log_out_cuda
 
 - func: log10(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _log10__cpu
     CUDA: _log10__cuda
 
 - func: log10(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _log10_out_cpu
     CUDA: _log10_out_cuda
 
 - func: log1p(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _log1p__cpu
@@ -1077,6 +1135,7 @@
     SparseCUDA: log1p_sparse_
 
 - func: log1p(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _log1p_out_cpu
     CUDA: _log1p_out_cuda
@@ -1084,15 +1143,18 @@
     SparseCUDA: log1p_out_sparse
 
 - func: log2(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _log2__cpu
     CUDA: _log2__cuda
 
 - func: log2(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _log2_out_cpu
     CUDA: _log2_out_cuda
@@ -1505,29 +1567,35 @@
     CUDA: range_cuda_out
 
 - func: reciprocal(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _reciprocal__cpu
     CUDA: _reciprocal__cuda
 
 - func: reciprocal(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _reciprocal_out_cpu
     CUDA: _reciprocal_out_cuda
 
 - func: neg(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _neg__cpu
     CUDA: _neg__cuda
 
 - func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _neg_out_cpu
     CUDA: _neg_out_cuda
@@ -1562,15 +1630,18 @@
   device_guard: False
 
 - func: round(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _round__cpu
     CUDA: _round__cuda
 
 - func: round(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _round_out_cpu
     CUDA: _round_out_cuda
@@ -1630,15 +1701,18 @@
     CUDA: hardshrink_backward_cuda
 
 - func: rsqrt(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _rsqrt__cpu
     CUDA: _rsqrt__cuda
 
 - func: rsqrt(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _rsqrt_out_cpu
     CUDA: _rsqrt_out_cuda
@@ -1681,29 +1755,35 @@
     CUDA: _sigmoid_out_cuda
 
 - func: sin(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _sin__cpu
     CUDA: _sin__cuda
 
 - func: sin(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _sin_out_cpu
     CUDA: _sin_out_cuda
 
 - func: sinh(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _sinh__cpu
     CUDA: _sinh__cuda
 
 - func: sinh(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _sinh_out_cpu
     CUDA: _sinh_out_cuda
@@ -1840,15 +1920,18 @@
   device_guard: False
 
 - func: sqrt(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _sqrt__cpu
     CUDA: _sqrt__cuda
 
 - func: sqrt(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _sqrt_out_cpu
     CUDA: _sqrt_out_cuda
@@ -1884,15 +1967,18 @@
   variants: method
 
 - func: tan(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _tan__cpu
     CUDA: _tan__cuda
 
 - func: tan(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _tan_out_cpu
     CUDA: _tan_out_cuda
@@ -1975,15 +2061,18 @@
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
 
 - func: trunc(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _trunc__cpu
     CUDA: _trunc__cuda
 
 - func: trunc(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _trunc_out_cpu
     CUDA: _trunc_out_cuda

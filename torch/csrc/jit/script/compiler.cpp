@@ -1460,7 +1460,14 @@ struct to_ir {
   // Get the appropriate builtin op for this augmented assignment
   // If the RHS is a tensor, return the corresponding ATen in-place op
   // If it's a list of scalars, then return the corresponding list augment op
-  Symbol getAugOp(const AugAssign& stmt, bool isTensor) {
+  Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
+    if (type->cast<ListType>()) { // Lists also have in-place ops.
+      switch (stmt.aug_op()) {
+        case '+':
+          return aten::add_;
+      }
+    }
+    bool isTensor = type->isSubtypeOf(TensorType::get());
     switch (stmt.aug_op()) {
       case '+':
         return isTensor ? aten::add_ : aten::add;
@@ -1524,7 +1531,7 @@ struct to_ir {
       emitBuiltinCall(
           stmt.range(),
           *method.graph(),
-          getAugOp(stmt, /*isTensor=*/true),
+          getAugOp(stmt, lhsValue->type()),
           self,
           {rhs},
           {},
@@ -1541,14 +1548,15 @@ struct to_ir {
     const auto lhs = Var(stmt.lhs());
     const auto lhsValue = environment_stack->getSugaredVar(lhs.name())
                               ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
+    auto lhsType = lhsValue->type();
+    if (lhsType->isSubtypeOf(TensorType::get()) || lhsType->cast<c10::ListType>()) {
       // for tensors, emit the corresponding in-place op
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
       const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
       const auto output = emitBuiltinCall(
           stmt.range(),
           *method.graph(),
-          getAugOp(stmt, /*isTensor=*/true),
+          getAugOp(stmt, lhsValue->type()),
           self,
           {rhs},
           {},
@@ -1589,7 +1597,7 @@ struct to_ir {
         emitBuiltinCall(
             stmt.range(),
             *method.graph(),
-            getAugOp(stmt, /*isTensor=*/true),
+            getAugOp(stmt, sliceable->type()),
             slicedArg,
             {rhs},
             {},
@@ -1606,7 +1614,7 @@ struct to_ir {
         const auto augmented = emitBuiltinCall(
             stmt.range(),
             *method.graph(),
-            getAugOp(stmt, /*isTensor=*/true),
+            getAugOp(stmt, sliceable->type()),
             indexed,
             {rhs},
             {},
@@ -1624,8 +1632,7 @@ struct to_ir {
       const auto listType = sliceable->type()->cast<ListType>();
       AT_ASSERT(listType != nullptr);
 
-      bool isTensorList =
-          listType->getElementType()->isSubtypeOf(TensorType::get());
+      auto elementType = listType->getElementType();
 
       // Get the idx to augment
       const auto subscriptExprs = lhs.subscript_exprs();
@@ -1645,7 +1652,7 @@ struct to_ir {
       const auto getItem =
           graph->insert(aten::select, {listArg, idxArg}, {}, stmt.range());
       const auto augmentedItem = graph->insert(
-          getAugOp(stmt, isTensorList), {getItem, valueArg}, {}, stmt.range());
+          getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
       graph->insert(
           aten::_set_item, {listArg, idxArg, augmentedItem}, {}, stmt.range());
     }
