@@ -10,12 +10,12 @@
 namespace c10 {
 
 namespace detail {
-  inline bool isSmallEndian() {
+  inline C10_HOST_DEVICE bool isSmallEndian() {
     int num = 1;
     return *(char *)&num == 1;
   }
 
-  inline float f32_from_bits(uint16_t src) {
+  inline C10_HOST_DEVICE float f32_from_bits(uint16_t src) {
     float res = 0;
     uint16_t* tmp = reinterpret_cast<uint16_t*>(&res);
     if (isSmallEndian()) {
@@ -29,7 +29,7 @@ namespace detail {
     return res;
   }
 
-  inline uint16_t bits_from_f32(float src) {
+  inline C10_HOST_DEVICE uint16_t bits_from_f32(float src) {
     uint16_t* res = reinterpret_cast<uint16_t*>(&src);
     return isSmallEndian() ? res[1] : res[0];
   }
@@ -39,7 +39,6 @@ struct alignas(2) BFloat16 {
   uint16_t val_;
 
   // HIP wants __host__ __device__ tag, CUDA does not
-
 #ifdef __HIP_PLATFORM_HCC__
   C10_HOST_DEVICE BFloat16() = default;
 #else

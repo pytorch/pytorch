@@ -584,6 +584,11 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('deprecated', bool),
 ])
 
+FunctionCode = NamedTuple('FunctionCode', [
+    ('definition', str),
+    ('declaration', str),
+])
+
 
 def device_guard(option, dispatch_options, dispatch_tensor):
     # For factory methods the `DeviceGuard` is already in the template.
@@ -865,8 +870,8 @@ def create_generic(top_env, declarations):
         body.append('return std::get<0>({}({}));'.format(fwd_name, ', '.join(actuals)))
         return body
 
-    def process_option(option, output_options):
-        # type: (FunctionOption, List[OutputDeclaration]) -> None
+    def process_option(option):
+        # type: (FunctionOption) -> None
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
 
@@ -1018,8 +1023,8 @@ def create_generic(top_env, declarations):
 
         return return_types
 
-    def process_native(option, output_options):
-        # type: (FunctionOption, List[OutputDeclaration]) -> None
+    def process_native(option):
+        # type: (FunctionOption) -> Optional[OutputDeclaration]
         assert option['python_module'] == '' or option['python_module'] == 'nn', \
             "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
                 option['python_module'], option['name'])
@@ -1052,6 +1057,32 @@ def create_generic(top_env, declarations):
         def has_named_tensor_formals(formals):
             return any(['Dimname' in formal['dynamic_type'] for formal in formals])
 
+        def gen_tensor_method(option):
+            # type: (Any) -> FunctionCode
+            return FunctionCode(
+                declaration=TENSOR_METHOD_DECLARATION.substitute(option),
+                definition=TENSOR_METHOD_DEFINITION.substitute(option))
+
+        def gen_namespace_function(option, dispatch_tensor, dispatch_options):
+            # type: (Any, Optional[str], Any) -> FunctionCode
+            if dispatch_tensor:
+                option['inferred_backend'] = 'at::detail::infer_backend({})'.format(dispatch_tensor)
+                option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
+            elif dispatch_options:
+                option['inferred_backend'] = '{}.backend()'.format(dispatch_options['name'])
+                option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
+            else:
+                # doesn't depend on a specific backend, use CPU
+                option['inferred_backend'] = 'Backend::CPU'
+                option['inferred_is_variable'] = 'false'
+            declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
+            fn_declaration = declaration.substitute(option)
+            if is_factory_method:
+                fn_definition = FACTORY_DEFINITION.substitute(option)
+            else:
+                fn_definition = FUNCTION_DEFINITION.substitute(option)
+            return FunctionCode(definition=fn_definition, declaration=fn_declaration)
+
         # Emit #ifdef NAMEDTENSOR_ENABLED macros for any code generated here
         # that is sent to top_env. This is because some of this code (Type.h,
         # Tensor.h, TensorMethods.h) is checked into the repo and must be
@@ -1062,6 +1093,12 @@ def create_generic(top_env, declarations):
             if is_named_tensor_only:
                 return NAMEDTENSOR_CHECK.substitute(code=code)
             return code
+
+        def add_namedtensor_enabled_macro(code):
+            # type: (FunctionCode) -> FunctionCode
+            return FunctionCode(
+                definition=NAMEDTENSOR_CHECK.substitute(code=code.definition),
+                declaration=NAMEDTENSOR_CHECK.substitute(code=code.declaration))
 
         assert find_formal('Type', formals) is None, \
             "Found Type argument in {}({}). Use TensorOptions instead.".format(
@@ -1094,8 +1131,6 @@ def create_generic(top_env, declarations):
                                                         find_tensorlists(formals))
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, dispatch_tensor)
 
-        env = nested_dict(option, top_env)
-
         broadcast_arg = get_broadcast_argument(option)
         if broadcast_arg is not None:
             raise Exception("broadcasting is not yet supported for native functions, "
@@ -1103,7 +1138,7 @@ def create_generic(top_env, declarations):
 
         if NAMEDTENSOR_ENABLED or not is_named_tensor_only:
             top_env['registration_declarations'].append(
-                REGISTRATION_DECLARATION.substitute(env))
+                REGISTRATION_DECLARATION.substitute(option))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1119,11 +1154,11 @@ def create_generic(top_env, declarations):
             abstract = True
         else:
             top_env['type_method_declarations'].append(
-                check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(env)))
+                check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
             top_env['type_method_definitions'].append(
-                check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(env)))
+                check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
             top_env['function_registrations'].append(
-                check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(env)))
+                check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1136,47 +1171,32 @@ def create_generic(top_env, declarations):
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(
-                        check_namedtensor_enabled(NATIVE_DECLARATION.substitute(env)))
+                        check_namedtensor_enabled(NATIVE_DECLARATION.substitute(option)))
                     generated_native_functions.append(value)
         else:
             top_env['native_function_declarations'].append(
-                check_namedtensor_enabled(NATIVE_DECLARATION.substitute(env)))
+                check_namedtensor_enabled(NATIVE_DECLARATION.substitute(option)))
 
         method_of = ['Type']
         if is_method:
-            top_env['tensor_method_declarations'].append(
-                check_namedtensor_enabled(
-                    TENSOR_METHOD_DECLARATION.substitute(env)))
-            top_env['tensor_method_definitions'].append(
-                check_namedtensor_enabled(
-                    TENSOR_METHOD_DEFINITION.substitute(env)))
+            code = gen_tensor_method(option)
+            if is_named_tensor_only:
+                code = add_namedtensor_enabled_macro(code)
+            top_env['tensor_method_declarations'].append(code.declaration)
+            top_env['tensor_method_definitions'].append(code.definition)
             method_of.append('Tensor')
 
         if is_namespace_function:
-            if dispatch_tensor:
-                option['inferred_backend'] = 'at::detail::infer_backend({})'.format(dispatch_tensor)
-                option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
-            elif dispatch_options:
-                option['inferred_backend'] = '{}.backend()'.format(dispatch_options['name'])
-                option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
-            else:
-                # doesn't depend on a specific backend, use CPU
-                option['inferred_backend'] = 'Backend::CPU'
-                option['inferred_is_variable'] = 'false'
-            declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
-            top_env['function_declarations'].append(
-                check_namedtensor_enabled(declaration.substitute(env)))
-            if is_factory_method:
-                top_env['function_definitions'].append(
-                    check_namedtensor_enabled(FACTORY_DEFINITION.substitute(env)))
-            else:
-                top_env['function_definitions'].append(
-                    check_namedtensor_enabled(FUNCTION_DEFINITION.substitute(env)))
+            code = gen_namespace_function(option, dispatch_tensor, dispatch_options)
+            if is_named_tensor_only:
+                code = add_namedtensor_enabled_macro(code)
+            top_env['function_definitions'].append(code.definition)
+            top_env['function_declarations'].append(code.declaration)
             method_of.append('namespace')
 
         if not NAMEDTENSOR_ENABLED and is_named_tensor_only:
-            return
-        output_options.append(OutputDeclaration(
+            return None
+        return OutputDeclaration(
             name=option['api_name'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
@@ -1195,7 +1215,7 @@ def create_generic(top_env, declarations):
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],
-        ))
+        )
 
     output_declarations = []  # type: List[OutputDeclaration]
     for declaration in declarations:
@@ -1205,9 +1225,12 @@ def create_generic(top_env, declarations):
             option["schema_string"] = declaration["schema_string"]
             try:
                 if option['mode'] != 'native':
-                    process_option(option, output_options)
+                    # XXX: Does the following line do anything meaningful?
+                    process_option(option)
                 else:
-                    process_native(option, output_options)
+                    output_option = process_native(option)
+                    if output_option:
+                        output_options.append(output_option)
             except NYIError:
                 option['skip'] = True
         output_declarations.extend(output_options)
