@@ -273,12 +273,10 @@ def _generate_function_classes(scope_dict):
     exceptions = {
         'Linear',
         'IndexLinear',
-        'SpatialFullConvolution',
         'SpatialConvolutionMM',
         'TemporalConvolution',
         'SpatialMaxUnpooling',
         'VolumetricMaxUnpooling',
-        'VolumetricFullConvolution',
         'VolumetricConvolutionMM',
         'TemporalMaxPooling',
         'BatchNormalization',

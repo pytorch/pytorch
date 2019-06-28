@@ -244,7 +244,7 @@ def set_training(model, mode):
 
 
 def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=1e-7,
-           test_args=2, do_constant_folding=False, example_outputs=None):
+           test_args=2, do_constant_folding=False, example_outputs=None, opset_version=None):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -283,6 +283,9 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
             either an integer specifying the number
             of random arguments to generate, or an iterable producing arguments
             to test under.
+        opset_version (int, default None): the opset version of the model to
+            export. If not specified, the default value in symboli_helper will
+            be used in utils._export().
     """
     def _nested_map(condition, fn, condition_msg=None):
         def _map(obj):
@@ -358,7 +361,9 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
     with set_training(model, training):
         proto_bytes = io.BytesIO()
         torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose,
-                                       do_constant_folding=do_constant_folding, example_outputs=example_outputs)
+                                       do_constant_folding=do_constant_folding,
+                                       example_outputs=example_outputs,
+                                       opset_version=opset_version)
         if isinstance(model, torch.jit.ScriptModule):
             torch_out = model(*args)
         proto = load_bytes(proto_bytes)
@@ -367,7 +372,9 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
         def run(args):
             alt_proto_bytes = io.BytesIO()
             torch_out = torch.onnx._export(model, args, alt_proto_bytes, verbose=verbose,
-                                           do_constant_folding=do_constant_folding, example_outputs=example_outputs)
+                                           do_constant_folding=do_constant_folding,
+                                           example_outputs=example_outputs,
+                                           opset_version=opset_version)
             if isinstance(model, torch.jit.ScriptModule):
                 torch_out = model(*args)
             alt_proto = load_bytes(alt_proto_bytes)

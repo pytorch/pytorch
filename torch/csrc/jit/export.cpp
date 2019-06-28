@@ -938,7 +938,7 @@ void ScriptModuleSerializer::convertModule(
     for (const auto& range : source_ranges) {
       std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
                                          srs.serialize(range.range)};
-      p.addIValue(c10::ivalue::Tuple::create(row_elems));
+      p.addIValue(c10::ivalue::Tuple::create(std::move(row_elems)));
     }
     p.endTuple();
     p.finish();

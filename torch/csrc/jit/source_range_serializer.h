@@ -14,7 +14,7 @@ class SourceRangeSerializer {
   c10::IValue serialize(const SourceRange& sr) {
     std::vector<c10::IValue> elements = {
         serialize_source(sr.source()), (int64_t)sr.start(), (int64_t)sr.end()};
-    return c10::ivalue::Tuple::create(elements);
+    return c10::ivalue::Tuple::create(std::move(elements));
   }
 
  private:
@@ -27,7 +27,7 @@ class SourceRangeSerializer {
     }
     std::vector<c10::IValue> elements{
         s->text(), s->filename(), (int64_t)s->starting_line_no()};
-    auto serialized = c10::ivalue::Tuple::create(elements);
+    auto serialized = c10::ivalue::Tuple::create(std::move(elements));
     serialized_sources[s] = serialized;
     return serialized;
   }
