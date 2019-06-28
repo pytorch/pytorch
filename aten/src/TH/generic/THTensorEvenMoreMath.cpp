@@ -7,7 +7,6 @@
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 {
-  std::cout << "non zero" << std::endl;
   ptrdiff_t numel = 0;
   int64_t *subscript_data;
   int64_t i = 0;
