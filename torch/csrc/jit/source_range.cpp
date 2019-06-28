@@ -69,7 +69,7 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   // Retrieve original SourceRange, if present.
   if (source_) {
     if (auto orig_source_range = findSourceRangeThatGenerated()) {
-      out << "Compiled from code ";
+      out << "\nCompiled from code ";
       orig_source_range->highlight(out);
     }
   }
