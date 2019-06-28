@@ -7,6 +7,8 @@
 #include <queue>
 #include <thread>
 
+#include <torch/serialize.h>
+
 namespace torch {
 namespace data {
 namespace datasets {
@@ -270,7 +272,7 @@ struct ChunkDatasetOptions {
   /// The size of each batch.
   TORCH_ARG(size_t, batch_size);
 
-  // the capacity of the queue for batch caching.
+  /// The capacity of the queue for batch caching.
   TORCH_ARG(size_t, cache_size) = 2048;
 };
 
@@ -308,7 +310,8 @@ class ChunkDataset final
         example_sampler_(std::move(example_sampler)),
         options_(std::move(options)),
         quit_worker_(false),
-        running_preloaders_(0) {}
+        running_preloaders_(0),
+        load_checkpoint_(false) {}
 
   virtual ~ChunkDataset() {
     // stop batch buffer first.
@@ -332,7 +335,6 @@ class ChunkDataset final
       "The requested batch size does not match with the initialized batch size.\n"
       " The requested batch size is ", batch_size,
       ", while the dataset is created with batch size equal to ", options_.batch_size_);
-
     return batch_buffer_->get_batch();
   }
 
@@ -352,9 +354,11 @@ class ChunkDataset final
     free_workers();
     preload_threads_.clear();
 
-    chunk_reader_.reset();
-
-    chunk_sampler_.reset(chunk_reader_.chunk_count());
+    if (!load_checkpoint_){
+      chunk_reader_.reset();
+      chunk_sampler_.reset(chunk_reader_.chunk_count());
+      load_checkpoint_ = false;
+    }
 
     // Throw out any existing cached batch in the buffer and re-creates a new
     // chunk buffer.
@@ -383,6 +387,17 @@ class ChunkDataset final
   // loading to set the epoch number for the sampler.
   ChunkSamplerType& chunk_sampler() {
     return chunk_sampler_;
+  }
+
+  void save(serialize::OutputArchive& archive) const override {
+    std::lock_guard<std::mutex> lock(chunk_index_guard_);
+    chunk_sampler_.save(archive);
+  }
+
+  void load(serialize::InputArchive& archive) override{
+    std::lock_guard<std::mutex> lock(chunk_index_guard_);
+    chunk_sampler_.load(archive);
+    load_checkpoint_ = true;
   }
 
  private:
@@ -455,7 +470,10 @@ class ChunkDataset final
   std::atomic<size_t> running_preloaders_;
 
   // mutex to synchronize chunk sampler next() call.
-  std::mutex chunk_index_guard_;
+  mutable std::mutex chunk_index_guard_;
+
+  // boolean value to indicate whether we need to load the checkpoint for chunk_sampler_.
+  bool load_checkpoint_;
 };
 } // namespace datasets
 } // namespace data
