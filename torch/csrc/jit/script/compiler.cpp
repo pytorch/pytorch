@@ -2200,11 +2200,11 @@ struct to_ir {
       case TK_APPLY: {
         // Push the source range of a call in case compiling this function
         // triggers an error
-        push_call(tree.range());
+        ErrorReport::CallStack::push_call(tree.range());
         auto apply = Apply(tree);
         auto sv = emitApplyExpr(apply, n_binders);
         // Compilation was successful, so remove the function call from the stack
-        pop_call();
+        ErrorReport::CallStack::pop_call();
         return sv;
       } break;
       default:
@@ -2972,10 +2972,10 @@ std::shared_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    push_function(def.name().name());
+    ErrorReport::CallStack::push_function(def.name().name());
     to_ir(def, _resolver, self, method);
     // Compilation was successful, so remove the function def info
-    pop_function();
+    ErrorReport::CallStack::pop_function();
   };
   return std::make_shared<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);

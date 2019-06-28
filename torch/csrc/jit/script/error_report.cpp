@@ -9,19 +9,19 @@ namespace script {
 thread_local std::vector<SourceRange> call_stack;
 thread_local std::vector<std::string> fn_stack;
 
-void push_call(const SourceRange& range) {
+void ErrorReport::CallStack::push_call(const SourceRange& range) {
   call_stack.push_back(range);
 }
 
-void pop_call() {
+void ErrorReport::CallStack::pop_call() {
   call_stack.pop_back();
 }
 
-void push_function(const std::string& name) {
+void ErrorReport::CallStack::push_function(const std::string& name) {
   fn_stack.push_back(name);
 }
 
-void pop_function() {
+void ErrorReport::CallStack::pop_function() {
   fn_stack.pop_back();
 }
 

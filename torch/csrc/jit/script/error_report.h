@@ -7,13 +7,15 @@ namespace torch {
 namespace jit {
 namespace script {
 
-// These functions are used to report why a function was being compiled (i.e.
-// what was the call stack of user functions at compilation time that led to
-// this error)
-void push_call(const SourceRange& range);
-void pop_call();
-void push_function(const std::string& name);
-void pop_function();
+// struct CAFFE2_API ErrorReportCallStack {
+//   // These functions are used to report why a function was being compiled (i.e.
+//   // what was the call stack of user functions at compilation time that led to
+//   // this error)
+//   static void push_call(const SourceRange& range);
+//   static void pop_call();
+//   static void push_function(const std::string& name);
+//   static void pop_function();
+// };
 
 struct CAFFE2_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e)
@@ -25,6 +27,16 @@ struct CAFFE2_API ErrorReport : public std::exception {
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
 
   const char* what() const noexcept override;
+
+  struct CallStack {
+    // These functions are used to report why a function was being compiled (i.e.
+    // what was the call stack of user functions at compilation time that led to
+    // this error)
+    static void push_call(const SourceRange& range);
+    static void pop_call();
+    static void push_function(const std::string& name);
+    static void pop_function();
+  };
 
  private:
   template <typename T>
