@@ -1291,8 +1291,8 @@ class TestLRScheduler(TestCase):
             # print(target)
             for t, r in zip(target, result):
                 self.assertAlmostEqual(target, result,
-                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                            epoch, t, r), delta=1e-5)
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, t, r), delta=1e-5)
 
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
