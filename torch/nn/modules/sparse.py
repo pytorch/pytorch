@@ -215,8 +215,7 @@ class EmbeddingBag(Module):
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
                          initialized from :math:`\mathcal{N}(0, 1)`.
 
-    Inputs: :attr:`input` (LongTensor), :attr:`offsets` (LongTensor, optional), and
-        :attr:`per_index_weights` (Tensor, optional)
+    Inputs: :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
         - If :attr:`input` is 2D of shape `(B, N)`,
 
