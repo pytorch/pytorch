@@ -603,6 +603,10 @@ def device_guard(option, dispatch_options, dispatch_tensor):
 def named_guard(option, tensors, tensorlists):
     if not option.get('named_guard', True) or (len(tensors) + len(tensorlists) == 0):
         return ''
+    # Override: named_guard = True for _th_ functions. This is because:
+    # There is always some at:: function that calls the _th_ function.
+    if option['name'].startswith('_th_'):
+        return ''
     named_conditions = []
     for tensor in tensors:
         named_conditions.append('{}.is_named()'.format(tensor))
