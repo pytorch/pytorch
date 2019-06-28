@@ -193,7 +193,7 @@ public:
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
-    copy_tensor_data(
+    copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
@@ -211,7 +211,7 @@ public:
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
     AT_ASSERT(typeid(*(impl.get())) == typeid(SparseTensorImpl));
     auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
-    copy_tensor_data(
+    copy_tensor_metadata(
       /*src_impl=*/sparse_impl,
       /*dest_impl=*/this,
       /*version_counter=*/version_counter(),
@@ -222,17 +222,17 @@ private:
     explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
    * from one TensorImpl to another TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
    */
-  static void copy_tensor_data(
+  static void copy_tensor_metadata(
       const SparseTensorImpl* src_sparse_impl,
       SparseTensorImpl* dest_sparse_impl,
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) {
-    TensorImpl::copy_tensor_data(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);
+    TensorImpl::copy_tensor_metadata(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);
 
     // Sparse-specific fields
     dest_sparse_impl->sparse_dim_ = src_sparse_impl->sparse_dim();

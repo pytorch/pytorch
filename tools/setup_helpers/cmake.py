@@ -13,7 +13,7 @@ from distutils.version import LooseVersion
 
 from . import escape_path
 from .env import (IS_64BIT, IS_DARWIN, IS_WINDOWS,
-                  DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
+                  DEBUG, REL_WITH_DEB_INFO,
                   check_env_flag, check_negative_env_flag)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
@@ -280,7 +280,6 @@ class CMake:
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
                                check_negative_env_flag('USE_FBGEMM')),
-            'USE_MKLDNN': USE_MKLDNN,
             'USE_NNPACK': USE_NNPACK,
             'USE_QNNPACK': USE_QNNPACK,
             'USE_NCCL': USE_NCCL,
@@ -314,9 +313,6 @@ class CMake:
 
         if USE_GLOO_IBVERBS:
             CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
-
-        if USE_MKLDNN:
-            CMake.defines(args, MKLDNN_ENABLE_CONCURRENT_EXEC="ON")
 
         expected_wrapper = '/usr/local/opt/ccache/libexec'
         if IS_DARWIN and os.path.exists(expected_wrapper):
