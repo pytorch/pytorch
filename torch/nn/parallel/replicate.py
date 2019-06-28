@@ -23,9 +23,9 @@ def _is_jit_enabled():
 
 
 # Check if we can safely replicate the module.
-# there are three types of module:
+# there are two types of module:
 # 1. python modules
-# 3. ScriptModule
+# 2. ScriptModule
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)

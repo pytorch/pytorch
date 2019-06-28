@@ -943,7 +943,6 @@ def _create_constant_iterable_module(module):
             modules[key] = _create_constant_iterable_module(submodule)
         else:
             modules[key] = _convert_to_script_module(submodule)
-            x = _convert_to_script_module(submodule)
 
     if isinstance(module, Sequential):
         return _ConstSequential(Sequential(modules))
@@ -973,15 +972,15 @@ def _try_compile_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
 
-    if not inspect.isfunction(fn) and not inspect.ismethod(fn):
-        raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
-                           "Python functions or methods currently.\n"
-                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn))
-
     if isinstance(fn, torch.nn.Module):
         # Since modules are callable pybind recognizes them as functions, but
         # don't do anything for them
         return None
+
+    if not inspect.isfunction(fn) and not inspect.ismethod(fn):
+        raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
+                           "Python functions or methods currently.\n"
+                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn, fn))
 
     # We don't have the actual scope where the function was defined, but we can
     # extract the necessary info from the closed over variables on the function
@@ -1063,7 +1062,8 @@ def _qualified_name(obj):
 
 
 def _is_recursive_script_enabled(value):
-    # TODO: when recursive script is made the default, remove this method
+    # TODO: [enable recursive script]
+    # when recursive script is made the default, remove this method
     enabled = torch._C._jit_recursive_script()
     module = inspect.getmodule(value)
     if module is not None and 'torch.nn' in module.__name__:
@@ -1728,7 +1728,7 @@ else:
             super(ScriptModule, self).__init__()
 
 
-def _convert_to_script_module(mod, methods=None):
+def _convert_to_script_module(mod):
     """
     Makes a ScriptModule from an nn.Module. If `_methods` is provided,
     these methods are treated as @script_methods. If not, it defaults to
@@ -1742,14 +1742,14 @@ def _convert_to_script_module(mod, methods=None):
         # Create constant versions for the iterable modules
         return _create_constant_iterable_module(mod)
 
-    if methods is None and hasattr(mod, 'forward'):
+    methods = ()
+    if hasattr(mod, 'forward'):
         if mod.forward.__func__ == torch.nn.Module.forward:
+            # TODO: [enable recursive script]
             # forward was not overrided
-            raise RuntimeError("No forward (TODO: delete this error)")
+            raise RuntimeError("No forward method was defined on {}".format(mod))
         if not _jit_internal.is_ignored_fn(mod.forward):
             methods = ('forward',)
-        else:
-            methods = ()
     exported = []
     for name in dir(mod):
         item = getattr(mod, name)
