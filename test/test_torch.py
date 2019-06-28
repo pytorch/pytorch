@@ -12219,12 +12219,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
-
-
-
-
-
-
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
