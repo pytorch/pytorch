@@ -500,8 +500,8 @@ class SSIMLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Target: :math:`(N, C, H, W)`, same shape as the input
+        - Input: :math:`(N, *)` where :math:`*` means, any number of additional dimensions
+        - Target: :math:`(N, *)`, same shape as the input
 
     Examples::
 
@@ -511,7 +511,7 @@ class SSIMLoss(_Loss):
         >>> output = loss(input, target, max_val=1.)
         >>> output.backward()
     """
-    __constants__ = ['filter_size', 'k1', 'k2', 'sigma' 'reduction']
+    __constants__ = ['filter_size', 'k1', 'k2', 'sigma', 'kernel', 'reduction']
 
     def __init__(self, channel=3, filter_size=11, k1=0.01, k2=0.03, sigma=1.5, size_average=None, reduce=None, reduction='mean'):
         super(SSIMLoss, self).__init__(size_average, reduce, reduction)
@@ -584,8 +584,8 @@ class MultiScaleSSIMLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Target: :math:`(N, C, H, W)`, same shape as the input
+        - Input: :math:`(N, *)` where :math:`*` means, any number of additional dimensions
+        - Target: :math:`(N, *)`, same shape as the input
 
     Examples::
 
@@ -595,7 +595,7 @@ class MultiScaleSSIMLoss(_Loss):
         >>> output = loss(input, target, max_val=1.)
         >>> output.backward()
     """
-    __constants__ = ['filter_size', 'k1', 'k2', 'sigma' 'reduction']
+    __constants__ = ['filter_size', 'k1', 'k2', 'sigma', 'kernel', 'reduction']
 
     def __init__(self, channel=3, filter_size=11, k1=0.01, k2=0.03, sigma=1.5, size_average=None, reduce=None, reduction='mean'):
         super(MultiScaleSSIMLoss, self).__init__(size_average, reduce, reduction)

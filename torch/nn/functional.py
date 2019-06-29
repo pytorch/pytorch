@@ -2303,16 +2303,22 @@ def ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
     See :class:`~torch.nn.SSIMLoss` for details.
     """
 
-    dim = input.dim()
-    if dim != 4:
-        raise ValueError('Expected 4 dimensions (got {})'.format(dim))
-
     if input.size() != target.size():
         raise ValueError('Expected input size ({}) to match target size ({}).'
                          .format(input.size(0), target.size(0)))
 
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
+
+    dim = input.dim()
+    if dim == 2:
+        input = input.expand(1, 1, input.dim(-2), input.dim(-1))
+        target = target.expand(1, 1, target.dim(-2), target.dim(-1))
+    elif dim == 3:
+        input = input.expand(1, input.dim(-3), input.dim(-2), input.dim(-1))
+        target = target.expand(1, target.dim(-3), target.dim(-2), target.dim(-1))
+    elif dim != 4:
+        raise ValueError('Expected 2, 3, or 4 dimensions (got {})'.format(dim))
 
     if kernel is None:
         kernel = _fspecial_gaussian(filter_size, channel, sigma)
@@ -2336,16 +2342,22 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
     See :class:`~torch.nn.MSSSIMLoss` for details.
     """
 
-    dim = input.dim()
-    if dim != 4:
-        raise ValueError('Expected 4 dimensions (got {}) from input'.format(dim))
-
     if input.size() != target.size():
         raise ValueError('Expected input size ({}) to match target size ({}).'
                          .format(input.size(0), target.size(0)))
 
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
+
+    dim = input.dim()
+    if dim == 2:
+        input = input.expand(1, 1, input.dim(-2), input.dim(-1))
+        target = target.expand(1, 1, target.dim(-2), target.dim(-1))
+    elif dim == 3:
+        input = input.expand(1, input.dim(-3), input.dim(-2), input.dim(-1))
+        target = target.expand(1, target.dim(-3), target.dim(-2), target.dim(-1))
+    elif dim != 4:
+        raise ValueError('Expected 2, 3, or 4 dimensions (got {})'.format(dim))
 
     if kernel is None:
         kernel = _fspecial_gaussian(filter_size, channel, sigma)
