@@ -10,7 +10,8 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(X.dim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  CAFFE_ENFORCE_EQ(label.dim(), 1);
+  CAFFE_ENFORCE(
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
   auto* Y = Output(0, vector<int64_t>(), at::dtype<float>());
   const auto* Xdata = X.data<float>();
