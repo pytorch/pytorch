@@ -70,9 +70,10 @@ int get_num_interop_threads() {
 void launch(std::function<void()> func) {
   auto debug_info = getThreadLocalDebugInfo();
   auto fn = [func, debug_info]() {
+    auto prev_info = getThreadLocalDebugInfo();
     setThreadLocalDebugInfo(debug_info);
     func();
-    setThreadLocalDebugInfo(nullptr);
+    setThreadLocalDebugInfo(prev_info);
   };
 #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
   intraop_launch(fn);
