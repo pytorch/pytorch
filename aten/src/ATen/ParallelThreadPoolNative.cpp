@@ -1,6 +1,7 @@
 #if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE || AT_PARALLEL_NATIVE_TBB
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
+#include "ATen/ThreadLocalDebugInfo.h"
 
 #include <atomic>
 
@@ -67,10 +68,16 @@ int get_num_interop_threads() {
 }
 
 void launch(std::function<void()> func) {
+  auto debug_info = getThreadLocalDebugInfo();
+  auto fn = [func, debug_info]() {
+    setThreadLocalDebugInfo(debug_info);
+    func();
+    setThreadLocalDebugInfo(nullptr);
+  };
 #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
-  intraop_launch(func);
+  intraop_launch(fn);
 #else
-  get_pool().run(func);
+  get_pool().run(fn);
 #endif
 }
 
