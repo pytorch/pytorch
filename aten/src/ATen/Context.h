@@ -77,7 +77,9 @@ class CAFFE2_API Context {
     });
     return thh_state.get();
   }
-
+  const at::cuda::NVRTC& getNVRTC() {
+    return detail::getCUDAHooks().nvrtc();
+  }
   THCState* getTHCState() {
     // AT_ASSERT(thc_state);
     return thc_state.get();
