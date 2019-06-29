@@ -17,8 +17,8 @@ class SingleLayerLinearModel(torch.nn.Module):
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super(TwoLayerLinearModel, self).__init__()
-        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
-        self.fc2 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -50,11 +50,28 @@ class NestedModel(torch.nn.Module):
 
 calib_data = [torch.rand(20, 5, dtype=torch.float) for _ in range(20)]
 
-# TODO: change assertEqual(..., True) to assertTrue
-
 class ModelQuantizeAPITest(TestCase):
 
-    def test_quantize1(self):
+    def checkNoPrepModules(self, module, has_observer=False):
+        r"""Checks the module does not contain child
+            modules for quantization prepration, e.g.
+            quant, dequant and observer
+        """
+        self.assertFalse(hasattr(module, 'quant'))
+        self.assertFalse(hasattr(module, 'dequant'))
+        self.assertEqual(hasattr(module, 'observer'), has_observer)
+
+    def checkHasPrepModules(self, module, has_observer=False):
+        r"""Checks the module contains child
+            modules for quantization prepration, e.g.
+            quant, dequant and observer
+        """
+        self.assertTrue(hasattr(module, 'quant'))
+        self.assertTrue(hasattr(module, 'dequant'))
+        self.assertEqual(hasattr(module, 'observer'), has_observer)
+
+
+    def test_quantize_single_layer(self):
         '''
             Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
             to nnq.Linear which is the quantized version of the module
@@ -65,19 +82,15 @@ class ModelQuantizeAPITest(TestCase):
             '': default_qconfig
         }
         tq.quantize(model, qConfigDict, default_eval_fn, [calib_data])
-        print('running model:', model)
-        self.assertTrue(hasattr(model, 'quant'))
-        self.assertEqual(hasattr(model, 'dequant'), True)
-        self.assertEqual(hasattr(model, 'observer'), False)
-        # since fc1 is not quantized
-        # self.assertEqual(hasattr(model.module, 'module'), False)
+        self.checkHasPrepModules(model)
+        self.checkNoPrepModules(model.fc1)
         self.assertEqual(type(model.fc1), nnq.Linear)
         self.assertEqual(type(model.quant), nnq.Quantize)
         self.assertEqual(type(model.dequant), nnq.DeQuantize)
         self.assertEqual(model.fc1.bias.dtype, torch.qint32)
         default_eval_fn(model, calib_data)
 
-    def test_quantize2(self):
+    def test_quantize_two_layers(self):
         '''
             TwoLayerLinearModel has two Linear modules but we only quantize the second one
             `fc2`, and `fc1`is not quantized
@@ -88,55 +101,57 @@ class ModelQuantizeAPITest(TestCase):
             'fc2': default_qconfig
         }
         tq.quantize(myModel, qConfigDict, default_eval_fn, [calib_data])
-        self.assertEqual(hasattr(myModel, 'quant'), False)
-        self.assertEqual(hasattr(myModel, 'observer'), False)
-        self.assertEqual(hasattr(myModel.fc2, 'quant'), True)
-        self.assertEqual(hasattr(myModel.fc2, 'dequant'), True)
-        self.assertEqual(hasattr(myModel.fc2, 'observer'), False)
+        self.checkNoPrepModules(myModel)
+        self.checkHasPrepModules(myModel.fc2)
         self.assertEqual(type(myModel.fc1), torch.nn.Linear)
+        # check only fc2 is quantized
         self.assertEqual(type(myModel.fc2), nnq.Linear)
+        self.assertEqual(type(myModel.fc2.quant), nnq.Quantize)
+        self.assertEqual(type(myModel.fc2.dequant), nnq.DeQuantize)
         default_eval_fn(myModel, calib_data)
 
 
-    def test_steps1(self):
+    def test_steps_single_layer(self):
         myModel = SingleLayerLinearModel()
         qConfigDict = {
             '': default_qconfig
         }
         tq.prepare(myModel, qConfigDict)
         # Check if observers and quant/dequant nodes are inserted
-        self.assertEqual(hasattr(myModel, 'quant'), True)
-        self.assertEqual(hasattr(myModel, 'dequant'), True)
-        self.assertEqual(hasattr(myModel.fc1, 'observer'), True)
+        self.checkHasPrepModules(myModel)
+        self.assertTrue(hasattr(myModel.fc1, 'observer'))
         default_eval_fn(myModel, calib_data)
 
         tq.convert_to_quantized(myModel)
+        self.checkHasPrepModules(myModel)
+        self.checkNoPrepModules(myModel.fc1)
         # Check if modules are swapped correctly
-        self.assertEqual(type(myModel.quant), nnq.Quantize)
-        self.assertEqual(hasattr(myModel.fc1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.fc1, 'observer'), False)
         self.assertEqual(type(myModel.fc1), nnq.Linear)
+        self.assertEqual(type(myModel.quant), nnq.Quantize)
+        self.assertEqual(type(myModel.dequant), nnq.DeQuantize)
         self.assertEqual(myModel.fc1.bias.dtype, torch.qint32)
+
         default_eval_fn(myModel, calib_data)
 
-    def test_steps2(self):
+    def test_steps_two_layers(self):
         myModel = TwoLayerLinearModel()
         qConfigDict = {
             'fc2': default_qconfig
         }
         tq.prepare(myModel, qConfigDict)
-        self.assertEqual(hasattr(myModel, 'quant'), False)
-        self.assertEqual(hasattr(myModel.fc1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.fc2, 'quant'), True)
-        self.assertEqual(hasattr(myModel.fc2, 'observer'), True)
+        self.checkNoPrepModules(myModel)
+        self.checkNoPrepModules(myModel.fc1)
+        self.checkHasPrepModules(myModel.fc2, True)
         default_eval_fn(myModel, calib_data)
 
         tq.convert_to_quantized(myModel)
-        self.assertEqual(hasattr(myModel, 'quant'), False)
-        self.assertEqual(hasattr(myModel.fc2, 'quant'), True)
-        self.assertEqual(hasattr(myModel.fc2, 'observer'), False)
+        self.checkNoPrepModules(myModel)
+        self.checkNoPrepModules(myModel.fc1)
+        self.checkHasPrepModules(myModel.fc2, False)
         self.assertEqual(type(myModel.fc1), torch.nn.Linear)
         self.assertEqual(type(myModel.fc2), nnq.Linear)
+        self.assertEqual(type(myModel.fc2.quant), nnq.Quantize)
+        self.assertEqual(type(myModel.fc2.dequant), nnq.DeQuantize)
         default_eval_fn(myModel, calib_data)
 
     def test_nested1(self):
@@ -146,37 +161,39 @@ class ModelQuantizeAPITest(TestCase):
             'sub2.fc2': default_qconfig
         }
         tq.prepare(myModel, qConfigDict)
-        self.assertEqual(hasattr(myModel, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub1.fc, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc2, 'quant'), True)
-        self.assertEqual(hasattr(myModel.sub2.fc2, 'observer'), True)
-        self.assertEqual(hasattr(myModel.fc3, 'quant'), True)
-        self.assertEqual(hasattr(myModel.fc3, 'observer'), True)
+        self.checkNoPrepModules(myModel)
+        self.checkNoPrepModules(myModel.sub1)
+        self.checkNoPrepModules(myModel.sub1.fc)
+        self.checkNoPrepModules(myModel.sub1.relu)
+        self.checkNoPrepModules(myModel.sub2)
+        self.checkNoPrepModules(myModel.sub2.fc1)
+        self.checkHasPrepModules(myModel.sub2.fc2, True)
+        self.checkHasPrepModules(myModel.fc3, True)
 
         default_eval_fn(myModel, calib_data)
 
         tq.convert_to_quantized(myModel)
-        self.assertEqual(hasattr(myModel, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub1.fc, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc2, 'quant'), True)
-        self.assertEqual(hasattr(myModel.sub2.fc2, 'observer'), False)
-        self.assertEqual(hasattr(myModel.fc3, 'quant'), True)
-        self.assertEqual(hasattr(myModel.fc3, 'observer'), False)
+        self.checkNoPrepModules(myModel)
+        self.checkNoPrepModules(myModel.sub1)
+        self.checkNoPrepModules(myModel.sub1.fc)
+        self.checkNoPrepModules(myModel.sub1.relu)
+        self.checkNoPrepModules(myModel.sub2)
+        self.checkNoPrepModules(myModel.sub2.fc1)
+        self.checkHasPrepModules(myModel.sub2.fc2)
+        self.checkHasPrepModules(myModel.fc3)
+
         self.assertEqual(type(myModel.sub1.fc), torch.nn.Linear)
         self.assertEqual(type(myModel.sub2.fc1), torch.nn.Linear)
         self.assertEqual(type(myModel.sub2.fc2), nnq.Linear)
+        self.assertEqual(type(myModel.sub2.fc2.quant), nnq.Quantize)
+        self.assertEqual(type(myModel.sub2.fc2.dequant), nnq.DeQuantize)
         self.assertEqual(type(myModel.fc3), nnq.Linear)
+        self.assertEqual(type(myModel.fc3.quant), nnq.Quantize)
+        self.assertEqual(type(myModel.fc3.dequant), nnq.DeQuantize)
         default_eval_fn(myModel, calib_data)
 
     def test_nested2(self):
-        """
-        If we add quant dequant for the whole module then we can eliminate
+        r"""If we add quant dequant for the whole module then we can eliminate
         extra quant dequant between modules. This is what current implementation
         supports.
         However, a more complete support would make test_nested3 work as well,
@@ -191,39 +208,38 @@ class ModelQuantizeAPITest(TestCase):
             'sub2': default_qconfig
         }
         tq.prepare(myModel, qConfigDict)
-        self.assertEqual(hasattr(myModel, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub1.fc, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2, 'quant'), True)
-        self.assertEqual(hasattr(myModel.sub2, 'observer'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc1, 'observer'), True)
-        self.assertEqual(hasattr(myModel.sub2.fc2, 'observer'), True)
-        self.assertEqual(hasattr(myModel.sub2.fc1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc2, 'quant'), False)
-        self.assertEqual(hasattr(myModel.fc3, 'quant'), True)
-        self.assertEqual(hasattr(myModel.fc3, 'observer'), True)
-
+        self.checkNoPrepModules(myModel)
+        self.checkNoPrepModules(myModel.sub1)
+        self.checkNoPrepModules(myModel.sub1.fc)
+        self.checkNoPrepModules(myModel.sub1.relu)
+        self.checkHasPrepModules(myModel.sub2)
+        self.checkNoPrepModules(myModel.sub2.fc1, True)
+        self.checkNoPrepModules(myModel.sub2.fc2, True)
+        self.checkHasPrepModules(myModel.fc3, True)
         default_eval_fn(myModel, calib_data)
 
         tq.convert_to_quantized(myModel)
         print('nested:', myModel)
-        self.assertEqual(hasattr(myModel, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub1.fc, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2, 'quant'), True)
-        self.assertEqual(hasattr(myModel.sub2, 'observer'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc1, 'observer'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc2, 'observer'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc1, 'quant'), False)
-        self.assertEqual(hasattr(myModel.sub2.fc2, 'quant'), False)
-        self.assertEqual(hasattr(myModel.fc3, 'quant'), True)
-        self.assertEqual(hasattr(myModel.fc3, 'observer'), False)
+        self.checkNoPrepModules(myModel)
+        self.checkNoPrepModules(myModel.sub1)
+        self.checkNoPrepModules(myModel.sub1.fc)
+        self.checkNoPrepModules(myModel.sub1.relu)
+        self.checkHasPrepModules(myModel.sub2)
+        self.checkNoPrepModules(myModel.sub2.fc1)
+        self.checkNoPrepModules(myModel.sub2.fc2)
+        self.checkHasPrepModules(myModel.fc3)
         self.assertEqual(type(myModel.sub1.fc), torch.nn.Linear)
+        self.assertEqual(type(myModel.sub1.relu), torch.nn.ReLU)
+        self.assertEqual(type(myModel.sub2.quant), nnq.Quantize)
         self.assertEqual(type(myModel.sub2.fc1), nnq.Linear)
         self.assertEqual(type(myModel.sub2.fc2), nnq.Linear)
+        self.assertEqual(type(myModel.sub2.dequant), nnq.DeQuantize)
+        self.assertEqual(type(myModel.fc3.quant), nnq.Quantize)
         self.assertEqual(type(myModel.fc3), nnq.Linear)
+        self.assertEqual(type(myModel.fc3.dequant), nnq.DeQuantize)
         default_eval_fn(myModel, calib_data)
 
+    # TODO: Add the support in a separate PR
     # def test_nested3(self):
     #     """
     #     More complicated nested test case with fallbacks

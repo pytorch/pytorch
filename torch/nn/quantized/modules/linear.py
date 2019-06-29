@@ -157,7 +157,7 @@ class Linear(NNLinear):
         bias_scale = (wt_qparams[0] * act_qparams[0]).float()
         qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long(), torch.qint8)
         qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
-        qlinear = Linear(mod.out_features, mod.in_features)
+        qlinear = Linear(mod.in_features, mod.out_features)
         qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
         qlinear._bias = qbias
         qlinear.out_scale = torch.tensor([act_qparams[0]])

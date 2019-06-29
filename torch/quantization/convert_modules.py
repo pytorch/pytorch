@@ -9,7 +9,7 @@ def _observer_forward_hook(self, input, output):
     self.observer(output)
 
 def add_observer(module, qconfig_dict, qconfig_parent=None, prefix=''):
-    r"""Transform a module to a quantized module according to qconfig_dict
+    r"""Transforms a module to a quantized module according to qconfig_dict.
 
     This function insert observer module to all leaf child module of a given
     module based on qconfig_dict.
@@ -50,17 +50,15 @@ def get_config_key(name, qconfig_dict):
     elif '.' in name:
         parent = name.rsplit('.', 1)[0]
         return get_config_key(parent, qconfig_dict)
-    else:
-        return None
+    return None
 
 def get_module(model, name):
     if name == '':
         return model
     splits = name.split('.')
-    child = model._modules[splits[0]]
-    for i in range(1, len(splits)):
-        child = child._modules[splits[i]]
-    return child
+    for i in range(len(splits)):
+        model = model._modules[splits[i]]
+    return model
 
 def _quant_forward_pre_hook(self, input):
     return self.quant(input[0])
@@ -83,7 +81,6 @@ def add_quant_dequant(module, qconfig_dict):
     """
     mod_key_set = set()
     for name, _ in module.named_modules():
-        print('name', name)
         dict_key = get_config_key(name, qconfig_dict)
         if dict_key is not None:
             mod_key_set.add(dict_key)
@@ -93,21 +90,22 @@ def add_quant_dequant(module, qconfig_dict):
     return module
 
 def prepare(module, qconfig_dict):
-    r"""Transform a module to a quantized module according to qconfig_dict,
-    it adds observer and quant dequant stub modules to the module. and
-    changes the forward method to invoke them
+    r"""Prepares the module for calibration according to qconfig_dict.
+
+    The function adds observer and quant dequant stub modules to the module.
+    It also adds the forward hooks to call quant and dequant methods.
 
     Args:
-        mod: instance of the module we want to transform
+        mod: input module
         qconfig_dict: dictionary that maps from name of submodule to quantization
-                     configuration
+                      configuration
     """
     add_observer(module, qconfig_dict)
     add_quant_dequant(module, qconfig_dict)
 
 class QuantStub(nn.Module):
-    r"""Quantize stub module which will be replace to actual Quantize module
-    in swap_module function
+    r"""Quantize stub module which replaces the quantized module
+    in `swap_module` function.
     """
     def __init__(self, qconfig):
         super(QuantStub, self).__init__()
@@ -118,8 +116,8 @@ class QuantStub(nn.Module):
         return x
 
 class DeQuantStub(nn.Module):
-    r"""Dequantize stub module which will be replace to actual DeQuantize module
-    in swap_module function
+    r"""Dequantizes stub module, which replaces the actual DeQuantize module
+    in `swap_module` function.
     """
     def __init__(self):
         super(DeQuantStub, self).__init__()
@@ -128,12 +126,12 @@ class DeQuantStub(nn.Module):
         return x
 
 def quantize(module, qconfig_dict, eval_fn, eval_args):
-    r"""Given a float module and qconfig_dict, convert it to a quantized module
+    r"""Converts a float module to quantized module.
 
-    First it will prepare the module to add observer and quant
-    deqaunt stub modules, then it calls `eval_fn` which will run the calibration
-    step and observers will record the stats of the tensors, after that we will
-    call `convert` which will convert the module to a quantized module.
+    First it will prepare the module for calibration or training, then it calls
+    `eval_fn` which will run the calibration step or training step,
+    after that we will call `convert` which will convert the module to a
+    quantized module.
     """
     prepare(module, qconfig_dict)
     eval_fn(module, *eval_args)
@@ -141,7 +139,7 @@ def quantize(module, qconfig_dict, eval_fn, eval_args):
     return module
 
 def convert_to_quantized(module):
-    r"""Convert a module with qparams to a quantized version of the module
+    r"""Converts the float module with qparams to a quantized module.
     """
     module_swapped = swap_module(module)
     if len(list(module.named_children())) == 0:
@@ -169,7 +167,7 @@ STUB_MODULE_MAPPING = {
 }
 
 def swap_module(mod, mapping=DEFAULT_MODULE_MAPPING):
-    r""" Check if a module has a quantized counterpart and swap it.
+    r"""Swaps the module if it has a quantized counterpart.
     """
     new_mod = mod
     if hasattr(mod, 'observer'):
