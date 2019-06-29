@@ -466,7 +466,7 @@ class Module(object):
 
         The hook can modify the input. User can either return a tuple or a
         single modified value in the hook. We will wrap the value into a tuple
-        if a single value is returned.
+        if a single value is returned(unless that value is already a tuple).
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -529,11 +529,10 @@ class Module(object):
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
             result = hook(self, input)
-            if isinstance(result, tuple):
+            if result is not None:
+                if not isinstance(result, tuple):
+                    result = (result,)
                 input = result
-            else:
-                if result is not None:
-                    input = (result,)
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
