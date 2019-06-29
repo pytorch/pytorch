@@ -799,7 +799,7 @@ void testThreadLocalDebugInfo() {
     checkDebugInfo();
     done = true;
   });
-  while (done) {}
+  while (!done) {}
   checkDebugInfo();
   at::setThreadLocalDebugInfo(nullptr);
   TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
