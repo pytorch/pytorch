@@ -772,7 +772,7 @@ void testRecordFunction() {
   autograd::profiler::popCallback();
 }
 
-class TestThreadLocalDebugInfoBase
+class TestThreadLocalDebugInfo
   : public at::ThreadLocalDebugInfoBase {
  public:
   virtual std::string getString(const char*) override {
@@ -793,7 +793,7 @@ void testThreadLocalDebugInfo() {
   };
   TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
   at::setThreadLocalDebugInfo(
-      std::make_shared<TestThreadLocalDebugInfoBase>());
+      std::make_shared<TestThreadLocalDebugInfo>());
   checkDebugInfo();
   std::atomic<bool> done {false};
   at::launch([checkDebugInfo, &done](){
