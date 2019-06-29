@@ -1987,21 +1987,24 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_lu_solve(self, cast):
-        a = torch.FloatTensor((((1.3722, -0.9020),
-                                (1.8849, 1.9169)),
-                               ((0.7187, -1.1695),
-                                (-0.0139, 1.3572)),
-                               ((-1.6181, 0.7148),
-                                (1.3728, 0.1319))))
-        b = torch.FloatTensor(((4.02, 6.19),
-                               (-1.56, 4.00),
-                               (9.81, -4.09)))
-        a, b = cast(a), cast(b)
-        LU_data, pivots, info = a.lu(get_infos=True)
-        self.assertEqual(info.abs().sum(), 0)
-        x = torch.lu_solve(b, LU_data, pivots)
-        b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
-        self.assertEqual(b_, b)
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        def run_test(A_dims, b_dims, cast):
+            A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+            b = cast(torch.randn(*b_dims))
+            LU_data, LU_pivots, infos = A.lu(get_infos=True)
+            self.assertEqual(infos, torch.zeros_like(infos))
+            x = torch.lu_solve(b, LU_data, LU_pivots)
+            b_ = torch.matmul(A, x)
+            self.assertEqual(torch.matmul(A, x), b.expand_as(b_))
+            x_out = cast(torch.Tensor())
+            torch.lu_solve(b, LU_data, LU_pivots, out=x_out)
+            self.assertEqual(x, x_out)
+
+        run_test((4, 2, 1, 3), (2, 1, 3, 4, 6), cast)  # no broadcasting
+        run_test((4, 2, 1, 3), (4, 6), cast)  # broadcasting b
+        run_test((4,), (2, 1, 3, 4, 2), cast)  # broadcasting A
+        run_test((4, 1, 3, 1), (2, 1, 3, 4, 5), cast)  # broadcasting A & b
 
     @skipIfNoLapack
     def test_lu_solve(self):

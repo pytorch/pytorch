@@ -164,7 +164,7 @@ void magmaLuSolve(
 template<class scalar_t>
 void magmaLuSolveBatched(
     magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
-    scalar_t** dB_array, magma_int_t lddb, magma_int_t* info_array,
+    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   AT_ERROR("lu_solve only takes float or double Tensors");
 }
@@ -463,17 +463,17 @@ void magmaLuSolve<float>(
 template<>
 void magmaLuSolveBatched<double>(
     magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
-    double** dB_array, magma_int_t lddb, magma_int_t* info_array,
+    double** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_dgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
+  info = magma_dgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
 }
 
 template<>
 void magmaLuSolveBatched<float>(
     magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
-    float** dB_array, magma_int_t lddb, magma_int_t* info_array,
+    float** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_sgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
+ info = magma_sgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
 }
 #endif
 
@@ -1283,7 +1283,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, std::vector<int64_t>& infos) {
+static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, int64_t& info) {
 #ifndef USE_MAGMA
 AT_ERROR("lu_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
@@ -1294,11 +1294,12 @@ AT_ERROR("lu_solve: MAGMA library not found in "
   auto n = lu.size(-2);
   auto nrhs = b.size(-1);
 
+  int info_tmp;
   if (b.dim() == 2) {
     magma_int_t info = 0;
     Tensor pivots_tmp = pivots.cpu();
-    magmaLuSolve<scalar_t>(n, nrhs, lu_data, n, pivots_tmp.data<magma_int_t>(), b_data, n, &info);
-    infos[0] = info;
+    magmaLuSolve<scalar_t>(n, nrhs, lu_data, n, pivots_tmp.data<magma_int_t>(), b_data, n, &info_tmp);
+    info = info_tmp;
   } else {
     auto pivots_data = pivots.data<magma_int_t>();
 
@@ -1312,7 +1313,6 @@ AT_ERROR("lu_solve: MAGMA library not found in "
     scalar_t** lu_array;
     scalar_t** b_array;
 
-    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, b);
     ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size, b);
     ALLOCATE_ARRAY(lu_array, scalar_t*, batch_size, b);
     ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
@@ -1326,28 +1326,21 @@ AT_ERROR("lu_solve: MAGMA library not found in "
     MAGMAQueue magma_queue(b.get_device());
     magmaLuSolveBatched<scalar_t>(
         n, nrhs, lu_array, n, pivots_array, b_array, n,
-        info_array, batch_size, magma_queue);
-
-    for (int64_t i = 0; i < batch_size; i++) {
-      infos[i] = info_array[i];
-    }
+        info_tmp, batch_size, magma_queue);
+    info = info_tmp;
   }
 #endif
 }
 
 Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  int64_t info = 0;
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto LU_data_working_copy = cloneBatchedColumnMajor(LU_data);
   auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
-  std::vector<int64_t> infos(batchCount(self), 0);
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cuda", [&]{
-    apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);
+    apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, info);
   });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "lu_solve_cuda");
-  } else {
-    singleCheckErrors(infos[0], "lu_solve_cuda");
-  }
+  TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
   return self_working_copy;
 }
 
