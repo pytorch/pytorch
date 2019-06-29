@@ -14,6 +14,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -117,6 +118,10 @@ class CAFFE2_API Context {
     std::call_once(complex_init_, [&] {
       detail::getComplexHooks().registerComplexTypes(this);
     });
+  }
+
+  const at::cuda::NVRTC& getNVRTC() {
+    return detail::getCUDAHooks().nvrtc();
   }
 
   THCState* getTHCState() {

@@ -24,6 +24,10 @@
 #define __ubsan_ignore_vptr__
 #endif
 
+#define AT_DISALLOW_COPY_AND_ASSIGN(TypeName) \
+  TypeName(const TypeName&) = delete; \
+  void operator=(const TypeName&) = delete
+
 namespace at {
 
 CAFFE2_API int _crash_if_asan(int);

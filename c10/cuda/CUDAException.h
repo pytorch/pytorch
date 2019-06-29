@@ -11,6 +11,7 @@
 // macro and a function implementation if we pass along __LINE__
 // and __FILE__, but no one has found this worth doing.
 
+// For CUDA Runtime API
 #define C10_CUDA_CHECK(EXPR)                               \
   do {                                                     \
     cudaError_t __err = EXPR;                              \

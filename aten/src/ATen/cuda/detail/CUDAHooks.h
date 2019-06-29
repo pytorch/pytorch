@@ -16,6 +16,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
+  const at::cuda::NVRTC& nvrtc() const override;
   int64_t current_device() const override;
   Allocator* getPinnedMemoryAllocator() const override;
   void registerCUDATypes(Context*) const override;
