@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
+#include <onnx/onnx_pb.h>
 
 #include <memory>
 

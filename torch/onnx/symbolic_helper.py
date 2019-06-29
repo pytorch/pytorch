@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 from torch._C import ListType
-import warnings
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -172,14 +171,14 @@ def _is_tensor_list(x):
 
 
 def _unimplemented(op, msg):
-    warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+    raise RuntimeError("ONNX export failed on " + op + " because " + msg + " not supported")
 
 
 def _black_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
-        warnings.warn("ONNX export failed on {}, which is not yet implemented for opset 10. "
-                      "Try exporting with a previous opset version."
-                      .format(name))
+        raise RuntimeError("ONNX export failed on {}, which is not implemented for opset {}. "
+                           "Try exporting with other opset versions."
+                           .format(name, _export_onnx_opset_version))
     return symbolic_fn
 
 
@@ -192,12 +191,20 @@ def _try_get_scalar_type(*args):
     return None
 
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
-    if _export_onnx_opset_version == 9:
+    if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
         return _slice(g, input, axes, starts, ends)
-    if _export_onnx_opset_version == 10:
+    else:
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
+
+def _constant_helper(g, shape, value):
+    if _export_onnx_opset_version < 9:
+        from torch.onnx.symbolic_opset8 import _constant
+        return _constant(g, shape, value)
+    else:
+        from torch.onnx.symbolic_opset9 import _constant
+        return _constant(g, shape, value)
 
 # ---------------------------------------------------------------------
 # ONNX operator version

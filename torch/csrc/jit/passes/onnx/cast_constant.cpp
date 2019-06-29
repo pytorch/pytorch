@@ -6,6 +6,14 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
+// For ONNX opset < 9, constant operator supports only three data types:
+// float16, float, and double. Constants of other data types are exported as float or double
+// and then cast back to their original data type with a cast node.
+// The above transformation is done in this pass.
+// The motivation behind having it as a post process pass opposed to handling in symbolic,
+// is that many constant operators would have already been removed in the export before this step.
+// On the other hand if cast is inserted in symbolic, consecutive node conversion will break
+// if it depends on certain inputs being constant.
 void CastConstant(Block* block) {
   auto graph = block->owningGraph();
   auto it = block->nodes().begin();
@@ -27,12 +35,12 @@ void CastConstant(Block* block) {
           case at::ScalarType::Int:
           case at::ScalarType::Short:
           case at::ScalarType::Bool:
-            to_type = 6; // Int32
+            to_type = ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
             val = val.to(at::ScalarType::Float);
             break;
 
           case at::ScalarType::Long:
-            to_type = 7; // Int64
+            to_type = ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
             val = val.to(at::ScalarType::Double);
             break;
 

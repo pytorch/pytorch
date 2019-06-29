@@ -26,8 +26,7 @@ def register_version(domain, version):
 def register_ops_helper(domain, version, iter_version):
     version_ops = get_ops_in_version(iter_version)
     for op in version_ops:
-        if isfunction(op[1]) and \
-           not is_registered_op(op[0], domain, version):
+        if isfunction(op[1]) and not is_registered_op(op[0], domain, version):
             register_op(op[0], op[1], domain, version)
 
 
@@ -35,7 +34,12 @@ def register_ops_in_version(domain, version):
     # iterates through the symbolic functions of
     # the specified opset version, and the previous
     # opset versions for operators supported in
-    # previous versions
+    # previous versions.
+
+    # Opset 9 is the base version.
+    # For operators of different opset version, updated symbolic functions are added
+    # in the respective symbolic_opset{version}.py file.
+    # Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
     iter_version = version
     while iter_version != 9:
         register_ops_helper(domain, version, iter_version)
