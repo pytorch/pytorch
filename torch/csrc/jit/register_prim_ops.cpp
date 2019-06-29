@@ -1521,18 +1521,19 @@ int listAdd(Stack& stack) {
   pop(stack, a, b);
 
   c10::List<T> ret;
-  const auto total_size = a.size() + b.size();
-  ret.reserve(total_size);
-  for (T a_element : a) {
-    ret.push_back(std::move(a_element));
+
+  if (a.use_count() == 1) {
+    ret = std::move(a);
+  } else {
+    ret = a.copy();
   }
-  for (T b_element : b) {
-    ret.push_back(std::move(b_element));
-  }
+
+  ret.append(std::move(b));
 
   push(stack, std::move(ret));
   return 0;
 }
+
 template <class T>
 int listInplaceAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<List<T>>();
