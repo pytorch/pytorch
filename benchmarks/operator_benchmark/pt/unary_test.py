@@ -24,9 +24,8 @@ unary_ops_configs = op_bench.config_list(
 
 
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, op_name, op_function): 
+    def init(self, M, N, op_function): 
         self.input_one = torch.rand(M, N)
-        self.set_module_name(op_name)
         self.op_function = op_function
 
     def forward(self):
