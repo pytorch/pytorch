@@ -78,8 +78,9 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes and devices for linear solve methods (gesv, cholesky_solve)
-static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
+// Validates input shapes and devices
+// for linear solve methods (solve, cholesky_solve, lu_solve, triangular_solve)
+static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, const char* name) {
   int64_t self_is_cuda = self.is_cuda();
   int64_t A_is_cuda = A.is_cuda();
 
@@ -102,20 +103,20 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
   }
 
   TORCH_CHECK(A.size(-1) == A.size(-2),
-           "A must be batches of square matrices, "
-           "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
+              "A must be batches of square matrices, "
+              "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
 
   TORCH_CHECK(A.size(-1) == self.size(-2),
-           "Incompatible matrix sizes for matmul: each A "
-           "matrix is ", A.size(-1), " by ", A.size(-1),
-           " but each b matrix is ", self.size(-2), " by ", self.size(-1));
+              "Incompatible matrix sizes for ", name, ": each A "
+              "matrix is ", A.size(-1), " by ", A.size(-1),
+              " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu, symeig)
 static inline void squareCheckInputs(const Tensor& self) {
   TORCH_CHECK(self.size(-1) == self.size(-2),
-           "A must be batches of square matrices, "
-           "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+              "A must be batches of square matrices, "
+              "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
 }
 
 /*
