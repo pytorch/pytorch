@@ -1638,3 +1638,8 @@ def gather(g, self, dim, index, sparse_grad=False):
     index = g.op("Cast", g.op("OneHot", index, depth, values, axis_i=dim), to_i=sym_help.cast_pytorch_to_onnx[dtype])
     mul = g.op("Mul", g.op("Unsqueeze", self, axes_i=[dim + 1]), index)
     return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
+
+
+@parse_args('v', 'is', 'i')
+def logsumexp(g, input, dim, keepdim):
+    return g.op('ReduceLogSumExp', input, axes_i=dim, keepdims_i=keepdim)
