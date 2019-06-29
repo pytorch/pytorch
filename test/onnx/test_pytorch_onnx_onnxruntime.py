@@ -84,19 +84,15 @@ class TestONNXRuntime(unittest.TestCase):
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
 
-    # @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
 
-    # @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_RNN_RELU(self):
         self.run_word_language_model("RNN_RELU")
 
-    # @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_LSTM(self):
         self.run_word_language_model("LSTM")
 
-    # @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_GRU(self):
         self.run_word_language_model("GRU")
 

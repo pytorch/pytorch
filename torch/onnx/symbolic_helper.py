@@ -198,14 +198,6 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
-def _constant_helper(g, shape, value):
-    if _export_onnx_opset_version < 9:
-        from torch.onnx.symbolic_opset8 import _constant
-        return _constant(g, shape, value)
-    else:
-        from torch.onnx.symbolic_opset9 import _constant
-        return _constant(g, shape, value)
-
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
