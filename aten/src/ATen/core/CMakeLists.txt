@@ -23,9 +23,6 @@ LIST(APPEND ATen_CORE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/strtod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_range.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_range_serialization.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/pickler.cpp
-
 )
 
 # Pass to parent
