@@ -801,7 +801,7 @@ void testThreadLocalDebugInfo() {
     done = true;
   });
   while (!done) {}
-  //checkDebugInfo();
+  checkDebugInfo();
   at::setThreadLocalDebugInfo(nullptr);
   TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
 }
