@@ -1,14 +1,12 @@
 #pragma once
 
-// ${generated_comment}
+#include <ATen/ATen.h>
 
-#include <ATen/TypeExtendedInterface.h>
+// ${generated_comment}
 
 namespace at {
 
-struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
-  explicit TypeDefault() {}
-
+struct CAFFE2_API TypeDefault {
   ${type_method_declarations}
 };
 

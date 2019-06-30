@@ -28,17 +28,6 @@ $extra_cuda_headers
 
 namespace at {
 
-${Type}::${Type}()
-  : ${DeviceType}TypeDefault() {}
-
-const char * ${Type}::toString() const {
-  return "${Type}";
-}
-
-TypeID ${Type}::ID() const {
-  return ${TypeID};
-}
-
 ${type_derived_method_definitions}
 
 static auto& registerer = globalATenDispatch()
