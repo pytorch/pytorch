@@ -10,11 +10,7 @@ std::unordered_map<std::string, void *>& ${Type}Dispatch::get_fn_table() {
 }
 
 ${Type}::${Type}()
-  : TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-
-Backend ${Type}::backend() const {
-  return Backend::${Backend};
-}
+  : TypeDefault() {}
 
 const char * ${Type}::toString() const {
   return "${Type}";

@@ -30,12 +30,6 @@ TEST(TensorOptionsTest, DefaultsToTheRightValues) {
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 }
 
-TEST(TensorOptionsTest, ReturnsTheCorrectType) {
-  auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  ASSERT_TRUE(
-      at::getType(options) == getNonVariableType(Backend::SparseCPU, kInt));
-}
-
 TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
   auto options = dtype(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);

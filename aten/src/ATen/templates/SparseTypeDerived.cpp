@@ -29,10 +29,7 @@ $extra_cuda_headers
 namespace at {
 
 ${Type}::${Type}()
-  : ${DeviceType}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-Backend ${Type}::backend() const {
-  return Backend::${Backend};
-}
+  : ${DeviceType}TypeDefault() {}
 
 const char * ${Type}::toString() const {
   return "${Type}";
