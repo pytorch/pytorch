@@ -94,4 +94,7 @@ class ComputeNormForBlobs(NetModifier):
                             output_scalar)
 
     def field_name_suffix(self):
-        return self._field_name_suffix
+        if self.row_index:
+            return '_row_{0}'.format(self.row_index) + self._field_name_suffix
+        else:
+            return self._field_name_suffix

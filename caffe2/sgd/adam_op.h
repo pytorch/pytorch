@@ -77,6 +77,66 @@ void adam_compute_output_grad(
   }
 }
 
+template <typename Context>
+void adam_update_output_grad_and_effective_lr(
+    int N,
+    const float* w,
+    const float* g,
+    const float* m,
+    const float* v,
+    float* nw,
+    float* nm,
+    float* nv,
+    float* ng,
+    float* effectiveLR,
+    float beta1,
+    float beta2,
+    float eps_hat,
+    float correction,
+    const float* lr,
+    Context* /*context*/) {
+  for (auto i = 0; i < N; ++i) {
+    float gi = g[i];
+    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+    ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
+    float effectiveLRi = effectiveLR[i] =
+        lr[0] * correction / (std::sqrt(vi) + eps_hat);
+    nw[i] = w[i] + effectiveLRi * mi;
+  }
+}
+
+template <typename Context>
+void adam_update_output_grad_and_effective_lr_and_update(
+    int N,
+    const float* w,
+    const float* g,
+    const float* m,
+    const float* v,
+    float* nw,
+    float* nm,
+    float* nv,
+    float* ng,
+    float* effectiveLR,
+    float* update,
+    float beta1,
+    float beta2,
+    float eps_hat,
+    float correction,
+    const float* lr,
+    Context* /*context*/) {
+  for (auto i = 0; i < N; ++i) {
+    float gi = g[i];
+    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+    ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
+    float effectiveLRi = effectiveLR[i] =
+        lr[0] * correction / (std::sqrt(vi) + eps_hat);
+    float updatei = update[i] = effectiveLRi * mi;
+    nw[i] = w[i] + updatei;
+  }
+}
+
 template <typename T, class Context>
 class AdamOp final : public Operator<Context> {
  public:
@@ -119,7 +179,7 @@ class AdamOp final : public Operator<Context> {
           correction,
           Input(LR).template data<T>(),
           &context_);
-    } else {
+    } else if (OutputSize() == 4) {
       Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
       adam_compute_output_grad<Context>(
           Input(GRAD).numel(),
@@ -137,6 +197,48 @@ class AdamOp final : public Operator<Context> {
           correction,
           Input(LR).template data<T>(),
           &context_);
+    } else if (OutputSize() == 5) {
+      Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+      Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(PARAM));
+      adam_update_output_grad_and_effective_lr<Context>(
+          Input(GRAD).numel(),
+          Input(PARAM).template data<T>(),
+          Input(GRAD).template data<T>(),
+          Input(MOMENT_1).template data<T>(),
+          Input(MOMENT_2).template data<T>(),
+          Output(OUTPUT_PARAM)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_2)->template mutable_data<T>(),
+          Output(OUTPUT_GRAD)->template mutable_data<T>(),
+          Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>(),
+          beta1_,
+          beta2_,
+          epsilon_,
+          correction,
+          Input(LR).template data<T>(),
+          &context_);
+    } else {
+      Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+      Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(PARAM));
+      Output(OUTPUT_UPDATE)->ResizeLike(Input(PARAM));
+      adam_update_output_grad_and_effective_lr_and_update<Context>(
+          Input(GRAD).numel(),
+          Input(PARAM).template data<T>(),
+          Input(GRAD).template data<T>(),
+          Input(MOMENT_1).template data<T>(),
+          Input(MOMENT_2).template data<T>(),
+          Output(OUTPUT_PARAM)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_2)->template mutable_data<T>(),
+          Output(OUTPUT_GRAD)->template mutable_data<T>(),
+          Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>(),
+          Output(OUTPUT_UPDATE)->template mutable_data<T>(),
+          beta1_,
+          beta2_,
+          epsilon_,
+          correction,
+          Input(LR).template data<T>(),
+          &context_);
     }
 
     return true;
@@ -147,7 +249,13 @@ class AdamOp final : public Operator<Context> {
   T beta2_{0.999};
   T epsilon_{1e-8};
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, GRAD, LR, ITER);
-  OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
+  OUTPUT_TAGS(
+      OUTPUT_PARAM,
+      OUTPUT_MOMENT_1,
+      OUTPUT_MOMENT_2,
+      OUTPUT_GRAD,
+      OUTPUT_EFFECTIVE_LR,
+      OUTPUT_UPDATE);
 };
 
 template <typename T, class Context>
@@ -250,7 +358,7 @@ class SparseAdamOp final : public Operator<Context> {
               &context_);
         }
       }
-    } else {
+    } else if (OutputSize() == 4) {
       Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
       auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
       for (auto i = 0; i < n; ++i) {
@@ -308,6 +416,137 @@ class SparseAdamOp final : public Operator<Context> {
               &context_);
         }
       }
+    } else if (OutputSize() == 5) {
+      Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+      Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(PARAM));
+      auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
+      auto* effectivelrOut =
+          Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>();
+      for (auto i = 0; i < n; ++i) {
+        auto idx = indices[i];
+
+        if (block_size == 1) {
+          float gi = gradIn[i];
+          float mi = moment1Out[idx] =
+              moment1In[idx] * beta1_ + gi * (1 - beta1_);
+          float vi = moment2Out[idx] =
+              moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
+          gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
+          float ei = effectivelrOut[idx] =
+              lr[0] * correction / (std::sqrt(vi) + epsilon_);
+          paramOut[idx] = paramIn[idx] + ei * mi;
+        } else {
+          auto offsetI = i * block_size;
+          auto offsetIdx = idx * block_size;
+
+#ifndef NDEBUG
+          CAFFE_ENFORCE_GE(
+              Input(PARAM).numel(),
+              block_size + offsetIdx,
+              this->debug_def().input(PARAM),
+              ", out of bound,  idx:",
+              idx,
+              " for input i:",
+              i,
+              " and block size:",
+              block_size);
+          CAFFE_ENFORCE_GE(
+              Input(GRAD).numel(),
+              block_size + offsetI,
+              this->debug_def().input(GRAD),
+              ", out of bound idx, idx:",
+              idx,
+              " for input i:",
+              i);
+#endif
+
+          adam_update_output_grad_and_effective_lr(
+              block_size,
+              paramIn + offsetIdx,
+              gradIn + offsetI,
+              moment1In + offsetIdx,
+              moment2In + offsetIdx,
+              paramOut + offsetIdx,
+              moment1Out + offsetIdx,
+              moment2Out + offsetIdx,
+              gradOut + offsetI,
+              effectivelrOut + offsetIdx,
+              beta1_,
+              beta2_,
+              epsilon_,
+              correction,
+              lr,
+              &context_);
+        }
+      }
+    } else {
+      Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+      Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(PARAM));
+      Output(OUTPUT_UPDATE)->ResizeLike(Input(PARAM));
+      auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();
+      auto* effectivelrOut =
+          Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>();
+      auto* updateOut = Output(OUTPUT_UPDATE)->template mutable_data<T>();
+      for (auto i = 0; i < n; ++i) {
+        auto idx = indices[i];
+
+        if (block_size == 1) {
+          float gi = gradIn[i];
+          float mi = moment1Out[idx] =
+              moment1In[idx] * beta1_ + gi * (1 - beta1_);
+          float vi = moment2Out[idx] =
+              moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
+          gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
+          float ei = effectivelrOut[idx] =
+              lr[0] * correction / (std::sqrt(vi) + epsilon_);
+          float ui = updateOut[idx] = ei * mi;
+          paramOut[idx] = paramIn[idx] + ui;
+
+        } else {
+          auto offsetI = i * block_size;
+          auto offsetIdx = idx * block_size;
+
+#ifndef NDEBUG
+          CAFFE_ENFORCE_GE(
+              Input(PARAM).numel(),
+              block_size + offsetIdx,
+              this->debug_def().input(PARAM),
+              ", out of bound,  idx:",
+              idx,
+              " for input i:",
+              i,
+              " and block size:",
+              block_size);
+          CAFFE_ENFORCE_GE(
+              Input(GRAD).numel(),
+              block_size + offsetI,
+              this->debug_def().input(GRAD),
+              ", out of bound idx, idx:",
+              idx,
+              " for input i:",
+              i);
+#endif
+
+          adam_update_output_grad_and_effective_lr_and_update(
+              block_size,
+              paramIn + offsetIdx,
+              gradIn + offsetI,
+              moment1In + offsetIdx,
+              moment2In + offsetIdx,
+              paramOut + offsetIdx,
+              moment1Out + offsetIdx,
+              moment2Out + offsetIdx,
+              gradOut + offsetI,
+              effectivelrOut + offsetIdx,
+              updateOut + offsetIdx,
+              beta1_,
+              beta2_,
+              epsilon_,
+              correction,
+              lr,
+              &context_);
+        }
+      }
     }
     return true;
   }
@@ -317,7 +556,13 @@ class SparseAdamOp final : public Operator<Context> {
   T beta2_;
   T epsilon_;
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, INDICES, GRAD, LR, ITER);
-  OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
+  OUTPUT_TAGS(
+      OUTPUT_PARAM,
+      OUTPUT_MOMENT_1,
+      OUTPUT_MOMENT_2,
+      OUTPUT_GRAD,
+      OUTPUT_EFFECTIVE_LR,
+      OUTPUT_UPDATE);
 };
 
 template <typename T, class Context>

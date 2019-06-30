@@ -52,8 +52,7 @@ __global__ void SparseAdagradKernel(
     const float* grad,
     const float* lr) {
   const float LR = lr[0];
-  CUDA_1D_KERNEL_LOOP(i, N)
-  {
+  CUDA_1D_KERNEL_LOOP(i, N) {
     const size_t gradIdx = i;
     const SIndex index = indices[i / grad_slice_sz];
     const size_t paramIdx = index * grad_slice_sz + (i % grad_slice_sz);
@@ -66,6 +65,57 @@ __global__ void SparseAdagradKernel(
   }
 }
 
+template <typename SIndex, typename THalf>
+__global__ void SparseAdagradOutputEffectiveLRKernel(
+    const size_t N,
+    const size_t grad_slice_sz,
+    const float epsilon,
+    THalf* param,
+    THalf* param_mom,
+    THalf* effective_lr,
+    const SIndex* indices,
+    const float* grad,
+    const float* lr) {
+  const float LR = lr[0];
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    const size_t gradIdx = i;
+    const SIndex index = indices[i / grad_slice_sz];
+    const size_t paramIdx = index * grad_slice_sz + (i % grad_slice_sz);
+
+    float mom_new = grad[gradIdx] * grad[gradIdx] + param_mom[paramIdx];
+    param_mom[paramIdx] = mom_new;
+    effective_lr[paramIdx] = LR / (sqrtf(mom_new) + epsilon);
+    float param_new = effective_lr[paramIdx] * grad[gradIdx] + param[paramIdx];
+    param[paramIdx] = param_new;
+  }
+}
+
+template <typename SIndex, typename THalf>
+__global__ void SparseAdagradOutputEffectiveLRandUpdateKernel(
+    const size_t N,
+    const size_t grad_slice_sz,
+    const float epsilon,
+    THalf* param,
+    THalf* param_mom,
+    THalf* effective_lr,
+    THalf* update,
+    const SIndex* indices,
+    const float* grad,
+    const float* lr) {
+  const float LR = lr[0];
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    const size_t gradIdx = i;
+    const SIndex index = indices[i / grad_slice_sz];
+    const size_t paramIdx = index * grad_slice_sz + (i % grad_slice_sz);
+
+    float mom_new = grad[gradIdx] * grad[gradIdx] + param_mom[paramIdx];
+    param_mom[paramIdx] = mom_new;
+    effective_lr[paramIdx] = LR / (sqrtf(mom_new) + epsilon);
+    update[paramIdx] = effective_lr[paramIdx] * grad[gradIdx];
+    float param_new = update[paramIdx] + param[paramIdx];
+    param[paramIdx] = param_new;
+  }
+}
 /**
  * Calculate RowwiseSparseAdagrad
  * M: gradients.dims[0]
@@ -155,32 +205,81 @@ class CUDASparseAdagradOp final : public Operator<Context> {
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<THalf>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>();
 
-    auto N = Input(GRAD).size();
-    auto grad_slice_sz = Input(GRAD).size_from_dim(Input(INDICES).ndim());
-    if (N == 0) {
-      // empty grad, nothing to do here, not even launching the kernel
-      return true;
+    if (OutputSize() == 2) {
+      auto N = Input(GRAD).size();
+      auto grad_slice_sz = Input(GRAD).size_from_dim(Input(INDICES).ndim());
+      if (N == 0) {
+        // empty grad, nothing to do here, not even launching the kernel
+        return true;
+      }
+      SparseAdagradKernel<IndexType, THalf>
+          <<<CAFFE_GET_BLOCKS(N),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context_.cuda_stream()>>>(
+              N,
+              grad_slice_sz,
+              epsilon_,
+              Output(OUTPUT_PARAM)->template mutable_data<THalf>(),
+              Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>(),
+              Input(INDICES).template data<IndexType>(),
+              Input(GRAD).template data<float>(),
+              Input(LR).template data<float>());
+    } else if (OutputSize() == 3) {
+      auto N = Input(GRAD).size();
+      auto grad_slice_sz = Input(GRAD).size_from_dim(Input(INDICES).ndim());
+      if (N == 0) {
+        // empty grad, nothing to do here, not even launching the kernel
+        return true;
+      }
+      SparseAdagradOutputEffectiveLRKernel<IndexType, THalf>
+          <<<CAFFE_GET_BLOCKS(N),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context_.cuda_stream()>>>(
+              N,
+              grad_slice_sz,
+              epsilon_,
+              Output(OUTPUT_PARAM)->template mutable_data<THalf>(),
+              Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>(),
+              Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<THalf>(),
+              Input(INDICES).template data<IndexType>(),
+              Input(GRAD).template data<float>(),
+              Input(LR).template data<float>());
+    } else {
+      auto N = Input(GRAD).size();
+      auto grad_slice_sz = Input(GRAD).size_from_dim(Input(INDICES).ndim());
+      if (N == 0) {
+        // empty grad, nothing to do here, not even launching the kernel
+        return true;
+      }
+      SparseAdagradOutputEffectiveLRandUpdateKernel<IndexType, THalf>
+          <<<CAFFE_GET_BLOCKS(N),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context_.cuda_stream()>>>(
+              N,
+              grad_slice_sz,
+              epsilon_,
+              Output(OUTPUT_PARAM)->template mutable_data<THalf>(),
+              Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>(),
+              Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<THalf>(),
+              Output(OUTPUT_UPDATE)->template mutable_data<THalf>(),
+              Input(INDICES).template data<IndexType>(),
+              Input(GRAD).template data<float>(),
+              Input(LR).template data<float>());
     }
-    SparseAdagradKernel<IndexType, THalf>
-        <<<CAFFE_GET_BLOCKS(N),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context_.cuda_stream()>>>(
-            N,
-            grad_slice_sz,
-            epsilon_,
-            Output(OUTPUT_PARAM)->template mutable_data<THalf>(),
-            Output(OUTPUT_MOMENT_1)->template mutable_data<THalf>(),
-            Input(INDICES).template data<IndexType>(),
-            Input(GRAD).template data<float>(),
-            Input(LR).template data<float>());
     return true;
   }
 
  protected:
   T epsilon_;
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
-  OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
+  OUTPUT_TAGS(
+      OUTPUT_PARAM,
+      OUTPUT_MOMENT_1,
+      OUTPUT_EFFECTIVE_LR,
+      OUTPUT_UPDATE);
 };
 
 template <>

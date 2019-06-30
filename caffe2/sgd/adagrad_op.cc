@@ -67,13 +67,14 @@ static OpSchema::Cost CostInferenceForSparseAdagrad(
 REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdagrad)
     .NumInputs(5)
-    .NumOutputs(2)
-    .EnforceOneToOneInplace()
+    .NumOutputs(2, 4)
+    .EnforceInplace({{0, 0}, {1, 1}})
     .SetDoc(R"DOC(
 
 Given inputs (param, moment, indices, grad, lr), runs the dense AdaGrad
 update on (param, grad, moment[indices], lr), and returns (new_param,
 new_moment) as in the dense case.
+Optionally returns (effective_lr and update) as well
 
 )DOC")
     .Input(0, "param", "Parameters to be updated")
@@ -83,6 +84,8 @@ new_moment) as in the dense case.
     .Input(4, "lr", "learning rate")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
+    .Output(2, "output_effective_lr", "(optional) Effective learning rate")
+    .Output(3, "output_update", "(optional) Actual update that is applied.")
     .Arg("epsilon", "Default 1e-5")
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForSparseAdagrad));
