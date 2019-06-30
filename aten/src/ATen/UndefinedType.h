@@ -13,10 +13,7 @@ namespace at {
 
 struct UndefinedType final : public TypeDefault {
   explicit UndefinedType();
-  virtual Backend backend() const override;
   virtual const char * toString() const override;
-  virtual Type & toBackend(Backend b) const override;
-  virtual Type & toScalarType(ScalarType s) const override;
   virtual TypeID ID() const override;
 };
 

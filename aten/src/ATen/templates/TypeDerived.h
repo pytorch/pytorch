@@ -18,7 +18,6 @@ namespace at {
 
 struct ${Type} final : public ${DeviceType}TypeDefault {
   explicit ${Type}();
-  virtual Backend backend() const override;
   virtual const char * toString() const override;
   virtual TypeID ID() const override;
 

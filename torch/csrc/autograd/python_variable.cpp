@@ -252,15 +252,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
       "can't assign Variable as its own grad");
 
   auto& grad = ((THPVariable*)py_grad)->cdata;
-  bool gradIsSparse = false;
-  auto backend = var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU;
-  auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.scalar_type());
-  if (typeOpt) {
-       auto& sparseType = at::globalContext().getNonVariableType(backend, var.scalar_type());
-       auto& gradType = at::globalContext().getNonVariableType(grad.type().backend(), grad.scalar_type());
-       gradIsSparse = gradType == sparseType;
-  }
-
+  bool gradIsSparse = var.dtype() == grad.dtype() && toSparse(tensorTypeIdToBackend(var.type_id())) == tensorTypeIdToBackend(grad.type_id());
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
       "assigned grad has data of a different type");
   if (var.is_cuda()) {
