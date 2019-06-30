@@ -57,8 +57,8 @@ struct TORCH_API VariableType final : public at::TypeDefault {
 
   static at::TypeExtendedInterface* getVariableTypeFromBaseType(const at::Type& baseType);
   static bool isVariableType(const at::Type& type);
-  static std::vector<at::Type*> allCUDATypes();
-  static std::vector<at::Type*> allCPUTypes();
+  static std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
+  static std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
 
   void backward(
       Tensor& self,
