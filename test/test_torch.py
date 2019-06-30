@@ -5329,6 +5329,15 @@ class _TestTorchMixin(object):
             with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.triangular_solve(b, A)
 
+            with self.assertRaisesRegex(RuntimeError, err_str):
+                torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=A_device).int())
+
+            # This checks if a suitable error message is thrown
+            # when LU output and pivots are on the same device
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Expected LU_pivots and LU_data to be on the same device"):
+                torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=b_device).int())
+
     @staticmethod
     def _test_qr(self, cast):
         def run_test(tensor_dims, some):

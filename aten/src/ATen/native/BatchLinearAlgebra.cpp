@@ -1007,9 +1007,13 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
   TORCH_CHECK(LU_data.dim() >= 2,
               "LU_data should have at least 2 dimensions, but has ", LU_data.dim(), " dimensions instead");
   TORCH_CHECK(LU_pivots.size(-1) == LU_data.size(-1),
-              "number of pivots per batch should be same as the dimension of the matrix");
+              "Number of pivots per batch should be same as the dimension of the matrix");
   TORCH_CHECK(LU_pivots.dtype() == at::kInt,
               "LU_pivots should be a Tensor of scalar type Int");
+  TORCH_CHECK(LU_pivots.device() == LU_data.device(),
+              "Expected LU_pivots and LU_data to be on the same device, "
+              "but found LU_pivots on ", LU_pivots.device(), " and LU_data on ",
+              LU_data.device(), " instead");
 
   // We check whether the batch dimensions of LU_pivots match the batch dimensions of LU_data
   // e.g.: LU_pivots.sizes() = 4 x 3 x 2, LU_data.sizes() = 4 x 3 x 2 x 2 is a pair of correct inputs
