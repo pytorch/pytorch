@@ -29,6 +29,12 @@
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
   variants: function
 
+- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void
+  variants: method
+
+- func: set_data(Tensor(a!) self, Tensor new_data) -> void
+  variants: method
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
