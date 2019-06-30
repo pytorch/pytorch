@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
