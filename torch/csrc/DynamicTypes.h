@@ -18,10 +18,6 @@ namespace c10 {
 struct Storage;
 }
 
-namespace at {
-struct Type;
-} // namespace at
-
 namespace torch {
 // Register a PyTypeObject* with the given attributes
 void registerStoragePyTypeObject(

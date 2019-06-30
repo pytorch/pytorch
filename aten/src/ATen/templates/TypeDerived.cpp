@@ -35,17 +35,6 @@ $legacy_th_headers
 
 namespace at {
 
-${Type}::${Type}()
-  : ${DeviceType}TypeDefault() {}
-
-const char * ${Type}::toString() const {
-  return "${Type}";
-}
-
-TypeID ${Type}::ID() const {
-  return ${TypeID};
-}
-
 /* example
 Tensor * ${Type}::add(Tensor & a, Tensor & b) {
   std::cout << "add Tensor with backend ${Backend}\n";
