@@ -86,10 +86,6 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Pinned memory requires CUDA. ", CUDA_HELP);
   }
 
-  virtual void registerCUDATypes(Context*) const {
-    AT_ERROR("Cannot registerCUDATypes() without ATen_cuda library. ", CUDA_HELP);
-  }
-
   virtual bool compiledWithCuDNN() const {
     return false;
   }

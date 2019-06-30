@@ -62,6 +62,12 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+  set(CPU_INTEL ON)
+else ()
+  set(CPU_INTEL OFF)
+endif ()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -126,7 +132,10 @@ option(USE_SYSTEM_EIGEN_INSTALL
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(USE_MKLDNN "Use MKLDNN" OFF)
+cmake_dependent_option(
+  USE_MKLDNN "Use MKLDNN. Only available on x86 and x86_64." ON
+  "CPU_INTEL" OFF)
+set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
