@@ -9,21 +9,6 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
-VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
-  : TypeDefault()
-  , baseType(baseType)
-  , id_(context->freshTypeID()) {
-  str = std::string("Variable[") + baseType->toString() + "]";
-}
-
-const char * VariableType::toString() const {
-  return str.c_str();
-}
-
-TypeID VariableType::ID() const {
-  return static_cast<TypeID>(id_);
-}
-
 namespace {
 std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   std::vector<DeprecatedTypeProperties*> res;

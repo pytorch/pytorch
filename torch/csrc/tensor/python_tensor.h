@@ -9,7 +9,6 @@ class TensorTypeId;
 }
 
 namespace at {
-struct Type;
 class Tensor;
 } // namespace at
 
