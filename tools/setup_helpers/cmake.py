@@ -21,8 +21,6 @@ from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
                    NCCL_SYSTEM_LIB, USE_NCCL)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 from .rocm import USE_ROCM
-from .nnpack import USE_NNPACK
-from .qnnpack import USE_QNNPACK
 
 
 def _which(thefile):
@@ -280,8 +278,6 @@ class CMake:
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
                                check_negative_env_flag('USE_FBGEMM')),
-            'USE_NNPACK': USE_NNPACK,
-            'USE_QNNPACK': USE_QNNPACK,
             'USE_NCCL': USE_NCCL,
             'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
             'USE_NUMPY': USE_NUMPY,
