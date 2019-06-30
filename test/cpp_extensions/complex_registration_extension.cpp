@@ -28,12 +28,8 @@ namespace at {
 
 struct ComplexCPUType : public at::CPUTypeDefault {
   ComplexCPUType()
-      : CPUTypeDefault(
-            ComplexCPUTensorId(),
-            /*is_variable=*/false,
-            /*is_undefined=*/false) {}
+      : CPUTypeDefault() {}
 
-  Backend backend() const override;
   const char* toString() const override;
   TypeID ID() const override;
 
@@ -69,10 +65,6 @@ struct ComplexHooks : public at::ComplexHooksInterface {
     context->registerType(Backend::ComplexCPU, new ComplexCPUType());
   }
 };
-
-Backend ComplexCPUType::backend() const {
-  return Backend::ComplexCPU;
-}
 
 const char* ComplexCPUType::toString() const {
   return "ComplexCPUType";

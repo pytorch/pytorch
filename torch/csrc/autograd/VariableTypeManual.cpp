@@ -10,110 +10,18 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 
 VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
-  : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
+  : TypeDefault()
   , baseType(baseType)
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
 
-Backend VariableType::backend() const {
-  return baseType->backend();
-}
-
 const char * VariableType::toString() const {
   return str.c_str();
 }
-Type & VariableType::toBackend(Backend b) const {
-  return *getVariableTypeFromBaseType(baseType->toBackend(b));
-}
-Type & VariableType::toScalarType(ScalarType s) const {
-  return *getVariableTypeFromBaseType(baseType->toScalarType(s));
-}
+
 TypeID VariableType::ID() const {
   return static_cast<TypeID>(id_);
-}
-
-std::vector<std::unique_ptr<Type>> type_to_variable_type;
-
-// XXX - this is not threadsafe with uses of Variables
-void register_variable_type_for(TypeExtendedInterface* baseType) {
-  AT_ASSERT(baseType);
-  const auto base_id = static_cast<size_t>(baseType->ID());
-  if(type_to_variable_type.size() <= base_id) {
-    type_to_variable_type.resize(base_id + 1);
-  }
-  type_to_variable_type[base_id] =
-      make_unique<VariableType>(&at::globalContext(), baseType);
-}
-
-struct VariableTypeRegistry {
-  VariableTypeRegistry() {
-    auto& context = at::globalContext();
-    for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
-      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-        auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
-        if (baseType && baseType->backend() != Backend::Undefined) {
-          register_variable_type_for(baseType);
-        }
-      }
-    }
-  }
-};
-
-struct VariableHooks : public at::VariableHooksInterface {
-  VariableHooks(at::VariableHooksArgs) {}
-  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend) const override;
-  at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
-};
-
-// Sigh, the registry doesn't support namespaces :(
-using at::RegistererVariableHooksRegistry;
-using at::VariableHooksRegistry;
-
-// WARNING: YOU MUST DO THE NEXT TWO STATIC INITIALIZERS IN THIS ORDER.
-//
-// If you do it in the other order, this is what can happen if
-// these static initializers are called before Context is
-// initialized:
-//
-//    - VariableHooks::registerVariableTypeFor will be activated
-//      to register a variable type
-//
-//    - We run the constructor of VariableTypeRegistry, which
-//      calls at::globalContext()
-//
-//    - Context is not initialized yet, so we call the constructor
-//      of Context
-//
-//    - We register CPU types, calling VariableHooks::registerVariableTypeFor
-//
-//    - We register the CPU type as a variable type
-//
-//    - In VariableTypeRegistry, we try to register the Variable type AGAIN!!
-//      Disaster.
-//
-static VariableTypeRegistry registry;
-REGISTER_VARIABLE_HOOKS(VariableHooks)
-
-// Pre-condition: backend/scalar_type is a valid type in the type_registry
-void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend) const {
-  auto* baseType = context->getNonVariableTypeRaw(backend, ScalarType::Undefined);
-  register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
-}
-
-at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
-  return *VariableType::getVariableTypeFromBaseType(baseType);
-}
-
-bool VariableType::isVariableType(const at::Type& type) {
-  return type.is_variable();
-}
-
-at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
-  auto id = static_cast<size_t>(baseType.ID());
-  if(id >= type_to_variable_type.size())
-    return nullptr;
-  return static_cast<at::TypeExtendedInterface*>(type_to_variable_type[id].get());
 }
 
 namespace {
@@ -191,14 +99,14 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
 }
 
 void VariableType::backward(
-    Tensor& self,
-    c10::optional<Tensor> gradient,
+    const Tensor& self,
+    const Tensor& gradient,
     bool keep_graph,
-    bool create_graph) const {
+    bool create_graph) {
   as_variable_ref(self).backward(gradient, keep_graph, create_graph);
 }
 
-void VariableType::set_data(Tensor & self, Tensor new_data) const {
+void VariableType::set_data(const Tensor & self, const Tensor & new_data) {
   as_variable_ref(self).set_data(new_data);
 }
 
