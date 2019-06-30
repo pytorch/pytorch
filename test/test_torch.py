@@ -10909,6 +10909,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             for i in range(len(array)):
                 self.assertEqual(tensor_from_array[i], array[i])
 
+        # Test unsupported type
+        array = np.array([1, 2, 3, 4], dtype=np.complex)
+        with self.assertRaises(TypeError):
+            tensor_from_array = torch.from_numpy(array)
+
         # check storage offset
         x = np.linspace(1, 125, 125)
         x.shape = (5, 5, 5)
@@ -11243,7 +11248,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(x_clone, xor_result)
 
     def test_op_invert(self):
-        for t in (torch.ByteTensor, torch.ShortTensor, torch.IntTensor, torch.LongTensor):
+        for t in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
             a = torch.arange(127, dtype=t.dtype)
             self.assertEqual(~a, a.bitwise_not())
         a = torch.BoolTensor([True, False])
@@ -11818,7 +11823,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1], device="cuda"))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).cuda())
-        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.set_default_tensor_type(torch.cuda.FloatTensor))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
 
     def test_cast_binary_op(self):
