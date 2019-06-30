@@ -91,8 +91,8 @@ struct CAFFE2_API CUDAHooksInterface {
     return -1;
   }
 
-  virtual int64_t getDeviceWithPrimaryContext() const {
-    return -1;
+  virtual bool hasPrimaryContext(int64_t device_index) const {
+    AT_ERROR("Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual Allocator* getPinnedMemoryAllocator() const {

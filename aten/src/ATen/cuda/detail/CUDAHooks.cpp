@@ -115,26 +115,13 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
-int64_t CUDAHooks::getDeviceWithPrimaryContext() const {
+bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
+  AT_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
+           "hasPrimaryContext expects valid device index, but got device_index=", device_index);
   unsigned int ctx_flags;
   int ctx_is_active;
-  // check current device first
-  int64_t current_device = CUDAHooks::current_device();
-  int64_t device = current_device;
-  if (device >= 0) {
-    AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device, &ctx_flags, &ctx_is_active));
-    if (ctx_is_active == 1) {
-      return device;
-    }
-  }
-  for (device = 0; device < at::cuda::device_count(); device++) {
-    if (device == current_device) continue;
-    AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device, &ctx_flags, &ctx_is_active));
-    if (ctx_is_active == 1) {
-      return device;
-    }
-  }
-  return -1;
+  AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
+  return ctx_is_active == 1;
 }
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
