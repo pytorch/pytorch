@@ -11249,7 +11249,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_op_invert(self):
         for t in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.arange(127, dtype=t.dtype)
+            a = torch.arange(127, dtype=t)
             self.assertEqual(~a, a.bitwise_not())
         a = torch.BoolTensor([True, False])
         self.assertEqual(~a, a.bitwise_not())
