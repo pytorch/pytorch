@@ -510,7 +510,7 @@ class CAFFE2_API Tensor {
   Tensor & sin_();
   Tensor sinh() const;
   Tensor & sinh_();
-  Tensor detach() const;
+  Tensor detach(bool allow_tensor_metadata_change=false) const;
   Tensor & detach_();
   int64_t size(int64_t dim) const;
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;

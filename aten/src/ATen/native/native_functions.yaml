@@ -1803,7 +1803,7 @@
     CPU: _sinh_out_cpu
     CUDA: _sinh_out_cuda
 
-- func: detach(Tensor self) -> Tensor
+- func: detach(Tensor self, *, bool allow_tensor_metadata_change=False) -> Tensor
   variants: function, method
 
 - func: detach_(Tensor(a!) self) -> Tensor(a!)

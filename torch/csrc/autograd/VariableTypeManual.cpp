@@ -176,7 +176,7 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) {
   return self;
 }
 
-Tensor VariableType::detach(const Tensor & self) {
+Tensor VariableType::detach(const Tensor & self, bool allow_tensor_metadata_change) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;
@@ -189,7 +189,7 @@ Tensor VariableType::detach(const Tensor & self) {
 
   }
   // <NON_GENERATED_CODE>
-  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach(); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach(allow_tensor_metadata_change); // NOLINT(cppcoreguidelines-pro-type-const-cast)
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);

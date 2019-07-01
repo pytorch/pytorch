@@ -227,6 +227,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// Returns a copy of this `Variable` that is detached from its autograd graph
   /// and has a blank version. This method is OK to call if the `Variable` is a
   /// view.
+  /// yf225 TODO: improve comment about the `allow_tensor_metadata_change` flag here!
   /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
   /// storage / storage_offset) of a tensor created from `detach()`, those metadata
   /// in the original tensor will also be updated. However, the new behavior is that
@@ -235,7 +236,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// to false to make such changes explicitly illegal, in order to prevent users from
   /// changing metadata of the detached tensor and expecting the original tensor to also
   /// be updated.
-  Variable detach() const;
+  Variable detach(bool allow_tensor_metadata_change = false) const;
 
   /// Like `detach()`, but removes this `Variable` in-place. This method may
   /// only be called on non-view `Variable`s. You can use `is_view()` to check
@@ -633,8 +634,13 @@ inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
   return get_autograd_meta()->grad_accumulator_.lock();
 }
 
-inline Variable Variable::detach() const {
-  auto var = make_variable_view(*this, *this, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false, Edge());
+inline Variable Variable::detach(bool allow_tensor_metadata_change) const {
+  auto var = make_variable_view(
+    *this,
+    *this,
+    /*is_differentiable=*/false,
+    /*allow_tensor_metadata_change=*/allow_tensor_metadata_change,
+    Edge());
   return var;
 }
 

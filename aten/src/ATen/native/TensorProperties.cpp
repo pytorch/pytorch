@@ -40,7 +40,7 @@ bool cudnn_is_acceptable(const Tensor& self) {
   return true;
 }
 
-Tensor detach(const Tensor& self) {
+Tensor detach(const Tensor& self, bool allow_tensor_metadata_change) {
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
   AT_ERROR("detach is not implemented for Tensor");
   return self;
