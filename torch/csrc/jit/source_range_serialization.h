@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace c10 {
-class IValue;
+struct IValue;
 }
 
 namespace torch {
