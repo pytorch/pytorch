@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/pickler.h>
@@ -96,13 +97,15 @@ const std::vector<char>& SourceRangePickler::get_data() {
   return p->stack();
 }
 
-SourceRangeUnpickler::SourceRangeUnpickler(at::DataPtr&& data, size_t size)
+ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
+    at::DataPtr&& data,
+    size_t size)
     : data(std::move(data)),
       size(size),
       deserializer(new SourceRangeDeserializer()),
       unpickled_records(nullptr) {}
 
-void SourceRangeUnpickler::unpickle() {
+void ConcreteSourceRangeUnpickler::unpickle() {
   if (unpickled_records) {
     return;
   }
@@ -119,8 +122,8 @@ void SourceRangeUnpickler::unpickle() {
   }
 }
 
-c10::optional<SourceRange> SourceRangeUnpickler::findSourceRangeThatGenerated(
-    const SourceRange& range) {
+c10::optional<SourceRange> ConcreteSourceRangeUnpickler::
+    findSourceRangeThatGenerated(const SourceRange& range) {
   unpickle();
 
   auto query = TaggedRange(range.start(), SourceRange{""});

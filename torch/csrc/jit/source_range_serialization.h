@@ -32,21 +32,8 @@ class SourceRangePickler {
 
 class SourceRangeUnpickler {
  public:
-  SourceRangeUnpickler(at::DataPtr&& data, size_t size);
-
   virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
-      const SourceRange& range);
-
-  virtual ~SourceRangeUnpickler() {}
-
- private:
-  at::DataPtr data;
-  size_t size;
-
-  virtual void unpickle();
-
-  std::shared_ptr<SourceRangeDeserializer> deserializer;
-  std::shared_ptr<SourceRangeRecords> unpickled_records;
+      const SourceRange& range) = 0;
 };
 
 } // namespace jit

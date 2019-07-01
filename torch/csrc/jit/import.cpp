@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
@@ -339,7 +340,8 @@ void ScriptModuleDeserializer::convertModule(
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_debug_arena().key());
 
-    gen_ranges = std::make_shared<SourceRangeUnpickler>(std::move(data), size);
+    gen_ranges =
+        std::make_shared<ConcreteSourceRangeUnpickler>(std::move(data), size);
   }
 
   if (module_def.has_torchscript_arena()) {
