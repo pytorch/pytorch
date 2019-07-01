@@ -2320,11 +2320,12 @@ def ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
     elif dim != 4:
         raise ValueError('Expected 2, 3, or 4 dimensions (got {})'.format(dim))
 
+    _, channel, _, _ = input.size()
+
     if kernel is None:
         kernel = _fspecial_gaussian(filter_size, channel, sigma)
     kernel = kernel.to(device=input.device)
 
-    _, channel, _, _ = input.size()
     ret, _ = _ssim(input, target, max_val, k1, k2, channel, kernel)
 
     if reduction != 'none':
@@ -2359,11 +2360,11 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
     elif dim != 4:
         raise ValueError('Expected 2, 3, or 4 dimensions (got {})'.format(dim))
 
+    _, channel, _, _ = input.size()
+
     if kernel is None:
         kernel = _fspecial_gaussian(filter_size, channel, sigma)
     kernel = kernel.to(device=input.device)
-
-    _, channel, _, _ = input.size()
 
     weights = torch.tensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333], device=input.device)
     weights = weights.unsqueeze(-1).unsqueeze(-1)
