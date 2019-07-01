@@ -12797,6 +12797,7 @@ class TestRecursiveScript(JitTestCase):
                     return x + self.x + 2
 
         self.assertTrue("script_method is deprecated" in str(warns[0].message))
+        self.assertTrue("Inheriting from torch.jit.ScriptModule is deprecated" in str(warns[1].message))
 
         self.assertExportImportModule(M(), (torch.randn(2, 2),))
 

@@ -1143,7 +1143,9 @@ def script_method(fn, _rcb=None):
 
     if torch._C._jit_recursive_script():
         warnings.warn("@torch.jit.script_method is deprecated. Please use the "
-                      "recursive scripting API for detail. See [insert link here] for details", stacklevel=2)
+                      "recursive scripting API. See [insert link here] for details", stacklevel=2)
+        export(fn)
+        return
     # NOTE: we need to traverse two frames here because the meta-class frame
     # for ScriptModule will be present, as opposed to invoking @script on a
     # a function or invoking define() on a CompilationUnit.
@@ -1333,6 +1335,11 @@ class ScriptMeta(type):
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type
     def __init__(cls, name, bases, attrs):
+        if torch._C._jit_recursive_script() and cls != ScriptModule:
+            warnings.warn("Inheriting from torch.jit.ScriptModule is deprecated. Please use the "
+                          "recursive scripting API. See [insert link here] for details", stacklevel=2)
+
+
         # initialize inherited properties
         cls._methods = {}
         cls._constants_set = set(getattr(cls, '__constants__', ()))
@@ -1360,16 +1367,14 @@ class ScriptMeta(type):
                 # this is the init of the concrete type of self,
                 # we have already resolved all _methods
 
-                # This adds ScriptMethods based on the recursive script API (meaning
-                # it scripts `forward` and anything called by forward, respecting
-                # @ignore and @export)
-                stubs = _collect_stubs(self)
-
-                # This adds ScriptMethods for @script_method decorated methods
-                methods = [v for k, v in sorted(cls._methods.items())]
-
-                # Call the compile for each def
-                _create_methods_from_stubs(self, methods + stubs)
+                if torch._C._jit_recursive_script():
+                    # This adds ScriptMethods based on the recursive script API (meaning
+                    # it scripts `forward` and anything called by forward, respecting
+                    # @ignore and @export)
+                    _create_methods_from_stubs(self, _collect_stubs(self))
+                else:
+                    methods = [v for k, v in sorted(cls._methods.items())]
+                    _create_methods_from_stubs(self, methods)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
