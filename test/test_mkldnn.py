@@ -389,6 +389,24 @@ class TestMkldnn(TestCase):
             x2.zero_().to_dense(),
         )
 
+    def test_is_mkldnn(self):
+        x = torch.randn(1, dtype=torch.float32)
+        self.assertFalse(x.is_mkldnn)
+        self.assertTrue(x.to_mkldnn().is_mkldnn)
+
+    def test_is_mkldnn_jit(self):
+        class EnsureMkldnn(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if not x.is_mkldnn:
+                    x = x.to_mkldnn()
+                return x
+
+        m = EnsureMkldnn()
+        x = torch.randn(1, dtype=torch.float32)
+        self.assertTrue(m(x).is_mkldnn)
+        self.assertTrue(m(x.to_mkldnn()).is_mkldnn)
+
     def _test_imagenet_model(self, model):
         model = model.train(False).float()
         mkldnn_model = mkldnn_utils.to_mkldnn(copy.deepcopy(model))

@@ -1754,7 +1754,7 @@ class _TestTorchMixin(object):
                   torch.ByteTensor, torch.LongTensor, torch.IntTensor, torch.ShortTensor, torch.CharTensor):
             if t == torch.BoolTensor:
                 a = torch.tensor([True, False])
-                expected_res = torch.BoolTensor([False, True])
+                expected_res = torch.tensor([False, True])
             else:
                 a = torch.arange(127, dtype=t.dtype)
                 expected_res = res.type(t)
