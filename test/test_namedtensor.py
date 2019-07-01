@@ -71,6 +71,41 @@ class TestNamedTensor(TestCase):
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
 
+    def test_info_smoke(self):
+        # Smoke test for info functions / methods / attributes on named tensors.
+        tensor = torch.empty(1, 1, names=('N', 'D'))
+
+        tensor.device
+        tensor.dtype
+        tensor.get_device()
+        tensor.is_complex()
+        tensor.is_floating_point()
+        tensor.is_nonzero()
+        torch.is_same_size(tensor, tensor)
+        torch.is_signed(tensor)
+        tensor.layout
+        tensor.numel()
+        tensor.dim()
+        tensor.element_size()
+        tensor.is_contiguous()
+        tensor.is_cuda
+        tensor.is_leaf
+        tensor.is_pinned()
+        tensor.is_shared()
+        tensor.is_sparse
+        tensor.ndimension()
+        tensor.nelement()
+        tensor.shape
+        tensor.size()
+        tensor.storage()
+        tensor.storage_offset()
+        tensor.storage_type()
+        tensor.stride()
+        tensor.data
+        tensor.data_ptr()
+        tensor.ndim
+        tensor.item()
+
     def test_unary_fns(self):
         TestCase = namedtuple('TestCase', ['name', 'lambd'])
 
