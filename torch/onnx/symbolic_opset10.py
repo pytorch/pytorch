@@ -66,7 +66,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             # convert indices to have non-flattened indices values
             from torch.onnx.symbolic_opset9 import sub
             s = sym_help._slice_helper(g, flattened_indices, axes=[2 + i for i in range(ndims)],
-                                         starts=tuple_fn(0), ends=tuple_fn(1))
+                                       starts=tuple_fn(0), ends=tuple_fn(1))
             indices = sub(g, indices, s)
             return r, indices
         else:
