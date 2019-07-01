@@ -132,11 +132,13 @@ option(USE_SYSTEM_EIGEN_INSTALL
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(USE_CBLAS_IN_MKLDNN "Use CBLAS in MKLDNN" OFF)
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86 and x86_64." ON
   "CPU_INTEL" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
+cmake_dependent_option(
+    USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
+    "USE_MKLDNN" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
