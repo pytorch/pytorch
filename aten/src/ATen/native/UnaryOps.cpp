@@ -136,12 +136,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
-static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
-#ifdef NAMEDTENSOR_ENABLED
-  at::namedinference::propagate_names(result, src);
-#endif
-}
-
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 

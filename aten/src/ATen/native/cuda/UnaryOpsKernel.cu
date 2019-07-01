@@ -9,6 +9,14 @@
 
 namespace at { namespace native {
 
+static void bitwise_not_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_INTEGRAL_AND_BOOL_TYPES(iter.dtype(), "bitwise_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return bitwise_not(a);
+    });
+  });
+}
+
 template <typename scalar_t>
 void fill_kernel_impl(TensorIterator& iter, Scalar value_scalar) {
   auto value = value_scalar.to<scalar_t>();
@@ -24,5 +32,6 @@ static void fill_kernel_cuda(TensorIterator& iter, Scalar value) {
 }
 
 REGISTER_DISPATCH(fill_stub, &fill_kernel_cuda);
+REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 
 }}

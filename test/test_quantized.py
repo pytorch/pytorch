@@ -588,6 +588,29 @@ class TestQuantizedConv(unittest.TestCase):
         # Make sure the results match
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
+    """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
+    @given(Q=qtensor(shapes=array_shapes(4, 4,), dtypes=((torch.qint8, np.int8, 0),)))
+    def test_qconv_unpack(self, Q):
+        W, (W_scale, W_zp), (qmin, qmax), (torch_type, np_type) = Q
+        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
+        qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
+
+        # Orig tensor is assumed to be in K(C/G)RS format
+        W = torch.from_numpy(W)
+        # K(C/G)RS -> KRS(C/G)
+        W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
+        W_q = torch.quantize_linear(W_KRSC, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+
+        # Pack weights using weight packing operator
+        W_packed = qconv_prepack(W_q, 1)
+        # Unpack weights weight unpacking operator (Used for serialization)
+        W_unpacked = qconv_unpack(W_packed)
+
+        # Assert equal
+        np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
+        np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
+        np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
+
 
 if __name__ == "__main__":
     run_tests()
