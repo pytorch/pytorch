@@ -1140,6 +1140,10 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_'
 def script_method(fn, _rcb=None):
     if not _enabled:
         return fn
+
+    if torch._C._jit_recursive_script():
+        warnings.warn("@torch.jit.script_method is deprecated. Please use the "
+                      "recursive scripting API for detail. See [insert link here] for details", stacklevel=2)
     # NOTE: we need to traverse two frames here because the meta-class frame
     # for ScriptModule will be present, as opposed to invoking @script on a
     # a function or invoking define() on a CompilationUnit.
@@ -1355,15 +1359,23 @@ class ScriptMeta(type):
             if type(self) == cls:
                 # this is the init of the concrete type of self,
                 # we have already resolved all _methods
+
+                # This adds ScriptMethods based on the recursive script API (meaning
+                # it scripts `forward` and anything called by forward, respecting
+                # @ignore and @export)
+                stubs = _collect_stubs(self)
+
+                # This adds ScriptMethods for @script_method decorated methods
                 methods = [v for k, v in sorted(cls._methods.items())]
-                _create_methods_from_stubs(self, methods)
+
+                # Call the compile for each def
+                _create_methods_from_stubs(self, methods + stubs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
 if _enabled:
-
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
     # it in the objects dict. Due to the standard rules for attribute lookup
@@ -1549,11 +1561,11 @@ if _enabled:
 
         forward = _CachedForward()
 
-        def __getattr__(self, attr):
-            if '_c' not in self.__dict__:
-                raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
-            if self._c._has_attribute(attr):
-                return self._c._get_attribute(attr)
+        def __getattribute__(self, attr):
+            # This needs to use __getattribute__ for methods to give a reference to the
+            # ScriptMethod instead of the Python method
+            if attr == '_c' or attr == '__dict__':
+                return super(ScriptModule, self).__getattribute__(attr)
             if self._c._has_method(attr):
                 if attr in self.__class__._methods:
                     original_method = self.__class__._methods[attr].original_method
@@ -1561,10 +1573,17 @@ if _enabled:
                     script_method = functools.wraps(original_method)(script_method)
                 else:
                     script_method = self._c._get_method(attr)
-                # cache method so future calls do not go through __getattr__
-                # to improve invocation performance
+
                 self.__dict__[attr] = script_method
                 return script_method
+
+            return super(ScriptModule, self).__getattribute__(attr)
+
+        def __getattr__(self, attr):
+            if '_c' not in self.__dict__:
+                raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
+            if self._c._has_attribute(attr):
+                return self._c._get_attribute(attr)
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
@@ -1610,7 +1629,7 @@ if _enabled:
                 super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
         def __dir__(self):
-            return sorted(Module.__dir__(self) + self._method_names())
+            return sorted(Module.__dir__(self) + self._c._method_names())
 
         def define(self, lang):
             # We use frames_up=1 to get to the proper surrounding scope. The stack
@@ -1789,6 +1808,29 @@ def _get_weak_stubs(cls):
     return stubs
 
 
+def _collect_stubs(mod):
+    exported = []
+    methods = ('forward',)
+    for name in dir(mod):
+        if not hasattr(mod, name):
+            continue
+        item = getattr(mod, name)
+        if callable(item):
+            if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
+                exported.append(name)
+    methods = methods + tuple(exported)
+
+    fns = [get_function_from_type(type(mod), method) for method in methods]
+    fns = list(filter(lambda fn: fn is not None, fns))
+
+    def make_stub(fn):
+        rcb = createResolutionCallbackFromClosure(fn)
+        ast = get_jit_def(fn, self_name="ScriptModule")
+        return ScriptMethodStub(rcb, ast, fn)
+
+    return list(map(make_stub, fns))
+
+
 def _convert_to_script_module(mod, methods=None):
     """
     Makes a ScriptModule from an nn.Module. If `_methods` is provided,
@@ -1800,21 +1842,7 @@ def _convert_to_script_module(mod, methods=None):
         # Create constant versions for the iterable modules
         return _create_constant_iterable_module(mod)
 
-    if methods is None:
-        methods = ('forward',)
-    exported = []
-    for name in dir(mod):
-        item = getattr(mod, name)
-        if callable(item):
-            if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
-                exported.append(name)
-    methods = methods + tuple(exported)
-
-    def make_stub(method):
-        func = get_function_from_type(type(mod), method)
-        return script_method(func, createResolutionCallbackFromClosure(func))
-
-    stubs = list(map(make_stub, methods))
+    stubs = _collect_stubs(mod)
     return WeakScriptModuleProxy(mod, stubs)
 
 

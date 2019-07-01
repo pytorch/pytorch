@@ -12779,6 +12779,28 @@ class TestRecursiveScript(JitTestCase):
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
+    def test_old_api_compatibility(self):
+        with warnings.catch_warnings(record=True) as warns:
+            class M(torch.jit.ScriptModule):
+                __constants__ = ['x']
+
+                def __init__(self):
+                    super(M, self).__init__()
+                    self.x = 2
+
+                # Test that @script_method is not needed
+                def forward(self, x):
+                    return x + self.x
+
+                @torch.jit.script_method
+                def other(self, x):
+                    return x + self.x + 2
+
+        self.assertTrue("script_method is deprecated" in str(warns[0].message))
+
+        self.assertExportImportModule(M(), (torch.randn(2, 2),))
+
+
     def test_module_basic(self):
         class Other(torch.nn.Module):
             __constants__ = ['x']
