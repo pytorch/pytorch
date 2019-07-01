@@ -29,6 +29,12 @@
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
   variants: function
 
+- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void
+  variants: method
+
+- func: set_data(Tensor(a!) self, Tensor new_data) -> void
+  variants: method
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -1018,22 +1024,27 @@
 - func: is_floating_point(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_complex(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_nonzero(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_signed(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
 
@@ -1658,6 +1669,7 @@
     MkldnnCPU: mkldnn_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: relu_
@@ -1736,6 +1748,7 @@
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
 
 - func: sigmoid(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: sigmoid
@@ -1743,6 +1756,7 @@
     MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _sigmoid__cpu
@@ -1750,6 +1764,7 @@
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _sigmoid_out_cpu
     CUDA: _sigmoid_out_cuda
@@ -1984,15 +1999,18 @@
     CUDA: _tan_out_cuda
 
 - func: tanh(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _tanh__cpu
     CUDA: _tanh__cuda
 
 - func: tanh(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
@@ -2306,6 +2324,7 @@
     SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_zero_
@@ -2589,6 +2608,7 @@
     SparseCUDA: is_coalesced_sparse
   requires_tensor: True
   device_guard: False
+  named_guard: False
 
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
@@ -2657,6 +2677,7 @@
 - func: numel(Tensor self) -> int
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -2759,6 +2780,7 @@
 
 - func: item(Tensor self) -> Scalar
   variants: method
+  named_guard: False
 
 # NB: Does NOT check precondition that numel == 1
 - func: _local_scalar_dense(Tensor self) -> Scalar
@@ -2766,6 +2788,7 @@
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
   variants: function
+  named_guard: False
 
 # Fused RNN kernels
 - func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor, Tensor)
@@ -3159,6 +3182,7 @@
     CUDA: legacy::cuda::_th_irshift_
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_lgamma_
@@ -3183,18 +3207,21 @@
     CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_digamma_
     CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_polygamma_
     CUDA: legacy::cuda::_th_polygamma_
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_erfinv_
@@ -3796,44 +3823,52 @@
     CUDA: legacy::cuda::_th_multinomial_alias_draw
 
 - func: lgamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_lgamma_out
     CUDA: legacy::cuda::_th_lgamma_out
 
 - func: lgamma(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_lgamma
     CUDA: legacy::cuda::_th_lgamma
 
 - func: digamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_digamma_out
     CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_digamma
     CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_polygamma_out
     CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_polygamma
     CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_erfinv_out
     CUDA: legacy::cuda::_th_erfinv_out
 
 - func: erfinv(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_erfinv

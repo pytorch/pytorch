@@ -462,9 +462,11 @@ class Module(object):
         The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
 
-            hook(module, input) -> None
+            hook(module, input) -> None or modified input
 
-        The hook should not modify the input.
+        The hook can modify the input. User can either return a tuple or a
+        single modified value in the hook. We will wrap the value into a tuple
+        if a single value is returned(unless that value is already a tuple).
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -481,9 +483,11 @@ class Module(object):
         The hook will be called every time after :func:`forward` has computed an output.
         It should have the following signature::
 
-            hook(module, input, output) -> None
+            hook(module, input, output) -> None or modified output
 
-        The hook should not modify the input or output.
+        The hook can modify the output. It can modify the input inplace but
+        it will not have effect on forward since this is called after
+        :func:`forward` is called.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -524,7 +528,11 @@ class Module(object):
 
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
-            hook(self, input)
+            result = hook(self, input)
+            if result is not None:
+                if not isinstance(result, tuple):
+                    result = (result,)
+                input = result
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
@@ -532,9 +540,7 @@ class Module(object):
         for hook in self._forward_hooks.values():
             hook_result = hook(self, input, result)
             if hook_result is not None:
-                raise RuntimeError(
-                    "forward hooks should never return any values, but '{}'"
-                    "didn't return None".format(hook))
+                result = hook_result
         if len(self._backward_hooks) > 0:
             var = result
             while not isinstance(var, torch.Tensor):
