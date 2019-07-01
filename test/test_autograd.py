@@ -1749,6 +1749,17 @@ class TestAutograd(TestCase):
         view = x.narrow(0, 1, 4)
         self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
+    def test_detach_allow_tensor_metadata_change(self):
+        x = torch.randn(10, 10, requires_grad=True)
+        y = x.detach()
+        with self.assertRaisesRegex(RuntimeError, 'yf225 TODO fill this out'):
+            y.resize_(5, 5)
+
+        x = torch.randn(10, 10, requires_grad=True)
+        y = x.detach(allow_tensor_metadata_change=True)
+        y.resize_(5, 5)
+        self.assertNotEqual(x.shape, y.shape)
+
     def test_detach_base(self):
         "detaching base does not detach view"
         x = torch.randn(10, 10, requires_grad=True)
