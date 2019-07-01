@@ -16,6 +16,9 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -66,6 +69,9 @@ Tensor& _clamp_out_cpu(
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
   return result;
 }
 
@@ -74,7 +80,11 @@ Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  return legacy::cpu::_th_clamp_max_out(result, self, max);
+  legacy::cpu::_th_clamp_max_out(result, self, max);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
@@ -82,7 +92,11 @@ Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  return legacy::cpu::_th_clamp_min_out(result, self, min);
+  legacy::cpu::_th_clamp_min_out(result, self, min);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 Tensor& fill_out(Tensor& self, const Scalar value) {
@@ -122,19 +136,10 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
-Tensor sigmoid(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::sigmoid_out(result, self);
-}
-Tensor& _sigmoid__cpu(Tensor& self) {
-  return at::sigmoid_out(self, self);
-}
-Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
-  checkBackend("sigmoid", {result}, Backend::CPU);
-  assert_no_internal_overlap(result, "sigmoid");
-  auto iter = TensorIterator::unary_op(result, self);
-  sigmoid_stub(iter->device_type(), *iter);
-  return result;
+static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, src);
+#endif
 }
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
@@ -154,6 +159,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
+    propagate_names_if_namedtensor_enabled(result, self);       \
     return result;                                              \
   }
 
@@ -178,6 +184,7 @@ IMPLEMENT_UNARY_OP_VEC(neg)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)
+IMPLEMENT_UNARY_OP_VEC(sigmoid)
 IMPLEMENT_UNARY_OP_VEC(sin)
 IMPLEMENT_UNARY_OP_VEC(sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt)

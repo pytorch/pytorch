@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -106,22 +107,28 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index, in
   return self.select(dim, index);
 }
 
-static Variable sequenceToVariable(const at::Type& type, PyObject* seq) {
-  auto& idx_type = type.toScalarType(kLong);
-  return torch::utils::indexing_tensor_from_data(idx_type, kLong, c10::nullopt, seq);
+static Variable sequenceToVariable(c10::TensorTypeId type_id, PyObject* seq) {
+  return torch::utils::indexing_tensor_from_data(type_id, kLong, c10::nullopt, seq);
 }
 
-static Variable valueToTensor(const at::Type & type, const ScalarType scalar_type, PyObject* value) {
+static Variable valueToTensor(c10::TensorTypeId type_id, ScalarType scalar_type, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
+  auto options = TensorOptions(scalar_type)
+      .device(computeDeviceType(type_id))
+      .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
+      .is_variable(true);
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
-    return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), type.options(scalar_type));
+    return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), options);
   }
   if (PyFloat_Check(value)) {
-    return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), type.options(scalar_type));
+    return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), options);
   }
-  throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, type.toString());
+  throw TypeError(
+    "can't assign a %s to a %s",
+    Py_TYPE(value)->tp_name,
+    torch::utils::type_to_string(getNonVariableDeprecatedTypeProperties(tensorTypeIdToBackend(type_id), scalar_type)).c_str());
 }
 
 static Variable boolToIndexingTensor(const Variable& self, bool value) {
@@ -183,7 +190,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
         handle_var(var);
       }
     } else if (PySequence_Check(obj)) {
-      handle_var(sequenceToVariable(self.dispatch_type(), obj));
+      handle_var(sequenceToVariable(self.type_id(), obj));
     } else {
       auto index = THPObjectPtr(PyNumber_Index(obj));
       if (!index) {
@@ -341,9 +348,9 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   OptionalDeviceGuard device_guard(device_of(self_));
   Variable value;
   if (isQIntType(self_.scalar_type())) {
-    value = valueToTensor(at::globalContext().getVariableType(at::Backend::CPU, at::kFloat), at::kFloat, py_value);
+    value = valueToTensor(CPUTensorId(), kFloat, py_value);
   } else {
-    value = valueToTensor(self_.dispatch_type(), self_.scalar_type(), py_value);
+    value = valueToTensor(self_.type_id(), self_.scalar_type(), py_value);
   }
 
   // handle simple types: integers, slices, ellipsis, bool
