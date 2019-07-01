@@ -244,14 +244,14 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
-      c10::optional<Tensor> gradient,
+      const Tensor& gradient,
       bool keep_graph,
       bool create_graph) const;
 
   /// Sets the tensor data held by this `Variable` to be the same as `new_data`.
   /// It requires that `new_data` has the same derived type of TensorImpl as
   /// this `Variable`, by checking `_has_same_tensorimpl_type(this, new_data)`.
-  void set_data(const at::Tensor &new_data);
+  void set_data(const at::Tensor &new_data) const;
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.

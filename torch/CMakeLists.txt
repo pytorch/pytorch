@@ -248,23 +248,108 @@ if (USE_NCCL)
     endif()
 endif()
 
-add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
+# In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
+# of type stub files to be omitted. 
+# For comptability with older CMake versions, we omit it for now, but leave it as a comment in case comptability with the older
+# CMake versions is eventually dropped.
+# set(Modules
+#     __init__
+#     activation
+#     adaptive
+#     batchnorm
+#     container
+#     conv
+#     distance
+#     dropout
+#     fold
+#     instancenorm
+#     linear
+#     loss
+#     module
+#     normalization
+#     padding
+#     pixelshuffle
+#     pooling
+#     rnn
+#     sparse
+#     upsampling
+# )
+# list(TRANSFORM Modules PREPEND "${TORCH_SRC_DIR}/nn/modules/")
+# set(ModuleStubIn ${Modules})
+# set(ModuleStubOut ${Modules})
+# list(TRANSFORM ModuleStubIn APPEND ".pyi.in")
+# list(TRANSFORM ModuleStubOut APPEND ".pyi")
+set(ModulesStubIn
+    ${TORCH_SRC_DIR}/nn/modules/__init__.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/activation.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/adaptive.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/batchnorm.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/container.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/conv.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/distance.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/dropout.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/fold.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/instancenorm.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/linear.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/loss.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/module.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/normalization.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/padding.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/pixelshuffle.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/pooling.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/rnn.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/sparse.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/upsampling.pyi.in
+)
+set(ModulesStubOut
+    ${TORCH_SRC_DIR}/nn/modules/__init__.pyi
+    ${TORCH_SRC_DIR}/nn/modules/activation.pyi
+    ${TORCH_SRC_DIR}/nn/modules/adaptive.pyi
+    ${TORCH_SRC_DIR}/nn/modules/batchnorm.pyi
+    ${TORCH_SRC_DIR}/nn/modules/container.pyi
+    ${TORCH_SRC_DIR}/nn/modules/conv.pyi
+    ${TORCH_SRC_DIR}/nn/modules/distance.pyi
+    ${TORCH_SRC_DIR}/nn/modules/dropout.pyi
+    ${TORCH_SRC_DIR}/nn/modules/fold.pyi
+    ${TORCH_SRC_DIR}/nn/modules/instancenorm.pyi
+    ${TORCH_SRC_DIR}/nn/modules/linear.pyi
+    ${TORCH_SRC_DIR}/nn/modules/loss.pyi
+    ${TORCH_SRC_DIR}/nn/modules/module.pyi
+    ${TORCH_SRC_DIR}/nn/modules/normalization.pyi
+    ${TORCH_SRC_DIR}/nn/modules/padding.pyi
+    ${TORCH_SRC_DIR}/nn/modules/pixelshuffle.pyi
+    ${TORCH_SRC_DIR}/nn/modules/pooling.pyi
+    ${TORCH_SRC_DIR}/nn/modules/rnn.pyi
+    ${TORCH_SRC_DIR}/nn/modules/sparse.pyi
+    ${TORCH_SRC_DIR}/nn/modules/upsampling.pyi
+)
+add_custom_target(torch_python_stubs DEPENDS
+    "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/nn/functional.pyi"
+    ${ModuleStubOut}
+)
 # For Declarations.yaml dependency
 add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/nn/functional.pyi"
+    ${ModuleStubOut}
     COMMAND
     "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TORCH_SRC_DIR}/__init__.pyi.in"
+    "${TORCH_SRC_DIR}/nn/functional.pyi.in"
+    ${ModuleStubIn}
+    "${TOOLS_PATH}/pyi/gen_pyi.py"
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
-    )
+)
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+add_dependencies(torch_python torch_python_stubs)
 
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
@@ -276,8 +361,6 @@ set_source_files_properties(
     )
 
 target_compile_definitions(torch_python PUBLIC _THP_CORE)
-
-add_dependencies(torch_python torch_python_stubs)
 
 target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 
