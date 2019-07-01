@@ -142,9 +142,6 @@ __global__ void compute_grad_weight(
   }
   const int idx_begin = segment_offsets[id];
   const int idx_end = (id == num_of_segments-1)?numel:segment_offsets[id+1];
-  if (idx_begin == padding_idx) {
-    return;
-  }
 
   accscalar_t weight = 0;
   for (int idx=idx_begin; idx < idx_end; ++idx) {
