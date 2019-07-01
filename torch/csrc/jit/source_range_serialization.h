@@ -34,6 +34,8 @@ class SourceRangeUnpickler {
  public:
   virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range) = 0;
+
+  virtual ~SourceRangeUnpickler() {}
 };
 
 } // namespace jit
