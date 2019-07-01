@@ -1,3 +1,4 @@
+#include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/Context.h>
@@ -5,16 +6,21 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
-#include <limits>
 
 namespace at { namespace native {
 
 static void bitwise_not_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_INTEGRAL_AND_BOOL_TYPES(iter.dtype(), "bitwise_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return bitwise_not(a);
+  if (iter.dtype() == ScalarType::Bool) {
+    gpu_kernel(iter, []GPU_LAMBDA(bool a) {
+      return !a;
     });
-  });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return ~a;
+      });
+    });
+  }
 }
 
 template <typename scalar_t>
