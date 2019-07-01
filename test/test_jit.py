@@ -12692,6 +12692,13 @@ a")
             def fn():
                 return random.randint()
 
+    def test_dir(self):
+        class M(torch.jit.ScriptModule):
+            def forward(self, t):
+                return t
+
+        self.assertTrue('forward' in dir(M()))
+
     def test_inferred_error_msg(self):
         """
         Test that when we get a type mismatch on a function where we inferred
