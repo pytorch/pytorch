@@ -501,6 +501,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::is_mkldnn(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mkldnn());
+           return 0;
+         }),
+     Operator(
          "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor a;
@@ -1521,18 +1529,19 @@ int listAdd(Stack& stack) {
   pop(stack, a, b);
 
   c10::List<T> ret;
-  const auto total_size = a.size() + b.size();
-  ret.reserve(total_size);
-  for (T a_element : a) {
-    ret.push_back(std::move(a_element));
+
+  if (a.use_count() == 1) {
+    ret = std::move(a);
+  } else {
+    ret = a.copy();
   }
-  for (T b_element : b) {
-    ret.push_back(std::move(b_element));
-  }
+
+  ret.append(std::move(b));
 
   push(stack, std::move(ret));
   return 0;
 }
+
 template <class T>
 int listInplaceAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<List<T>>();

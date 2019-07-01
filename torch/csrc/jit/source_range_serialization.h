@@ -34,14 +34,14 @@ class SourceRangeUnpickler {
  public:
   SourceRangeUnpickler(at::DataPtr&& data, size_t size);
 
-  c10::optional<SourceRange> findSourceRangeThatGenerated(
+  virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range);
 
  private:
   at::DataPtr data;
   size_t size;
 
-  void unpickle();
+  virtual void unpickle();
 
   std::shared_ptr<SourceRangeDeserializer> deserializer;
   std::shared_ptr<SourceRangeRecords> unpickled_records;
