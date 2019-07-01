@@ -11784,7 +11784,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1], device="cuda"))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).cuda())
-        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.set_default_tensor_type(torch.cuda.FloatTensor))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
 
     def test_cast_binary_op(self):
