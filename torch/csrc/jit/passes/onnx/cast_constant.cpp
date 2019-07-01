@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/cast_constant.h>
+#include <onnx/onnx_pb.h>
 
 namespace torch {
 namespace jit {
