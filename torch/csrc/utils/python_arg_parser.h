@@ -396,8 +396,7 @@ static std::string cpu_prefix = "cpu:";
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    const auto& default_tensor_type = torch::tensors::get_default_tensor_type();
-    return at::Device(default_tensor_type.device_type());
+    return at::Device(backendToDeviceType(tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id())));
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);

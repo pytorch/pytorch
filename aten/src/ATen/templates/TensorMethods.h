@@ -56,17 +56,6 @@ inline TensorOptions Tensor::options() const {
                         .is_variable(is_variable());
 }
 
-inline void Tensor::backward(
-    c10::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) {
-  dispatch_type().backward(*this, std::move(gradient), keep_graph, create_graph);
-}
-
-inline void Tensor::set_data(Tensor new_data) {
-  dispatch_type().set_data(*this, new_data);
-}
-
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
 
