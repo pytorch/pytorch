@@ -17,7 +17,9 @@ import warnings
 #   Scan
 
 black_listed_operators = [
-    "scan", "expand", "expand_as", "adaptive_max_pool1d", "adaptive_max_pool2d", "adaptive_max_pool3d"
+    "scan", "expand", "expand_as",
+    "adaptive_max_pool1d", "adaptive_max_pool2d", "adaptive_max_pool3d",
+    "max_pool1d_with_indices", "max_pool2d_with_indices", "max_pool3d_with_indices"
 ]
 
 

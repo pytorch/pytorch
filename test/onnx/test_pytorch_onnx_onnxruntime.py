@@ -120,6 +120,12 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_with_indices(self):
+        model = torch.nn.MaxPool1d(2, stride=1, return_indices=True)
+        x = torch.randn(20, 16, 50)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_maxpool_dilation(self):
         model = torch.nn.MaxPool1d(2, stride=1, dilation=2)
