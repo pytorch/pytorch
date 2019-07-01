@@ -251,6 +251,17 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (3, 4), dtype=torch.int32)
         self.run_test(GreaterModel(), (x, y))
 
+    def test_gt_scalar(self):
+        class GreaterModel(torch.nn.Module):
+            def forward(self, input):
+                return input > 1
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_test(GreaterModel(), x)
+
+        x = torch.randint(10, (3, 4), dtype=torch.int32)
+        self.run_test(GreaterModel(), x)
+
     def test_lt(self):
         class LessModel(torch.nn.Module):
             def forward(self, input, other):

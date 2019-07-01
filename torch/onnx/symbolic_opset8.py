@@ -5,6 +5,8 @@ import torch.onnx.symbolic_opset9 as sym_opset9
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset, _try_get_scalar_type
 from torch.onnx.symbolic_opset9 import wrap_logical_op_with_cast_to, _cast_Float, _reshape_from_tensor
 
+import warnings
+
 # Note [ONNX operators that are added/updated from opset 8 to opset 9]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # New operators:
@@ -59,14 +61,24 @@ def upsample_nearest2d(g, input, output_size, align_corners=None):
                     scales_f=scales)
 
 
-def _cast_integer_to_float(g, *args):
+# NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
+#       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
+#       is lost after casting.
+def _try_cast_integer_to_float(g, *args):
     floating_scalar_types = ['Half', 'Float', 'Double']
     old_type = None
+    # Cast the input tensor to Float if its scalarType is known and is not floating number.
+    # If casting is performed, return the old scalarType, otherwise return None.
     if args[0].type().kind() == "DimensionedTensorType" or args[0].type().kind() == "CompleteTensorType":
         old_type = args[0].type().scalarType()
-        if old_type in floating_scalar_types:
-            return (old_type, *args)
-    args = [_cast_Float(g, arg, False) for arg in args]
+        if not old_type in floating_scalar_types:
+            args = [_cast_Float(g, arg, False) for arg in args]
+        else:
+            return (None, *args)
+    else:
+        warnings.warn("Only floating datatype is supported for these operators: "
+                      "\{Greater, Less, MatMul, PRelu, Gemm, Flatten\}. This might cause "
+                      "the onnx model to be incorrect, if inputs have integer datatypes.")
     return (old_type, *args)
 
 
@@ -84,7 +96,7 @@ def gt(g, input, other):
 def gt_impl(g, input, other):
     other = sym_help._maybe_get_scalar(other)
     other = sym_help._if_scalar_type_as(g, other, input)
-    _, input, other = _cast_integer_to_float(g, input, other)
+    _, input, other = _try_cast_integer_to_float(g, input, other)
     return g.op("Greater", input, other)
 
 
@@ -96,22 +108,21 @@ def lt(g, input, other):
 def lt_impl(g, input, other):
     other = sym_help._maybe_get_scalar(other)
     other = sym_help._if_scalar_type_as(g, other, input)
-    _, input, other = _cast_integer_to_float(g, input, other)
+    _, input, other = _try_cast_integer_to_float(g, input, other)
     return g.op("Less", input, other)
 
 
 def bmm(g, self, other):
     if _try_get_scalar_type(self):
-        old_type, self, other = _cast_integer_to_float(g, self, other)
+        old_type, self, other = _try_cast_integer_to_float(g, self, other)
         return _cast_to_type(g, g.op("MatMul", self, other), old_type)
     else:
         return g.op("MatMul", self, other)
 
 
 def matmul(g, self, other):
-    # print('scalar type:', _try_get_scalar_type(self))
     if _try_get_scalar_type(self):
-        old_type, self, other = _cast_integer_to_float(g, self, other)
+        old_type, self, other = _try_cast_integer_to_float(g, self, other)
         return _cast_to_type(g, g.op("MatMul", self, other), old_type)
     else:
         return g.op("MatMul", self, other)
@@ -123,7 +134,7 @@ def prelu(g, self, weight):
         if self_sizes and len(self_sizes) > 2:
             weight = g.op("Unsqueeze", weight, axes_i=list(range(1, len(self_sizes) - 1)))
     if _try_get_scalar_type(self):
-        old_type, self, weight = _cast_integer_to_float(g, self, weight)
+        old_type, self, weight = _try_cast_integer_to_float(g, self, weight)
         return _cast_to_type(g, g.op("PRelu", self, weight), old_type)
     else:
         return g.op("PRelu", self, weight)
@@ -135,7 +146,7 @@ def mm(g, self, other):
     ty = sym_help._try_get_scalar_type(self, other).lower()
     C = g.constant(0, [1], ty)
     if _try_get_scalar_type(self):
-        old_type, self, other, C = _cast_integer_to_float(g, self, other, C)
+        old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
         return _cast_to_type(g, g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0), old_type)
     else:
         return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
@@ -144,7 +155,7 @@ def mm(g, self, other):
 @parse_args('v', 'v', 'v', 't', 't')
 def addmm(g, self, mat1, mat2, beta, alpha):
     if _try_get_scalar_type(self):
-        old_type, self, mat1, mat2 = _cast_integer_to_float(g, self, mat1, mat2)
+        old_type, self, mat1, mat2 = _try_cast_integer_to_float(g, self, mat1, mat2)
         return _cast_to_type(
             g, g.op("Gemm", mat1, mat2, self,
                     beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha)), old_type)
@@ -160,43 +171,35 @@ def view(g, self, size):
         if self.isCompleteTensor():
             self_sizes = self.type().sizes()
             if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-                old_type, self = _cast_integer_to_float(g, self)
+                old_type, self = _try_cast_integer_to_float(g, self)
                 return _cast_to_type(g, g.op("Flatten", self, axis_i=1), old_type)
         shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
 
 
-@parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
+    start_dim_i = sym_help._get_const(start_dim, 'i', 'start_dim')
+    end_dim_i = sym_help._get_const(end_dim, 'i', 'end_dim')
+
     dim = input.type().dim()
     if end_dim < 0 :
         end_dim = dim + end_dim
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1 and end_dim == dim - 1 :
         if _try_get_scalar_type(input):
-            old_type, input = _cast_integer_to_float(g, input)
+            old_type, input = _try_cast_integer_to_float(g, input)
             return _cast_to_type(g, g.op("Flatten", input, axis_i=start_dim), old_type)
         else:
             return g.op("Flatten", input, axis_i=start_dim)
     if start_dim == 0 and end_dim == dim - 2 :
         if _try_get_scalar_type(input):
-            old_type, input = _cast_integer_to_float(g, input)
+            old_type, input = _try_cast_integer_to_float(g, input)
             return _cast_to_type(g, g.op("Flatten", input, axis_i=end_dim + 1), old_type)
         else:
             return g.op("Flatten", input, axis_i=end_dim + 1)
-    # use Reshape for cases where the output shape is not 2D
-    if input.type().kind() != "CompleteTensorType":
-        return _unimplemented("flatten", "input size not accesible")
-    input_dims = input.type().sizes()
-    output_dims = []
-    for i in range(0, dim):
-        if start_dim < i and end_dim >= i:
-            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
-        else:
-            output_dims.append(input_dims[i])
-    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
-    p = _reshape_from_tensor(g, input, shape)
-    return p
+
+    return sym_opset9.flatten(g, input, start_dim, end_dim)
+
 
 def _constant_fill(g, sizes, dtype, const_value):
     if not sym_help.scalar_type_to_pytorch_type[dtype].is_floating_point:
@@ -237,6 +240,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     else:
         dtype = sym_help._get_const(dtype, 'i', 'dtype')
         return _constant_fill(g, sizes, dtype, const_value)
+
 
 @parse_args('v', 'f', 'i', 'v', 'v', 'v')
 def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
