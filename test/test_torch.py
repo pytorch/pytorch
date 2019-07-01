@@ -1753,7 +1753,7 @@ class _TestTorchMixin(object):
         for t in (torch.BoolTensor,
                   torch.ByteTensor, torch.LongTensor, torch.IntTensor, torch.ShortTensor, torch.CharTensor):
             if t == torch.BoolTensor:
-                a = torch.BoolTensor([True, False])
+                a = torch.tensor([True, False])
                 expected_res = torch.BoolTensor([False, True])
             else:
                 a = torch.arange(127, dtype=t.dtype)

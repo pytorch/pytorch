@@ -51,25 +51,6 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 #endif
 }
 
-#ifdef __CUDACC__
-  #define CUDA_HOST_DEVICE __host__ __device__
-#else
-  #define CUDA_HOST_DEVICE
-#endif  // __CUDACC__
-
-// Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not wraps this operation for both Boolean and
-// integral types.
-inline CUDA_HOST_DEVICE bool bitwise_not(bool a) {
-  return !a;
-}
-
-template <typename scalar_t>
-inline CUDA_HOST_DEVICE
-typename std::enable_if<std::is_integral<scalar_t>::value, scalar_t>::type
-bitwise_not(scalar_t a) {
-  return ~a;
-}
-
 // Missing unary functions
 // digamma
 // lgamma
