@@ -1041,6 +1041,9 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
       VT_working_copy.zero_();
       U_working_copy.zero_();
     }
+  } else {
+    U_working_copy.zero_();
+    VT_working_copy.zero_();
   }
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }

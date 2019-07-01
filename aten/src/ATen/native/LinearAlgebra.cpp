@@ -540,74 +540,18 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
   return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
-// Non-optimized batched svd implementation. This can be merged with at::svd
-// once at::svd has been ported to ATen.
-static std::tuple<Tensor, Tensor, Tensor>
-_batch_svd(const Tensor& self, bool some, bool compute_uv)
-{
-  const int64_t ndim = self.ndimension();
-
-  TORCH_CHECK(
-      ndim >= 2,
-      "Expected a tensor with at least 2 dimensions, but got a tensor with ",
-      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-
-  if (ndim == 2) {
-    return at::svd(self, some, compute_uv);
-  }
-
-  const int64_t n = self.size(-2);
-  const int64_t m = self.size(-1);
-  const int64_t k = std::min<int64_t>(n, m);
-  const int64_t nn = (some && compute_uv) ? k : n;
-  const int64_t mm = (some && compute_uv) ? k : m;
-  const int64_t p = batchCount(self);
-
-  Tensor t = self.reshape({p, n, m});
-
-  Tensor s = at::empty({p, k}, self.options());
-  Tensor u, v;
-  if (compute_uv) {
-    u = at::empty({p, n, nn}, self.options());
-    v = at::empty({p, m, mm}, self.options());
-  }
-
-  for (int64_t i = 0; i < p; i++) {
-    auto tuple = at::svd(t[i], some, compute_uv);
-    s[i] = std::get<1>(tuple);
-    if (compute_uv) {
-      u[i] = std::get<0>(tuple);
-      v[i] = std::get<2>(tuple);
-    }
-  }
-
-  std::vector<int64_t> shape = self.sizes().slice(0, ndim-1).vec();
-  shape[ndim-2] = k;
-  s = s.reshape(shape);
-
-  shape[ndim-2] = n;
-  shape.push_back(nn);
-  u = compute_uv ? u.reshape(shape) : at::zeros(shape, self.options());
-
-  shape[ndim-2] = m;
-  shape[ndim-1] = mm;
-  v = compute_uv ? v.reshape(shape) : at::zeros(shape, self.options());
-
-  return std::tuple<Tensor, Tensor, Tensor>(u, s, v);
-}
-
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
   Tensor p = _move_to_end(self, dim);
-  return at::sum(std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
+  return at::sum(std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
   Tensor p = _move_to_end(self, dim);
-  return at::sum_out(result, std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
+  return at::sum_out(result, std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {

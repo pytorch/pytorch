@@ -1322,7 +1322,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
 
-  char jobchar = compute_uv ? 'N' : (some ? 'S' : 'A');
+  char jobchar = compute_uv ? (some ? 'S' : 'A') : 'N';
 
   Tensor U_working_copy, S_working_copy, VT_working_copy;
   std::tie(U_working_copy, S_working_copy, VT_working_copy) = _create_U_S_VT(self, some, compute_uv);
@@ -1339,6 +1339,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
     // Create strided tensor in pinned memory
     auto self_working_copy = at::empty_strided(self.sizes(), self_col_major_strides,
                                                at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
+    self_working_copy.copy_(self);
 
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cuda", [&]{
       apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobchar, infos);
@@ -1363,9 +1364,9 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
       U_working_copy.zero_();
     }
   } else {
-    U_working_copy = U_working_copy.to(self.device());
+    U_working_copy = U_working_copy.to(self.device()).zero_();
     S_working_copy = S_working_copy.to(self.device());
-    VT_working_copy = VT_working_copy.to(self.device());
+    VT_working_copy = VT_working_copy.to(self.device()).zero_();
   }
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
