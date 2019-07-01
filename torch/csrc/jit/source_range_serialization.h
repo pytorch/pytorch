@@ -37,6 +37,8 @@ class SourceRangeUnpickler {
   virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range);
 
+  virtual ~SourceRangeUnpickler() {}
+
  private:
   at::DataPtr data;
   size_t size;
