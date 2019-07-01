@@ -135,8 +135,6 @@ class TestONNXRuntime(unittest.TestCase):
     def test_layer_norm(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
-        output = model(x)
-
         self.run_test(model, x, rtol=1e-05, atol=1e-07)
 
     def test_reduce_log_sum_exp(self):
