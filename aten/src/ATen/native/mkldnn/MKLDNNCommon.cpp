@@ -6,12 +6,13 @@
 
 #include <ideep.hpp>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 /**
  * `IntrusivePtrTargetWrapper` wraps a custom storage handle  of a tensor
-*  (as template param) and inherits `c10::intrusive_ptr_target` so that it
-*  can be used with `c10::intrusive_ptr`.
+ *  (as template param) and inherits `c10::intrusive_ptr_target` so that it
+ *  can be used with `c10::intrusive_ptr`.
  *
  * It currently only supports wrapping the custom handle by:
  * - Constructing with an existing custom handle by copy/move constructor.
@@ -22,13 +23,13 @@ namespace at { namespace native {
  */
 template <typename T>
 struct CAFFE2_API IntrusivePtrTargetWrapper : c10::intrusive_ptr_target {
-private:
+ private:
   T target_;
 
-public:
+ public:
   IntrusivePtrTargetWrapper() = delete;
-  IntrusivePtrTargetWrapper(const T& target): target_(target) {}
-  IntrusivePtrTargetWrapper(T&& target): target_(std::move(target)) {}
+  IntrusivePtrTargetWrapper(const T& target) : target_(target) {}
+  IntrusivePtrTargetWrapper(T&& target) : target_(std::move(target)) {}
 
   T& get_target() {
     return target_;
@@ -46,15 +47,19 @@ Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options)
   auto dims = it.get_dims();
   IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
   return detail::make_tensor<MKLDNNTensorImpl>(
-    MkldnnCPUTensorId(), options.dtype(), options.device(), handle,
-    std::vector<int64_t>(dims.begin(), dims.end()));
+      MkldnnCPUTensorId(), options.dtype(), options.device(), handle,
+      std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
-  AT_ASSERTM(mkldnn_tensor.is_mkldnn(),
-             "mkldnn_to_dense expects MKL-DNN tensor input");
-  AT_ASSERTM(!mkldnn_tensor.is_variable(), "_internal_get_MKLDNNImpl: should not be a variable");
-  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
+  AT_ASSERTM(
+      mkldnn_tensor.is_mkldnn(),
+      "mkldnn_to_dense expects MKL-DNN tensor input");
+  AT_ASSERTM(
+      !mkldnn_tensor.is_variable(),
+      "_internal_get_MKLDNNImpl: should not be a variable");
+  MKLDNNTensorImpl* mklimpl =
+      static_cast<MKLDNNTensorImpl*>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
@@ -62,8 +67,9 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   AT_ASSERTM(
       tensor.type_id() == CPUTensorId(),
       "itensor_view_from_dense expects dense CPU tensor input");
-  AT_ASSERTM(tensor.scalar_type() == ScalarType::Float,
-             "itensor_view_from_dense expects float tensor input");
+  AT_ASSERTM(
+      tensor.scalar_type() == ScalarType::Float,
+      "itensor_view_from_dense expects float tensor input");
   AT_ASSERTM(
       !tensor.is_variable(),
       "itensor_view_from_dense: should not be a variable");
@@ -71,6 +77,8 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
            ideep::tensor::data_type::f32},
           tensor.template data<float>()};
 }
-}}
+
+} // namespace native
+} // namespace at
 
 #endif // AT_MKLDNN_ENABLED()

@@ -722,6 +722,7 @@
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
     QuantizedCPU: empty_affine_quantized_cpu
+    MkldnnCPU: empty_affine_quantized_mkldnn
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
@@ -2683,6 +2684,7 @@
   variants: method
   dispatch:
     CPU: dense_to_mkldnn
+    QuantizedCPU: dense_to_mkldnn
 
 - func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
   variants: function
@@ -2696,6 +2698,7 @@
   variants: function
   dispatch:
     CPU: quantize_linear_cpu
+    MkldnnCPU: quantize_linear_mkldnn
 
 - func: quantize_linear_per_channel(Tensor self, Tensor scales, Tensor zero_points, int[] axis, ScalarType dtype) -> Tensor
   variants: function
@@ -2706,6 +2709,7 @@
   variants: function, method
   dispatch:
     QuantizedCPU: dequantize_quant
+    MkldnnCPU: dequantize_quant_mkldnn
 
 - func: _dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
   variants: function
@@ -2716,11 +2720,13 @@
   variants: function, method
   dispatch:
     QuantizedCPU: q_scale_quant
+    MkldnnCPU: q_scale_quant_mkldnn
 
 - func: q_zero_point(Tensor self) -> int
   variants: function, method
   dispatch:
     QuantizedCPU: q_zero_point_quant
+    MkldnnCPU: q_zero_point_quant_mkldnn
 
 - func: int_repr(Tensor self) -> Tensor
   variants: function, method

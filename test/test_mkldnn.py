@@ -14,6 +14,9 @@ import torch
 import torch.jit
 from torch.utils import mkldnn as mkldnn_utils
 from common_utils import TestCase, run_tests, TemporaryFileName
+from hypothesis import given
+from hypothesis import strategies as st
+from hypothesis_utils import array_shapes
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
@@ -409,6 +412,37 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    # mkldnn quantized tensor only support 0 or 128 zero point.
+    @given(zero_point=st.sampled_from([0, 128]),
+           shapes=array_shapes(1, 5, 1, 5))
+    def test_quantize(self, zero_point, shapes):
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            if dtype != torch.quint8:
+                zero_point = 0
+            X = torch.rand(shapes, dtype=torch.float) * 128
+            mkldnn_X = X.to_mkldnn()
+
+            qX = torch.quantize_linear(X, scale=0.9, zero_point=zero_point, dtype=dtype)
+            qmkldnn_X = torch.quantize_linear(mkldnn_X, scale=0.9, zero_point=zero_point, dtype=dtype)
+            qX_to_mkldnn = qX.to_mkldnn()
+
+            scale = qX.q_scale()
+            mkldnn_scale = qmkldnn_X.q_scale()
+            qX_to_mkldnn_scale = qX_to_mkldnn.q_scale()
+
+            zp = qX.q_zero_point()
+            mkldnn_zp = qmkldnn_X.q_zero_point()
+            qX_to_mkldnn_zp = qX_to_mkldnn.q_zero_point()
+
+            mkldnn_X_hat = torch.dequantize(qX_to_mkldnn)
+            X_hat = torch.dequantize(qmkldnn_X.to_dense())
+
+            self.assertEqual(scale, mkldnn_scale)
+            self.assertEqual(zp, mkldnn_zp)
+            self.assertEqual(scale, qX_to_mkldnn_scale)
+            self.assertEqual(zp, qX_to_mkldnn_zp)
+
+            self.assertEqual(X_hat, mkldnn_X_hat.to_dense())
 
 if __name__ == '__main__':
     run_tests()

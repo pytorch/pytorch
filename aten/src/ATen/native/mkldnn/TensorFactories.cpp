@@ -2,7 +2,13 @@
 
 namespace at { namespace native {
 
-#if AT_MKLDNN_ENABLED()
+#if !AT_MKLDNN_ENABLED()
+
+Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  AT_ERROR("empty_mkldnn: MKL-DNN build is disabled");
+}
+
+#else // AT_MKLDNN_EBABLED
 
 Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
@@ -12,14 +18,9 @@ Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::option
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   ideep::tensor::dims dst_dims (sizes.begin(), sizes.end());
   ideep::tensor it;
-  it.resize<AllocForMKLDNN>(dst_dims, ideep::tensor::data_type::f32);
+  auto data_type = get_mkldnn_dtype(typeMetaToScalarType(options.dtype()));
+  it.resize<AllocForMKLDNN>(dst_dims, data_type);
   return new_with_itensor_mkldnn(std::move(it), options);
-}
-
-#else
-
-Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AT_ERROR("empty_mkldnn: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()

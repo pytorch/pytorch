@@ -406,6 +406,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_quantized() const {
+    // mkldnn quantized tensor is represented by non-quantized tensor with data
+    // type,sunch as QInt8...,so we use isQIntType to identify quantized tensor.
+    if (is_mkldnn())
+      return isQIntType(typeMetaToScalarType(dtype()));
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
