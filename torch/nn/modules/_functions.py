@@ -39,7 +39,7 @@ class SyncBatchNorm(Function):
             running_var,
             momentum,
             eps,
-            count_all.view(-1).tolist()
+            count_all.view(-1).long().tolist()
         )
 
         self.save_for_backward(input, weight, mean, invstd)
