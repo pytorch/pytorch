@@ -1024,22 +1024,27 @@
 - func: is_floating_point(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_complex(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_nonzero(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_signed(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
 
@@ -2603,6 +2608,7 @@
     SparseCUDA: is_coalesced_sparse
   requires_tensor: True
   device_guard: False
+  named_guard: False
 
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
@@ -2671,6 +2677,7 @@
 - func: numel(Tensor self) -> int
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -2773,6 +2780,7 @@
 
 - func: item(Tensor self) -> Scalar
   variants: method
+  named_guard: False
 
 # NB: Does NOT check precondition that numel == 1
 - func: _local_scalar_dense(Tensor self) -> Scalar
@@ -2780,6 +2788,7 @@
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
   variants: function
+  named_guard: False
 
 # Fused RNN kernels
 - func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor, Tensor)
