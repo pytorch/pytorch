@@ -7,20 +7,6 @@ from torch import stack
 from torch.nn.functional import embedding
 import torch
 
-def test_init():
-    # This is a scalar. It aligns with Torch.
-    # These cannot be concatenated with anything else.
-    # They function as a building block for lists.
-    a = NestedTensor(torch.tensor(1.0),
-                      torch.tensor(1))
-    assert a.tensor.dim() == 0
-    assert a.mask.dim() == 0
-    assert a.tensor.numel() == 1
-    assert a.mask.numel() == 1
-    assert a.tensor.shape == ()
-    assert a.mask.shape == ()
-
-
 def test_cat():
     # Test concatenation of NestedTensors
     # This is a core operation used in stack and append
@@ -130,10 +116,6 @@ def test_cat():
     test_single_element_lists()
     test_two_element_single_element_lists()
     test_two_scalars()
-
-
-def test_constructors():
-    a = torch.nestedtensor([torch.tensor(2.0)])
 
 
 def test_embedding_monkey():
@@ -320,12 +302,6 @@ def test_nested_cross_entropy_loss():
     print(n(ba, bb))
 
 
-# TODO: Write a test
-def test_fill_masked():
-    a = torch.nestedtensor([torch.tensor([0., 4.]), torch.tensor([1., 2., 3., 4., 1., 0.])])
-    a.fill_masked(3)
-
-
 def test_len():
     a = torch.nestedtensor([torch.tensor([1, 2]), 
                             torch.tensor([3, 4]), 
@@ -352,17 +328,10 @@ def test_unbind():
 # TODO: Carefully test reference passing vs. value passing for each function
 # TODO: Add more tests for variable length examples
 if __name__ == "__main__":
-    test_init()
-    test_cat()
-    # TODO: Why does stack and cat behave the same for a list
-    # of torch.tensor(scalar)s
-    test_constructors()
     test_unbind()
     test_nested_size()
-    test_embedding_monkey()
-    test_fill_masked()
-    test_nested_cross_entropy_loss()
-    test_nested_linear()
+    # test_embedding_monkey()
+    # test_nested_cross_entropy_loss()
+    # test_nested_linear()
     test_len()
-    import pdb; pdb.set_trace()
-    test_nested_lstm()
+    # test_nested_lstm()
