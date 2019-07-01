@@ -1,4 +1,3 @@
-import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import _black_list_in_opset
 
 import torch.onnx.symbolic_opset9 as sym_opset9
@@ -28,7 +27,7 @@ black_listed_operators = [
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 def max(g, self, dim_or_y=None, keepdim=None):
     # torch.max(input, other)
-    if keepdim is None and not dim_or_y is None:
+    if keepdim is None and dim_or_y is not None:
         warnings.warn("Multidirectional broadcasting is not supported in opset 7. "
                       "This might cause the onnx model to be incorrect, if inputs to max operators "
                       "have different shapes")
@@ -37,7 +36,7 @@ def max(g, self, dim_or_y=None, keepdim=None):
 
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input, other)
-    if keepdim is None and not dim_or_y is None:
+    if keepdim is None and dim_or_y is not None:
         warnings.warn("Multidirectional broadcasting is not supported in opset 7. "
                       "This might cause the onnx model to be incorrect, if inputs to min operators "
                       "have different shapes")

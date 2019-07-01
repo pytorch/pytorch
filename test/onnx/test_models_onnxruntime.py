@@ -5,9 +5,6 @@ from __future__ import unicode_literals
 
 import unittest
 import onnxruntime  # noqa
-import torch
-import numpy as np
-import io
 
 from test_models import TestModels
 from test_pytorch_onnx_onnxruntime import run_model_test

@@ -3,7 +3,7 @@ import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset, _try_get_scalar_type
-from torch.onnx.symbolic_opset9 import wrap_logical_op_with_cast_to, _cast_Float, _reshape_from_tensor
+from torch.onnx.symbolic_opset9 import wrap_logical_op_with_cast_to, _cast_Float
 
 import warnings
 
@@ -71,13 +71,13 @@ def _try_cast_integer_to_float(g, *args):
     # If casting is performed, return the old scalarType, otherwise return None.
     if args[0].type().kind() == "DimensionedTensorType" or args[0].type().kind() == "CompleteTensorType":
         old_type = args[0].type().scalarType()
-        if not old_type in floating_scalar_types:
+        if old_type not in floating_scalar_types:
             args = [_cast_Float(g, arg, False) for arg in args]
         else:
             return (None, *args)
     else:
         warnings.warn("Only floating datatype is supported for these operators: "
-                      "\{Greater, Less, MatMul, PRelu, Gemm, Flatten\}. This might cause "
+                      "{Greater, Less, MatMul, PRelu, Gemm, Flatten}. This might cause "
                       "the onnx model to be incorrect, if inputs have integer datatypes.")
     return (old_type, *args)
 
@@ -203,7 +203,8 @@ def flatten(g, input, start_dim, end_dim):
 
 def _constant_fill(g, sizes, dtype, const_value):
     if not sym_help.scalar_type_to_pytorch_type[dtype].is_floating_point:
-        result = g.op("ConstantFill", sizes, dtype_i=sym_help.cast_pytorch_to_onnx["Float"], input_as_shape_i=1, value_f=const_value)
+        result = g.op(
+            "ConstantFill", sizes, dtype_i=sym_help.cast_pytorch_to_onnx["Float"], input_as_shape_i=1, value_f=const_value)
         return sym_help._cast_func_template(sym_help.scalar_type_to_onnx[dtype], g, result, None)
     else:
         return g.op("ConstantFill", sizes, dtype_i=sym_help.scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=const_value)
