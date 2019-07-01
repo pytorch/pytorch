@@ -61,10 +61,11 @@ class _LRScheduler(object):
         self.__dict__.update(state_dict)
 
     def get_lr(self):
+        # Return last computed learning rate by current scheduler
         return self._last_computed_lr
 
     def _compute_lr(self):
-        # NOTE [LR Closed Form] Compute the learning rate using the recursive form of the scheduler
+        # NOTE [LR Recursive Form] Compute the learning rate using the recursive form of the scheduler
         raise NotImplementedError
 
     def _compute_lr_closed_form(self):
