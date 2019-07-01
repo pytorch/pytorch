@@ -13,35 +13,10 @@ from hypothesis_utils import qtensor, array_shapes
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
 from common_utils import skipIfNotRegistered
+from common_utils import _quantize, _dequantize, _requantize
 
 def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
-
-
-def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
-    """Quantizes a numpy array."""
-    if qmin is None:
-        qmin = np.iinfo(dtype).min
-    if qmax is None:
-        qmax = np.iinfo(dtype).max
-    qx = (np.round(x / scale + zero_point)).astype(np.int64)
-    qx = np.clip(qx, qmin, qmax)
-    qx = qx.astype(dtype)
-    return qx
-
-
-def _dequantize(qx, scale, zero_point):
-    """Dequantizes a numpy array."""
-    x = (qx.astype(np.float) - zero_point) * scale
-    return x
-
-
-def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
-    """Requantizes a numpy array, i.e., intermediate int32 or int16 values are
-    converted back to given type"""
-    qx = (x * multiplier).round() + zero_point
-    qx = np.clip(qx, qmin, qmax).astype(qtype)
-    return qx
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -612,6 +587,29 @@ class TestQuantizedConv(unittest.TestCase):
 
         # Make sure the results match
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
+
+    """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
+    @given(Q=qtensor(shapes=array_shapes(4, 4,), dtypes=((torch.qint8, np.int8, 0),)))
+    def test_qconv_unpack(self, Q):
+        W, (W_scale, W_zp), (qmin, qmax), (torch_type, np_type) = Q
+        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
+        qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
+
+        # Orig tensor is assumed to be in K(C/G)RS format
+        W = torch.from_numpy(W)
+        # K(C/G)RS -> KRS(C/G)
+        W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
+        W_q = torch.quantize_linear(W_KRSC, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+
+        # Pack weights using weight packing operator
+        W_packed = qconv_prepack(W_q, 1)
+        # Unpack weights weight unpacking operator (Used for serialization)
+        W_unpacked = qconv_unpack(W_packed)
+
+        # Assert equal
+        np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
+        np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
+        np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
 
 if __name__ == "__main__":
