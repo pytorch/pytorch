@@ -713,29 +713,11 @@ class TestNN(NNTestCase):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
 
-        def fw_fail1(self, input, output):
-            return output
-
-        def fw_fail2(self, input, output):
-            return input
-
         def bw_fail1(self, grad_input, grad_output):
             return grad_input[:-1]
 
         def bw_fail2(self, grad_input, grad_output):
             return grad_input + (torch.randn(2, 2),)
-
-        with module.register_forward_hook(fw_fail1):
-            with self.assertRaises(RuntimeError) as err:
-                module(input)
-            self.assertIn("fw_fail", err.exception.args[0])
-            self.assertIn("didn't return None", err.exception.args[0])
-
-        with module.register_forward_hook(fw_fail2):
-            with self.assertRaises(RuntimeError) as err:
-                module(input)
-            self.assertIn("fw_fail2", err.exception.args[0])
-            self.assertIn("didn't return None", err.exception.args[0])
 
         with module.register_backward_hook(bw_fail1):
             with self.assertRaises(RuntimeError) as err:
@@ -764,6 +746,28 @@ class TestNN(NNTestCase):
         module(input).backward(torch.ones(5, 5))
         expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
         self.assertEqual(input.grad.data, expected_grad)
+
+    def test_hook_mutations(self):
+        module = nn.Linear(5, 5)
+        input = torch.randn(5, 5, requires_grad=True)
+
+        def forward_pre_hook(m, input):
+            return torch.nn.functional.relu(input[0])
+
+        def forward_hook(m, input, output):
+            return -output
+
+        module.register_forward_pre_hook(forward_pre_hook)
+        module.register_forward_hook(forward_hook)
+        output = module(input)
+        expected_res = -torch.nn.functional.linear(torch.nn.functional.relu(input), module.weight, module.bias)
+        self.assertEqual(output, expected_res)
+        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        mask = (input > 0).double()
+        expected_grad = -torch.ones(5, 5).mm(module.weight.data) * 2 * mask
+        self.assertEqual(input.grad, expected_grad)
+
+
 
     def test_to(self):
         m = nn.Linear(3, 5)
