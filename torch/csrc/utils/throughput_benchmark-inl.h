@@ -50,7 +50,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   int64_t initialized{0};
   int64_t finished{0};
   bool start{false};
-  std::atomic<int64_t> num_forwards{0};
+  std::atomic<int64_t> num_attempted_iters{0};
   std::vector<std::thread> callers;
 
   for (auto thread_id = 0; thread_id < config.num_calling_threads;
@@ -71,7 +71,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         }
       }
       LOG(INFO) << "Starting forward thread " << thread_id;
-      while (num_forwards.fetch_add(1) < config.num_iters) {
+      while (num_attempted_iters.fetch_add(1) < config.num_iters) {
         runOnce(std::move(thread_inputs[thread_id][input_iters[thread_id]]));
         ++input_iters[thread_id];
       }
@@ -115,9 +115,12 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
                             end_time - start_time)
                             .count() /
       1000.0 / 1000.0;
+  // We use config.num_iters instead of num_attempted_iters as it is
+  // repsesatative of the real work done. Last attempted iteration on each
+  // calling threads doesn't represent the real work (i.e. running the model)
   stats.latency_avg_ms =
-      total_time_ms * config.num_calling_threads / num_forwards;
-  stats.num_iters = num_forwards;
+      total_time_ms * config.num_calling_threads / config.num_iters;
+  stats.num_iters = config.num_iters;
 
   for (auto& t : callers) {
     t.join();
