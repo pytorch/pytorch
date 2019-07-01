@@ -1294,7 +1294,7 @@ AT_ERROR("lu_solve: MAGMA library not found in "
   auto n = lu.size(-2);
   auto nrhs = b.size(-1);
 
-  int info_tmp;
+  int info_tmp = 0;
   if (b.dim() == 2) {
     magma_int_t info = 0;
     Tensor pivots_tmp = pivots.cpu();
@@ -1308,7 +1308,6 @@ AT_ERROR("lu_solve: MAGMA library not found in "
     auto pivots_stride = pivots.size(-1);
     magma_int_t batch_size = magma_int_cast(batchCount(b), "batchCount");
 
-    magma_int_t* info_array;
     magma_int_t** pivots_array;
     scalar_t** lu_array;
     scalar_t** b_array;
@@ -1324,9 +1323,33 @@ AT_ERROR("lu_solve: MAGMA library not found in "
     }
 
     MAGMAQueue magma_queue(b.get_device());
-    magmaLuSolveBatched<scalar_t>(
-        n, nrhs, lu_array, n, pivots_array, b_array, n,
-        info_tmp, batch_size, magma_queue);
+
+    // Compute as many batches of 65535 possible
+    // The number of "mini"-batches are floor(batch_size / 65535)
+    // and these cover floor(batch_size / 65535) * 65535 matrix solves
+    int64_t mini_batches = batch_size / 65535, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * 65535; mini_idx += 65535) {
+      scalar_t** lu_array_cur = &lu_array[mini_idx];
+      scalar_t** b_array_cur = &b_array[mini_idx];
+      magma_int_t** pivots_array_cur = &pivots_array[mini_idx];
+
+      magmaLuSolveBatched<scalar_t>(
+          n, nrhs, lu_array_cur, n, pivots_array_cur, b_array_cur, n,
+          info_tmp, 65535, magma_queue);
+
+      if (info_tmp != 0) {
+        break;
+      }
+    }
+
+    // Compute whatever is left = batch_size - floor(batch_size / 65535) * 65535
+    // which concisely is equal to batch_size % 65535
+    if (batch_size % 65535 != 0 && info_tmp == 0) {
+      magmaLuSolveBatched<scalar_t>(
+          n, nrhs, &lu_array[mini_idx], n, &pivots_array[mini_idx], &b_array[mini_idx], n,
+          info_tmp, batch_size % 65535, magma_queue);
+    }
+
     info = info_tmp;
   }
 #endif

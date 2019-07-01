@@ -2011,6 +2011,27 @@ class _TestTorchMixin(object):
         self._test_lu_solve(self, lambda t: t)
 
     @staticmethod
+    def _test_lu_solve_batched_many_batches(self, cast):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        def run_test(A_dims, b_dims, cast):
+            A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+            b = cast(torch.randn(*b_dims))
+            LU_data, LU_pivots, infos = A.lu(get_infos=True)
+            self.assertEqual(infos, torch.zeros_like(infos))
+            x = torch.lu_solve(b, LU_data, LU_pivots)
+            b_ = torch.matmul(A, x)
+            self.assertEqual(b_, b.expand_as(b_))
+
+        run_test((5, 256, 256), (5, 10), cast)
+        run_test((5,), (512, 512, 5, 10), cast)
+
+    @skipIfNoLapack
+    @slowTest
+    def test_lu_solve_batched_many_batches(self):
+        self._test_lu_solve_batched_many_batches(self, lambda t: t)
+
+    @staticmethod
     def _test_lu_unpack(self, cast):
         def run_test(shape, cast):
             a = cast(torch.randn(*shape))
