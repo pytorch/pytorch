@@ -1,5 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/MemoryOverlap.h>
+#include <ATen/native/UnaryOps.h>
+#include <ATen/native/TensorIterator.h>
 #ifdef NAMEDTENSOR_ENABLED
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -93,5 +96,20 @@ IMPLEMENT_UNARY_OP_PREQUEL(sqrt)
 IMPLEMENT_UNARY_OP_PREQUEL(tan)
 IMPLEMENT_UNARY_OP_PREQUEL(tanh)
 IMPLEMENT_UNARY_OP_PREQUEL(trunc)
+
+#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                          \
+  Tensor& _##op##__cuda(Tensor& self) {                          \
+    return at::op##_out(self, self);                             \
+  }                                                              \
+  Tensor& _##op##_out_cuda(Tensor& result, const Tensor& self) { \
+    checkBackend(#op, {result}, Backend::CUDA);                  \
+    assert_no_internal_overlap(result, #op);                     \
+    auto iter = TensorIterator::unary_op(result, self);          \
+    op##_stub(iter->device_type(), *iter);                       \
+    propagate_names_if_namedtensor_enabled(result, self);        \
+    return result;                                               \
+  }
+
+IMPLEMENT_UNARY_OP_VEC_CUDA(bitwise_not)
 
 }}

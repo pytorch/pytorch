@@ -51,18 +51,6 @@ static void abs_kernel(TensorIterator& iter) {
   });
 }
 
-// Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not wraps this operation for both Boolean and
-// integral types.
-inline bool bitwise_not(bool a) {
-  return !a;
-}
-
-template <typename scalar_t>
-inline typename std::enable_if<std::is_integral<scalar_t>::value, scalar_t>::type
-bitwise_not(scalar_t a) {
-  return ~a;
-}
-
 static void bitwise_not_kernel(TensorIterator& iter) {
   AT_DISPATCH_INTEGRAL_AND_BOOL_TYPES(iter.dtype(), "bitwise_cpu", [&]() {
     cpu_kernel(

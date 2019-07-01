@@ -1109,7 +1109,7 @@ class TestCuda(TestCase):
             self.assertEqual(expected_res, a)
 
         # test exceptions
-        for t in(torch.cuda.HalfTensor, torch.cuda.FloatTensor, torch.cuda.DoubleTensor):
+        for t in (torch.cuda.HalfTensor, torch.cuda.FloatTensor, torch.cuda.DoubleTensor):
             a = torch.zeros(10, dtype=t.dtype, device='cuda')
             # new tensor
             with self.assertRaises(RuntimeError):
