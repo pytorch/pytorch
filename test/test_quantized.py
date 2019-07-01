@@ -259,10 +259,13 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
         assume(axis < X.ndim)
         X = torch.from_numpy(X)
+        new_shape = np.array(X.shape)
+        new_shape[axis] = 0
         for idx in range(num):
             tensors_q.append(torch.quantize_linear(X, scale, zero_point,
                                                    torch_type))
             tensors_ref.append(X)
+            new_shape[axis] += tensors_ref[-1].shape[axis]
 
         cat_ref = torch.cat(tensors_ref, axis=axis)
         cat_ref = torch.quantize_linear(cat_ref, scale, zero_point, torch_type)
@@ -272,8 +275,14 @@ class TestQuantizedOps(TestCase):
         cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
                          zero_point=zero_point)
         cat_q = cat_q.dequantize()
-
         np.testing.assert_equal(cat_ref.numpy(), cat_q.numpy())
+
+        q_cat_out_op = torch.ops.quantized.cat_out
+        cat_q_out = torch._empty_affine_quantized(list(new_shape), scale=scale, zero_point=zero_point, dtype=torch_type)
+        q_cat_out_op(tensors_q, axis=axis, out=cat_q_out)
+        cat_q_out = cat_q_out.dequantize()
+        np.testing.assert_equal(cat_ref.numpy(), cat_q_out.numpy())
+
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
