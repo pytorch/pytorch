@@ -13,7 +13,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
 #include <vector>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
@@ -450,7 +450,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
     if (self.names().has_value()) {
       AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()->at(dim));
@@ -459,7 +459,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   const auto outnames = namedinference::erase_name(self.names(), dim);
 #endif
   if (index < 0) {
@@ -471,7 +471,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
   auto result = self.as_strided(sizes, strides, storage_offset);
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   if (outnames) {
     internal_set_names_inplace(result, *outnames);
   }
@@ -479,7 +479,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   return result;
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 Tensor select(const Tensor& self, Dimname dim, int64_t index) {
   return at::select(self, dimname_to_position(self, dim), index);
 }

@@ -34,7 +34,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
         if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
-          NAMED_FLAG="export USE_NAMEDTENSOR=1"
+          NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
         fi
 
         export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -78,7 +78,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
           export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
-          NAMED_FLAG="export USE_NAMEDTENSOR=1"
+          NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
         else
           export COMMIT_DOCKER_IMAGE=$output_image
         fi

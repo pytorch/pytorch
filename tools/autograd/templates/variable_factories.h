@@ -13,7 +13,7 @@
 #include <initializer_list>
 #include <utility>
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 using at::DimnameList;
 #endif
 

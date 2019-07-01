@@ -8,7 +8,7 @@ import sys
 
 
 def namedtensor_enabled():
-    return '-DNAMEDTENSOR_ENABLED' in torch.__config__.show()
+    return '-DBUILD_NAMEDTENSOR' in torch.__config__.show()
 
 skipIfNamedTensorDisabled = \
     unittest.skipIf(not namedtensor_enabled(),

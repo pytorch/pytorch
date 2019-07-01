@@ -301,7 +301,7 @@ PyObject *THPVariable_get_ndim(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 PyObject *THPVariable_get_names(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -482,7 +482,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   {"names", (getter)THPVariable_get_names, nullptr, nullptr, nullptr},
 #endif
   {nullptr}

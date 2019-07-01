@@ -5,7 +5,7 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
@@ -1029,7 +1029,7 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
 }
 
 static void THTensor_(propagate_names_if_named_tensor_enabled)(THTensor* result, THTensor* src) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
 #endif
 }
@@ -1145,7 +1145,7 @@ void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
     case 1: THTensor_(trigamma)(r_, t); break;
     default: THError("polygamma(n,x) is not implemented for n>=2");
   }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(r_, t);
 #endif
 }

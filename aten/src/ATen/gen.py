@@ -15,7 +15,7 @@ import preprocess_declarations
 import function_wrapper
 
 from code_template import CodeTemplate
-from env import NAMEDTENSOR_ENABLED
+from env import BUILD_NAMEDTENSOR
 
 
 # This file is the top-level entry point for code generation in ATen.
@@ -439,8 +439,8 @@ def generate_outputs():
     # Filter out named-tensor only declarations.
     # They are necessary in create_generic because that generates Type.h, Tensor.h,
     # and TensorMethods.h, all of which are checked in to the codebase and therefore
-    # need to be consistent whether or not NAMEDTENSOR_ENABLED is on/off.
-    if not NAMEDTENSOR_ENABLED:
+    # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
+    if not BUILD_NAMEDTENSOR:
         declarations = [decl for decl in declarations
                         if 'Dimname' not in decl['schema_string']]
 

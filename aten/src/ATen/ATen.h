@@ -9,7 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
 #include <ATen/ScalarOps.h>

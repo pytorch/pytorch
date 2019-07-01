@@ -292,8 +292,6 @@ class CMake:
                       TORCH_BUILD_VERSION=version,
                       CMAKE_BUILD_TYPE=self._build_type,
                       INSTALL_TEST=build_test,
-                      NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or
-                                           check_negative_env_flag('NO_NAMEDTENSOR')),
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
                       NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
                       NCCL_ROOT_DIR=NCCL_ROOT_DIR,

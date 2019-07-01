@@ -1,4 +1,4 @@
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/NamedTensorUtils.h>
 #include <sstream>

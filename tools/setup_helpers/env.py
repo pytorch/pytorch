@@ -58,4 +58,3 @@ hotpatch_build_env_vars()
 
 DEBUG = check_env_flag('DEBUG')
 REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
-NAMEDTENSOR_ENABLED = check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')

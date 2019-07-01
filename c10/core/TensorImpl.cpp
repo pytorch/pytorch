@@ -160,7 +160,7 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 NamedTensorMetaInterface::~NamedTensorMetaInterface() {}
 
 std::unique_ptr<NamedTensorMetaInterface> NamedTensorMetaInterface::clone() const {
