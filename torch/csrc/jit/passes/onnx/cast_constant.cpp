@@ -12,7 +12,7 @@ using namespace ::c10::onnx;
 // The above transformation is done in this pass.
 // The motivation behind having it as a post process pass opposed to handling in symbolic,
 // is that many constant operators would have already been removed in the export before this step.
-// On the other hand if cast is inserted in symbolic, consecutive node conversion will break
+// On the other hand if cast is inserted in symbolic, subsequent node conversion will break
 // if it depends on certain inputs being constant.
 void CastConstant(Block* block) {
   auto graph = block->owningGraph();
