@@ -115,8 +115,8 @@ void init_dataset_bindings_impl(PyObject* module) {
       "Sets the underlying sampler to a new stride",
       py::arg("stride"));
   sampler_wrapper.def(
-      "set_total_stride",
-      &SamplerWrapper::set_total_stride,
+      "set_total_strides",
+      &SamplerWrapper::set_total_strides,
       "Sets the total number of strides for the underlying sampler",
       py::arg("total"));
   sampler_wrapper.def(
@@ -124,8 +124,8 @@ void init_dataset_bindings_impl(PyObject* module) {
       &SamplerWrapper::current_stride,
       "Returns current sampler stride");
   sampler_wrapper.def(
-      "total_stride",
-      &SamplerWrapper::total_stride,
+      "total_strides",
+      &SamplerWrapper::total_strides,
       "Returns the total number of sampler strides");
 
   /// DistributedSampler

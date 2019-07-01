@@ -37,7 +37,7 @@ namespace samplers {
    *
    * For example, assume 2 Python Dataloader workers reading
    * the same ChunkDataset. Each worker needs to reset their
-   * ChunkDataset instance so that one of them reads alleven (stride 0)
+   * ChunkDataset instance so that one of them reads all even (stride 0)
    * batches while the other reads all odd batches (stride 1).
    *
    * NOTE: To preserve back compatibility with C++ implementation,
@@ -48,11 +48,11 @@ class SamplerWrapper : public Sampler<> {
  public:
   explicit SamplerWrapper(
       std::shared_ptr<Sampler<>> sampler,
-      size_t total_stride = 0,
+      size_t total_strides = 0,
       size_t current_stride = 0)
       : sampler_(std::move(sampler)),
         current_stride_(current_stride),
-        total_stride_(total_stride) {}
+        total_strides_(total_strides) {}
   virtual ~SamplerWrapper() = default;
 
   /// Resets the underlying sampler to a new set of indices.
@@ -61,15 +61,17 @@ class SamplerWrapper : public Sampler<> {
   };
 
   /// Sets the underlying sampler to a new stride
-  /// WARNING: `current_stride_` is not changed by the sampler `reset` routine
+  /// Stride depends on the number of used python Dataloader workers
+  /// so `reset()` method will not change this parameter
   void set_current_stride(size_t stride) {
     current_stride_ = stride;
   };
 
   /// Sets the total number of strides for the underlying sampler
-  /// WARNING: `total_stride_` is not changed by the sampler `reset` routine
-  void set_total_stride(size_t total) {
-    total_stride_ = total;
+  /// Total strides depend on the number of used python Dataloader workers
+  /// so `reset()` method will not change this parameter
+  void set_total_strides(size_t total) {
+    total_strides_ = total;
   };
 
   /// Returns current sampler stride
@@ -78,13 +80,13 @@ class SamplerWrapper : public Sampler<> {
   };
 
   /// Returns the total number of sampler strides
-  size_t total_stride() {
-    return total_stride_;
+  size_t total_strides() {
+    return total_strides_;
   };
 
   /// Returns the next batch of indices.
   torch::optional<std::vector<size_t>> next(size_t batch_size) override {
-    if (total_stride_ > 0) {
+    if (total_strides_ > 0) {
       torch::optional<std::vector<size_t>> indices;
       AT_ASSERT(batch_size == 1);
       while (true) {
@@ -92,7 +94,7 @@ class SamplerWrapper : public Sampler<> {
         if (!idx) {
           break;
         }
-        if (idx.value()[0] % total_stride_ == current_stride_) {
+        if (idx.value()[0] % total_strides_ == current_stride_) {
           return idx;
         }
       }
@@ -115,7 +117,7 @@ class SamplerWrapper : public Sampler<> {
  private:
   std::shared_ptr<samplers::Sampler<>> sampler_;
   size_t current_stride_;
-  size_t total_stride_;
+  size_t total_strides_;
 };
 
 /// This class creates a trampoline for virtual methods of `Sampler`

@@ -1651,6 +1651,14 @@ class TestIndividualWorkerQueue(TestCase):
 
 
 class TestChunkDataset(TestCase):
+    """
+    This class serves as an example on how to use ChunkDataset API python bindings
+
+    The API is almost identical to the C++ version. The difference is the need for the
+    SampleWrapper on Python implementation that is not required by C++c ounterpart.
+    This is due to the fact that Python DataLoader uses multiprocessing module for
+    parallelism as opposed to multi-threading
+    """
     def setUp(self):
         super(TestChunkDataset, self).setUp()
         self.chunk_count=3
