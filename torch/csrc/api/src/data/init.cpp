@@ -29,7 +29,7 @@ using namespace torch::serialize;
 
 void init_dataset_bindings(PyObject* module) {
   init_dataset_bindings_impl(module);
-  init_dataset_bindings_test(module);
+  init_dataset_bindings_example(module);
 }
 
 void init_dataset_bindings_impl(PyObject* module) {
@@ -407,7 +407,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           "Resets any internal state associate with this reader");
 }
 
-void init_dataset_bindings_test(PyObject* module) {
+void init_dataset_bindings_example(PyObject* module) {
   // Getting reference to python submodule
   auto m = py::handle(module).cast<py::module>();
   auto data = m.def_submodule("data");

@@ -9,11 +9,41 @@ namespace py = pybind11;
 namespace torch {
 namespace data {
 
+/// Main function that calls all python binding functions
+/// (aka `init_dataset_bindings_impl` and `init_dataset_bindings_example`)
 void init_dataset_bindings(PyObject* module);
+/// Implements ChunkDataset API python bindings
 void init_dataset_bindings_impl(PyObject* module);
-void init_dataset_bindings_test(PyObject* module);
+/// Implements ChunkDatareader and ChunkDataset binds that can be used
+/// as example for future ChunkDataset API implementations
+void init_dataset_bindings_example(PyObject* module);
 
 namespace samplers {
+  /**
+   * Implementation of a wrapper around Sampler classes
+   *
+   * This is needed for generating Python bindings, only.
+   * On C++ implementation, a single process share the same ChunkDataset
+   * class among all threads, so sampling is straingthforward.
+   *
+   * On Python implementation, on the other hand, DataLoader uses
+   * multi-processing instead of multi-threading for parallelism.
+   * Each Python Dataloader is a separate process with a copy of
+   * ChunkDataset library (which includes samplers). To prevent different
+   * processes to read the same data in parallel, sampler strides are needed
+   * to coordinate workers. Each instance of SamplerWrapper must be configured
+   * with different strides, so that sampling happens in a round-robin fashion:
+   * stride0, stride1, ..., strideN, stride0, stride1, ..., strideN, ...
+   *
+   * For example, assume 2 Python Dataloader workers reading
+   * the same ChunkDataset. Each worker needs to reset their
+   * ChunkDataset instance so that one of them reads alleven (stride 0)
+   * batches while the other reads all odd batches (stride 1).
+   *
+   * NOTE: To preserve back compatibility with C++ implementation,
+   * which doesn't need stride support due to multi-threading,
+   * `reset()` method doesn't reset stride setting.
+   */
 class SamplerWrapper : public Sampler<> {
  public:
   explicit SamplerWrapper(
