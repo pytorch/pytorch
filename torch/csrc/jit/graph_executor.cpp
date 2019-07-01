@@ -603,7 +603,7 @@ RegisterGraphExecutorImpl reg_graph_executor_impl(
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
     : pImpl(dynamic_cast<GraphExecutorImplBase*>(
-          getGraphExecutorImpl()(graph, optimize))) {}
+          getGraphExecutorImpl()(std::move(graph), optimize))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
