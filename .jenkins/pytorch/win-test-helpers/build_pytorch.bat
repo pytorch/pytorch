@@ -69,6 +69,9 @@ set CXX=sccache cl
 
 set CMAKE_GENERATOR=Ninja
 
+:: The following code will try to build PyTorch twice if USE_CUDA is neither 0
+:: nor 1. It is intended so that both builds can be folded into 1 CI run.
+
 if not "%USE_CUDA%"=="1" (
   if "%REBUILD%"=="" (
     set NO_CUDA=1
