@@ -13,7 +13,6 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
-#include <thrust/device_vector.h>
 
 #include <torch/types.h>
 
@@ -213,7 +212,7 @@ Tensor embedding_backward_cuda_kernel(
   // spawn a warp per index. In this context, a segment is a number of rows that should
   // be summarized.
   // Unit: index in `sorted_indices` and `orig_indices`
-  thrust::device_vector<int64_t> segment_offsets(numel);
+  auto segment_offsets = at::empty({numel}, orig_indices.options());
   int64_t num_of_segments;
   {
     auto sorted_indices_dev = thrust::device_ptr<int64_t>(sorted_indices.data<int64_t>());
@@ -225,7 +224,7 @@ Tensor embedding_backward_cuda_kernel(
             sorted_indices_dev + numel,
             thrust::make_counting_iterator(0),
             dummy_dev,
-            thrust::raw_pointer_cast(segment_offsets.data()));
+            thrust::device_ptr<int64_t>(segment_offsets.data<int64_t>()));
     num_of_segments = thrust::get<0>(ends) - dummy_dev;
   }
 
@@ -236,7 +235,7 @@ Tensor embedding_backward_cuda_kernel(
   {
     krn_partials_per_segment<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
             partials_per_segment.data<int64_t>(),
-            thrust::raw_pointer_cast(segment_offsets.data()),
+            segment_offsets.data<int64_t>(),
             num_of_segments,
             numel);
   }
@@ -245,16 +244,16 @@ Tensor embedding_backward_cuda_kernel(
   // of each partial-segment in `sorted_indices`, we need to compute the
   // start position of each _segment_ in `partial_segment_offset`.
   // Unit: index in `partial_segment_offset`
-  thrust::device_vector<int64_t> partials_per_segment_offset(num_of_segments); 
+  auto partials_per_segment_offset = at::empty({num_of_segments}, orig_indices.options());
   thrust::exclusive_scan(
           policy,
           thrust::device_ptr<int64_t>(partials_per_segment.data<int64_t>()),
           thrust::device_ptr<int64_t>(partials_per_segment.data<int64_t>()+num_of_segments),
-          partials_per_segment_offset.begin());
+          thrust::device_ptr<int64_t>(partials_per_segment_offset.data<int64_t>()));
 
   // The total number of partial-segments is the sum of `partials_per_segment_offset`
   const int num_of_partial_segments = partials_per_segment[num_of_segments-1].item<int64_t>() +
-          partials_per_segment_offset[num_of_segments-1];
+          partials_per_segment_offset[num_of_segments-1].item<int64_t>();
 
   // Now we can compute the start position of each partial-segment
   // Unit: index in `sorted_indices` and `orig_indices`
@@ -263,8 +262,8 @@ Tensor embedding_backward_cuda_kernel(
     krn_partial_segment_offset<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
             partial_segment_offset.data<int64_t>(),
             partials_per_segment.data<int64_t>(),
-            thrust::raw_pointer_cast(partials_per_segment_offset.data()),
-            thrust::raw_pointer_cast(segment_offsets.data()),
+            partials_per_segment_offset.data<int64_t>(),
+            segment_offsets.data<int64_t>(),
             num_of_segments);
   }
 
@@ -318,9 +317,9 @@ Tensor embedding_backward_cuda_kernel(
             sorted_indices.data<int64_t>(),
             grad_weight.data<scalar_t>(),
             stride,
-            thrust::raw_pointer_cast(segment_offsets.data()),
+            segment_offsets.data<int64_t>(),
             num_of_segments, grad_weight_per_segment.data<partial_weight_t>(),
-            thrust::raw_pointer_cast(partials_per_segment_offset.data()),
+            partials_per_segment_offset.data<int64_t>(),
             num_of_partial_segments, stride_warped);
       THCudaCheck(cudaGetLastError());
   });
