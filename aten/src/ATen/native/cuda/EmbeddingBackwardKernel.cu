@@ -228,10 +228,10 @@ Tensor embedding_backward_cuda_kernel(
   // We split the segments up into sizes of `NROWS_PER_THREAD`
   // Compute the number partial-segments per segment (some partial-segments 
   // may not be the full `NROWS_PER_THREAD` number of rows)
-  thrust::device_vector<int64_t> partials_per_segment(num_of_segments);
+  auto partials_per_segment = at::empty({num_of_segments}, orig_indices.options());
   {
     krn_partials_per_segment<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
-            thrust::raw_pointer_cast(partials_per_segment.data()),
+            partials_per_segment.data<int64_t>(),
             thrust::raw_pointer_cast(segment_offsets.data()),
             num_of_segments,
             numel);
@@ -244,21 +244,21 @@ Tensor embedding_backward_cuda_kernel(
   thrust::device_vector<int64_t> partials_per_segment_offset(num_of_segments); 
   thrust::exclusive_scan(
           policy,
-          partials_per_segment.begin(),
-          partials_per_segment.end(),
+          thrust::device_ptr<int64_t>(partials_per_segment.data<int64_t>()),
+          thrust::device_ptr<int64_t>(partials_per_segment.data<int64_t>()+num_of_segments),
           partials_per_segment_offset.begin());
 
   // The total number of partial-segments is the sum of `partials_per_segment_offset`
-  const int num_of_partial_segments = partials_per_segment[num_of_segments-1] +
+  const int num_of_partial_segments = partials_per_segment[num_of_segments-1].item<int64_t>() +
           partials_per_segment_offset[num_of_segments-1];
 
   // Now we can compute the start position of each partial-segment
   // Unit: index in `sorted_indices` and `orig_indices`
-  thrust::device_vector<int64_t> partial_segment_offset(num_of_partial_segments);
+  auto partial_segment_offset = at::empty({num_of_partial_segments}, orig_indices.options());
   {
     krn_partial_segment_offset<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
-            thrust::raw_pointer_cast(partial_segment_offset.data()),
-            thrust::raw_pointer_cast(partials_per_segment.data()),
+            partial_segment_offset.data<int64_t>(),
+            partials_per_segment.data<int64_t>(),
             thrust::raw_pointer_cast(partials_per_segment_offset.data()),
             thrust::raw_pointer_cast(segment_offsets.data()),
             num_of_segments);
@@ -281,7 +281,7 @@ Tensor embedding_backward_cuda_kernel(
           mode_mean, bag_size.data<int64_t>(),
           per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
           per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-          thrust::raw_pointer_cast(partial_segment_offset.data()),
+          partial_segment_offset.data<int64_t>(),
           num_of_partial_segments, grad_weight_per_segment.data<scalar_t>(),
           stride_warped);
     });
@@ -293,7 +293,7 @@ Tensor embedding_backward_cuda_kernel(
           grad.data<scalar_t>(),
           count.defined() ? count.data<int64_t>() : nullptr,
           numel, stride,
-          thrust::raw_pointer_cast(partial_segment_offset.data()),
+          partial_segment_offset.data<int64_t>(),
           num_of_partial_segments,
           grad_weight_per_segment.data<scalar_t>(),
           padding_idx,
