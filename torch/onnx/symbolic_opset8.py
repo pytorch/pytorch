@@ -182,21 +182,21 @@ def flatten(g, input, start_dim, end_dim):
     end_dim_i = sym_help._get_const(end_dim, 'i', 'end_dim')
 
     dim = input.type().dim()
-    if end_dim < 0 :
-        end_dim = dim + end_dim
+    if end_dim_i < 0 :
+        end_dim_i = dim + end_dim_i
     # use ONNX's Flatten operator for cases where the output shape is 2D
-    if start_dim == 1 and end_dim == dim - 1 :
+    if start_dim_i == 1 and end_dim_i == dim - 1 :
         if _try_get_scalar_type(input):
             old_type, input = _try_cast_integer_to_float(g, input)
-            return _cast_to_type(g, g.op("Flatten", input, axis_i=start_dim), old_type)
+            return _cast_to_type(g, g.op("Flatten", input, axis_i=start_dim_i), old_type)
         else:
-            return g.op("Flatten", input, axis_i=start_dim)
-    if start_dim == 0 and end_dim == dim - 2 :
+            return g.op("Flatten", input, axis_i=start_dim_i)
+    if start_dim_i == 0 and end_dim_i == dim - 2 :
         if _try_get_scalar_type(input):
             old_type, input = _try_cast_integer_to_float(g, input)
-            return _cast_to_type(g, g.op("Flatten", input, axis_i=end_dim + 1), old_type)
+            return _cast_to_type(g, g.op("Flatten", input, axis_i=end_dim_i + 1), old_type)
         else:
-            return g.op("Flatten", input, axis_i=end_dim + 1)
+            return g.op("Flatten", input, axis_i=end_dim_i + 1)
 
     return sym_opset9.flatten(g, input, start_dim, end_dim)
 
