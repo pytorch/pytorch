@@ -677,6 +677,7 @@ class TestOperators(TestCase):
         self.assertONNX(model, x,
                         operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
+
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
     _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS
