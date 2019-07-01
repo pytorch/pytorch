@@ -364,8 +364,8 @@ def add_torch_libs():
             "//caffe2/torch/lib/libshm:libshm",
         ],
         external_deps=[
-            ("cudnn", "7.1.2", "cudnn-lazy"),
-            ("nccl", "2.1.15", "nccl-lazy"),
+            ("cudnn", None, "cudnn-lazy"),
+            ("nccl", None, "nccl-lazy"),
             ("cuda", None, "nvToolsExt-lazy"),
             ("cuda", None, "nvrtc-lazy"),
             ("cuda", None, "nvrtc-builtins-lazy"),

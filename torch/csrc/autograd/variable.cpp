@@ -68,7 +68,7 @@ void Variable::detach_() {
 }
 
 void Variable::backward(
-    c10::optional<Tensor> gradient,
+    const Tensor& gradient,
     bool keep_graph,
     bool create_graph) const {
   auto autograd_meta = get_autograd_meta();
@@ -76,14 +76,15 @@ void Variable::backward(
   edges.emplace_back(autograd_meta->grad_fn_, autograd_meta->output_nr_);
 
   std::vector<Variable> inputs;
-  if (!gradient.has_value()) {
-    gradient = at::ones_like(*this);
+  Tensor gradient_ = gradient;
+  if (!gradient.defined()) {
+    gradient_ = at::ones_like(*this);
   }
-  inputs.push_back(std::move(as_variable_ref(*gradient)));
+  inputs.push_back(std::move(as_variable_ref(gradient_)));
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
-void Variable::set_data(const at::Tensor &new_data) {
+void Variable::set_data(const at::Tensor &new_data) const {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` has the same derived
   // type of TensorImpl as `var`.
