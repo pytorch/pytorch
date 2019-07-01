@@ -1369,6 +1369,14 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(ReduceSumNegativeIndices(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_reduce_sum_multi_dim(self):
+        class ReduceSumMultipleAxes(torch.nn.Module):
+            def forward(self, x):
+                return x.sum(dim=(2, 3), keepdim=True)
+
+        x = torch.randn(16, 3, 256, 256)
+        self.run_model_test(ReduceSumMultipleAxes(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_group_norm(self):
         c = torch.randn(BATCH_SIZE, 6, 224)
         model = nn.GroupNorm(3, 6)
