@@ -425,10 +425,6 @@ void addObjectMethods(py::module& m) {
           py::arg("arg"),
           py::arg("device_option") = py::none())
       .def("_wrap_tensor_impl", [](Blob* blob, void* ptr) {
-        // We use `at::AutoNonVariableTypeMode` thread-local guard here to ensure
-        // that the `!is_variable()` check passes in `caffe2::Tensor(at::Tensor)`
-        // constructor.
-        at::AutoNonVariableTypeMode non_var_type_mode(true);
         auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
             unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
         TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");

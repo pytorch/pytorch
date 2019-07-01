@@ -932,11 +932,6 @@ class Operator : public OperatorBase {
   // non-async executors that do not rely on events
   bool Run(int stream_id = 0) final {
     try {
-      // This `at::AutoNonVariableTypeMode` thread-local guard is to make sure
-      // all Variable inputs to this Caffe2 op are treated as Tensors (i.e.
-      // their `is_variable()` is false) within the scope of `Run()`.
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
-
       StartAllObservers();
 
       context_.SwitchToDevice(stream_id);
@@ -984,11 +979,6 @@ class Operator : public OperatorBase {
 
   bool RunAsync(int stream_id = 0) final {
     try {
-      // This `at::AutoNonVariableTypeMode` thread-local guard is to make sure
-      // all Variable inputs to this Caffe2 op are treated as Tensors (i.e.
-      // their `is_variable()` is false) within the scope of `RunAsync()`.
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
-
       StartAllObservers();
 
       context_.SwitchToDevice(stream_id);

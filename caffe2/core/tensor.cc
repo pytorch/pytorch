@@ -201,9 +201,6 @@ void Tensor::enforce_invariants() {
   if (impl_.get() == nullptr) {
     throw std::runtime_error("TensorImpl with nullptr is not supported");
   }
-  CAFFE_ENFORCE(
-      !impl_->is_variable(),
-      "Caffe2 tensor wrapper doesn't support autograd variables");
   CAFFE_ENFORCE_EQ(
       impl_->layout(),
       at::kStrided,
