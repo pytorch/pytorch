@@ -111,7 +111,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
            " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu)
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu, symeig)
 static inline void squareCheckInputs(const Tensor& self) {
   TORCH_CHECK(self.size(-1) == self.size(-2),
            "A must be batches of square matrices, "
@@ -129,7 +129,14 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     if (info < 0) {
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
-      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+      if (strstr(name, "svd")) {
+        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
+      } else if (strstr(name, "symeig")) {
+        AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
+                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.")
+      } else {
+        AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+      }
     }
   }
 }
@@ -146,11 +153,7 @@ static inline void batchCheckErrors(const Tensor& infos, const char* name) {
     if (info < 0) {
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
-      if (strstr(name, "svd")) {
-        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
-      } else {
-        AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
-      }
+      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
     }
   }
 }
@@ -165,6 +168,9 @@ static inline void singleCheckErrors(int64_t info, const char* name) {
   } else if (info > 0) {
     if (strstr(name, "svd")) {
       AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
+    } else if (strstr(name, "symeig")) {
+      AT_ERROR(name, ": the algorithm failed to converge; ", info,
+               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.")
     } else {
       AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
     }
