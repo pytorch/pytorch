@@ -109,7 +109,6 @@ libtorch_sources = [
     "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/register_string_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
-    "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/api/src/jit.cpp",
