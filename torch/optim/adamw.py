@@ -14,7 +14,7 @@ class AdamW(Optimizer):
             parameter groups
         lr (float, optional): learning rate (default: 1e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.99))
+            running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)
@@ -30,7 +30,7 @@ class AdamW(Optimizer):
         https://openreview.net/forum?id=ryQu7f-RZ
     """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.99), eps=1e-8,
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=1e-2, amsgrad=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
