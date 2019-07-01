@@ -22,7 +22,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
     has_grad_fn_ = !variable.is_leaf();
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
-    data_ = variable.variable_data();
+    data_ = variable.detach();
     if (variable.is_leaf()) {
       grad_accumulator_ = variable.grad_accumulator();
     } else if (!is_output) {
@@ -78,7 +78,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
-  Variable var = as_variable_ref(data_).variable_data();
+  Variable var = as_variable_ref(data_).detach();
   // We set `var`'s `allow_tensor_metadata_change` to true here, because we
   // should not restrict any resizing / restriding ops on the reconstructed
   // Variable.
