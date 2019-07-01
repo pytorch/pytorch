@@ -1,5 +1,7 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
+#include <ATen/TypeDefault.h>
+
 // ${generated_comment}
 
 // NOTE [Sharded File]: on this file's split-into-shards state
