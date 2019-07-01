@@ -9,7 +9,6 @@
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
@@ -52,11 +51,6 @@ void window_function_checks(
       window_length);
 }
 
-// FIXME: point to LegacyTHDispatcher.
-const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
-  return at::getType(options);
-}
-
 } // namespace
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -91,7 +85,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
+Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.backend() == Backend::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
@@ -117,6 +111,9 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
+
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
 
@@ -138,7 +135,15 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptio
   return t;
 }
 
-Tensor& empty_out(Tensor& result, IntArrayRef size) {
+Tensor& empty_out(
+    Tensor& result,
+    IntArrayRef size,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // Preferably, this argument would not be accepted by _out, but the code
+  // generator requires the out and non-out overloads to match exactly
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "'memory_format' argument is incompatible with 'out' tensor argument");
   check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
@@ -168,12 +173,37 @@ Tensor empty_like(const Tensor& self) {
   return native::empty_like(self, self.options());
 }
 
-Tensor empty_like(const Tensor& self, const TensorOptions& options) {
+Tensor empty_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+
+  TORCH_CHECK(
+      !(options.layout() != kStrided &&
+          optional_memory_format.has_value()),
+      "memory format option is only supported by strided tensors");
   if (options.layout() == kSparse && self.is_sparse()) {
-    auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
-    return res;
+    auto result = at::empty({0}, options); // to be resized
+    result.sparse_resize_and_clear_(
+        self.sizes(), self.sparse_dim(), self.dense_dim());
+    return result;
   }
+
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  auto use_memory_format = memory_format;
+  if (memory_format == MemoryFormat::Preserve) {
+    if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
+      use_memory_format = MemoryFormat::ChannelsLast;
+    } else if (self.is_contiguous(MemoryFormat::Contiguous)) {
+      use_memory_format = MemoryFormat::Contiguous;
+    } else {
+      TORCH_CHECK(
+          false,
+          "undefined behavior of the preserve format, source tensor neither channels last nor contiguous")
+    }
+  }
+
   if (self.is_quantized()) {
     // We could check if dtype is still quantized?  But then should we shift/scale
     // the q_zero_point / q_scale or not?
@@ -187,9 +217,11 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     //                        PerTensorAffine scheme right now");
     return at::_empty_affine_quantized(self.sizes(), options,
                                        self.q_scale(),
-                                       self.q_zero_point());
+                                       self.q_zero_point(),
+                                       use_memory_format);
   }
-  return at::empty(self.sizes(), options);
+
+  return at::empty(self.sizes(), options, use_memory_format);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

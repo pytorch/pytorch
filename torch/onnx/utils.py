@@ -118,33 +118,33 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             "doc_string" from the exported model, which information about the stack
             trace.
         example_outputs: example outputs of the model that is being exported.
-        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict): 
-            a dictionary to specify dynamic axes of input/output, such that:            
+        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
+            a dictionary to specify dynamic axes of input/output, such that:
             - KEY:  input and/or output names
             - VALUE: index of dynamic axes for given key and potentially the name to be used for
             exported dynamic axes. In general the value is defined according to one of the following
             ways or a combination of both:
 
             (1). A list of integers specifiying the dynamic axes of provided input. In this scenario
-            automated names will be generated and applied to dynamic axes of provided input/output 
-            during export. 
+            automated names will be generated and applied to dynamic axes of provided input/output
+            during export.
 
-            OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in 
-            corresponding input/output TO the name that is desired to be applied on such axis of 
+            OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in
+            corresponding input/output TO the name that is desired to be applied on such axis of
             such input/output during export.
 
-            Example. if we have the following shape for inputs and outputs:             
+            Example. if we have the following shape for inputs and outputs:
                 shape(input_1) = ('b', 3, 'w', 'h')
-                and shape(input_2) = ('b', 4)           
-                and shape(output)  = ('b', 'd', 5)      
+                and shape(input_2) = ('b', 4)
+                and shape(output)  = ('b', 'd', 5)
 
             Then dynamic axes can be defined either as:
             (a). ONLY INDICES:
                  dynamic_axes = {'input_1':[0, 2, 3], 'input_2':[0], 'output':[0, 1]}
                  where automatic names will be generated for exported dynamic axes
 
-            OR (b). INDICES WITH CORRESPONDING NAMES: 
-                dynamic_axes = {'input_1':{0:'batch', 1:'width', 2:'height'}, 
+            OR (b). INDICES WITH CORRESPONDING NAMES:
+                dynamic_axes = {'input_1':{0:'batch', 1:'width', 2:'height'},
                                  'input_2':{0:'batch'},
                                  'output':{0:'batch', 1:'detections'}
                  where provided names will be applied to exported dynamic axes
@@ -212,16 +212,17 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
-    # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
-    torch._C._jit_pass_prepare_division_for_onnx(graph)
-    # onnx does not support tuples, so try to remove them
-    torch._C._jit_pass_lower_all_tuples(graph)
-    # onnx only supports tensors, so we turn all out number types into tensors
-    torch._C._jit_pass_erase_number_types(graph)
-    torch._C._jit_pass_peephole(graph, True)
-    torch._C._jit_pass_lint(graph)
-
     if operator_export_type != OperatorExportTypes.RAW:
+        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
+        torch._C._jit_pass_prepare_division_for_onnx(graph)
+        # onnx does not support tuples, so try to remove them
+        torch._C._jit_pass_lower_all_tuples(graph)
+        torch._C._jit_pass_peephole(graph, True)
+        torch._C._jit_pass_lint(graph)
+
+        # onnx only supports tensors, so we turn all out number types into tensors
+        torch._C._jit_pass_erase_number_types(graph)
+
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_onnx_peephole(graph)
@@ -310,7 +311,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
             param_names = list(state_dict.keys())
             for i, inp in enumerate(graph_inputs):
                 if i >= user_input_num:
-                    inp.setUniqueName(param_names[i - user_input_num])
+                    inp.setDebugName(param_names[i - user_input_num])
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop)
@@ -332,7 +333,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     flatten_args, _ = torch._C._jit_flatten(args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
-    input_and_param_names = [val.uniqueName() for val in graph.inputs()]
+    input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
@@ -462,8 +463,8 @@ def _set_input_and_output_names(graph, input_names, output_names):
                 "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
         for name, node in zip(name_list, node_list):
-            if node.uniqueName() != name:
-                node.setUniqueName(name)
+            if node.debugName() != name:
+                node.setDebugName(name)
     set_names(list(graph.inputs()), input_names, 'input')
     set_names(list(graph.outputs()), output_names, 'output')
 
@@ -775,9 +776,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     if(hasattr(model, 'graph')):
         # Extracting set of valid input/output names that shall be used for dynamic_axes
         if (input_names is None) or len(input_names) == 0:
-            input_names = [x.uniqueName() for x in model.graph.inputs()]
+            input_names = [x.debugName() for x in model.graph.inputs()]
         if (output_names is None) or len(output_names) == 0:
-            output_names = [y.uniqueName() for y in model.graph.outputs()]
+            output_names = [y.debugName() for y in model.graph.outputs()]
 
     valid_names = set()
     if input_names is not None:
@@ -793,7 +794,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if key not in valid_names:
             warnings.warn("Provided key {} for dynamic axes is not a valid input/output name".format(key))
         if isinstance(value, list):
-            warnings.warn('No names were found for specified dynamic axes of provided input.' 
+            warnings.warn('No names were found for specified dynamic axes of provided input.'
                           'Automatically generated names will be applied to each dynamic axes of input {}'.format(key))
 
             value_dict = {}

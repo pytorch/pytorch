@@ -30,7 +30,7 @@ from .env import NAMEDTENSOR_ENABLED
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -588,7 +588,7 @@ def emit_body(declaration):
                 if arg['name'] == derivative_var_name:
                     break
             else:
-                assert False
+                raise AssertionError()
 
             return 'grad_fn->should_compute_output({})'.format(edge_off)
 
