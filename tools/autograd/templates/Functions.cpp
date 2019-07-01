@@ -1621,9 +1621,9 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
            "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
            "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
 
-  auto m = self.size(0);
-  auto n = self.size(1);
-  auto k = sigma.size(0);
+  auto m = self.size(-2);
+  auto n = self.size(-1);
+  auto k = sigma.size(-1);
   auto gsigma = grads[1];
 
   auto u = raw_u;
@@ -1635,22 +1635,22 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     // We ignore the free subspace here because possible base vectors cancel
     // each other, e.g., both -v and +v are valid base for a dimension.
     // Don't assume behavior of any particular implementation of svd.
-    u = raw_u.narrow(1, 0, k);
-    v = raw_v.narrow(1, 0, k);
+    u = raw_u.narrow(-1, 0, k);
+    v = raw_v.narrow(-1, 0, k);
     if (gu.defined()) {
-      gu = gu.narrow(1, 0, k);
+      gu = gu.narrow(-1, 0, k);
     }
     if (gv.defined()) {
-      gv = gv.narrow(1, 0, k);
+      gv = gv.narrow(-1, 0, k);
     }
   }
-  auto vt = v.t();
+  auto vt = v.transpose(-2, -1);
 
   Tensor sigma_term;
   if (gsigma.defined()) {
-    sigma_term = u.mm(gsigma.diag()).mm(vt);
+    sigma_term = at::matmul(u, at::matmul(gsigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), vt));
   } else {
-    sigma_term = at::zeros({1}, self.options()).expand_as(self);
+    sigma_term = at::zeros_like(self);
   }
   // in case that there are no gu and gv, we can avoid the series of kernel
   // calls below
@@ -1658,40 +1658,40 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     return sigma_term;
   }
 
-  auto ut = u.t();
+  auto ut = u.transpose(-2, -1);
   auto im = at::eye(m, self.options());
   auto in = at::eye(n, self.options());
-  auto sigma_mat = sigma.diag();
-  auto sigma_mat_inv = sigma.pow(-1).diag();
-  auto sigma_expanded_sq = sigma.pow(2).expand_as(sigma_mat);
-  auto F = sigma_expanded_sq - sigma_expanded_sq.t();
+  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  auto sigma_sq = sigma.pow(2);
+  auto F = sigma_sq.unsqueeze(-2) - sigma_sq.unsqueeze(-1);
   // The following two lines invert values of F, and fills the diagonal with 0s.
   // Notice that F currently has 0s on diagonal. So we fill diagonal with +inf
   // first to prevent nan from appearing in backward of this function.
-  F.diagonal().fill_(INFINITY);
+  F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
   F = F.pow(-1);
 
   Tensor u_term, v_term;
 
   if (gu.defined()) {
-    u_term = u.mm(F.mul(ut.mm(gu) - gu.t().mm(u))).mm(sigma_mat);
+    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(ut, gu) - at::matmul(gu.transpose(-2, -1), u)), sigma_mat));
     if (m > k) {
-      u_term = u_term + (im - u.mm(ut)).mm(gu).mm(sigma_mat_inv);
+      u_term = u_term + at::matmul(im - at::matmul(u, ut), at::matmul(gu, sigma_mat_inv));
     }
-    u_term = u_term.mm(vt);
+    u_term = at::matmul(u_term, vt);
   } else {
-    u_term = at::zeros({1}, self.options()).expand_as(self);
+    u_term = at::zeros_like(self);
   }
 
   if (gv.defined()) {
-    auto gvt = gv.t();
-    v_term = sigma_mat.mm(F.mul(vt.mm(gv) - gvt.mm(v))).mm(vt);
+    auto gvt = gv.transpose(-2, -1);
+    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vt, gv) - at::matmul(gvt, v)), vt));
     if (n > k) {
-      v_term = v_term + sigma_mat_inv.mm(gvt.mm(in - v.mm(vt)));
+      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvt, in - at::matmul(v, vt)));
     }
-    v_term = u.mm(v_term);
+    v_term = at::matmul(u, v_term);
   } else {
-    v_term = at::zeros({1}, self.options()).expand_as(self);
+    v_term = at::zeros_like(self);
   }
 
   return u_term + sigma_term + v_term;
