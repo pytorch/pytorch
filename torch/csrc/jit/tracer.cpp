@@ -111,10 +111,10 @@ Value* TracingState::getValue(const IValue& var) {
       if (it == value_map.end()) {
         continue;
       }
-      if (!it->second->hasUniqueName()) {
+      if (!it->second->hasDebugName()) {
         auto unique_name = getTracingState()->lookup_var_name_fn(ten);
         if (!unique_name.empty()) {
-          it->second->setUniqueName(unique_name);
+          it->second->setDebugName(unique_name);
         }
       }
       return it->second;
@@ -218,7 +218,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     if (state->hasValue(input)) {
       input_tensor = input_tensor.view(input_tensor.sizes());
     }
-    value->setUniqueName(name);
+    value->setDebugName(name);
     state->setValue(input_tensor, value);
     return input_tensor;
   } else if (auto tuple_type = type->cast<TupleType>()) {
@@ -287,17 +287,14 @@ static void gatherParametersAndBuffers(
   
   state->setValue(self.module_object(), self_value);
 
-  for (auto& param : self.get_parameters()) {
-    addInput(state, param.value(), param.type(), g.insertGetAttr(self_value, param.name()));
-  }
-  for (auto& param : self.get_attributes()) {
-    if (param.type()->isSubtypeOf(TensorType::get())) {
-      addInput(state, param.value(), param.type(), g.insertGetAttr(self_value, param.name()));
+  for (script::Slot s : self.get_slots()) {
+    if (s.type()->isSubtypeOf(TensorType::get())) {
+      addInput(
+          state, s.value(), s.type(), g.insertGetAttr(self_value, s.name()));
+    } else if (s.entity_type() == script::EntityType::MODULE) {
+      gatherParametersAndBuffers(
+          state, g.insertGetAttr(self_value, s.name()), s.to_module());
     }
-  }
-  for (const auto& sub : self.get_modules()) {
-    gatherParametersAndBuffers(
-        state, g.insertGetAttr(self_value, sub->field_name()), *sub);
   }
 }
 
@@ -305,7 +302,9 @@ static void gatherParametersAndBuffers(
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self) {
+std::pair<std::shared_ptr<TracingState>, Stack> enter(
+    TypedStack inputs,
+    script::Module* self) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
@@ -420,7 +419,13 @@ void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
 }
 void addInputs(Node* n, const char* name, const at::Scalar& value) {
-  detail::genericAddInput(n, value);
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
 }
 void addInputs(
     Node* n,
@@ -464,8 +469,20 @@ void addInputs(Node* n, const char* name, at::MemoryFormat value) {
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::ScalarType>& value) {
+    const c10::optional<at::MemoryFormat>& value) {
   if (value) {
+    detail::genericAddInput(n, static_cast<int64_t>(*value));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone(IntType::get()))->output();
+    n->addInput(none);
+  }
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::ScalarType>& value) {
+  if (value.has_value()) {
     detail::genericAddInput(n, static_cast<int64_t>(*value));
   } else {
     Graph* g = n->owningGraph();
@@ -650,6 +667,8 @@ void ArgumentStash::stashValue(
     ten = g.insert(prim::Int, {ten});
   } else if (type == FloatType::get()) {
     ten = g.insert(prim::Float, {ten});
+  } else if (type == NumberType::get()) {
+    ten = g.insert(prim::ImplicitTensorToNum, {ten});
   }
 
   stash.values.emplace(arg_name, ten);

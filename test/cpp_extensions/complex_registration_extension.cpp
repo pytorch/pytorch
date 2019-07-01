@@ -15,6 +15,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/ATenDispatch.h>
 
 #include <cstddef>
 #include <functional>
@@ -36,7 +37,8 @@ struct ComplexCPUType : public at::CPUTypeDefault {
   const char* toString() const override;
   TypeID ID() const override;
 
-  Tensor empty(IntArrayRef size, const TensorOptions & options) const override {
+  static Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+    TORCH_CHECK(!optional_memory_format.has_value(), "memory format is not supported")
     AT_ASSERT(options.device().is_cpu());
 
     for (auto x: size) {
@@ -79,6 +81,9 @@ const char* ComplexCPUType::toString() const {
 TypeID ComplexCPUType::ID() const {
   return TypeID::ComplexCPU;
 }
+
+static auto& complex_empty_registration = globalATenDispatch()
+  .registerOp(Backend::ComplexCPU, "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor", &ComplexCPUType::empty);
 
 REGISTER_COMPLEX_HOOKS(ComplexHooks);
 

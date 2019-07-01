@@ -1,3 +1,8 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 from test_pytorch_common import TestCase, run_tests
 
 import torch
@@ -94,7 +99,7 @@ class TestONNXOpset(TestCase):
                     {"name": "strides", "ints": [1], "type": 7}]}]
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.randn(20, 16, 50)
-        check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[9, 10])
 
         # add test with dilations
         module = torch.nn.MaxPool1d(2, stride=1, dilation=2)
@@ -106,7 +111,7 @@ class TestONNXOpset(TestCase):
                     {"name": "kernel_shape", "ints": [2], "type": 7},
                     {"name": "pads", "ints": [0, 0], "type": 7},
                     {"name": "strides", "ints": [1], "type": 7}]}]
-        ops = {9 : ops_9, 10 : ops_10}
+        ops = {10 : ops_10}
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
 
@@ -205,6 +210,98 @@ class TestONNXOpset(TestCase):
         ops = []
         ops = {9 : ops, 10 : ops}
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
+
+    def test_full(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.full((3, 4), x)
+
+        ops = [{"op_name" : "Constant"},
+               {"op_name" : "ConstantOfShape"},
+               {"op_name" : "Add"}]
+        ops = {9 : ops, 10 : ops}
+        x = torch.tensor(12)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
+    def test_interpolate(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                return torch.nn.functional.interpolate(x,
+                                                       size=size,
+                                                       mode='nearest')
+        ops_9 = [{"op_name" : "Constant"},
+                 {"op_name" : "Shape"},
+                 {"op_name" : "Gather"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Shape"},
+                 {"op_name" : "Gather"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Mul"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Mul"},
+                 {"op_name" : "Unsqueeze"},
+                 {"op_name" : "Unsqueeze"},
+                 {"op_name" : "Concat"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Cast"},
+                 {"op_name" : "Shape"},
+                 {"op_name" : "Slice"},
+                 {"op_name" : "Cast"},
+                 {"op_name" : "Div"},
+                 {"op_name" : "Concat"},
+                 {"op_name" : "Upsample",
+                  "attributes" :
+                  [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Shape"},
+                  {"op_name" : "Gather"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Shape"},
+                  {"op_name" : "Gather"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Mul"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Mul"},
+                  {"op_name" : "Unsqueeze"},
+                  {"op_name" : "Unsqueeze"},
+                  {"op_name" : "Concat"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Cast"},
+                  {"op_name" : "Shape"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice"},
+                  {"op_name" : "Cast"},
+                  {"op_name" : "Div"},
+                  {"op_name" : "Concat"},
+                  {"op_name" : "Resize",
+                   "attributes" :
+                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        check_onnx_opsets_operator(MyModel(), x, ops, opset_versions=[9, 10])
+
+        class MyDynamicModel(torch.nn.Module):
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                # work around for now: turn the dynamic sizes into constant
+                size = [int(i) for i in size]
+                return torch.nn.functional.interpolate(x,
+                                                       size=size,
+                                                       mode='nearest')
+        ops_9 = [{"op_name" : "Constant"},
+                 {"op_name" : "Upsample",
+                  "attributes" :
+                  [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Resize",
+                   "attributes" :
+                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.randn(20, 16, 50)
+        check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
 
 
 if __name__ == '__main__':

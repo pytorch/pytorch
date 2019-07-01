@@ -35,9 +35,9 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     return;
   }
 
-  auto sizes = detail::Array<int64_t, 25>(0);
-  auto strides = detail::Array<int64_t, 25>(0);
-  auto index_ptrs = detail::Array<char*, 25>(nullptr);
+  auto sizes = at::detail::Array<int64_t, 25>(0);
+  auto strides = at::detail::Array<int64_t, 25>(0);
+  auto index_ptrs = at::detail::Array<char*, 25>(nullptr);
   for (int i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];

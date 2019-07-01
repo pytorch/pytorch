@@ -218,7 +218,7 @@ class TestOperators(TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                assert False
+                raise AssertionError()
 
             @staticmethod
             def forward(ctx, x, y):
@@ -355,15 +355,35 @@ class TestOperators(TestCase):
 
     def test_reduced_mean_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.mean(x, dim=2, keepdim=True), x)
+        self.assertONNX(lambda x: torch.mean(x, dim=(2, 3), keepdim=True), x)
+
+    def test_mean_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::mean',
+                                   lambda x: torch.mean(x, dtype=torch.double), x)
+
+    def test_reduced_mean_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::mean',
+                                   lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
 
     def test_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.sum(x), x)
 
+    def test_sum_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::sum',
+                                   lambda x: torch.sum(x, dtype=torch.double), x)
+
+    def test_reduced_sum_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::sum',
+                                   lambda x: torch.sum(x, dim=0, dtype=torch.double), x)
+
     def test_reduced_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.sum(x, dim=2), x)
+        self.assertONNX(lambda x: torch.sum(x, dim=(1, 2)), x)
 
     def test_reduced_sum_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -380,6 +400,16 @@ class TestOperators(TestCase):
     def test_reduced_prod_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.prod(x, dim=2, keepdim=True), x)
+
+    def test_prod_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::prod',
+                                   lambda x: torch.prod(x, dtype=torch.double), x)
+
+    def test_reduced_prod_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::prod',
+                                   lambda x: torch.prod(x, dim=0, dtype=torch.double), x)
 
     def test_sqrt(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -495,17 +525,17 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, requires_grad=True)
         self.assertONNX(lambda x: x.repeat(1, 2, 3, 4), x)
 
-    def test_norm(self):
+    def test_norm_p1(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.norm(p=1, dim=2), (x))
+
+    def test_norm_p2(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
     def test_upsample_nearest(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
-
-    def test_upsample_bilinear(self):
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)

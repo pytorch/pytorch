@@ -11,7 +11,7 @@ import unittest
 from datetime import timedelta
 
 from itertools import groupby
-from functools import wraps
+from functools import partial, reduce, wraps
 from collections import namedtuple
 
 import torch
@@ -154,6 +154,49 @@ def simple_multi_input_reduce_tests(rank, world_size):
             [torch.Tensor([2 * rank + 1.0]), torch.Tensor([2 * rank + 2.0])],
             torch.Tensor([2 * world_size]),
         ),
+    ]
+
+
+def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
+    """
+    Generate a number of basic test cases for sparse reduction.
+    These cover tensors with a varying number of sparse dimensions and a varying
+    number of dense dimensions. The only reduction operation we support is sum.
+    """
+    def generate(rank, world_size, sparse_dims=1, dense_dims=0):
+        # First sparse dimension is [0..rank].
+        # Subsequent dimensions are always 0, so we know there is
+        # a non-empty intersection between any two sparse tensors.
+        indices = [range(rank + 1)]
+        shape = [world_size] + [2 for _ in range(dense_dims)]
+        for _ in range(sparse_dims - 1):
+            indices.append([0] * (rank + 1))
+            shape.append(world_size)
+        values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
+        return torch.sparse_coo_tensor(indices, values, shape)
+
+    def compute_sum(fn, world_size):
+        return reduce(lambda a, b: a + b, [fn(rank, world_size) for rank in range(world_size)])
+
+    return [
+        (
+            [
+                fn(num_inputs * rank + i, num_inputs * world_size)
+                for i in range(num_inputs)
+            ],
+            [
+                compute_sum(fn, num_inputs * world_size)
+                for i in range(num_inputs)
+            ],
+        )
+        for fn in [
+            partial(generate, sparse_dims=1),
+            partial(generate, sparse_dims=2),
+            partial(generate, sparse_dims=3),
+            partial(generate, dense_dims=1),
+            partial(generate, dense_dims=2),
+            partial(generate, dense_dims=3),
+        ]
     ]
 
 
@@ -787,6 +830,54 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allreduce_stress_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
+
+    def test_sparse_allreduce_checks(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros([1])
+        t2 = torch.sparse_coo_tensor([[0]], [1], size=(2,))
+        t3 = torch.sparse_coo_tensor([[0]], [1], size=(4,))
+
+        with self.assertRaisesRegex(ValueError, "requires non-empty tensor list"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor layout"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([t1, t2], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([t2, t3], opts)
+
+        # Sparse allreduce only works with c10d.ReduceOp.SUM.
+        for op in [c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX]:
+            with self.assertRaisesRegex(ValueError, "unsupported reduction operation"):
+                opts = c10d.AllreduceOptions()
+                opts.reduceOp = op
+                pg.allreduce([t3], opts)
+
+    def _test_sparse_allreduce_basics(self, fn):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        for num_inputs_per_rank in [1, 2]:
+            tests = simple_sparse_reduce_tests(
+                self.rank,
+                self.world_size,
+                num_inputs=num_inputs_per_rank)
+            for (inputs, outputs) in tests:
+                work = pg.allreduce([fn(input) for input in inputs])
+                work.wait()
+                self.assertEqual(work.result(), outputs)
+
+    def test_sparse_allreduce_basics(self):
+        self._test_sparse_allreduce_basics(lambda t: t)
+
+    @skip_if_not_multigpu
+    def test_sparse_allreduce_basics_cuda(self):
+        self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
 
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -2297,58 +2388,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @skip_if_not_nccl
     @skip_if_not_multigpu
-    def test_no_used_parameters(self):
-        """
-        Note: this test can be sped up by only running it on a CPU module
-        once DistributedDataParallel supports them.
-        """
-        store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-
-        class NoUsedParameters(nn.Module):
-            def __init__(self):
-                super(NoUsedParameters, self).__init__()
-
-                # Make sure this module has some parameters, only to then decide
-                # to never use them from the `forward` function.
-                self.fc1 = nn.Linear(2, 10, bias=False)
-                self.fc2 = nn.Linear(10, 4, bias=False)
-                self.fc3 = nn.Linear(4, 4, bias=False)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                return x * 0.0
-
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        model = DistributedDataParallel(
-            NoUsedParameters().float().to(device_id),
-            device_ids=[device_id],
-            process_group=process_group,
-            find_unused_parameters=True,
-        )
-
-        batch_size = 4
-        input = torch.rand([batch_size, 2], dtype=torch.float)
-
-        # After initialization, no parameter has their gradient set.
-        for p in model.parameters():
-            self.assertTrue(p.requires_grad)
-            self.assertIsNone(p.grad)
-
-        # Run `forward` function.
-        model(input)
-
-        # Because none of the parameters were used, we expect reduction for
-        # all parameters will be executed right when initializing the reducer.
-        # Once `forward` returns, all the parameter's gradients must be set.
-        for p in model.parameters():
-            self.assertTrue(p.requires_grad)
-            self.assertIsNotNone(p.grad)
-            self.assertTrue(torch.is_tensor(p.grad))
-            self.assertEqual(p.size(), p.grad.size())
-
-    @skip_if_not_nccl
-    @skip_if_not_multigpu
     def test_no_grad(self):
         """
         Note: this test can be sped up by only running it on a CPU module
@@ -2397,7 +2436,63 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
-    def test_accumulate_gradients(self):
+    def test_accumulate_gradients_no_sync(self):
+        # This is the recommended way to implement accumulate grads
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        global_batch_size = self.world_size
+        local_batch_size = len(devices)
+
+        model, ddp_model, input, target = \
+            self._prepare_single_device_module(
+                process_group, devices, devices, global_batch_size)
+
+        def step_model(model, input, target):
+            model.train()
+            output = model(input)
+            loss = F.mse_loss(output, target.to(output.device))
+            loss.backward()
+
+        # ensure accumulate grads works with no_grad
+        with torch.no_grad():
+            with ddp_model.no_sync():
+                ddp_model.train()
+                ddp_model(input)
+
+        # check two model parameters over 2 iterations
+        for iteration in range(2):
+            # single cpu/gpu training
+            step_model(model, input, target)
+
+            ddp_input = input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]
+            ddp_target = target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]
+
+            if iteration % 2 == 0:
+                # accumulate grads locally when iteration == 0
+                with ddp_model.no_sync():
+                    step_model(ddp_model, ddp_input, ddp_target)
+            else:
+                # sync grads when iteration == 1
+                step_model(ddp_model, ddp_input, ddp_target)
+
+            for i, j in zip(model.parameters(), ddp_model.parameters()):
+                if iteration % 2 == 0:
+                    self.assertNotEqual(i.grad, j.grad)
+                else:
+                    self.assertEqual(i.grad, j.grad)
+
+            # Shuffle the input so that DDP input is different
+            torch.manual_seed(1337 + iteration)
+            input = input[torch.randperm(global_batch_size)]
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_accumulate_gradients_module(self):
+        # This is NOT the recommended way to implement accumulating grads, but
+        # we would like to make sure DDP does not mess up with the underlying
+        # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -2445,15 +2540,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
-    @skip_if_not_nccl
-    @skip_if_not_multigpu
     def test_ignored_output(self):
         """
-        Note: this test can be sped up by only running it on a CPU module
-        once DistributedDataParallel supports them.
+        Test that the output of a model can be ignored and that there is no
+        implicit requirement that `backward` gets called.
         """
         store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         class IgnoredOutput(nn.Module):
             def __init__(self):
@@ -2467,17 +2560,59 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 x = self.relu(self.fc2(x))
                 return F.softmax(x, dim=1)
 
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
-            IgnoredOutput().float().to(device_id),
-            device_ids=[device_id],
+            IgnoredOutput().float(),
             process_group=process_group,
         )
 
         batch_size = 4
         criterion = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.float)
-        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+
+        # Run a few iterations where we ignore the output.
+        for _ in range(4):
+            output = model(input)
+            del output
+
+        # Run a few iterations where we use the output.
+        for _ in range(4):
+            output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+    def test_ignored_output_with_unused_parameters(self):
+        """
+        Test that the output of a model can be ignored and that there is no
+        implicit requirement that `backward` gets called, if not all model
+        parameters participated in computing the model output.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        class IgnoredOutputWithUnusedParameters(nn.Module):
+            def __init__(self):
+                super(IgnoredOutputWithUnusedParameters, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.fc3 = nn.Linear(4, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        model = DistributedDataParallel(
+            IgnoredOutputWithUnusedParameters().float(),
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
 
         # Run a few iterations where we ignore the output.
         for _ in range(4):
@@ -2554,6 +2689,46 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             output = ddp(input)
             loss = criterion(output, target)
             loss.backward()
+
+    def test_sparse_gradients(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        class SparseGradientModule(nn.Module):
+            def __init__(self):
+                super(SparseGradientModule, self).__init__()
+                self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
+
+            def forward(self, x):
+                return F.softmax(self.embedding(x), dim=1)
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        mult = 2
+        batch_size = mult * self.world_size
+        criterion = nn.CrossEntropyLoss()
+        input = torch.randint(0, 10, [batch_size, 2])
+        target = torch.randint(0, 10, [batch_size])
+
+        # Run with entire batch against single process version
+        criterion(vanilla_model(input), target).backward()
+
+        # Run with partial batch against multi process version
+        partial_input = input.split(mult)[self.rank]
+        partial_target = target.split(mult)[self.rank]
+        criterion(ddp_model(partial_input), partial_target).backward()
+
+        # Check that the gradients are sparse and identical
+        vanilla_parameter = next(vanilla_model.parameters())
+        ddp_parameter = next(ddp_model.parameters())
+        self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
 
 
 class ReducerModule(nn.Module):
