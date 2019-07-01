@@ -16,7 +16,7 @@ IValue deepCopy(const IValue& self) {
     return IValue(self.toTensor().clone());
   }
   if (self.isTensorList()) {
-    std::vector<at::Tensor> newList;
+    c10::List<at::Tensor> newList;
     for (const at::Tensor& oldTensor : self.toTensorListRef()) {
       newList.push_back(oldTensor.clone());
     }

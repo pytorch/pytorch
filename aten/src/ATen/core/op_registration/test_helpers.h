@@ -10,10 +10,7 @@
 
 template<class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return {std::forward<Inputs>(inputs)...};
-#pragma GCC diagnostic pop
 }
 
 inline at::Tensor dummyTensor(c10::TensorTypeId dispatch_key) {

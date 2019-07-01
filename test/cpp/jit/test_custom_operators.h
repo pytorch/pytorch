@@ -70,9 +70,9 @@ void testCustomOperators() {
     // Check that lists work well.
     torch::RegisterOperators reg(
         "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
-        [](const std::vector<int64_t>& ints,
-           const std::vector<double>& floats,
-           std::vector<at::Tensor> tensors) { return floats; });
+        [](torch::List<int64_t> ints,
+           torch::List<double> floats,
+           torch::List<at::Tensor> tensors) { return floats; });
 
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
     ASSERT_EQ(ops.size(), 1);
@@ -110,7 +110,7 @@ void testCustomOperators() {
   {
     torch::RegisterOperators reg(
         "foo::lists2(Tensor[] tensors) -> Tensor[]",
-        [](std::vector<at::Tensor> tensors) { return tensors; });
+        [](torch::List<at::Tensor> tensors) { return tensors; });
 
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists2"));
     ASSERT_EQ(ops.size(), 1);

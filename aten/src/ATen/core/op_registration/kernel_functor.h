@@ -161,8 +161,6 @@ namespace detail {
   };
 
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   template<class T, bool AllowDeprecatedTypes>
   T ivalue_to_arg(IValue&& v) {
     assert_is_valid_input_type<T, AllowDeprecatedTypes>();
@@ -174,7 +172,6 @@ namespace detail {
     assert_is_valid_output_type<T, AllowDeprecatedTypes>();
     return IValue(std::move(v));
   }
-#pragma GCC diagnostic pop
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, guts::index_sequence<ivalue_arg_indices...>) {
