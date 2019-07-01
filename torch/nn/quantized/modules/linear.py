@@ -95,7 +95,7 @@ class Linear(NNLinear):
     __constants__ = ['bias', 'in_features', 'out_features']
 
     def __init__(self, in_features, out_features, bias=True):
-        assert bias, 'nobias is not supported in Quantized Linear module yet'
+        # assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
         del self.weight
         del self.bias

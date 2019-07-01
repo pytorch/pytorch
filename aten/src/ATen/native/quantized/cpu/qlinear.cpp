@@ -32,7 +32,9 @@ class QLinearInt8 final : public c10::OperatorKernel {
     const auto* input_ptr =
         reinterpret_cast<uint8_t*>(input_contig.data<c10::quint8>());
 
-    AT_ASSERT(input.dim() >= 2);
+    TORCH_CHECK(
+        input.dim() >= 2,
+        "The dimension of input tensor should be larger than or equal to 2");
     // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
     // matrices, respectively.
     int64_t M = 1;
@@ -49,9 +51,9 @@ class QLinearInt8 final : public c10::OperatorKernel {
 
     int64_t N = static_cast<int64_t>(packB->numCols());
     int64_t K = input.size(input.dim() - 1);
-    AT_ASSERT(K == static_cast<int64_t>(packB->numRows()));
-    AT_ASSERT(bias.size(0) == N);
-    AT_ASSERT(bias.dim() == 1);
+    TORCH_CHECK(
+        K == static_cast<int64_t>(packB->numRows()),
+        "The number of rows in the packB should be equal to K");
 
     float input_scale_float = input.q_scale();
     int32_t input_zero_point_int32 = input.q_zero_point();
@@ -92,10 +94,14 @@ class QLinearInt8 final : public c10::OperatorKernel {
     // This is the end of the pipeline, pass the resulting matrix through.
     fbgemm::DoNothing<> doNothingObj{};
 
-    // TODO: contiguous is called for further jit optimizations.
-    auto bias_contig = bias.contiguous();
-    const auto* bias_ptr =
-        reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
+    const int32_t* bias_ptr = nullptr;
+    if (bias.dim() != 0) {
+      TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(bias.size(0) == N, "bias should have N elements");
+      // TODO: contiguous is called for further jit optimizations.
+      auto bias_contig = bias.contiguous();
+      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
+    }
 
     // After the uint8 * int8 matrix multiplication is performed, this operation
     // does:
@@ -152,10 +158,10 @@ class QLinearInt8 final : public c10::OperatorKernel {
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+        .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor? b=None, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             c10::RegisterOperators::options()
               .kernel<QLinearInt8<false>>(QuantizedCPUTensorId()))
-        .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+        .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor? b=None, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             c10::RegisterOperators::options()
               .kernel<QLinearInt8<true>>(QuantizedCPUTensorId()));
 } // namespace
