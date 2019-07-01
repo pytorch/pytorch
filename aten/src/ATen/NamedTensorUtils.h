@@ -34,6 +34,7 @@ namespace namedinference {
 
 optional<std::vector<Dimname>> erase_name(optional<DimnameList> self_names, int64_t dim);
 void propagate_names(Tensor& result, const Tensor& src);
+void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
 } // namespace namedinference
 
