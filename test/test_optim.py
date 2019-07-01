@@ -684,10 +684,10 @@ class TestLRScheduler(TestCase):
     def test_get_lr_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
         # lr = 0.005    if 2 <= epoch < 5
-        # lr = 0.0005   if epoch < 9
-        # lr = 0.00005   if epoch >= 9
+        # lr = 0.0005   if 5 <= epoch < 9
+        # lr = 0.00005   if 9 <= epoch
         epochs = 10
-        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 1
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_get_lr(scheduler, targets, epochs)
