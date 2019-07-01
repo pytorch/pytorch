@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 from torch._C import ListType
+import warnings
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -171,7 +172,7 @@ def _is_tensor_list(x):
 
 
 def _unimplemented(op, msg):
-    raise RuntimeError("ONNX export failed on " + op + " because " + msg + " not supported")
+    warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
 
 def _black_list_in_opset(name):
