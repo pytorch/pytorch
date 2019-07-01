@@ -4427,7 +4427,7 @@ class _TestTorchMixin(object):
 
         # randperm of 0 elements is an empty tensor
         res1 = torch.randperm(0)
-        res2 = torch.LongTensor()
+        res2 = torch.LongTensor(5)
         torch.randperm(0, out=res2)
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
