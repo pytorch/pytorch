@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <thread>
 
 namespace torch { namespace autograd {
 struct ReadyQueue;
@@ -69,9 +70,13 @@ protected:
   std::once_flag start_threads_flag_;
   // Safe to read ready_queues_ without synchronization after intialization
   std::vector<std::shared_ptr<ReadyQueue>> ready_queues_;
+  // Number of reentrant threads currently accessing ready queue
+  std::vector<int> num_reentrant_threads_;
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_
   std::mutex post_callbacks_lock_;
+  // How many nested reentrant calls are allowed until a new thread is used
+  int max_recursion_depth_;
 
   struct ThreadPoolShared {
     // Data structures used by the threads for executing reentrant backwards

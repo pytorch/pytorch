@@ -10,6 +10,7 @@ bool THPEngine_initModule(PyObject *module);
 namespace torch { namespace autograd { namespace python {
 
 struct PythonEngine : public Engine {
+  PythonEngine();
   void thread_init(int device) override;
   void thread_on_exception(FunctionTask& task, std::exception& e) override;
   variable_list execute(

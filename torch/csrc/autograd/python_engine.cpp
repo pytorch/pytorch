@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/python_headers.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -30,6 +31,10 @@ static Engine& get_python_engine() {
 }
 
 namespace torch { namespace autograd { namespace python {
+
+PythonEngine::PythonEngine () {
+  max_recursion_depth_ = 0.1*Py_GetRecursionLimit();
+}
 
 void PythonEngine::thread_init(int device) {
   // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
