@@ -15,7 +15,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
 
@@ -172,7 +172,7 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> names() const {
     return impl::internal_get_names(unsafeGetTensorImpl());
   }
@@ -260,7 +260,7 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
   bool is_named() const;
 
