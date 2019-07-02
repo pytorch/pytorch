@@ -26,7 +26,7 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
-from .env import NAMEDTENSOR_ENABLED
+from .env import BUILD_NAMEDTENSOR
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
@@ -280,7 +280,7 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
-    if NAMEDTENSOR_ENABLED:
+    if BUILD_NAMEDTENSOR:
         # Short-term plan: Don't support tracing Dimname.
         # Long-term plan: Add Dimname as a first-class type to the JIT.
         if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):

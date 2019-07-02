@@ -93,7 +93,7 @@ TEST(TorchScriptTest, TestDictArgMatching) {
       def dict_op(a: Dict[str, Tensor], b: str):
         return a[b]
     )JIT");
-  c10::impl::GenericDict dict;
+  c10::Dict<std::string, at::Tensor> dict;
   dict.insert("hello", torch::ones({2}));
   auto output = module->run_method("dict_op", dict, std::string("hello"));
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());

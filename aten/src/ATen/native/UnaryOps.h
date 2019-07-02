@@ -45,12 +45,6 @@ DECLARE_DISPATCH(unary_fn, trunc_stub);
 
 DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub);
 
-inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
-#ifdef NAMEDTENSOR_ENABLED
-      at::namedinference::propagate_names(result, src);
-#endif
-}
-
 // Missing unary functions
 // digamma
 // lgamma
