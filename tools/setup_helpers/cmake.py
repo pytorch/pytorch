@@ -20,7 +20,6 @@ from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
                    NCCL_SYSTEM_LIB, USE_NCCL)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
-from .rocm import USE_ROCM
 
 
 def _which(thefile):
@@ -281,7 +280,6 @@ class CMake:
             'USE_NCCL': USE_NCCL,
             'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
             'USE_NUMPY': USE_NUMPY,
-            'USE_ROCM': USE_ROCM,
             'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
 
