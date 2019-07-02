@@ -3183,6 +3183,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
         elif kv_same:
             # encoder-decoder attention
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
             _start = 0
             _end = embed_dim
@@ -3197,6 +3198,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
                 v = None
             else:
 
+                # This is inline in_proj function with in_proj_weight and in_proj_bias
                 _b = in_proj_bias
                 _start = embed_dim
                 _end = None
@@ -3206,6 +3208,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
                 k, v = linear(key, _w, _b).chunk(2, dim=-1)
 
         else:
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
             _start = 0
             _end = embed_dim
@@ -3214,6 +3217,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
                 _b = _b[_start:_end]
             q = linear(query, _w, _b)
 
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
             _start = embed_dim
             _end = embed_dim * 2
@@ -3222,6 +3226,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
                 _b = _b[_start:_end]
             k = linear(key, _w, _b)
 
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
             _start = embed_dim * 2
             _end = None
