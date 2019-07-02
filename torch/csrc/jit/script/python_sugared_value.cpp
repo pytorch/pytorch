@@ -525,6 +525,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto& pyCu = CompilationUnit::_get_python_cu();
     if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
+    } else if (getRecursiveScriptMode()) {
+      // Register class
+      auto rcb = py::module::import("torch._jit_internal").attr("createResolutionCallback")(2);
+      py::module::import("torch.jit").attr("_compile_and_register_class")(obj, rcb);
+
+      // Return class
+      auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName));
+      AT_ASSERT(classType, "Class '", qualifiedName, "' should have been compiled but was not");
+      return std::make_shared<ClassValue>(classType);
     }
   }
 
