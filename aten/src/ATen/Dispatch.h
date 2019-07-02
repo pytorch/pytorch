@@ -162,7 +162,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                        \
   }()
 
-#define AT_DISPATCH_FLOATING_TYPES_AND_LONG_AND_HALF(TYPE, NAME, ...)                 \
+#define AT_DISPATCH_FLOATING_TYPES_AND_LONG_AND_HALF(TYPE, NAME, ...)        \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
     /* don't use TYPE again in case it is an expensive or side-effect op */  \
