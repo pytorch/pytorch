@@ -175,7 +175,7 @@ void avg_pool2d_out_cuda_template(
   const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
   if (divisor_override.has_value()) {
-    AT_DISPATCH_FLOATING_TYPES_AND_LONG_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "avg_pool2d_out_cuda_frame",
       [&] {
         using accscalar_t = acc_type<scalar_t, false>;
@@ -199,7 +199,7 @@ void avg_pool2d_out_cuda_template(
       }
   } else {
     if (count_include_pad) {
-      AT_DISPATCH_FLOATING_TYPES_AND_LONG_AND_HALF(input.scalar_type(),
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
         "avg_pool2d_out_cuda_frame",
         [&] {
           using accscalar_t = acc_type<scalar_t, true>;
@@ -223,7 +223,7 @@ void avg_pool2d_out_cuda_template(
       );
     }
     else {
-      AT_DISPATCH_FLOATING_TYPES_AND_LONG_AND_HALF(input.scalar_type(),
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
         "avg_pool2d_out_cuda_frame",
         [&] {
           using accscalar_t = acc_type<scalar_t, true>;
@@ -324,7 +324,7 @@ Tensor& avg_pool2d_backward_out_cuda_template(
   const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
   if (divisor_override.has_value()) {
-    AT_DISPATCH_FLOATING_TYPES_AND_LONG_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "avg_pool2d_backward_out_cuda_frame",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
@@ -349,7 +349,7 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     );
   } else {
     if (count_include_pad) {
-      AT_DISPATCH_FLOATING_TYPES_AND_LONG_AND_HALF(input.scalar_type(),
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
         "avg_pool2d_backward_out_cuda_frame",
         [&] {
           using accscalar_t = acc_type<scalar_t, true>;
@@ -373,7 +373,7 @@ Tensor& avg_pool2d_backward_out_cuda_template(
       );
     }
     else {
-      AT_DISPATCH_FLOATING_TYPES_AND_LONG_AND_HALF(input.scalar_type(),
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
         "avg_pool2d_backward_out_cuda_frame",
         [&] {
           using accscalar_t = acc_type<scalar_t, true>;

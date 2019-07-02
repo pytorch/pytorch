@@ -515,7 +515,7 @@ class TestAvgPool(TestCase):
             return self._sum_pool2d(x, kernel_size) / size
         n = 5
         m = 8
-        input = torch.rand(1, 1, n, m).cpu()
+        input = torch.rand(1, 1, n, m)
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 acctual = torch.nn.functional.avg_pool2d(input[0], (i, j))
@@ -530,7 +530,7 @@ class TestAvgPool(TestCase):
     def test_doubletensor_sum_pool2d(self):
         n = 3
         m = 3
-        input = torch.rand(1, 1, n, m).cpu()
+        input = torch.rand(1, 1, n, m)
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 for divisor in [1, 7, i * j]:
@@ -546,7 +546,7 @@ class TestAvgPool(TestCase):
         h = 6
         w = 5
         d = 7
-        input = torch.rand(h, w, d).cpu()
+        input = torch.rand(h, w, d)
         for i in range(1, h + 1):
             for j in range(1, w + 1):
                 for k in range(1, d + 1):
@@ -559,7 +559,7 @@ class TestAvgPool(TestCase):
         h = 6
         w = 5
         d = 7
-        input = torch.rand(h, w, d).cpu()
+        input = torch.rand(h, w, d)
         for i in range(1, h + 1):
             for j in range(1, w + 1):
                 for k in range(1, d + 1):
@@ -577,7 +577,7 @@ class TestLongTensor(TestCase):
     def test_longtensor_avg_pool2d_same_as_doubletensor(self):
         n = 7
         m = 8
-        l_input = torch.LongTensor(1, n, m).random_(-1000, 1000).cpu()
+        l_input = torch.randint(-1000, 1000, size=(1, n, m))
         d_input = l_input.clone().double()
         for i in range(n):
             for j in range(m):
@@ -589,7 +589,7 @@ class TestLongTensor(TestCase):
         n = 7
         m = 8
         l = 6
-        l_input = torch.LongTensor(1, n, m, l).random_(-1000, 1000).cpu()
+        l_input = torch.randint(-1000, 1000, size=(1, n, m, l))
         d_input = l_input.clone().double()
         for i in range(n):
             for j in range(m):
