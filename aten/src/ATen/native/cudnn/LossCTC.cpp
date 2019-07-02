@@ -46,14 +46,14 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   checkBackend(c, {*log_probs}, Backend::CUDA);
   checkBackend(c, {*targets}, Backend::CPU);
   int64_t batch_size = log_probs->size(1);
-  AT_CHECK(input_lengths_.size() == batch_size, "input_lengths needs to have size to match batch_size");
-  AT_CHECK(target_lengths_.size() == batch_size, "target_lengths needs to have size to match batch_size");
+  TORCH_CHECK(input_lengths_.size() == batch_size, "input_lengths needs to have size to match batch_size");
+  TORCH_CHECK(target_lengths_.size() == batch_size, "target_lengths needs to have size to match batch_size");
 
   std::vector<int> input_lengths(input_lengths_.begin(), input_lengths_.end());
   std::vector<int> target_lengths(target_lengths_.begin(), target_lengths_.end());
 
   setCuDNNStreamToCurrent();
-  AT_CHECK(BLANK == 0, "blank must be label 0 for cudnn_ctc_loss");
+  TORCH_CHECK(BLANK == 0, "blank must be label 0 for cudnn_ctc_loss");
   // checked in dispatch:
   // assert other conditions for cudnnCTCLoss: all label lengths <= 256
   // all input lengths = logprob.size(0)

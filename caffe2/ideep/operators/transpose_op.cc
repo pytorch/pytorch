@@ -1,0 +1,35 @@
+#include <caffe2/ideep/ideep_utils.h>
+
+using namespace caffe2;
+
+namespace {
+
+class IDEEPTransposeOp final : public IDEEPOperator {
+ public:
+  USE_IDEEP_DEF_ALIASES();
+  USE_IDEEP_OPERATOR_FUNCTIONS();
+
+  IDEEPTransposeOp(const OperatorDef& operator_def, Workspace* ws)
+      : IDEEPOperator(operator_def, ws),
+        axes_(this->template GetRepeatedArgument<int>("axes")){ }
+  ~IDEEPTransposeOp() override {}
+
+  bool RunOnDevice() override {
+    const auto& X = Input(INPUT);
+    auto* Y = Output(OUTPUT);
+
+    Y->transpose_from(X, axes_);
+
+    return true;
+  }
+
+ private:
+  std::vector<int> axes_;
+
+  INPUT_TAGS(INPUT);
+  OUTPUT_TAGS(OUTPUT);
+};
+
+REGISTER_IDEEP_OPERATOR(Transpose, IDEEPTransposeOp);
+
+} // namespace

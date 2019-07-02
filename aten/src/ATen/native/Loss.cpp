@@ -1,9 +1,15 @@
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/CPUApplyUtils.h>
 
 #define EPSILON 1e-12
+#define _USE_MATH_DEFINES
 
 namespace {
   static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
@@ -124,5 +130,22 @@ Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tenso
     }
 
     return grad_input;
+}
+
+Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool log_input, const bool full, const double eps, const int64_t reduction)
+{
+    Tensor loss;
+    if (log_input) {
+        loss = at::exp(input) - target * input;
+    } else {
+        loss = input - target * at::log(input + eps);
+    }
+    
+    if (full) {
+        auto mask1 = (target > 1);
+        loss.masked_select(mask1) += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).masked_select(mask1);
+    }
+
+    return apply_loss_reduction(loss, reduction);
 }
 }}  // namespace at::native

@@ -2,15 +2,23 @@
 
 namespace c10 {
 
-ThreadPool::ThreadPool(std::size_t pool_size, int numa_node_id)
-    : threads_(pool_size),
+ThreadPool::ThreadPool(
+      int pool_size,
+      int numa_node_id,
+      std::function<void()> init_thread)
+    : threads_(pool_size < 0 ? defaultNumThreads() : pool_size),
       running_(true),
       complete_(true),
       available_(threads_.size()),
       total_(threads_.size()),
       numa_node_id_(numa_node_id) {
   for (std::size_t i = 0; i < threads_.size(); ++i) {
-    threads_[i] = std::thread(std::bind(&ThreadPool::main_loop, this, i));
+    threads_[i] = std::thread([this, i, init_thread](){
+      if (init_thread) {
+        init_thread();
+      }
+      this->main_loop(i);
+    });
   }
 }
 
@@ -48,6 +56,9 @@ bool ThreadPool::inThreadPool() const {
 }
 
 void ThreadPool::run(const std::function<void()>& func) {
+  if (threads_.size() == 0) {
+    throw std::runtime_error("No threads to run a task");
+  }
   std::unique_lock<std::mutex> lock(mutex_);
 
   // Set task and signal condition variable so that a worker thread will
@@ -65,8 +76,6 @@ void ThreadPool::waitWorkComplete() {
 }
 
 void ThreadPool::main_loop(std::size_t index) {
-  init_thread();
-
   std::unique_lock<std::mutex> lock(mutex_);
   while (running_) {
     // Wait on condition variable while the task is empty and
@@ -118,20 +127,6 @@ void ThreadPool::main_loop(std::size_t index) {
       // the lock.
     }
   } // while running_
-}
-
-// constexpr initialization guaranteed to be before any static initialization
-std::atomic<int> num_threads{1};
-void setNumThreads(size_t v) {
-  if(-1  == num_threads.exchange(v)) {
-   throw std::runtime_error("Error: cannot set num threads after pool has started");
-  }
-}
-
-TaskThreadPoolBase& global_work_queue() {
-  static std::shared_ptr<TaskThreadPoolBase> pool =
-      ThreadPoolRegistry()->Create("C10", 0, num_threads.exchange(-1), false);
-  return *pool;
 }
 
 C10_DEFINE_SHARED_REGISTRY(

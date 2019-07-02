@@ -502,6 +502,12 @@ class Struct(Field):
                 children[name] = right_field
                 continue
             left_field = children[name]
+            if not (isinstance(left_field, Struct) and isinstance(right_field, Struct)):
+                raise TypeError(
+                    "Type of left_field, " + str(type(left_field)) +
+                    ", and type of right_field, " +
+                    str(type(right_field)) +
+                    ", must both the Struct to allow merging of the field, " + name)
             children[name] = left_field + right_field
 
         return Struct(*(viewitems(children)))

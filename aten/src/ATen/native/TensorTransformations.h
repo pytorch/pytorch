@@ -31,18 +31,18 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
   // check duplicates in dims
   wrap_all_dims(flip_dims_v, total_dims);
   flip_dims_v.erase(std::unique(flip_dims_v.begin(), flip_dims_v.end()), flip_dims_v.end());
-  AT_CHECK((int64_t)flip_dims_v.size() == flip_dims_size,
+  TORCH_CHECK((int64_t)flip_dims_v.size() == flip_dims_size,
     "dims has duplicates, original flip dims size=", flip_dims_size,
     ", but unique flip dims size=", flip_dims_v.size());
 }
 
 static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
-  AT_CHECK(shifts.size() > 0, "`shifts` required");
+  TORCH_CHECK(shifts.size() > 0, "`shifts` required");
   if (dims.size() == 0 && shifts.size() == 1) {
     auto flattened = self.contiguous().view(self.numel());
     return roll(flattened, shifts[0], 0).view(self.sizes());
   }
-  AT_CHECK(
+  TORCH_CHECK(
     shifts.size() == dims.size(),
     "shifts and dimensions must align. shifts: ", shifts.size(), ", dims:", dims.size()
   );

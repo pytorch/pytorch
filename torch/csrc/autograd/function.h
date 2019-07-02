@@ -34,7 +34,7 @@ using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
 
 // Custom deleter to prevent stack overflows.
-void deleteFunction(Function* function);
+TORCH_API void deleteFunction(Function* function);
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                               Function
@@ -214,7 +214,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
-    AT_CHECK(output_edge_index < num_outputs(), "Index out of range");
+    TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
     return next_edges_[output_edge_index].is_valid();
   }
 
@@ -247,13 +247,27 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   // Hook API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void add_post_hook(std::unique_ptr<FunctionPostHook>&& post_hook) {
+  uintptr_t add_post_hook(std::unique_ptr<FunctionPostHook>&& post_hook) {
     post_hooks_.push_back(std::move(post_hook));
+    // Use the raw pointer as the unique key to identify this hook. This key
+    // can then be used in del_post_hook(key) to remove this hook.
+    return reinterpret_cast<std::uintptr_t>(post_hooks_.back().get());
   }
 
   const std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() const
       noexcept {
     return post_hooks_;
+  }
+
+  // delete a post hook matching the key
+  bool del_post_hook(const uintptr_t& key) {
+    for (auto it = post_hooks_.begin(); it != post_hooks_.end(); ++it) {
+      if (key == reinterpret_cast<std::uintptr_t>(it->get())) {
+        post_hooks_.erase(it);
+        return true;
+      }
+    }
+    return false;
   }
 
   std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() noexcept {

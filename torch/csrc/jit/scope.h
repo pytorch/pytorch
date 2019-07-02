@@ -21,45 +21,26 @@ struct TORCH_API Scope : public c10::intrusive_ptr_target {
  private:
   ScopePtr parent_;
   Symbol name_;
-  ScopePtr intrusive_from_this() {
-    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
-                                           // from a raw `this` pointer
-                                           // so we need to bump the refcount
-                                           // to account for this ownership
-    return c10::intrusive_ptr<Scope>::reclaim(this);
-  }
+  ScopePtr intrusive_from_this();
 
  public:
-  Scope() {
-    name_ = Symbol::scope("");
-  }
-  Scope(ScopePtr parent, Symbol name) {
-    name_ = name;
-    parent_ = std::move(parent);
-  }
+  Scope();
+
+  Scope(ScopePtr parent, Symbol name);
+
   ScopePtr push(Symbol name);
 
-  ScopePtr parent() {
-    if (!parent_) {
-      throw std::runtime_error("Cannot get parent from Scope with no parent");
-    }
-    return parent_;
-  }
-  bool isRoot() const {
-    return !parent_;
-  }
-  bool isBlank() const {
-    static const Symbol blank = Symbol::scope("");
-    return isRoot() && name() == blank;
-  }
+  ScopePtr parent();
+
+  bool isRoot() const;
+
+  bool isBlank() const;
 
   ScopePtr getRoot();
 
   size_t getDepth();
 
-  Symbol name() const {
-    return name_;
-  }
+  Symbol name() const;
 
   std::string namesFromRoot(const std::string& separator = "/") const;
 };
