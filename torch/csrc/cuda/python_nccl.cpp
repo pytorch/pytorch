@@ -191,10 +191,10 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
     ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel();
+    AutoNcclGroup nccl_group_guard;
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;
-    AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
@@ -270,10 +270,10 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
     ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel();
+    AutoNcclGroup nccl_group_guard;
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;
-    AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
@@ -332,10 +332,10 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
     ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel() / len;
+    AutoNcclGroup nccl_group_guard;
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;
-    AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);

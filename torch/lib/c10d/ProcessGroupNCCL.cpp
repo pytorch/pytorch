@@ -17,18 +17,16 @@ namespace {
 
 struct AutoNcclGroup {
   AutoNcclGroup() {
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     C10D_NCCL_CHECK(ncclGroupStart());
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #endif
   }
   ~AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     C10D_NCCL_CHECK(ncclGroupEnd());
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
 #endif
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
 };
 
@@ -408,24 +406,27 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   pre(ncclStreams_[key]);
 
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    gpuGuard.set_index(devices[i].index());
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+
+    // Both `inputs' and `outputs' are created on a worker stream and used in
+    // different ncclStreams.  Hence, both must record the ncclStream to
+    // prevent being freed before the collective finishes.
+    //
+    // We only record `inputs' here, and leave recording `outputs' to `fn' for
+    // operations where `inputs' and `outputs' are not the same.
+    //
+    // See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+        inputs[i].storage().data(), ncclStream);
+  }
+
   {
     AutoNcclGroup nccl_group_guard;
-
     for (size_t i = 0; i < inputs.size(); ++i) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-
-      // Both `inputs' and `outputs' are created on a worker stream and used in
-      // different ncclStreams.  Hence, both must record the ncclStream to
-      // prevent being freed before the collective finishes.
-      //
-      // We only record `inputs' here, and leave recording `outputs' to `fn' for
-      // operations where `inputs' and `outputs' are not the same.
-      //
-      // See [Sync Streams].
-      c10::cuda::CUDACachingAllocator::recordStream(
-          inputs[i].storage().data(), ncclStream);
-
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
     }
