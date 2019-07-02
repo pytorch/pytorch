@@ -122,7 +122,6 @@ void avg_pool2d_out_cuda_template(
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  int divisor_override,
   c10::optional<int64_t> divisor_override)
 {
   TensorArg output_arg{ output, "output", 1 };
