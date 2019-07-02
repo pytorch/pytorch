@@ -261,11 +261,16 @@ class Subset(Dataset):
 
 class ChunkDataset(IterableDataset):
     r"""
-    Subset of a dataset at specified indices.
+    Wrapper class for the C++ ChunkDataset class.
+
+    Additional to the role of wrapping its C++ counterpart dataset class,
+    it also allows collation, convertion or transformation through ``collate_fn``.
+    ``ChunkDataset`` extends ``IterableDataset`` because the size of the dataset is
+    unknown.
 
     Arguments:
         dataset (Dataset): The whole Dataset
-        indices (sequence): Indices in the whole set selected for subset
+        collate_fn (optional, callable): Collates, converts or transform batches
     """
     def __init__(self, dataset, collate_fn=None):
         super(ChunkDataset, self).__init__()
