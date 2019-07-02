@@ -207,6 +207,7 @@ Tensor & VariableType::detach_(Tensor & self) {
     node = graph->create(jit::aten::detach, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
+    jit::tracer::addInputs(node, "allow_tensor_metadata_change", false);
     graph->insertNode(node);
     jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
