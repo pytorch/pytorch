@@ -16,11 +16,11 @@ using namespace at;
 TEST(TestQTensor, QuantDequantAPIs) {
   auto num_elements = 10;
   Tensor r = at::ones({num_elements});
-  const float scale = 1.0;
-  const int32_t zero_point = 2;
+  const double scale = 1.0;
+  const int64_t zero_point = 2;
   Tensor qr = at::quantize_linear(r, scale, zero_point, kQUInt8);
-  ASSERT_EQ(qr.q_scale().to<float>(), scale);
-  ASSERT_EQ(qr.q_zero_point().to<int32_t>(), zero_point);
+  ASSERT_EQ(qr.q_scale(), scale);
+  ASSERT_EQ(qr.q_zero_point(), zero_point);
   ASSERT_TRUE(qr.is_quantized());
   ASSERT_FALSE(r.is_quantized());
 

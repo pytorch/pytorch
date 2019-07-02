@@ -60,7 +60,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
-      c10::ListPtr<at::Tensor> outputs);
+      c10::List<at::Tensor> outputs);
 #endif
 
   virtual ~OperatorBase() noexcept;
@@ -636,7 +636,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-  c10::ListPtr<at::Tensor> move_newstyle_outputs() && {
+  c10::List<at::Tensor> move_newstyle_outputs() && {
     return std::move(newstyle_outputs_);
   }
 #endif
@@ -656,7 +656,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;
-  c10::ListPtr<at::Tensor> newstyle_outputs_;
+  c10::List<at::Tensor> newstyle_outputs_;
 #endif
   // HACK
   // We preserve the fact that Output() returns Tensor*
@@ -793,7 +793,7 @@ class Operator : public OperatorBase {
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
-      c10::ListPtr<at::Tensor> outputs)
+      c10::List<at::Tensor> outputs)
       : OperatorBase(fn_schema, std::move(inputs), std::move(outputs)) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.

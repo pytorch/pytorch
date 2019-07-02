@@ -18,10 +18,10 @@ class ScriptModuleSerializer : public BlobSerializerBase {
       TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(typeMeta.Match<std::shared_ptr<Module>>());
+    CAFFE_ENFORCE(typeMeta.Match<Module>());
 
     std::stringstream ss;
-    (*static_cast<const std::shared_ptr<Module>*>(pointer))->save(ss);
+    (*static_cast<const Module*>(pointer)).save(ss);
 
     // NB: wrapping the entire zip archive as one string is probably not a
     // good idea and might be slow. This is meant as a workaround, any proper
@@ -45,7 +45,7 @@ class ScriptModuleDeserializer : public BlobDeserializerBase {
     std::stringstream ss;
     ss << serialized;
     ss.seekg(0);
-    *blob->GetMutable<std::shared_ptr<Module>>() = torch::jit::load(ss);
+    *blob->GetMutable<Module>() = torch::jit::load(ss);
   }
 };
 
@@ -62,7 +62,7 @@ class ScriptModuleLoadOp final : public Operator<CPUContext> {
     std::stringstream ss;
     ss << moduleBinary;
     ss.seekg(0);
-    *OperatorBase::Output<std::shared_ptr<Module>>(0) = torch::jit::load(ss);
+    *OperatorBase::Output<Module>(0) = torch::jit::load(ss);
     return true;
   }
 };
@@ -83,12 +83,13 @@ class ScriptModuleOp final : public Operator<Context> {
   }
 
   static caffe2::Tensor castIValueToTensor(IValue v) {
-    return caffe2::Tensor(torch::autograd::Variable(std::move(v).toTensor()).tensor_data());
+    return caffe2::Tensor(
+        torch::autograd::Variable(std::move(v).toTensor()).tensor_data());
   }
 
   bool RunOnDevice() override {
-    const auto& module = OperatorBase::Input<std::shared_ptr<Module>>(0);
-    Method method = module->get_method(method_name_);
+    const auto& module = OperatorBase::Input<Module>(0);
+    Method method = module.get_method(method_name_);
     // Assume all inputs are tensor for now
     std::vector<IValue> inputs;
     const int num_inputs = InputSize();
@@ -121,11 +122,9 @@ class ScriptModuleOp final : public Operator<Context> {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(std::shared_ptr<Module>);
+CAFFE_KNOWN_TYPE(Module);
 
-REGISTER_BLOB_SERIALIZER(
-    (TypeMeta::Id<std::shared_ptr<Module>>()),
-    ScriptModuleSerializer);
+REGISTER_BLOB_SERIALIZER((TypeMeta::Id<Module>()), ScriptModuleSerializer);
 // NB: the first argument to REGISTER_BLOB_DESERIALIZER macro doesn't really
 // need to be a real type, it just get converted to string
 REGISTER_BLOB_DESERIALIZER(

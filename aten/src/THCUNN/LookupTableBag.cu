@@ -12,7 +12,6 @@
 #endif
 #include <thrust/unique.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCTensorSort.cuh>
 
 #if defined(__HIP_PLATFORM_HCC__)

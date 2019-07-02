@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 import itertools
 import random
+import os
 
 
 """Performance microbenchmarks's utils.
@@ -24,6 +25,22 @@ def numpy_random_fp32(*shape):
     # TODO: consider more complex/custom dynamic ranges for
     # comprehensive test coverage.
     return np.random.rand(*shape).astype(np.float32)
+
+
+def set_omp_threads(num_threads): 
+    existing_value = os.environ.get('OMP_NUM_THREADS', '')
+    if existing_value != '': 
+        print("Overwriting existing OMP_NUM_THREADS value: {}; Setting it to {}.".format(
+            existing_value, num_threads))
+    os.environ["OMP_NUM_THREADS"] = str(num_threads)
+
+
+def set_mkl_threads(num_threads):
+    existing_value = os.environ.get('MKL_NUM_THREADS', '')
+    if existing_value != '': 
+        print("Overwriting existing MKL_NUM_THREADS value: {}; Setting it to {}.".format(
+            existing_value, num_threads))
+    os.environ["MKL_NUM_THREADS"] = str(num_threads)
 
 
 def cross_product(*inputs):

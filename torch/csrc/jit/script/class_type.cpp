@@ -7,16 +7,6 @@ namespace c10 {
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
 
-#ifndef C10_ANDROID
-namespace ivalue {
-Object::~Object() {
-  if (type_->is_module()) {
-    type_->compilation_unit()->drop_all_functions();
-  }
-}
-} // namespace ivalue
-#endif
-
 std::shared_ptr<Function> ClassType::getMethod(const std::string& name) const {
   return compilation_unit_->find_function(name);
 }
