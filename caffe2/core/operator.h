@@ -126,28 +126,14 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
   template <typename T>
   inline vector<T> GetVectorFromIValueList(const c10::IValue& value) const {
-    return value.template to<vector<T>>();
+    return c10::impl::toVector(value.template to<List<T>>());
   }
 #endif
 
   template <typename T>
   inline vector<T> GetRepeatedArgument(
       const string& name,
-      const vector<T>& default_value = {}) const {
-    if (isLegacyOperator()) {
-      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-      return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
-          *operator_def_, name, default_value);
-    }
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
-    auto index = argumentIndexWithName(name);
-    CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
-    const auto& value = newstyle_inputs_[index.value()];
-    return GetVectorFromIValueList<T>(value);
-#else
-    CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
-#endif
-  }
+      const vector<T>& default_value = {}) const;
 
   // Get the inputs and outputs as specific types.
   template <typename T>
@@ -779,6 +765,53 @@ inline vector<string> OperatorBase::GetVectorFromIValueList<string>(
   enum _InputTags { first_input = 0, __VA_ARGS__ }
 #define OUTPUT_TAGS(first_input, ...)                                          \
   enum _OutputTags { first_input = 0, __VA_ARGS__ }
+
+
+template <typename T>
+inline vector<T> OperatorBase::GetRepeatedArgument(
+    const string& name,
+    const vector<T>& default_value) const {
+  if (isLegacyOperator()) {
+    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+    return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
+        *operator_def_, name, default_value);
+  }
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+  auto index = argumentIndexWithName(name);
+  CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
+  const auto& value = newstyle_inputs_[index.value()];
+  return GetVectorFromIValueList<T>(value);
+#else
+  CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
+#endif
+}
+
+// We need this specialisation because IValue based lists don't support
+// int16_t. We need to load it as List<int64_t> and transform to int16_t.
+template <>
+inline vector<int16_t> OperatorBase::GetRepeatedArgument<int16_t>(
+    const string& name,
+    const vector<int16_t>& default_value) const {
+  if (isLegacyOperator()) {
+    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+    return ArgumentHelper::GetRepeatedArgument<OperatorDef, int16_t>(
+        *operator_def_, name, default_value);
+  }
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+  auto index = argumentIndexWithName(name);
+  CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
+  const auto& value = newstyle_inputs_[index.value()];
+  auto vec = GetVectorFromIValueList<int64_t>(value);
+  std::vector<int16_t> result;
+  result.reserve(vec.size());
+  for (int64_t elem : vec) {
+    result.push_back(static_cast<int16_t>(elem));
+  }
+  return result;
+#else
+  CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
+#endif
+}
 
 // Operator is the class that you usually want to derive, if your operator will
 // run on different devices. You should then implement the RunOnDevice()
