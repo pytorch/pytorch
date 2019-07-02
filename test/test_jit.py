@@ -48,6 +48,7 @@ import copy
 import inspect
 import math
 import numpy as np
+import numbers
 import io
 import os
 import pickle
@@ -5078,19 +5079,26 @@ a")
                 if debug:
                     print("in: ", a, b)
                     print("out: ", res_python, res_script)
-                if type(res_python) == type(res_script):
-                    if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
+                # We can't use assertEqual because of a couple of differences:
+                # 1. nan == nan should return true
+                # 2. When python functions throw an exception, we usually want to silently ignore them.
+                # (ie: We want to return `nan` for math.sqrt(-5))
+                if res_python != res_script:
+                    if isinstance(res_python, Exception):
                         continue
-                    if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
-                        continue
-                msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
-                        .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                if isinstance(res_python, numbers.Number) and isinstance(res_script, numbers.Number):
-                    mx_val = max(abs(res_python), abs(res_script))
-                    prec = 1e-4 * mx_val
-                else:
-                    prec = (1e-4)
-                self.assertEqual(res_python, res_script, message=msg, prec=prec)
+                    if type(res_python) == type(res_script):
+                        if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
+                            continue
+                        if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
+                            continue
+                    msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
+                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
+                    if isinstance(res_python, numbers.Number) and isinstance(res_script, numbers.Number):
+                        mx_val = max(abs(res_python), abs(res_script))
+                        prec = 1e-4 * mx_val
+                    else:
+                        prec = (1e-4)
+                    self.assertEqual(res_python, res_script, message=msg, prec=prec)
 
 
         ops = [x for x in dir(math) if callable(getattr(math, x))]
