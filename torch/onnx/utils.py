@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 r"""
 The torch.onnx module contains functions to export models into the ONNX
 IR format.  These models can be loaded with the ONNX library and then
@@ -220,6 +222,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lint(graph)
 
+        torch._C._jit_pass_onnx_remove_print(graph)
+        torch._C._jit_pass_onnx_preprocess_caffe2(graph)
+
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
 
@@ -370,9 +375,11 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=False):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+    from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
+    _set_operator_export_type(operator_export_type)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
@@ -396,9 +403,11 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     __IN_ONNX_EXPORT = True
     try:
         from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+        from torch.onnx.symbolic_helper import _set_operator_export_type
         if opset_version is None:
             opset_version = _default_onnx_opset_version
         _set_opset_version(opset_version)
+        _set_operator_export_type(operator_export_type)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
