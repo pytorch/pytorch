@@ -4,7 +4,7 @@
 
 #include <ATen/InferSize.h>
 #include <new>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
