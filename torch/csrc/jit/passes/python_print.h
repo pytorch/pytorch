@@ -12,16 +12,6 @@ struct Method;
 struct Module;
 } // namespace script
 
-// A pair of (byte offset, SourceRange) describing a specific segment
-// of the output stream
-struct TaggedRange {
-  TaggedRange(size_t bytes, SourceRange range)
-      : bytes(bytes), range(std::move(range)) {}
-  size_t bytes;
-  SourceRange range;
-};
-using SourceRangeRecords = std::vector<TaggedRange>;
-
 TORCH_API void PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,

@@ -1,7 +1,16 @@
 #include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/source_range_serialization.h>
 
 namespace torch {
 namespace jit {
+
+c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
+    const SourceRange& range) {
+  if (!gen_ranges_) {
+    return c10::nullopt;
+  }
+  return gen_ranges_->findSourceRangeThatGenerated(range);
+}
 
 // a range of a shared string 'file_' with
 C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
@@ -56,6 +65,13 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   out << str.substr(end_line, end_highlight - end_line);
   if (!str.empty() && str.back() != '\n')
     out << "\n";
+  // Retrieve original SourceRange, if present.
+  if (source_) {
+    if (auto orig_source_range = findSourceRangeThatGenerated()) {
+      out << "Compiled from code ";
+      orig_source_range->highlight(out);
+    }
+  }
 }
 
 } // namespace jit

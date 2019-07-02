@@ -8,6 +8,9 @@
 namespace torch {
 namespace jit {
 
+struct SourceRangeUnpickler;
+struct SourceRange;
+
 // Source represents a code segment. It keeps track of:
 //  - text : the text of the code segment
 //  - filename (optional) : if present, represents the name of the file from
@@ -15,18 +18,25 @@ namespace jit {
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
 struct Source {
-  explicit Source(std::string text)
-      : text_(std::move(text)), filename_(c10::nullopt) {
+  explicit Source(
+      std::string text,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : text_(std::move(text)),
+        filename_(c10::nullopt),
+        starting_line_no_(0),
+        gen_ranges_(std::move(gen_ranges)) {
     calc_line_start_offsets();
   }
 
   Source(
       std::string text,
       c10::optional<std::string> filename,
-      size_t starting_line_no)
+      size_t starting_line_no,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
       : text_(std::move(text)),
         filename_(std::move(filename)),
-        starting_line_no_(starting_line_no) {
+        starting_line_no_(starting_line_no),
+        gen_ranges_(std::move(gen_ranges)) {
     calc_line_start_offsets();
   }
 
@@ -67,6 +77,9 @@ struct Source {
     return starting_line_no_;
   }
 
+  c10::optional<SourceRange> findSourceRangeThatGenerated(
+      const SourceRange& range);
+
  private:
   void calc_line_start_offsets() {
     size_t pos = 0;
@@ -82,6 +95,8 @@ struct Source {
   // Starting offsets for lines into the source. e.g. line 0 starts at
   // line_starting_offsets_[0], etc.
   std::vector<size_t> line_starting_offsets_;
+
+  std::shared_ptr<SourceRangeUnpickler> gen_ranges_;
 };
 
 // A SourceRange is a view into a Source, that points to a subset of the source,
@@ -139,6 +154,13 @@ struct CAFFE2_API SourceRange {
   bool operator!=(const SourceRange& rhs) const {
     return !(*this == rhs);
   }
+  
+  c10::optional<SourceRange> findSourceRangeThatGenerated() const {
+    if (!source_) {
+      return c10::nullopt;
+    }
+    return source_->findSourceRangeThatGenerated(*this);
+  }
 
  private:
   std::shared_ptr<Source> source_;
@@ -150,6 +172,16 @@ inline std::ostream& operator<<(std::ostream& out, const SourceRange& range) {
   range.highlight(out);
   return out;
 }
+
+// A pair of (byte offset, SourceRange) describing a specific segment
+// of the output stream
+struct TaggedRange {
+  TaggedRange(size_t bytes, SourceRange range)
+      : bytes(bytes), range(std::move(range)) {}
+  size_t bytes;
+  SourceRange range;
+};
+using SourceRangeRecords = std::vector<TaggedRange>;
 
 } // namespace jit
 } // namespace torch

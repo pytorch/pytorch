@@ -171,10 +171,13 @@ struct PythonPrintPass {
   SourceRangeStack source_range_stack_ = {SourceRange("")};
 
   struct WithSourceRange {
-    explicit WithSourceRange(SourceRangeStack* stack, SourceRange sr)
-        : stack(stack) {
+    explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
       TORCH_INTERNAL_ASSERT(stack);
-      stack->push_back(std::move(sr));
+      if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
+        stack->push_back(std::move(gen_source.value()));
+      } else {
+        stack->push_back(std::move(n->sourceRange()));
+      }
     }
 
     ~WithSourceRange() {
@@ -190,6 +193,13 @@ struct PythonPrintPass {
     TaggedStringStream(TaggedStringStream&& rhs) = default;
 
     TaggedStringStream& operator<<(const std::string& s) {
+      // This prevents having redundant entries at the same offset,
+      // which can happen for example in printValueList when begin
+      // and end are the empty string.
+      if (s.size() == 0) {
+        return *this;
+      }
+
       if (!ranges_.size() || ranges_.back().range != srs_->back()) {
         ranges_.emplace_back((size_t)oss_.tellp(), srs_->back());
       }
@@ -231,6 +241,21 @@ struct PythonPrintPass {
 
     const std::vector<TaggedRange>& ranges() const {
       return ranges_;
+    }
+
+    // Write out this TaggedStringStream's text and source ranges to
+    // os and source_ranges_out, respectively. stream_pos gives
+    // the byte offset into the current stream, so we can accurately
+    // record source ranges as byte offsets.
+    void print(
+        std::ostream& os,
+        SourceRangeRecords* source_ranges_out,
+        int64_t stream_pos) {
+      os << str();
+      for (const auto& x : ranges()) {
+        source_ranges_out->push_back(x);
+        source_ranges_out->back().bytes += stream_pos;
+      }
     }
 
    private:
@@ -756,7 +781,7 @@ struct PythonPrintPass {
   }
 
   void printNode(Node* node, bool print_const) {
-    WithSourceRange guard(&source_range_stack_, node->sourceRange());
+    WithSourceRange guard(&source_range_stack_, node);
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -1149,8 +1174,7 @@ struct PythonPrintPass {
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
 
-    WithSourceRange guard(
-        &source_range_stack_, graph.param_node()->sourceRange());
+    WithSourceRange guard(&source_range_stack_, graph.param_node());
 
     indent();
     body_ << "def " << func.name() << "(";
@@ -1250,8 +1274,9 @@ struct PythonPrintPass {
   }
 
   void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
-    out << getImports() << body_.str();
-    source_ranges_out = body_.ranges();
+    out << getImports();
+    int64_t source_offset = out.tellp();
+    body_.print(out, &source_ranges_out, source_offset);
   }
 };
 

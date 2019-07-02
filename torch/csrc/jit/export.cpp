@@ -11,7 +11,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/source_range_serializer.h>
+#include <torch/csrc/jit/source_range_serialization.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -931,21 +931,14 @@ void ScriptModuleSerializer::convertModule(
     // Write out debug records
     torch::RecordRef* debug_record =
         module_def->mutable_torchscript_debug_arena();
-    Pickler p;
-    SourceRangeSerializer srs;
-    p.start();
-    p.startTuple();
-    for (const auto& range : source_ranges) {
-      std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
-                                         srs.serialize(range.range)};
-      p.addIValue(c10::ivalue::Tuple::create(std::move(row_elems)));
-    }
-    p.endTuple();
-    p.finish();
+
+    SourceRangePickler source_range_pickler;
+    source_range_pickler.pickle(source_ranges);
+    const auto& range_data = source_range_pickler.get_data();
     std::stringstream debug_filename;
     debug_filename << "debug/" << module_name.str() << ".pkl";
     writer_.writeRecord(
-        debug_filename.str(), p.stack().data(), p.stack().size());
+        debug_filename.str(), range_data.data(), range_data.size());
     debug_record->set_key(debug_filename.str());
   }
 
