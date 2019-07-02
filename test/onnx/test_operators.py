@@ -639,6 +639,12 @@ class TestOperators(TestCase):
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
 
+    def test_layer_norm_aten(self):
+        model = torch.nn.LayerNorm([10, 10])
+        x = torch.randn(20, 5, 10, 10)
+        self.assertONNX(model, x,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
