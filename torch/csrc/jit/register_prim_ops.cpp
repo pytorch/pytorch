@@ -77,8 +77,8 @@ template <typename dtype> // int64_t, bool, double
 Operation listConstruct(int64_t num_inputs) {
   return [=](Stack& stack) {
     auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    std::vector<dtype> vals =
-        fmap(inputs, [](const IValue& v) { return v.to<dtype>(); });
+    c10::List<dtype> vals =
+        c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
     drop(stack, num_inputs);
     push(stack, std::move(vals));
     return 0;
@@ -591,7 +591,7 @@ RegisterOperators reg(
                    size, peek(stack, i, num_inputs).toIntListRef());
              }
              drop(stack, num_inputs);
-             push(stack, std::move(size));
+             push(stack, c10::impl::toList(std::move(size)));
              return 0;
            };
          }),
@@ -2830,16 +2830,16 @@ RegisterOperators reg3({
 at::Tensor leaky_relu(const at::Tensor& tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
-at::Tensor cat(const std::vector<at::Tensor>& tensors) {
-  return at::cat(tensors);
+at::Tensor cat(const c10::List<at::Tensor>& tensors) {
+  return at::cat(c10::impl::toVector(tensors));
 }
 
-std::string get_first(const std::vector<std::vector<std::string>>& strings) {
-  return strings[0][0];
+std::string get_first(const c10::List<c10::List<std::string>>& strings) {
+  return strings.get(0).get(0);
 }
 
 static auto reg4 =
-    torch::jit::RegisterOperators()
+    torch::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",
             &leaky_relu)
         .op("_test::cat(Tensor[] inputs) -> Tensor", &cat)
