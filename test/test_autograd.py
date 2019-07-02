@@ -19,7 +19,7 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent, emit_nvtx
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
-                          suppress_warnings, skipIfRocm,
+                          suppress_warnings, skipIfRocm, slowTest,
                           load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
@@ -2146,6 +2146,7 @@ class TestAutograd(TestCase):
                     ctx.x = Variable(x.data, requires_grad=True)
                     ctx.y = Variable(y_data, requires_grad=True)
                     ctx.output_var = ctx.x * ctx.y
+                    print(ctx.output_var)
                 return ctx.output_var.detach()
 
             @staticmethod
@@ -3196,6 +3197,27 @@ for shape in [(1,), ()]:
         s = TestCase.runWithPytorchAPIUsageStderr(code)
         self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
+    def test_deep_reentrant(self):
+        class DeepReentrant(Function):
+            @staticmethod
+            def forward(ctx, x):
+                with torch.enable_grad():
+                    ctx.x = Variable(x.data, requires_grad=True)
+                    ctx.x = ctx.x-1
+                return ctx.x.detach()
+
+            @staticmethod
+            def backward(ctx, x):
+                if ctx.x < 0:
+                    return x
+                with torch.enable_grad():
+                    DeepReentrant.apply(ctx.x).sum().backward()
+                return x
+
+        v = torch.tensor(2000.0, requires_grad=True)
+        DeepReentrant.apply(v).sum().backward()
+
+    @slowTest
     def test_checkpointing(self):
         num_inp = 2000
         nz_inp = 10
