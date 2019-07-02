@@ -9,7 +9,7 @@
 
 namespace at { namespace native {
 
-static void bitwise_not_kernel_cuda(TensorIterator& iter) {
+void bitwise_not_kernel_cuda_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a) {
       return !a;
@@ -21,6 +21,14 @@ static void bitwise_not_kernel_cuda(TensorIterator& iter) {
       });
     });
   }
+}
+
+static void bitwise_not_kernel_cuda(TensorIterator& iter) {
+  // Wrap the implementation to a non-static function, otherwise will have the following build error on Windows:
+  //
+  //    On Windows, the enclosing parent function ("bitwise_not_kernel_cuda") for an extended __host__ __device__ lambda
+  //    cannot have internal or no linkage
+  bitwise_not_kernel_cuda_impl(iter);
 }
 
 template <typename scalar_t>
