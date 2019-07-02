@@ -86,7 +86,7 @@ using EnforceNotMet = ::c10::Error;
 
 #define CAFFE_ENFORCE(condition, ...)                               \
   do {                                                              \
-    if (!(condition)) {                                             \
+    if (C10_UNLIKELY(!(condition))) {                               \
       ::c10::ThrowEnforceNotMet(                                    \
           __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
     }                                                               \
@@ -94,7 +94,7 @@ using EnforceNotMet = ::c10::Error;
 
 #define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                         \
   do {                                                                    \
-    if (!(condition)) {                                                   \
+    if (C10_UNLIKELY(!(condition))) {                                     \
       ::c10::ThrowEnforceNotMet(                                          \
           __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__), this); \
     }                                                                     \
@@ -198,7 +198,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
   do {                                                                  \
     using namespace ::c10::enforce_detail;                              \
     const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_r_ = (condition); \
-    if (CAFFE_ENFORCE_THAT_IMPL_r_.bad()) {                             \
+    if (C10_UNLIKELY(CAFFE_ENFORCE_THAT_IMPL_r_.bad())) {               \
       ::c10::ThrowEnforceNotMet(                                        \
           __FILE__,                                                     \
           __LINE__,                                                     \
@@ -213,7 +213,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
     using namespace ::c10::enforce_detail;                             \
     const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_ = \
         (condition);                                                   \
-    if (CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.bad()) {                \
+    if (C10_UNLIKELY(CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.bad())) {  \
       ::c10::ThrowEnforceNotMet(                                       \
           __FILE__,                                                    \
           __LINE__,                                                    \

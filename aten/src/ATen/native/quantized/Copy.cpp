@@ -5,7 +5,9 @@
 
 namespace at {
 namespace native {
-Tensor& quantized_copy_(Tensor& self, const Tensor& src) {
+
+// Copying from float to QInt, used for assigning float value to QTensor
+Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
   TORCH_CHECK(
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
@@ -18,8 +20,8 @@ Tensor& quantized_copy_(Tensor& self, const Tensor& src) {
     scalar_t* self_data = self.data<scalar_t>();
     for (int i = 0; i < self.numel(); ++i) {
       self_data[i] = quantize_val<scalar_t>(
-          self.q_scale().to<float>(),
-          self.q_zero_point().to<int32_t>(),
+          self.q_scale(),
+          self.q_zero_point(),
           src_data[i]);
     }
   });

@@ -15,7 +15,7 @@ import caffe2.python.ideep_test_util as mu
 def _tensor_splits(draw, add_axis=False):
     """Generates (axis, split_info, tensor_splits) tuples."""
     tensor = draw(hu.tensor(min_dim=2, min_value=4))  # Each dim has at least 4 elements.
-    axis = draw(st.integers(0, len(tensor.shape) - 1))
+    axis = draw(st.integers(-len(tensor.shape), len(tensor.shape) - 1))
     if add_axis:
         # Simple case: get individual slices along one axis, where each of them
         # is (N-1)-dimensional. The axis will be added back upon concatenation.

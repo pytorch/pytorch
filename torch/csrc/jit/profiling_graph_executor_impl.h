@@ -5,15 +5,16 @@ namespace torch {
 namespace jit {
 
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
-  using GraphExecutorImplBase::GraphExecutorImplBase;
+  ProfilingGraphExecutorImpl(const std::shared_ptr<Graph>& graph, bool optimize);
 
-  void run(Stack& stack) override;
+  ExecutionPlan getPlanFor(Stack& stack) override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
  private:
   std::unique_ptr<ProfilingRecord> pr_;
-  std::unique_ptr<ExecutionPlan> exec_plan_;
+  ExecutionPlan profiling_plan_; // plan to run in order to profiling the code
+  c10::optional<ExecutionPlan> optimized_plan_;
 };
 
 } // namespace jit

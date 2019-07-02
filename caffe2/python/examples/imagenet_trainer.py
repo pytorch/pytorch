@@ -691,7 +691,7 @@ def main():
                         help="Save the trained model to a given name")
     parser.add_argument("--load_model_path", type=str, default=None,
                         help="Load previously saved model to continue training")
-    parser.add_argument("--use_cpu", type=bool, default=False,
+    parser.add_argument("--use_cpu", action="store_true",
                         help="Use CPU instead of GPU")
     parser.add_argument("--use_ideep", type=bool, default=False,
                         help="Use ideep")

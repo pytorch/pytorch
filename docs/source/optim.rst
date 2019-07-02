@@ -18,8 +18,8 @@ you can specify optimizer-specific options such as the learning rate, weight dec
 
 .. note::
 
-    If you need to move a model to GPU via `.cuda()`, please do so before
-    constructing optimizers for it. Parameters of a model after `.cuda()` will
+    If you need to move a model to GPU via ``.cuda()``, please do so before
+    constructing optimizers for it. Parameters of a model after ``.cuda()`` will
     be different objects with those before the call.
 
     In general, you should make sure that optimized parameters live in
@@ -132,6 +132,24 @@ How to adjust Learning Rate
 :mod:`torch.optim.lr_scheduler` provides several methods to adjust the learning
 rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
+
+Learning rate scheduling should be applied after optimizer's update; e.g., you
+should write your code this way:
+
+    >>> scheduler = ...
+    >>> for epoch in range(100):
+    >>>     train(...)
+    >>>     validate(...)
+    >>>     scheduler.step()
+
+.. warning::
+  Prior to PyTorch 1.1.0, the learning rate scheduler was expected to be called before
+  the optimizer's update; 1.1.0 changed this behavior in a BC-breaking way.  If you use
+  the learning rate scheduler (calling ``scheduler.step()``) before the optimizer's update
+  (calling ``optimizer.step()``), this will skip the first value of the learning rate schedule.
+  If you are unable to reproduce results after upgrading to PyTorch 1.1.0, please check
+  if you are calling ``scheduler.step()`` at the wrong time.
+
 
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
     :members:

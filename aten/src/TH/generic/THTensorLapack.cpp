@@ -259,53 +259,6 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   c10::raw::intrusive_ptr::decref(work);
 }
 
-void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz, const char *uplo)
-{
-  if (a == NULL) a = rv_;
-  THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 1,"A should be square");
-
-  int n, lda, lwork, info;
-  THTensor *work = nullptr;
-  scalar_t wkopt;
-
-  THTensor *rv__ = NULL;
-  THTensor *re__ = NULL;
-
-  rv__ = THTensor_(cloneColumnMajor)(rv_, a);
-
-  n = THTensor_sizeLegacyNoScalars(rv__, 0);
-  lda = n;
-
-  THTensor_(resize1d)(re_,n);
-  re__ = THTensor_(newContiguous)(re_);
-
-  /* get optimal workspace size */
-  if (n != 0) {
-    THLapack_(syev)(jobz[0], uplo[0], n, rv__->data<scalar_t>(), lda,
-                    re_->data<scalar_t>(), &wkopt, -1, &info);
-    lwork = (int)wkopt;
-    work = THTensor_(newWithSize1d)(lwork);
-    THLapack_(syev)(jobz[0], uplo[0], n, rv__->data<scalar_t>(), lda,
-                    re_->data<scalar_t>(), work->data<scalar_t>(), lwork, &info);
-
-    THLapackCheckWithCleanup("Lapack Error %s : %d off-diagonal elements didn't converge to zero",
-                             THCleanup(c10::raw::intrusive_ptr::decref(rv__);
-                                       c10::raw::intrusive_ptr::decref(re__);
-                                       c10::raw::intrusive_ptr::decref(work);),
-                             "syev", info,"");
-  }
-
-  // No eigenvectors specified
-  if (*jobz == 'N') {
-    THTensor_(fill)(rv_, 0);
-  }
-
-  THTensor_(freeCopyTo)(rv__, rv_);
-  THTensor_(freeCopyTo)(re__, re_);
-  c10::raw::intrusive_ptr::decref(work);
-}
-
 void THTensor_(gesdd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* some, const char* compute_uv)
 {
   THTensor *ra_ = THTensor_(new)();
@@ -576,41 +529,6 @@ void THTensor_(pstrf)(THTensor *ra_, THIntTensor *rpiv_, THTensor *a, const char
 
   THTensor_(freeCopyTo)(ra__, ra_);
   c10::raw::intrusive_ptr::decref(work);
-}
-
-/*
-  Perform a QR decomposition of a matrix.
-
-  In LAPACK, two parts of the QR decomposition are implemented as two separate
-  functions: geqrf and orgqr. For flexibility and efficiency, these are wrapped
-  directly, below - but to make the common usage convenient, we also provide
-  this function, which calls them both and returns the results in a more
-  intuitive form.
-
-  Args:
-  * `rq_` - result Tensor in which to store the Q part of the decomposition.
-  * `rr_` - result Tensor in which to store the R part of the decomposition.
-  * `a`   - input Tensor; the matrix to decompose.
-
-*/
-void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a)
-{
-  int m = a->size(0);
-  int n = a->size(1);
-  int k = (m < n ? m : n);
-  THTensor *ra_ = THTensor_(new)();
-  THTensor *rtau_ = THTensor_(new)();
-  THTensor *rr__ = THTensor_(new)();
-  THTensor_(geqrf)(ra_, rtau_, a);
-  THTensor_(resize2d)(rr__, k, ra_->size(1));
-  THTensor_(narrow)(rr__, ra_, 0, 0, k);
-  THTensor_(triu)(rr_, rr__, 0);
-  THTensor_(resize2d)(rq_, ra_->size(0), k);
-  THTensor_(orgqr)(rq_, ra_, rtau_);
-  THTensor_(narrow)(rq_, rq_, 1, 0, k);
-  c10::raw::intrusive_ptr::decref(ra_);
-  c10::raw::intrusive_ptr::decref(rtau_);
-  c10::raw::intrusive_ptr::decref(rr__);
 }
 
 /*

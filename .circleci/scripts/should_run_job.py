@@ -4,6 +4,9 @@ import sys
 
 # Modify this variable if you want to change the set of default jobs
 # which are run on all pull requests.
+#
+# WARNING: Actually, this is a lie; we're currently also controlling
+# the set of jobs to run via the Workflows filters in CircleCI config.
 
 default_set = [
     # PyTorch CPU
@@ -22,6 +25,7 @@ default_set = [
     'caffe2-py2-cuda9.1-cudnn7-ubuntu16.04',
     # Caffe2 ONNX
     'caffe2-onnx-py2-gcc5-ubuntu16.04',
+    'caffe2-onnx-py3.6-clang7-ubuntu16.04',
     # Caffe2 Clang
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
@@ -29,6 +33,7 @@ default_set = [
 
     # Binaries
     'manywheel 2.7mu cpu devtoolset3',
+    'libtorch 2.7m cpu devtoolset3',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
@@ -39,9 +44,13 @@ default_set = [
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
+    # XLA
+    'pytorch-xla-linux-trusty-py3.6-gcc5.4',
+
     # Other checks
     'pytorch-short-perf-test-gpu',
-    'pytorch-doc-push',
+    'pytorch-python-doc-push',
+    'pytorch-cpp-doc-push',
 ]
 
 # Takes in commit message to analyze via stdin

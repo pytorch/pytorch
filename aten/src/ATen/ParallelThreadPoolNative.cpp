@@ -1,4 +1,4 @@
-#if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE
+#if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE || AT_PARALLEL_NATIVE_TBB
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
 
@@ -67,7 +67,11 @@ int get_num_interop_threads() {
 }
 
 void launch(std::function<void()> func) {
+#if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
+  intraop_launch(func);
+#else
   get_pool().run(func);
+#endif
 }
 
 } // namespace at

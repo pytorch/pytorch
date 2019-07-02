@@ -65,12 +65,6 @@ def process_types_and_backends(option):
         assert(backend in all_backends)
         backend_types[backend] = set(expand(backend_types[backend]))
 
-    # disable CUDA Half if there is a Sparse argument
-    for arg in option.get('arguments', []):
-        if arg['type'] == 'THSTensor*':
-            if 'CUDA' in backend_types:
-                backend_types['CUDA'].discard('Half')
-
     # special case remove Half for cpu unless it is explicitly enabled
     if not option.get('cpu_half', False):
         if 'CPU' in backend_types:
@@ -213,30 +207,6 @@ def discover_sparse_tensor_operations(declaration):
                     for j, arg in enumerate(option['arguments'])
                     if not exclude(arg)]
         return '#'.join(elements)
-
-    # Determine if any options have the 'aten_dense_sparse' flag
-    dense_sparse_options = [option
-                            for option in declaration['options']
-                            if option.get('aten_dense_sparse', False)]
-    if len(dense_sparse_options) > 0:
-        signature_to_option = {signature(option): option
-                               for option in declaration['options']}
-
-        for option in declaration['options']:
-            for i, arg in enumerate(option['arguments']):
-                if (arg['type'] == 'THSTensor*' and
-                        option.get('aten_dense_sparse', False)):
-                    signature_of_tensor_version = signature(
-                        option, i, 'Tensor &')
-                    if signature_of_tensor_version in signature_to_option:
-                        tensor_version = \
-                            signature_to_option[signature_of_tensor_version]
-                        raw_args = len(tensor_version['arguments'])
-                        names = [arg['name'] for arg in tensor_version['arguments']
-                                 if not exclude(arg)]
-                        filtered_args = len(names)
-                        tensor_version['when_sparse_dispatch'] = names[i -
-                                                                       (raw_args - filtered_args)]
 
 
 def is_extended_method(option):

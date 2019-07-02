@@ -214,10 +214,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__repr__",
           [](Graph& g) {
-            std::stringstream ss;
-            ss << g;
-            return ss.str();
+            return g.toString();
           })
+      .def(
+          "str",
+          &Graph::toString,
+          py::arg("print_source_ranges") = true)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -229,6 +231,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](const std::shared_ptr<Graph> g,
              const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
+             const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string) {
@@ -238,6 +241,7 @@ void initPythonIRBindings(PyObject* module_) {
                 g,
                 initializers,
                 onnx_opset_version,
+                dynamic_axes,
                 defer_weight_export,
                 operator_export_type,
                 strip_doc_string);
@@ -257,6 +261,7 @@ void initPythonIRBindings(PyObject* module_) {
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
+          py::arg("dynamic_axes"),
           py::arg("defer_weight_export") = false,
           py::arg("operator_export_type") =
               ::torch::onnx::OperatorExportTypes::ONNX,
@@ -366,7 +371,7 @@ void initPythonIRBindings(PyObject* module_) {
           "__repr__",
           [](Value& n) {
             std::stringstream ss;
-            ss << n.uniqueName() << " defined in (" << *n.node() << ")";
+            ss << n.debugName() << " defined in (" << *n.node() << ")";
             return ss.str();
           })
       .VS(type)
@@ -375,8 +380,8 @@ void initPythonIRBindings(PyObject* module_) {
       // skip owningGraph because it returns a raw pointer to a otherwise
       // std::shared_ptr stored graph object, and would cause a double free
       .VS(unique)
-      .VS(uniqueName)
-      .VS(setUniqueName)
+      .VS(debugName)
+      .VS(setDebugName)
       .VS(offset)
       .VS(uses)
       .VS(replaceAllUsesWith)

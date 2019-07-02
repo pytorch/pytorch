@@ -127,6 +127,14 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(self.data_ptr());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -158,7 +166,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  auto memory_format = r.toMemoryFormat(0);
+  auto memory_format = r.memoryformat(0);
   // avoids touching the GIL or current device if self is already contiguous
   if (self_.is_contiguous(memory_format)) {
     // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
@@ -318,6 +326,36 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_nonzero(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.nonzero();
+}
+
+static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.nonzero_numpy();
+}
+
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "nonzero()|deprecated",
+    "nonzero(*, bool as_tuple=False)",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0 || (r.idx == 1 && !r.toBool(0))) {
+    return wrap(dispatch_nonzero(self_));
+  } else {
+    return wrap(dispatch_nonzero_numpy(self_));
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -390,12 +428,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
-  }
-  return torch::utils::tensor_to_numpy(self_.tensor_data());
+  return torch::utils::tensor_to_numpy(self_);
   END_HANDLE_TH_ERRORS
 }
 
@@ -452,7 +485,7 @@ static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyO
   });
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto memory_format = r.toMemoryFormat(0);
+  auto memory_format = r.memoryformat(0);
   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
   return wrap(dispatch_is_contiguous(self, memory_format));
   END_HANDLE_TH_ERRORS
@@ -515,7 +548,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::legacy_tensor_new(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::legacy_tensor_new(self_.type_id(), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -524,7 +557,7 @@ static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_empty(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_empty(self_.type_id(), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -533,7 +566,7 @@ static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject*
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_full(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_full(self_.type_id(), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -542,7 +575,7 @@ static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject*
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_ones(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_ones(self_.type_id(), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -551,7 +584,7 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_tensor(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_tensor(self_.type_id(), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -560,7 +593,7 @@ static PyObject * THPVariable_new_zeros(PyObject* self, PyObject* args, PyObject
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_zeros(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_zeros(self_.type_id(), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -629,7 +662,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.isNone(0)) {
-    return THPUtils_packString(torch::utils::type_to_string(self_.dispatch_type(), self_.scalar_type()));
+    return THPUtils_packString(torch::utils::type_to_string(self_.type()));
   }
   auto obj = r.pyobject(0);
   std::string type_name;
@@ -652,8 +685,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   if (is_dtype) {
     scalar_type = r.scalartype(0);
   } else {
-    Type* type;
-    std::tie(type, scalar_type) = torch::utils::type_from_string(type_name);
+    at::DeprecatedTypeProperties* type = torch::utils::type_from_string(type_name);
+    scalar_type = type->scalarType();
     auto device_type = backendToDeviceType(type->backend());
     if (device_type != device.type()) {
       device = at::Device(device_type);
@@ -704,6 +737,7 @@ PyMethodDef variable_methods[] = {
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"data_ptr", (PyCFunction)THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
@@ -725,6 +759,7 @@ PyMethodDef variable_methods[] = {
   {"new_ones", (PyCFunction)THPVariable_new_ones, METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_tensor", (PyCFunction)THPVariable_new_tensor, METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_zeros", (PyCFunction)THPVariable_new_zeros, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"nonzero", (PyCFunction)THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"requires_grad_", (PyCFunction)THPVariable_requires_grad_, METH_VARARGS | METH_KEYWORDS, NULL},

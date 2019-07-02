@@ -27,6 +27,7 @@ public:
 
 template <>
 struct Vec256<int64_t> : public Vec256i {
+  using value_type = int64_t;
   static constexpr int size() {
     return 4;
   }
@@ -120,6 +121,7 @@ struct Vec256<int64_t> : public Vec256i {
 
 template <>
 struct Vec256<int32_t> : public Vec256i {
+  using value_type = int32_t;
   static constexpr int size() {
     return 8;
   }
@@ -251,6 +253,7 @@ void convert(const int32_t *src, double *dst, int64_t n) {
 
 template <>
 struct Vec256<int16_t> : public Vec256i {
+  using value_type = int16_t;
   static constexpr int size() {
     return 16;
   }

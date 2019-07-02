@@ -17,6 +17,7 @@ template <> class Vec256<double> {
 private:
   __m256d values;
 public:
+  using value_type = double;
   static constexpr int size() {
     return 4;
   }

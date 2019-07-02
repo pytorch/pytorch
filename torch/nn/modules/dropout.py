@@ -15,8 +15,7 @@ class _DropoutNd(Module):
         self.inplace = inplace
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
-        return 'p={}{}'.format(self.p, inplace_str)
+        return 'p={}, inplace={}'.format(self.p, self.inplace)
 
 
 @weak_module

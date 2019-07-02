@@ -89,7 +89,7 @@ static FunctionDescription THVector_(adds_DISPATCHTABLE)[] = {
   FUNCTION_IMPL(THVector_(adds_DEFAULT), SIMDExtension_DEFAULT)
 };
 // Dispatch stubs that just call the pointers
-TH_API void THVector_(adds)(scalar_t *r_, const scalar_t *t, const scalar_t value, const ptrdiff_t n) {
+void THVector_(adds)(scalar_t *r_, const scalar_t *t, const scalar_t value, const ptrdiff_t n) {
   THVector_(adds_DISPATCHPTR)(r_, t, value, n);
 }
 
@@ -180,7 +180,7 @@ void THVector_(divs)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptr
 }
 
 
-static void (*THVector_(normal_fill_DISPATCHPTR))(scalar_t *, const int64_t, THGenerator *, const scalar_t, const scalar_t) = &THVector_(normal_fill_DEFAULT);
+static void (*THVector_(normal_fill_DISPATCHPTR))(scalar_t *, const int64_t, at::Generator *, const scalar_t, const scalar_t) = &THVector_(normal_fill_DEFAULT);
 static FunctionDescription THVector_(normal_fill_DISPATCHTABLE)[] = {
   #if defined(TH_REAL_IS_FLOAT) && defined(USE_AVX2)
       FUNCTION_IMPL(THVector_(normal_fill_AVX2), SIMDExtension_AVX2),
@@ -190,7 +190,7 @@ static FunctionDescription THVector_(normal_fill_DISPATCHTABLE)[] = {
 };
 void THVector_(normal_fill)(scalar_t *data,
                             const int64_t size,
-                            struct THGenerator *generator,
+                            at::Generator *generator,
                             const scalar_t mean,
                             const scalar_t stddev) {
   THVector_(normal_fill_DISPATCHPTR)(data, size, generator, mean, stddev);

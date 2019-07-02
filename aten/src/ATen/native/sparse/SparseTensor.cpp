@@ -116,7 +116,7 @@ SparseTensor new_with_dims_and_tensor_sparse(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntArrayRef size, const TensorOptions& options) {
+Tensor empty_sparse(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
   TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   return new_with_dims_sparse(size.size(), 0, size, options);
 }
@@ -508,9 +508,9 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   return r;
 }
 
-SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
+SparseTensor sparse_mask_cpu(const Tensor& t, const SparseTensor& mask) {
   SparseTensor r = at::empty({0}, t.options().layout(kSparse));
-  sparse_mask_out_cpu(r, t, mask.tref);
+  sparse_mask_out_cpu(r, t, mask);
   return r;
 }
 

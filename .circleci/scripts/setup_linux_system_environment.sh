@@ -29,6 +29,10 @@ done
 # See if we actually were successful
 systemctl list-units --all | cat
 
+# For good luck, try even harder to kill apt-get
+sudo pkill apt-get || true
+
+# For even better luck, purge unattended-upgrades
 sudo apt-get purge -y unattended-upgrades
 
 cat /etc/apt/sources.list

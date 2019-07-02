@@ -1,6 +1,7 @@
 import sys
 import ast
 import inspect
+import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
@@ -117,8 +118,17 @@ def get_type_line(source):
     lines = source.split('\n')
     lines = [(line_num, line) for line_num, line in enumerate(lines)]
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
+    lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
+
 
     if len(type_lines) == 0:
+        type_pattern = re.compile('#[\t ]*type[\t ]*:')
+        wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
+        if len(wrong_type_lines) > 0:
+            raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
+                               + " is probably invalid.\nIt must be '# type:'"
+                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)" # noqa
+                               + "\nfor examples")
         return None
     elif len(type_lines) == 1:
         # Only 1 type line, quit now

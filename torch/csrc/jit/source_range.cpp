@@ -1,18 +1,27 @@
 #include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/source_range_serialization.h>
 
 namespace torch {
 namespace jit {
 
+c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
+    const SourceRange& range) {
+  if (!gen_ranges_) {
+    return c10::nullopt;
+  }
+  return gen_ranges_->findSourceRangeThatGenerated(range);
+}
+
 // a range of a shared string 'file_' with
 C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
-  if (size() == file_->size()) {
+  const std::string& str = source_->text();
+  if (size() == str.size()) {
     // this is just the entire file, not a subset, so print it out.
     // primarily used to print out python stack traces
-    out << *file_;
+    out << str;
     return;
   }
 
-  const std::string& str = file();
   size_t begin_line = start(); // beginning of line to highlight
   size_t end_line = start(); // end of line to highlight
   while (begin_line > 0 && str[begin_line - 1] != '\n')
@@ -42,6 +51,12 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   }
   AT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
 
+  if (auto flc = file_line_col()) {
+    std::string filename;
+    size_t line, col;
+    std::tie(filename, line, col) = *flc;
+    out << "at " << filename << ":" << line << ":" << col << "\n";
+  }
   out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
   out << std::string(start() - begin_line, ' ');
   size_t len = std::min(size(), end_line - start());
@@ -50,6 +65,13 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   out << str.substr(end_line, end_highlight - end_line);
   if (!str.empty() && str.back() != '\n')
     out << "\n";
+  // Retrieve original SourceRange, if present.
+  if (source_) {
+    if (auto orig_source_range = findSourceRangeThatGenerated()) {
+      out << "Compiled from code ";
+      orig_source_range->highlight(out);
+    }
+  }
 }
 
 } // namespace jit

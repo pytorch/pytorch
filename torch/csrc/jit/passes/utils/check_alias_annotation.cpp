@@ -17,7 +17,7 @@ IValue deepCopy(const IValue& self) {
   }
   if (self.isTensorList()) {
     std::vector<at::Tensor> newList;
-    for (const auto& oldTensor : self.toTensorListRef()) {
+    for (const at::Tensor& oldTensor : self.toTensorListRef()) {
       newList.push_back(oldTensor.clone());
     }
     return newList;
@@ -26,7 +26,8 @@ IValue deepCopy(const IValue& self) {
   // Lists of ivalues should recursively deep copy their contents
   if (self.isGenericList()) {
     std::vector<IValue> newList;
-    for (const auto& value : self.toGenericListRef()) {
+    newList.reserve(self.toGenericListRef().size());
+    for (const IValue& value : self.toGenericListRef()) {
       newList.push_back(deepCopy(value));
     }
     return newList;
@@ -34,11 +35,11 @@ IValue deepCopy(const IValue& self) {
 
   // Regular lists can copy assign
   if (self.isIntList()) {
-    return IValue(self.toIntListRef());
+    return IValue(self.toIntList().copy());
   } else if (self.isDoubleList()) {
-    return IValue(self.toDoubleListRef());
+    return IValue(self.toDoubleList().copy());
   } else if (self.isBoolList()) {
-    return IValue(self.toBoolListRef());
+    return IValue(self.toBoolList().copy());
   } else if (self.isString()) {
     return IValue(self.toStringRef());
   }
@@ -65,7 +66,7 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
   } else if (lhs.isNone() && rhs.isNone()) {
     return true;
   } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntList()->elements() == rhs.toIntList()->elements();
+    return lhs.toIntListRef().equals(rhs.toIntListRef());
   } else if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }

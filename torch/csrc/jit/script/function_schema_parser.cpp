@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/schema_type_parser.h>
 #include <c10/util/string_utils.h>
+#include <ATen/core/Reduction.h>
 
 #include <functional>
 #include <memory>
@@ -25,7 +26,8 @@ namespace script {
 namespace {
 struct SchemaParser {
   SchemaParser(const std::string& str)
-      : L(str), type_parser(L, /*parse_complete_tensor_types*/ false) {}
+      : L(std::make_shared<Source>(str)),
+        type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();

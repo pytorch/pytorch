@@ -2,9 +2,11 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/script/error_report.h>
 
 #include <torch/csrc/autograd/variable.h>
 
@@ -73,7 +75,9 @@ class ShapePropagator {
       } catch (propagation_error& e) {
         setUnshapedType(node);
       } catch (std::exception& e) {
-         node->sourceRange().wrapAndRethrowException(e, "operation failed shape propagation");
+        throw script::ErrorReport(node->sourceRange())
+            << ExceptionMessage(e)
+            << "\nThe above operation failed shape propagation in this context";
       }
     }
   }
@@ -84,9 +88,13 @@ class ShapePropagator {
 
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{
-        aten::resize_,    aten::resize_as_, aten::copy_,    aten::set_,
+        aten::resize_,
+        aten::resize_as_,
+        aten::copy_,
+        aten::set_,
         aten::unsqueeze_,
-        aten::t_, aten::transpose_, // could preserve DimensionedTensorType Here
+        aten::t_,
+        aten::transpose_, // could preserve DimensionedTensorType Here
     };
 
     if (resize_ops.count(n->kind()))
@@ -110,7 +118,7 @@ class ShapePropagator {
       }
       if (resizesInput(n)) {
         for (const auto input : n->inputs()) {
-          if (aliasDb_.writesToAlias(n, {input}, /*recurseBlocks*/ false)) {
+          if (aliasDb_.writesToAlias(n, {input})) {
             resized_alias_set.insert(input);
           }
         }
@@ -525,8 +533,11 @@ class ShapePropagator {
       case prim::TupleConstruct: {
         // We refresh the tuple type, because the input types could have been
         // refined.
+        auto orig_type = node->output()->type()->expect<TupleType>();
         node->output()->setType(TupleType::create(
-            fmap(node->inputs(), [](Value* v) { return v->type(); })));
+            fmap(node->inputs(), [](Value* v) { return v->type(); }),
+            orig_type->qualified_name_obj(),
+            orig_type->schema()));
         return;
       }
       case prim::TupleUnpack: {
@@ -566,6 +577,8 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::CallFunction:
+      case prim::CallMethod:
       case prim::AutogradZero: {
         setUnshapedType(node);
         return;
@@ -1237,7 +1250,7 @@ class ShapePropagator {
     //   - has ScalarType dtype, Layeout layout and Device device arguments
     static const register_formula_for like_factories_with_options{
         {
-            "aten::empty_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::empty_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
             "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
@@ -1266,7 +1279,7 @@ class ShapePropagator {
     //   arguments
     static const register_formula_for size_factories_with_options{
         {
-            "aten::empty(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::empty(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
             "aten::full(int[] size, Scalar fill_value, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::ones(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",

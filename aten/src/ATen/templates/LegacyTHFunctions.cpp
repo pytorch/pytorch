@@ -3,7 +3,10 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 #include <ATen/${Generator}.h>
 #include <ATen/ExpandUtils.h>
 ${th_headers}
@@ -19,7 +22,7 @@ namespace {
     return t.scalar_type();
   }
   ScalarType infer_scalar_type(const TensorList & tl) {
-    AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+    TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
     return tl[0].scalar_type();
   }
 
