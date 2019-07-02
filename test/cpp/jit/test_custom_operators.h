@@ -96,11 +96,11 @@ void testCustomOperators() {
         op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
-    push(stack, c10::make_list<int64_t>({1, 2}));
-    push(stack, c10::make_list<double>({1.0, 2.0}));
-    push(stack, c10::make_list<at::Tensor>({autograd::make_variable(at::ones(5))}));
+    push(stack, c10::List<int64_t>({1, 2}));
+    push(stack, c10::List<double>({1.0, 2.0}));
+    push(stack, c10::List<at::Tensor>({autograd::make_variable(at::ones(5))}));
     op->getOperation()(stack);
-    c10::List<double> output = c10::make_list<double>();
+    c10::List<double> output;
     pop(stack, output);
 
     ASSERT_EQ(output.size(), 2);
@@ -128,9 +128,9 @@ void testCustomOperators() {
         op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
     Stack stack;
-    push(stack, c10::make_list<at::Tensor>({autograd::make_variable(at::ones(5))}));
+    push(stack, c10::List<at::Tensor>({autograd::make_variable(at::ones(5))}));
     op->getOperation()(stack);
-    c10::List<at::Tensor> output = c10::make_list<at::Tensor>();
+    c10::List<at::Tensor> output;
     pop(stack, output);
 
     ASSERT_EQ(output.size(), 1);

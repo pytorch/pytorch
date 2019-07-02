@@ -60,9 +60,6 @@ inline void parallel_for(
       internal::_unset_thread_num();
     };
 
-    // using shared_ptr to share ownership of the future with the lambda,
-    // to ensure we don't destroy future while lambda is still
-    // running in markCompleted
     std::vector<c10::ivalue::Future> futures(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
