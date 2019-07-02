@@ -136,7 +136,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     const int32_t* bias_ptr = nullptr;
     if (bias.has_value()) {
-      Tensor bias_vec = bias.value_or(Tensor());
+      Tensor bias_vec = bias.value();
       TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
           bias_vec.size(0) == K,
