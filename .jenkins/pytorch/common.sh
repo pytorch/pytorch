@@ -20,6 +20,12 @@ set -ex
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
+# Figure out which Python to use
+PYTHON="$(which python)"
+if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  PYTHON=$(which "python${BASH_REMATCH[1]}")
+fi
+
 # This token is used by a parser on Jenkins logs for determining
 # if a failure is a legitimate problem, or a problem with the build
 # system; to find out more, grep for this string in ossci-job-dsl.
