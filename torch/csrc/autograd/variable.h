@@ -225,17 +225,14 @@ struct TORCH_API Variable : public at::Tensor {
   }
 
   /// Returns a copy of this `Variable` that is detached from its autograd graph
-  /// and has a blank version. This method is OK to call if the `Variable` is a
-  /// view.
-  /// yf225 TODO: improve comment about the `allow_tensor_metadata_change` flag here!
-  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
-  /// storage / storage_offset) of a tensor created from `detach()`, those metadata
-  /// in the original tensor will also be updated. However, the new behavior is that
-  /// those metadata changes to the detached tensor will not update the original tensor
-  /// anymore, and in the `detach()` function we need to set `allow_tensor_metadata_change_`
-  /// to false to make such changes explicitly illegal, in order to prevent users from
-  /// changing metadata of the detached tensor and expecting the original tensor to also
-  /// be updated.
+  /// but shares version counter with this `Variable`. This method is OK to call
+  /// if the `Variable` is a view.
+  ///
+  /// If `allow_tensor_metadata_change` is set to false, changing the tensor metadata
+  /// (e.g. sizes / strides / storage / storage_offset) of a tensor created from
+  /// `detach()` will throw an error. If `allow_tensor_metadata_change` is set to true,
+  /// changing the tensor metadata of a detached tensor will work, but such changes
+  /// will not be propagated back to the original tensor.
   Variable detach(bool allow_tensor_metadata_change = false) const;
 
   /// Like `detach()`, but removes this `Variable` in-place. This method may

@@ -1757,9 +1757,11 @@ class TestAutograd(TestCase):
 
         x = torch.randn(10, 10, requires_grad=True)
         y = x.detach(allow_tensor_metadata_change=True)
+        y_saved_version = y._version
         y.resize_(5, 5)
-        self.assertNotEqual(x.shape, y.shape)
-        # yf225 TODO: check that `y`'s version counter is bumped
+        self.assertEqual(y.shape, (5, 5))
+        self.assertEqual(x.shape, (10, 10))
+        self.assertGreater(y._version, y_saved_version)
 
     def test_detach_base(self):
         "detaching base does not detach view"
