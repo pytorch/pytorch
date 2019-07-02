@@ -1180,7 +1180,7 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
-- func: log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+- func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor

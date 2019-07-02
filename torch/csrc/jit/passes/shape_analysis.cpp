@@ -1213,7 +1213,7 @@ class ShapePropagator {
         {
           "aten::cumprod(Tensor self, int dim, *, int? dtype) -> Tensor",
           "aten::cumsum(Tensor self, int dim, *, int? dtype) -> Tensor",
-          "aten::log_softmax(Tensor self, int dim, *, int? dtype) -> Tensor"
+          "aten::log_softmax(Tensor self, int dim, int? dtype) -> Tensor"
         },
         [](Node* node) -> type_vec_t {
           at::optional<IValue> opt_dtype = node->get(attr::dtype);
