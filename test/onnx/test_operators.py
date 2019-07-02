@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 from test_pytorch_common import TestCase, run_tests, flatten
 
 import torch
@@ -218,7 +220,7 @@ class TestOperators(TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                assert False
+                raise AssertionError()
 
             @staticmethod
             def forward(ctx, x, y):
@@ -355,7 +357,7 @@ class TestOperators(TestCase):
 
     def test_reduced_mean_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.mean(x, dim=2, keepdim=True), x)
+        self.assertONNX(lambda x: torch.mean(x, dim=(2, 3), keepdim=True), x)
 
     def test_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -363,7 +365,7 @@ class TestOperators(TestCase):
 
     def test_reduced_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.sum(x, dim=2), x)
+        self.assertONNX(lambda x: torch.sum(x, dim=(1, 2)), x)
 
     def test_reduced_sum_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -502,10 +504,6 @@ class TestOperators(TestCase):
     def test_upsample_nearest(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
-
-    def test_upsample_bilinear(self):
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)

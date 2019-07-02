@@ -12,19 +12,57 @@ namespace detail {
 constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
     "_caffe2_preallocated_outputs";
 
-using _CallCaffe2OpFunc = c10::ListPtr<at::Tensor>(
+using _CallCaffe2OpFunc = c10::List<at::Tensor>(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    c10::ListPtr<at::Tensor>&& outputs);
+    c10::List<at::Tensor>&& outputs);
 
 template <class Caffe2Operator>
-inline c10::ListPtr<at::Tensor> _call_caffe2_op(
+inline c10::List<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    c10::ListPtr<at::Tensor>&& outputs) {
+    c10::List<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
   op.Run();
   return std::move(op).move_newstyle_outputs();
+}
+
+inline at::Tensor unwrap_tensor(at::Tensor&& tensor) {
+  if (tensor.is_variable()) {
+    auto tensor_impl = tensor.unsafeGetTensorImpl();
+    auto tensor_impl_copy = tensor_impl->shallow_copy_and_detach(
+    /*version_counter=*/tensor_impl->version_counter(),
+    /*allow_tensor_metadata_change=*/tensor_impl->allow_tensor_metadata_change());
+    return at::Tensor(tensor_impl_copy);
+  } else {
+    return std::move(tensor);
+  }
+}
+
+inline IValue unwrap(IValue&& ivalue) {
+  // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
+  if (ivalue.isTensor() && ivalue.toTensor().defined()) {
+    return unwrap_tensor(std::move(ivalue).toTensor());
+  } else if (ivalue.isTensorList()) {
+    c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
+    for (size_t i = 0; i < list.size(); ++i) {
+      list[i] = unwrap_tensor(list.extract(i));
+    }
+    return std::move(list);
+  } else if (ivalue.isGenericList()) {
+    c10::impl::GenericList list = std::move(ivalue).toGenericList();
+    for (size_t i = 0; i < list.size(); ++i) {
+      list[i] = unwrap(list.extract(i));
+    }
+    return std::move(list);
+  } else if (ivalue.isGenericDict()) {
+    for (auto& item : ivalue.toGenericDict()) {
+      item.setValue(unwrap(item.value()));
+    }
+    return std::move(ivalue);
+  } else {
+    return std::move(ivalue);
+  }
 }
 
 // This function is inline in the hope that compilers optimizing for speed will
@@ -54,7 +92,7 @@ inline void _call_caffe2_op_from_c10(
   const size_t num_inputs = schema.arguments().size() -
       1; // -1 because the last argument is the list of preallocated tensors
 
-  c10::ListPtr<at::Tensor> outputs = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> outputs;
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
     // they haven't been passed in. Pass a list of uninitialized tensors to
@@ -63,6 +101,11 @@ inline void _call_caffe2_op_from_c10(
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
     outputs = std::move(preallocated_outputs).toTensorList();
+  }
+
+  // unwrap tensor inputs from variable
+  for (auto iter = stack->end() - num_inputs; iter != stack->end(); ++iter) {
+    *iter = unwrap(std::move(*iter));
   }
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector

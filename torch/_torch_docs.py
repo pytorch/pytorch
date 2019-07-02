@@ -455,7 +455,7 @@ Args:
     other (Tensor): second tensor to compare
     atol (float, optional): absolute tolerance. Default: 1e-08
     rtol (float, optional): relative tolerance. Default: 1e-05
-    equal_nan (float, optional): if ``True``, then two ``NaN`` s will be compared as equal. Default: ``False``
+    equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be compared as equal. Default: ``False``
 
 Example::
 
@@ -670,9 +670,9 @@ bincount(self, weights=None, minlength=0) -> Tensor
 Count the frequency of each value in an array of non-negative ints.
 
 The number of bins (size 1) is one larger than the largest value in
-:attr:`input` unless :attr:`input` is empty, in which case the result is a
+:attr:`self` unless :attr:`self` is empty, in which case the result is a
 tensor of size 0. If :attr:`minlength` is specified, the number of bins is at least
-:attr:`minlength` and if :attr:`input` is empty, then the result is tensor of size
+:attr:`minlength` and if :attr:`self` is empty, then the result is tensor of size
 :attr:`minlength` filled with zeros. If ``n`` is the value at position ``i``,
 ``out[n] += weights[i]`` if :attr:`weights` is specified else
 ``out[n] += 1``.
@@ -680,14 +680,14 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 .. include:: cuda_deterministic.rst
 
 Arguments:
-    input (Tensor): 1-d int tensor
+    self (Tensor): 1-d int tensor
     weights (Tensor): optional, weight for each value in the input tensor.
         Should be of same size as input tensor.
     minlength (int): optional, minimum number of bins. Should be non-negative.
 
 Returns:
-    output (Tensor): a tensor of shape ``Size([max(input) + 1])`` if
-    :attr:`input` is non-empty, else ``Size(0)``
+    output (Tensor): a tensor of shape ``Size([max(self) + 1])`` if
+    :attr:`self` is non-empty, else ``Size(0)``
 
 Example::
 
@@ -1365,7 +1365,7 @@ Example::
 
 add_docstr(torch.diagflat,
            r"""
-diagflat(input, diagonal=0) -> Tensor
+diagflat(input, offset=0) -> Tensor
 
 - If :attr:`input` is a vector (1-D tensor), then returns a 2-D square tensor
   with the elements of :attr:`input` as the diagonal.
@@ -1859,6 +1859,10 @@ Creates a :class:`Tensor` from a :class:`numpy.ndarray`.
 The returned tensor and :attr:`ndarray` share the same memory. Modifications to
 the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
 tensor is not resizable.
+
+It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
+``numpy.float32``, ``numpy.float16``, ``numpy.int64``, ``numpy.int32``,
+``numpy.int16``, ``numpy.int8``, ``numpy.uint8``, and ``numpy.bool``.
 
 Example::
 
@@ -3616,7 +3620,7 @@ add_docstr(torch.ones,
 ones(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
-by the variable argument :attr:`sizes`.
+by the variable argument :attr:`size`.
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
@@ -3876,15 +3880,15 @@ Example::
 
 add_docstr(torch.rand,
            r"""
-rand(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
 
-The shape of the tensor is defined by the variable argument :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`size`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -3929,8 +3933,8 @@ between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
 .. note:
-    With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.int64`.
+    With the global dtype default (``torch.float32``), this function returns
+    a tensor with dtype ``torch.int64``.
 
 Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
@@ -3969,8 +3973,8 @@ random integers generated uniformly between :attr:`low` (inclusive) and
 :attr:`high` (exclusive).
 
 .. note:
-    With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.int64`.
+    With the global dtype default (``torch.float32``), this function returns
+    a tensor with dtype ``torch.int64``.
 
 Args:
     {input}
@@ -3985,7 +3989,7 @@ Args:
 
 add_docstr(torch.randn,
            r"""
-randn(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randn(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
@@ -3994,10 +3998,10 @@ distribution).
 .. math::
     \text{{out}}_{{i}} \sim \mathcal{{N}}(0, 1)
 
-The shape of the tensor is defined by the variable argument :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`size`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -4144,7 +4148,7 @@ add_docstr(torch.arange,
            r"""
 arange(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{\text{end} - \text{start}}{\text{step}} \right\rfloor`
+Returns a 1-D tensor of size :math:`\left\lceil \frac{\text{end} - \text{start}}{\text{step}} \right\rceil`
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
@@ -4900,17 +4904,14 @@ add_docstr(torch.symeig,
 symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
-of a real symmetric matrix :attr:`input`, represented by a namedtuple
-(eigenvalues, eigenvectors).
-
-:attr:`input` and :math:`V` are :math:`(m \times m)` matrices and :math:`e` is a
-:math:`m` dimensional vector.
+of a real symmetric matrix :attr:`input` or a batch of real symmetric matrices,
+represented by a namedtuple (eigenvalues, eigenvectors).
 
 This function calculates all eigenvalues (and vectors) of :attr:`input`
 such that :math:`\text{input} = V \text{diag}(e) V^T`.
 
 The boolean argument :attr:`eigenvectors` defines computation of
-eigenvectors or eigenvalues only.
+both eigenvectors and eigenvalues or eigenvalues only.
 
 If it is ``False``, only eigenvalues are computed. If it is ``True``,
 both eigenvalues and eigenvectors are computed.
@@ -4921,14 +4922,15 @@ only the upper triangular portion is used by default.
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 .. note:: Irrespective of the original strides, the returned matrix `V` will
-          be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+          be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).strides()`.
 
 .. note:: Extra care needs to be taken when backward through outputs. Such
           operation is really only stable when all eigenvalues are distinct.
           Otherwise, ``NaN`` can appear as the gradients are not properly defined.
 
 Args:
-    input (Tensor): the input symmetric matrix
+    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
+                    batch dimensions consisting of symmetric matrices.
     eigenvectors(boolean, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
     out (tuple, optional): the output tuple of (Tensor, Tensor)
@@ -4936,29 +4938,36 @@ Args:
 Returns:
     (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **eigenvalues** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
-          The eigenvalues are in ascending order.
-        - **eigenvectors** (*Tensor*): Shape :math:`(m \times m)`.
+        - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`. The eigenvalues in ascending order.
+        - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
           If ``eigenvectors=False``, it's a tensor filled with zeros.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
 
 
-    >>> a = torch.tensor([[ 1.96,  0.00,  0.00,  0.00,  0.00],
-                          [-6.49,  3.80,  0.00,  0.00,  0.00],
-                          [-0.47, -6.39,  4.17,  0.00,  0.00],
-                          [-7.20,  1.50, -1.51,  5.70,  0.00],
-                          [-0.65, -6.34,  2.67,  1.80, -7.10]]).t()
+    >>> a = torch.randn(5, 5)
+    >>> a = a + a.t()  # To make a symmetric
+    >>> a
+    tensor([[-5.7827,  4.4559, -0.2344, -1.7123, -1.8330],
+            [ 4.4559,  1.4250, -2.8636, -3.2100, -0.1798],
+            [-0.2344, -2.8636,  1.7112, -5.5785,  7.1988],
+            [-1.7123, -3.2100, -5.5785, -2.6227,  3.1036],
+            [-1.8330, -0.1798,  7.1988,  3.1036, -5.1453]])
     >>> e, v = torch.symeig(a, eigenvectors=True)
     >>> e
-    tensor([-11.0656,  -6.2287,   0.8640,   8.8655,  16.0948])
+    tensor([-13.7012,  -7.7497,  -2.3163,   5.2477,   8.1050])
     >>> v
-    tensor([[-0.2981, -0.6075,  0.4026, -0.3745,  0.4896],
-            [-0.5078, -0.2880, -0.4066, -0.3572, -0.6053],
-            [-0.0816, -0.3843, -0.6600,  0.5008,  0.3991],
-            [-0.0036, -0.4467,  0.4553,  0.6204, -0.4564],
-            [-0.8041,  0.4480,  0.1725,  0.3108,  0.1622]])
+    tensor([[ 0.1643,  0.9034, -0.0291,  0.3508,  0.1817],
+            [-0.2417, -0.3071, -0.5081,  0.6534,  0.4026],
+            [-0.5176,  0.1223, -0.0220,  0.3295, -0.7798],
+            [-0.4850,  0.2695, -0.5773, -0.5840,  0.1337],
+            [ 0.6415, -0.0447, -0.6381, -0.0193, -0.4230]])
+    >>> a_big = torch.randn(5, 2, 2)
+    >>> a_big = a_big + a_big.transpose(-2, -1)  # To make a_big symmetric
+    >>> e, v = a_big.symeig(eigenvectors=True)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(e.diag_embed(), v.transpose(-2, -1))), a_big)
+    True
 """)
 
 add_docstr(torch.t,
@@ -5677,7 +5686,7 @@ add_docstr(torch.zeros,
 zeros(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
-by the variable argument :attr:`sizes`.
+by the variable argument :attr:`size`.
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
@@ -5728,13 +5737,13 @@ Example::
 
 add_docstr(torch.empty,
            r"""
-empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
+empty(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
-defined by the variable argument :attr:`sizes`.
+defined by the variable argument :attr:`size`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -6397,6 +6406,8 @@ Arguments:
     window_length (int): the size of returned window
     periodic (bool, optional): If True, returns a window to be used as periodic
         function. If False, return a symmetric window.
+    alpha (float, optional): The coefficient :math:`\alpha` in the equation above
+    beta (float, optional): The coefficient :math:`\beta` in the equation above
     {dtype} Only floating point types are supported.
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
@@ -6654,8 +6665,7 @@ Generator(device='cpu') -> Generator
 
 Creates and returns a generator object which manages the state of the algorithm that
 produces pseudo random numbers. Used as a keyword argument in many :ref:`inplace-random-sampling`
-functions. Currently only creation of CPU Generator is supported through
-this API.
+functions.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the generator.
@@ -6666,6 +6676,7 @@ Returns:
 Example::
 
     >>> g_cpu = torch.Generator()
+    >>> g_cuda = torch.Generator(device='cuda')
 """)
 
 

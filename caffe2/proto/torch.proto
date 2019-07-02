@@ -72,6 +72,8 @@ message ModuleDef {
 
   // Used for retrieving module state from the pickled IValues table
   optional int64 get_state_attribute_id = 10;
+
+  optional RecordRef torchscript_debug_arena = 11;
 }
 
 // Represents all non-module code that the model depends on.

@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -30,7 +29,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     int NDim = output_channels / groups;
     int KDim_per_group = kernel_h * kernel_w * input_channels_per_group;
     auto weight_contig = weight.contiguous();
-    int weight_zero_point_int32 = weight.q_zero_point().toInt();
+    int32_t weight_zero_point_int32 = weight.q_zero_point();
     TORCH_CHECK(
         weight_zero_point_int32 == 0,
         "Only symmetric quantization is supported for weights yet");
@@ -50,7 +49,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
                              groups),
                          col_offsets,
                          {kernel_h, kernel_w},
-                         weight.q_scale().toFloat(),
+                         weight.q_scale(),
                          weight_zero_point_int32});
     // TODO: we will need to replace this with torchscript classes at a later
     // point.

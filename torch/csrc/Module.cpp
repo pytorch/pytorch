@@ -27,6 +27,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/autograd/generated/python_nn_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
@@ -37,11 +38,13 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
+#include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/init.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/onnx/init.h>
+#include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
 #ifdef USE_CUDNN
@@ -101,6 +104,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   }
   torch::utils::initializeLayouts();
   torch::utils::initializeMemoryFormats();
+  torch::utils::initializeQSchemes();
   torch::utils::initializeDtypes();
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
@@ -456,12 +460,11 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
+PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (torch::tensors::get_default_tensor_type().is_cuda()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  return THPUtils_packString(
+          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_tensor_type_id()),
+                              /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
 
@@ -498,7 +501,7 @@ static PyMethodDef TorchMethods[] = {
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  nullptr},
-  {"_is_default_type_cuda", (PyCFunction)THPModule_isDefaultTypeCuda, METH_NOARGS,  nullptr},
+  {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,  nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
@@ -533,21 +536,7 @@ void init__THCUNN(PyObject*);
 
 }} // namespace torch::nn
 
-bool THDPDoubleStorage_init(PyObject *module);
-bool THDPFloatStorage_init(PyObject *module);
-//bool THDPHalfStorage_init(PyObject *module);
-bool THDPLongStorage_init(PyObject *module);
-bool THDPIntStorage_init(PyObject *module);
-bool THDPShortStorage_init(PyObject *module);
-bool THDPCharStorage_init(PyObject *module);
-bool THDPByteStorage_init(PyObject *module);
-bool THDPBoolStorage_init(PyObject *module);
-
 static std::vector<PyMethodDef> methods;
-
-#ifdef USE_DISTRIBUTED
-PyMethodDef* THDPModule_methods();
-#endif
 
 // TODO: Refactor this in some less manual way
 #ifdef USE_CUDNN
@@ -621,7 +610,6 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
 #ifdef USE_DISTRIBUTED
-  THPUtils_addPyMethodDefs(methods, THDPModule_methods());
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
@@ -647,6 +635,7 @@ PyObject* initModule() {
   THPDTypeInfo_init(module);
   THPLayout_init(module);
   THPMemoryFormat_init(module);
+  THPQScheme_init(module);
   THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
@@ -656,6 +645,7 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);

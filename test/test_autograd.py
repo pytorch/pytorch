@@ -15,7 +15,7 @@ from functools import reduce
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent
+from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent, emit_nvtx
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
@@ -1220,6 +1220,34 @@ class TestAutograd(TestCase):
         b = a + 2
         with self.assertRaises(RuntimeError):
             torch.autograd.backward([b], [None])
+
+    def test_backward_twice_with_saved_values(self):
+        b = torch.randn(3, requires_grad=True, dtype=torch.double)
+        c = torch.zeros(3, dtype=torch.double)
+        c[[1, 2]] = b[[1, 1]]
+        c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
+        self.assertRaisesRegex(RuntimeError, 'Specify retain_graph=True',
+                               lambda: c.backward(torch.tensor([1, 1, 1], dtype=torch.double)))
+
+    def test_backward_twice_retained_graph_with_saved_values(self):
+        b = torch.randn(3, requires_grad=True, dtype=torch.double)
+        c = torch.zeros(3, dtype=torch.double)
+        c[[1, 2]] = b[[1, 1]]
+        c.backward(torch.tensor([1, 1, 1], dtype=torch.double), retain_graph=True)
+        c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
+
+    def test_backward_twice_without_saved_values(self):
+        b = torch.randn(3, requires_grad=True, dtype=torch.double)
+        c = b + 1
+        c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
+        c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
+
+    def test_backward_twice_retained_graph_without_saved_values(self):
+        b = torch.randn(3, requires_grad=True, dtype=torch.double)
+        c = torch.zeros(3, dtype=torch.double)
+        c[[1, 2]] = b[[1, 1]]
+        c.backward(torch.tensor([1, 1, 1], dtype=torch.double), retain_graph=True)
+        c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
 
     def test_next_functions(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -2572,6 +2600,18 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
+    @skipIfRocm
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_profiler_emit_nvtx(self):
+        # This test is not intended to ensure correctness of nvtx ranges.
+        # That would require something a great deal more complex (you'd have to create a
+        # profile in a subprocess, open it, and parse the sql somehow).
+        # This test is merely intended to catch if emit_nvtx breaks on construction.
+        a = torch.tensor([1, 2, 3], dtype=torch.float32, device='cuda')
+        with torch.cuda.profiler.profile():
+            with emit_nvtx():
+                a.add(1.0)
+
     def test_dir(self):
         x = torch.randn(10, 10)
         keys = dir(x)
@@ -3274,39 +3314,44 @@ def add_test(
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                 if not exclude_tensor_method(name, test_name):
+                    output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                     output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
                     if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
                         output_tensor = torch.DoubleTensor((output_tensor,))
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops
 
-                def fn(*inputs):
-                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
-                    return output_process_fn(output)
+                    def fn(*inputs):
+                        output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                        return output_process_fn(output)
 
-                if not is_inplace and name not in EXCLUDE_GRADCHECK:
-                    run_grad_and_gradgrad_checks(self, name, test_name, fn,
-                                                 output_variable, (self_variable,) + args_variable)
+                    if not is_inplace and name not in EXCLUDE_GRADCHECK:
+                        run_grad_and_gradgrad_checks(self, name, test_name, fn,
+                                                     output_variable, (self_variable,) + args_variable)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
                     def fn(*inputs):
-                        output = getattr(torch, name)(*inputs)
+                        output = getattr(torch, name)(*inputs, **kwargs)
                         return output_process_fn(output)
 
                     f_args_variable = (self_variable,) + args_variable
                     f_args_tensor = (self_tensor,) + args_tensor
                     # could run the gradchecks again, but skip since we did it for the methods above.
+                    run_gradcheck = exclude_tensor_method(name, test_name) and not is_inplace and name not in EXCLUDE_GRADCHECK
                     run_functional_checks(self, test_name, name, fn,
-                                          False, f_args_variable, f_args_tensor)
+                                          run_gradcheck, f_args_variable, f_args_tensor)
 
                 # check for correct type of input.data and input.grad.data
                 if not is_inplace:
                     self_variable = create_input((self_size,), requires_grad=True)[0][0]
                     args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs)
-                    output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                    if hasattr(self_variable, name):
+                        output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                    else:
+                        self_and_args_variable = (self_variable,) + args_variable
+                        output_variable = getattr(torch, name)(*self_and_args_variable, **kwargs_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
                         if output_variable.is_sparse:
                             rand = randn_like(output_variable.to_dense()).to_sparse()

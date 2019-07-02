@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import multiprocessing
 import os
+import re
 from subprocess import check_call, check_output
 import sys
 import distutils
@@ -12,7 +13,7 @@ from distutils.version import LooseVersion
 
 from . import escape_path
 from .env import (IS_64BIT, IS_DARWIN, IS_WINDOWS,
-                  DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
+                  DEBUG, REL_WITH_DEB_INFO,
                   check_env_flag, check_negative_env_flag)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
@@ -20,8 +21,6 @@ from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
                    NCCL_SYSTEM_LIB, USE_NCCL)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 from .rocm import USE_ROCM
-from .nnpack import USE_NNPACK
-from .qnnpack import USE_QNNPACK
 
 
 def _which(thefile):
@@ -57,7 +56,7 @@ class CMake:
 
     def __init__(self, build_dir):
         self._cmake_command = CMake._get_cmake_command()
-        self._build_dir = build_dir
+        self.build_dir = build_dir
 
         if DEBUG:
             self._build_type = "Debug"
@@ -65,6 +64,15 @@ class CMake:
             self._build_type = "RelWithDebInfo"
         else:
             self._build_type = "Release"
+
+    @property
+    def _cmake_cache_file(self):
+        r"""Returns the path to CMakeCache.txt.
+
+        Returns:
+          string: The path to CMakeCache.txt.
+        """
+        return os.path.join(self.build_dir, 'CMakeCache.txt')
 
     @staticmethod
     def _get_cmake_command():
@@ -93,11 +101,11 @@ class CMake:
         raise RuntimeError('no version found')
 
     def run(self, args, env):
-        "Run cmake with arguments and an environment."
+        "Executes cmake with arguments and an environment."
 
         command = [self._cmake_command] + args
         print(' '.join(command))
-        check_call(command, cwd=self._build_dir, env=env)
+        check_call(command, cwd=self.build_dir, env=env)
 
     @staticmethod
     def defines(args, **kwargs):
@@ -106,15 +114,75 @@ class CMake:
             if value is not None:
                 args.append('-D{}={}'.format(key, value))
 
+    @staticmethod
+    def convert_cmake_value_to_python_value(cmake_value, cmake_type):
+        r"""Convert a CMake value in a string form to a Python value.
+
+        Arguments:
+          cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
+          cmake_type (string): The CMake type of :attr:`cmake_value`.
+
+        Returns:
+          A Python value corresponding to :attr:`cmake_value` with type :attr:`cmake_type`.
+        """
+
+        cmake_type = cmake_type.upper()
+        up_val = cmake_value.upper()
+        if cmake_type == 'BOOL':
+            # https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/VariablesListsStrings#boolean-values-in-cmake
+            return not (up_val in ('FALSE', 'OFF', 'N', 'NO', '0', '', 'NOTFOUND') or up_val.endswith('-NOTFOUND'))
+        elif cmake_type == 'FILEPATH':
+            if up_val.endswith('-NOTFOUND'):
+                return None
+            else:
+                return cmake_value
+        else:  # Directly return the cmake_value.
+            return cmake_value
+
+    @staticmethod
+    def _get_cmake_cache_variables(cmake_cache_file):
+        r"""Gets values in CMakeCache.txt into a dictionary.
+
+        Arguments:
+          cmake_cache_file: A CMakeCache.txt file object.
+        Returns:
+          dict: A ``dict`` containing the value of cached CMake variables.
+        """
+
+        results = dict()
+        for line in cmake_cache_file:
+            line = line.strip()
+            if not line or line.startswith(('#', '//')):
+                # Blank or comment line, skip
+                continue
+
+            # Space can also be part of variable name and value
+            matched = re.match(r'(\S.*):\s*([a-zA-Z_-][a-zA-Z0-9_-]*)\s*=\s*(.*)', line)
+            if matched is None:  # Illegal line
+                raise ValueError('Unexpected line in {}: {}'.format(repr(cmake_cache_file), line))
+            variable, type_, value = matched.groups()
+            if type_.upper() in ('INTERNAL', 'STATIC'):
+                # CMake internal variable, do not touch
+                continue
+            results[variable] = CMake.convert_cmake_value_to_python_value(value, type_)
+
+        return results
+
+    def get_cmake_cache_variables(self):
+        r"""Gets values in CMakeCache.txt into a dictionary.
+        Returns:
+          dict: A ``dict`` containing the value of cached CMake variables.
+        """
+        with open(self._cmake_cache_file) as f:
+            return CMake._get_cmake_cache_variables(f)
+
     def generate(self, version, cmake_python_library, build_python, build_test, my_env, rerun):
         "Runs cmake to generate native build files."
 
-        cmake_cache_file = os.path.join(self._build_dir, 'CMakeCache.txt')
-
-        if rerun and os.path.isfile(cmake_cache_file):
-            os.remove(cmake_cache_file)
-        ninja_build_file = os.path.join(self._build_dir, 'build.ninja')
-        if os.path.exists(cmake_cache_file) and not (
+        if rerun and os.path.isfile(self._cmake_cache_file):
+            os.remove(self._cmake_cache_file)
+        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
+        if os.path.exists(self._cmake_cache_file) and not (
                 USE_NINJA and not os.path.exists(ninja_build_file)):
             # Everything's in place. Do not rerun.
             return
@@ -160,92 +228,87 @@ class CMake:
         install_dir = os.path.join(base_dir, "torch")
 
         _mkdir_p(install_dir)
-        _mkdir_p(self._build_dir)
+        _mkdir_p(self.build_dir)
+
+        # Store build options that are directly stored in environment variables
+        build_options = {
+            # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
+            'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
+        }
+        # Options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars
+        additional_options = {
+            # Key: environment variable name. Value: Corresponding variable name to be passed to CMake.
+            '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
+            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
+        }
+        additional_options.update({
+            var: var for var in
+            ('BLAS',
+             'BUILDING_WITH_TORCH_LIBS',
+             'CMAKE_PREFIX_PATH',
+             'EXPERIMENTAL_SINGLE_THREAD_POOL',
+             'MKL_THREADING',
+             'MKLDNN_THREADING',
+             'ONNX_ML',
+             'ONNX_NAMESPACE',
+             'PARALLEL_BACKEND',
+             'WERROR')
+        })
+
+        for var, val in my_env.items():
+            # We currently pass over all environment variables that start with "BUILD_" or "USE_". This is because we
+            # currently have no reliable way to get the list of all build options we have specified in CMakeLists.txt.
+            # (`cmake -L` won't print dependent options when the dependency condition is not met.) We will possibly
+            # change this in the future by parsing CMakeLists.txt ourselves (then additional_options would also not be
+            # needed to be specified here).
+            true_var = additional_options.get(var)
+            if true_var is not None:
+                build_options[true_var] = val
+            elif var.startswith(('USE_', 'BUILD_')):
+                build_options[var] = val
+
+        # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
+        # future, as CMake can detect many of these libraries pretty comfortably. We have them here for now before CMake
+        # integration is completed. They appear here not in the CMake.defines call below because they start with either
+        # "BUILD_" or "USE_" and must be overwritten here.
+        build_options.update({
+            'BUILD_PYTHON': build_python,
+            'BUILD_TEST': build_test,
+            'USE_CUDA': USE_CUDA,
+            'USE_DISTRIBUTED': USE_DISTRIBUTED,
+            'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
+                               check_negative_env_flag('USE_FBGEMM')),
+            'USE_NCCL': USE_NCCL,
+            'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
+            'USE_NUMPY': USE_NUMPY,
+            'USE_ROCM': USE_ROCM,
+            'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
+        })
 
         CMake.defines(args,
                       PYTHON_EXECUTABLE=escape_path(sys.executable),
                       PYTHON_LIBRARY=escape_path(cmake_python_library),
                       PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
-                      BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
                       TORCH_BUILD_VERSION=version,
                       CMAKE_BUILD_TYPE=self._build_type,
-                      BUILD_PYTHON=build_python,
-                      BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
-                      BUILD_BINARY=check_env_flag('BUILD_BINARY'),
-                      BUILD_TEST=build_test,
                       INSTALL_TEST=build_test,
-                      BUILD_CAFFE2_OPS=not check_negative_env_flag('BUILD_CAFFE2_OPS'),
-                      ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE", "onnx_torch"),
-                      ONNX_ML=not check_negative_env_flag("ONNX_ML"),
-                      USE_CUDA=USE_CUDA,
-                      USE_DISTRIBUTED=USE_DISTRIBUTED,
-                      USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or
-                                      check_negative_env_flag('USE_FBGEMM')),
                       NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or
                                            check_negative_env_flag('NO_NAMEDTENSOR')),
-                      USE_NUMPY=USE_NUMPY,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
-                      USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
                       NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
                       NCCL_ROOT_DIR=NCCL_ROOT_DIR,
                       NCCL_SYSTEM_LIB=NCCL_SYSTEM_LIB,
-                      CAFFE2_STATIC_LINK_CUDA=check_env_flag('USE_CUDA_STATIC_LINK'),
-                      USE_ROCM=USE_ROCM,
-                      USE_NNPACK=USE_NNPACK,
-                      USE_LEVELDB=check_env_flag('USE_LEVELDB'),
-                      USE_LMDB=check_env_flag('USE_LMDB'),
-                      USE_OPENCV=check_env_flag('USE_OPENCV'),
-                      USE_QNNPACK=USE_QNNPACK,
-                      USE_TENSORRT=check_env_flag('USE_TENSORRT'),
-                      USE_FFMPEG=check_env_flag('USE_FFMPEG'),
-                      USE_SYSTEM_EIGEN_INSTALL="OFF",
-                      USE_MKLDNN=USE_MKLDNN,
-                      USE_NCCL=USE_NCCL,
                       NCCL_EXTERNAL=USE_NCCL,
                       CMAKE_INSTALL_PREFIX=install_dir,
                       CMAKE_C_FLAGS=cflags,
                       CMAKE_CXX_FLAGS=cflags,
                       CMAKE_EXE_LINKER_FLAGS=ldflags,
                       CMAKE_SHARED_LINKER_FLAGS=ldflags,
-                      THD_SO_VERSION="1",
-                      CMAKE_PREFIX_PATH=(os.getenv('CMAKE_PREFIX_PATH') or
-                                         distutils.sysconfig.get_python_lib()),
-                      BLAS=os.getenv('BLAS'),
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
-                      USE_REDIS=os.getenv('USE_REDIS'),
-                      USE_GLOG=os.getenv('USE_GLOG'),
-                      USE_GFLAGS=os.getenv('USE_GFLAGS'),
-                      USE_ASAN=check_env_flag('USE_ASAN'),
-                      WERROR=os.getenv('WERROR'))
-
-        if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
-            CMake.defines(args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
-
-        if os.getenv('USE_OPENMP'):
-            CMake.defines(args, USE_OPENMP=check_env_flag('USE_OPENMP'))
-
-        if os.getenv('USE_TBB'):
-            CMake.defines(args, USE_TBB=check_env_flag('USE_TBB'))
-
-        if os.getenv('MKL_SEQ'):
-            CMake.defines(args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
-
-        if os.getenv('MKL_TBB'):
-            CMake.defines(args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
-
-        mkldnn_threading = os.getenv('MKLDNN_THREADING')
-        if mkldnn_threading:
-            CMake.defines(args, MKLDNN_THREADING=mkldnn_threading)
-
-        parallel_backend = os.getenv('PARALLEL_BACKEND')
-        if parallel_backend:
-            CMake.defines(args, PARALLEL_BACKEND=parallel_backend)
+                      **build_options)
 
         if USE_GLOO_IBVERBS:
             CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
-
-        if USE_MKLDNN:
-            CMake.defines(args, MKLDNN_ENABLE_CONCURRENT_EXEC="ON")
 
         expected_wrapper = '/usr/local/opt/ccache/libexec'
         if IS_DARWIN and os.path.exists(expected_wrapper):
@@ -298,6 +361,6 @@ class CMake:
         # build detector.
         # This line works around that bug by manually updating the build.ninja timestamp
         # after the entire build is finished.
-        ninja_build_file = os.path.join(self._build_dir, 'build.ninja')
+        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
         if os.path.exists(ninja_build_file):
             os.utime(ninja_build_file, None)

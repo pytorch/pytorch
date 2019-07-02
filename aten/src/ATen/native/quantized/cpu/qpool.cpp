@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -119,8 +118,8 @@ Tensor q_maxpool_2d(Tensor qx,                  // Input Tensor (Quantized)
   Tensor qy = at::_empty_affine_quantized(
     oSizes,
     qx.options().dtype(toQIntType(qx.scalar_type())),
-    qx.q_scale().toDouble(),
-    qx.q_zero_point().toLong());
+    qx.q_scale(),
+    qx.q_zero_point());
   auto qx_contig = qx.contiguous();
   auto qxd = qx_contig.data<Q>();
   auto qyd = qy.data<Q>();

@@ -107,6 +107,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)
+      .def("_jit_pass_onnx_remove_print", RemovePrintOps)
+      .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
@@ -134,7 +136,7 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& methodName,
              py::function pyObserverFunction) {
             // Create a new node that would be used in the insert observer pass:
@@ -162,7 +164,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& methodName,
              py::dict& pyQParamDict) {
             if (!pyQParamDict.size()) {
@@ -176,7 +178,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant_for_weight_bias",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& method_name,
              const std::string& param_name,
              py::function pyGetQParamFunc) {
@@ -211,14 +213,12 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
           "_jit_pass_pattern_based_rewrite",
-          [](std::shared_ptr<script::Module>& m) {
-            return PatternBasedRewrite(m);
-          })
+          [](const script::Module& m) { return PatternBasedRewrite(m); })
       .def(
           "_jit_pass_custom_pattern_based_rewrite",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             std::shared_ptr<script::Module> m) {
+             const script::Module& m) {
             SubgraphRewriter subgraph_rewriter;
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnModule(m);
@@ -336,8 +336,17 @@ void initJITBindings(PyObject* module) {
           "_jit_set_profiling_mode",
           [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
       .def(
-          "_jit_set_first_class_mode",
-          [](bool enabled) { script::getFirstClassMode() = enabled; })
+          "_jit_set_inline_everything_mode",
+          [](bool enabled) { script::getInlineEverythingMode() = enabled; })
+      .def(
+          "_jit_try_infer_type",
+          [](py::object obj) -> TypePtr {
+            auto match = tryToInferType(obj);
+            if (match.type) {
+              return *match.type;
+            }
+            return nullptr;
+          })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {

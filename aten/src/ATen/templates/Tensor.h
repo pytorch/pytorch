@@ -1,9 +1,9 @@
 #pragma once
 
-#include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
@@ -12,6 +12,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #ifdef NAMEDTENSOR_ENABLED
@@ -35,6 +36,12 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+
+struct Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
@@ -167,18 +174,13 @@ class CAFFE2_API Tensor {
   }
 #ifdef NAMEDTENSOR_ENABLED
   optional<DimnameList> names() const {
-    const auto* meta = get_named_tensor_meta();
-    if (meta == nullptr) {
-      return nullopt;
-    } else {
-      return meta->names();
-    }
+    return impl::internal_get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
     return dim();
   }
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
   }
 
@@ -207,9 +209,6 @@ class CAFFE2_API Tensor {
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
         is_variable());
-  }
-  Type & dispatch_type() const {
-    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
@@ -345,14 +344,6 @@ class CAFFE2_API Tensor {
   const Tensor& grad() const {
     return impl_->grad();
   }
-
-  void set_data(Tensor new_data);
-
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
-  void backward(
-      c10::optional<Tensor> gradient = c10::nullopt,
-      bool keep_graph = false,
-      bool create_graph = false);
 
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
