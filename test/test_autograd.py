@@ -1759,6 +1759,7 @@ class TestAutograd(TestCase):
         y = x.detach(allow_tensor_metadata_change=True)
         y.resize_(5, 5)
         self.assertNotEqual(x.shape, y.shape)
+        # yf225 TODO: check that `y`'s version counter is bumped
 
     def test_detach_base(self):
         "detaching base does not detach view"
