@@ -54,6 +54,7 @@ import os
 import pickle
 import pickletools
 import random
+import re
 import shutil
 import sys
 import tempfile
@@ -5101,6 +5102,58 @@ a")
                     self.assertEqual(res_python, res_script, message=msg, prec=prec)
 
 
+        # https://stackoverflow.com/a/48567936
+        def get_parameter_count(func):
+            """Count parameter of a function.
+
+            Supports Python functions (and built-in functions).
+            If a function takes *args, then -1 is returned
+            """
+
+            # If the function is a builtin function we use our
+            # approach. If it's an ordinary Python function we
+            # fallback by using the the built-in extraction
+            # functions (see else case), otherwise
+            if isinstance(func, types.BuiltinFunctionType):
+                try:
+                    arg_test = 999
+                    s = [None] * arg_test
+                    func(*s)
+                except TypeError as e:
+                    message = str(e)
+                    found = re.match(
+                        r"[\w]+\(\) takes ([0-9]{1,3}) positional argument[s]* but " +
+                        str(arg_test) + " were given", message)
+                    if found:
+                        return int(found.group(1))
+
+                    if "takes no arguments" in message:
+                        return 0
+                    elif "takes at most" in message:
+                        found = re.match(
+                            r"[\w]+\(\) takes at most ([0-9]{1,3}).+", message)
+                        if found:
+                            return int(found.group(1))
+                    elif "takes exactly" in message:
+                        # string can contain 'takes 1' or 'takes one',
+                        # depending on the Python version
+                        found = re.match(
+                            r"[\w]+\(\) takes exactly ([0-9]{1,3}|[\w]+).+", message)
+                        if found:
+                            return 1 if found.group(1) == "one" \
+                                    else int(found.group(1))
+                return -1  # *args
+            else:
+                try:
+                    if PY3:
+                        argspec = inspect.getfullargspec(func)
+                    else:
+                        argspec = inspect.getargspec(func)
+                except:
+                    raise TypeError("unable to determine parameter count")
+
+                return -1 if argspec.varargs else len(argspec.args)
+
         ops = [x for x in dir(math) if callable(getattr(math, x))]
         for op in ops:
             if op in unimplemented_math_ops:
@@ -5130,13 +5183,7 @@ a")
                 checkMath("pow", 2, is_float=True, ret_type="float")
             else:
                 func = getattr(math, op)
-                param_count = 0
-
-                def num_args(f):  # Parses the docstring for builtin functions
-                    spec = f.__doc__.split('\n')[0]
-                    args = spec[spec.find('(') + 1:spec.find(')')]
-                    return args.count(',') + 1 if args else 0
-                param_count = num_args(func)
+                param_count = get_parameter_count(func)
                 if param_count == 1:
                     checkMathWrap(op, 1)
                 else:
