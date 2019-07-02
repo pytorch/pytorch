@@ -30,7 +30,8 @@ static void avg_pool3d_out_frame(
           int padT,
           int padW,
           int padH,
-          bool count_include_pad)
+          bool count_include_pad,
+          c10::optional<int64_t> divisor_override)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
@@ -66,10 +67,15 @@ static void avg_pool3d_out_frame(
             wend = std::min(wend, iwidth);
 
             int divide_factor;
-            if (count_include_pad)
-              divide_factor = pool_size;
-            else
-              divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
+            if (divisor_override.has_value()) {
+              divide_factor = divisor_override.value();
+            } else {
+              if(count_include_pad) {
+                divide_factor = pool_size;
+              } else {
+                divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
+              }
+            }
 
             /* compute local sum: */
             scalar_t sum = 0.0;
@@ -102,7 +108,8 @@ void avg_pool3d_out_cpu_template(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 3) &&
@@ -112,6 +119,10 @@ void avg_pool3d_out_cpu_template(
 
   TORCH_CHECK((input_.ndimension() == 4 || input_.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
+
+  if (divisor_override.has_value()) {
+    TORCH_CHECK(divisor_override.value() != 0, "divisor must be not zero");
+  }
 
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
@@ -153,7 +164,7 @@ void avg_pool3d_out_cpu_template(
     /* resize output */
     output.resize_({nslices, otime, oheight, owidth});
 
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND_LONG(input.scalar_type(),
       "avg_pool3d_out_frame",
       [&] {
         scalar_t *input_data = input.data<scalar_t>();
@@ -166,7 +177,8 @@ void avg_pool3d_out_cpu_template(
           kT, kW, kH,
           dT, dW, dH,
           padT, padW, padH,
-          count_include_pad);
+          count_include_pad,
+          divisor_override);
     });
   }
   else  /* batch mode */
@@ -178,7 +190,7 @@ void avg_pool3d_out_cpu_template(
     /* resize output */
     output.resize_({nbatch, nslices, otime, oheight, owidth});
 
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND_LONG(input.scalar_type(),
       "avg_pool3d_out_frame",
       [&] {
         scalar_t *input_data = input.data<scalar_t>();
@@ -193,7 +205,8 @@ void avg_pool3d_out_cpu_template(
               kT, kW, kH,
               dT, dW, dH,
               padT, padW, padH,
-              count_include_pad
+              count_include_pad,
+              divisor_override
             );
           }
         });
@@ -221,7 +234,8 @@ static void avg_pool3d_backward_out_frame(
           int padT,
           int padW,
           int padH,
-          bool count_include_pad)
+          bool count_include_pad,
+          c10::optional<int64_t> divisor_override)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
@@ -255,11 +269,16 @@ static void avg_pool3d_backward_out_frame(
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);
 
-            int64_t divide_factor;
-            if (count_include_pad)
-              divide_factor = pool_size;
-            else
-              divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
+            int divide_factor;
+            if (divisor_override.has_value()) {
+              divide_factor = divisor_override.value();
+            } else {
+              if(count_include_pad) {
+                divide_factor = pool_size;
+              } else {
+                divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
+              }
+            }
 
             /* scatter gradients out to footprint: */
             scalar_t val  = *op++;
@@ -290,7 +309,8 @@ Tensor& avg_pool3d_backward_out_cpu_template(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 3) &&
@@ -300,6 +320,10 @@ Tensor& avg_pool3d_backward_out_cpu_template(
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
+
+  if (divisor_override.has_value()) {
+    TORCH_CHECK(divisor_override.value() != 0, "divisor must be not zero");
+  }
 
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
@@ -347,7 +371,7 @@ Tensor& avg_pool3d_backward_out_cpu_template(
   /* backprop */
   if (input.ndimension() == 4) /* non-batch mode*/
   {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND_LONG(input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
        scalar_t *gradInput_data = gradInput.data<scalar_t>();
@@ -361,7 +385,8 @@ Tensor& avg_pool3d_backward_out_cpu_template(
          kT, kW, kH,
          dT, dW, dH,
          padT, padW, padH,
-         count_include_pad);
+         count_include_pad,
+         divisor_override);
     });
   }
   else /* batch mode */
@@ -370,7 +395,7 @@ Tensor& avg_pool3d_backward_out_cpu_template(
     const int64_t istride = nslices * itime * iwidth * iheight;
     const int64_t ostride = nslices * otime * owidth * oheight;
 
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND_LONG(input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
         scalar_t *gradInput_data = gradInput.data<scalar_t>();
@@ -386,7 +411,8 @@ Tensor& avg_pool3d_backward_out_cpu_template(
               kT, kW, kH,
               dT, dW, dH,
               padT, padW, padH,
-              count_include_pad
+              count_include_pad,
+              divisor_override
             );
           }
         });
@@ -405,7 +431,8 @@ Tensor& avg_pool3d_out_cpu(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   avg_pool3d_out_cpu_template(
     output,
@@ -414,7 +441,8 @@ Tensor& avg_pool3d_out_cpu(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return output;
 }
 
@@ -424,7 +452,8 @@ Tensor avg_pool3d_cpu(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   Tensor output = at::empty({0}, input.options());
   avg_pool3d_out_cpu_template(
@@ -434,7 +463,8 @@ Tensor avg_pool3d_cpu(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return output;
 }
 
@@ -446,7 +476,8 @@ Tensor& avg_pool3d_backward_out_cpu(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   avg_pool3d_backward_out_cpu_template(
     gradInput,
@@ -456,7 +487,8 @@ Tensor& avg_pool3d_backward_out_cpu(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return gradInput;
 }
 
@@ -467,7 +499,8 @@ Tensor avg_pool3d_backward_cpu(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   auto gradInput = at::zeros_like(input);
   avg_pool3d_backward_out_cpu_template(
@@ -478,7 +511,8 @@ Tensor avg_pool3d_backward_cpu(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return gradInput;
 }
 

@@ -29,7 +29,7 @@ __global__ void avg_pool3d_cuda_update_output(
   int dT, int dH, int dW,
   int padT, int padH, int padW,
   bool count_include_pad,
-  int offsetZ)
+  int offsetZ, int divisor_override)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -55,10 +55,15 @@ __global__ void avg_pool3d_cuda_update_output(
     wend = min(wend, input.size(3));
 
     accscalar_t divide_factor;
-    if (count_include_pad)
-      divide_factor = static_cast<accscalar_t>(pool_size);
-    else
-      divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
+    if (divisor_override) {
+      divide_factor = static_cast<accscalar_t>(divisor_override);
+    } else {
+      if(count_include_pad) {
+        divide_factor = static_cast<accscalar_t>(pool_size);
+      } else {
+        divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
+      }
+    }
 
     int ti, hi, wi;
     for (ti = tstart; ti < tend; ++ti)
@@ -88,7 +93,7 @@ __global__ void avg_pool3d_cuda_update_output(
   int dT, int dH, int dW,
   int padT, int padH, int padW,
   bool count_include_pad,
-  int offsetZ)
+  int offsetZ, int divisor_override)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -114,10 +119,15 @@ __global__ void avg_pool3d_cuda_update_output(
     wend = min(wend, input.size(3));
 
     accscalar_t divide_factor;
-    if (count_include_pad)
-      divide_factor = static_cast<accscalar_t>(pool_size);
-    else
-      divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
+    if (divisor_override) {
+      divide_factor = static_cast<accscalar_t>(divisor_override);
+    } else {
+      if(count_include_pad) {
+        divide_factor = static_cast<accscalar_t>(pool_size);
+      } else {
+        divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
+      }
+    }
 
     int ti, hi, wi;
     for (ti = tstart; ti < tend; ++ti)
@@ -189,7 +199,7 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
   int dT, int dH, int dW,
   int padT, int padH, int padW,
   bool count_include_pad,
-  int offsetZ)
+  int offsetZ, int divisor_override)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -214,10 +224,15 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
     wend = min(wend, gradInput.size(3));
 
     accscalar_t divide_factor;
-    if (count_include_pad)
-      divide_factor = static_cast<accscalar_t>(pool_size);
-    else
-      divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
+    if (divisor_override) {
+      divide_factor = static_cast<accscalar_t>(divisor_override);
+    } else {
+      if(count_include_pad) {
+        divide_factor = static_cast<accscalar_t>(pool_size);
+      } else {
+        divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
+      }
+    }
 
     scalar_t val = ScalarConvert<accscalar_t, scalar_t>::to(
       ScalarConvert<scalar_t, accscalar_t>::to(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
@@ -241,7 +256,7 @@ __global__ void avg_pool3d_cuda_update_grad_input(
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
-  bool count_include_pad, int offsetZ)
+  bool count_include_pad, int offsetZ, int divisor_override)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -266,10 +281,15 @@ __global__ void avg_pool3d_cuda_update_grad_input(
     wend = min(wend, gradInput.size(3));
 
     accscalar_t divide_factor;
-    if (count_include_pad)
-      divide_factor = static_cast<accscalar_t>(pool_size);
-    else
-      divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
+    if (divisor_override) {
+      divide_factor = static_cast<accscalar_t>(divisor_override);
+    } else {
+      if(count_include_pad) {
+        divide_factor = static_cast<accscalar_t>(pool_size);
+      } else {
+        divide_factor = static_cast<accscalar_t>((tend - tstart) * (hend - hstart) * (wend - wstart));
+      }
+    }
 
     scalar_t val = ScalarConvert<accscalar_t, scalar_t>::to(
       ScalarConvert<scalar_t, accscalar_t>::to(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
@@ -295,7 +315,7 @@ __global__ void avg_pool3d_cuda_update_grad_input(
        dT, dH, dW,                                          \
        padT, padH, padW,                                    \
        count_include_pad,                                   \
-       offsetZ);                                            \
+       offsetZ, divisor_override);                          \
   break
 
 void avg_pool3d_out_cuda_template(
@@ -305,7 +325,8 @@ void avg_pool3d_out_cuda_template(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   TensorArg output_arg{ output, "output", 1 };
   TensorArg input_arg{ input, "input", 2 };
@@ -400,7 +421,7 @@ void avg_pool3d_out_cuda_template(
                dT, dH, dW,
                padT, padH, padW,
                count_include_pad,
-               offsetZ);
+               offsetZ, divisor_override);
             break;
         }
 
@@ -425,7 +446,8 @@ void avg_pool3d_backward_out_cuda_template(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput, "gradOutput", 2 };
@@ -522,7 +544,7 @@ void avg_pool3d_backward_out_cuda_template(
               work_grad_input.packed_accessor<scalar_t, 4>(),
               kT, kH, kW,
               1.0f/(kT * kH * kW),
-              offsetZ);
+              offsetZ, divisor_override);
 
           TORCH_CHECK(cudaGetLastError() == cudaSuccess,
             "avg_pool3d_backward_out_frame failed with error code ",
@@ -557,7 +579,7 @@ void avg_pool3d_backward_out_cuda_template(
                  dT, dH, dW,
                  padT, padH, padW,
                  count_include_pad,
-                 offsetZ);
+                 offsetZ, divisor_override);
           }
           else {
             avg_pool3d_cuda_update_grad_input<scalar_t, accscalar_t>
@@ -568,7 +590,7 @@ void avg_pool3d_backward_out_cuda_template(
                  dT, dH, dW,
                  padT, padH, padW,
                  count_include_pad,
-                 offsetZ);
+                 offsetZ, divisor_override);
           }
 
           TORCH_CHECK(cudaGetLastError() == cudaSuccess,
@@ -592,7 +614,8 @@ Tensor& avg_pool3d_out_cuda(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   avg_pool3d_out_cuda_template(
     output,
@@ -601,7 +624,8 @@ Tensor& avg_pool3d_out_cuda(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return output;
 }
 
@@ -611,7 +635,8 @@ Tensor avg_pool3d_cuda(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   Tensor output = at::empty({0}, input.options());
   avg_pool3d_out_cuda_template(
@@ -621,7 +646,8 @@ Tensor avg_pool3d_cuda(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return output;
 }
 
@@ -633,7 +659,8 @@ Tensor& avg_pool3d_backward_out_cuda(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   avg_pool3d_backward_out_cuda_template(
     gradInput,
@@ -643,7 +670,8 @@ Tensor& avg_pool3d_backward_out_cuda(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return gradInput;
 }
 
@@ -654,7 +682,8 @@ Tensor avg_pool3d_backward_cuda(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   auto gradInput = at::zeros_like(input);
   avg_pool3d_backward_out_cuda_template(
@@ -665,7 +694,8 @@ Tensor avg_pool3d_backward_cuda(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return gradInput;
 }
 
