@@ -1752,7 +1752,7 @@ class TestAutograd(TestCase):
     def test_detach_allow_tensor_metadata_change(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = x.detach()
-        with self.assertRaisesRegex(RuntimeError, 'yf225 TODO fill this out'):
+        with self.assertRaisesRegex(RuntimeError, 'is not allowed on Tensor created from .data or .detach()'):
             y.resize_(5, 5)
 
         x = torch.randn(10, 10, requires_grad=True)
