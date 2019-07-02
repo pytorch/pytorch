@@ -64,7 +64,7 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
   }
 }
 
-template <typename scalar_t, typename accscalar_t, bool COUNT_INCLUDE_PAD>
+template <typename scalar_t, typename accscalar_t, bool COUNT_INCLUDE_PAD, bool USE_DIVISOR>
 __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const scalar_t* const top_diff,
     const int num, const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
