@@ -78,20 +78,29 @@ void BoundShapeInferencer::InferBoundShapeAndType(
   const static std::unordered_set<std::string> unsupported{"Tile"};
   shape_info_ = info;
 
-  for (const auto& op : net.op()) {
-    VLOG(1) << op.type();
-    if (unsupported.count(op.type())) {
-      continue;
-    }
-    InferOps(op, ws);
-  }
+  bool inferFinished = false;
 
-  // Doing a reverse pass to infer the input shapes if applicable
-  for (int i = net.op_size() - 1; i >= 0; --i) {
-    const auto& op = net.op(i);
-    if (op.type() == "Concat") {
-      InferConcatInputs(op);
+  auto old_shape_num = shape_info_.size();
+  while (!inferFinished) {
+    for (const auto& op : net.op()) {
+      VLOG(1) << op.type();
+      if (unsupported.count(op.type())) {
+        continue;
+      }
+      InferOps(op, ws);
     }
+
+    // Doing a reverse pass to infer the input shapes if applicable
+    for (int i = net.op_size() - 1; i >= 0; --i) {
+      const auto& op = net.op(i);
+      if (op.type() == "Concat") {
+        InferConcatInputs(op);
+      }
+    }
+    inferFinished = old_shape_num == shape_info_.size();
+    LOG(INFO) << "old shape info num: " << old_shape_num
+              << ", new shape info num: " << shape_info_.size();
+    old_shape_num = shape_info_.size();
   }
 
   // Make sure shape has name
