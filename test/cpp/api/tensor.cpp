@@ -2,6 +2,8 @@
 
 #include <torch/types.h>
 
+#include <test/cpp/api/support.h>
+
 #include <ATen/ATen.h>
 
 #include <cmath>
@@ -305,4 +307,19 @@ TEST(TensorTest, Item_CUDA) {
   }
 }
 
-// yf225 TODO: add `detach()` and `detach(/*allow_tensor_metadata_change=*/true)` tests
+TEST(TensorTest, Detach) {
+  {
+    auto tensor = torch::randn({3, 4});
+    auto tensor_detached = tensor.detach();
+    ASSERT_THROWS_WITH(
+      tensor_detached.resize_({4, 5}),
+      "is not allowed on Tensor created from .data or .detach()");
+  }
+  {
+    auto tensor = torch::randn({3, 4});
+    auto tensor_detached = tensor.detach(/*allow_tensor_metadata_change=*/true);
+    tensor_detached.resize_({4, 5});
+    ASSERT_EQ(tensor_detached.sizes(), std::vector<int64_t>({4, 5}));
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3, 4}));
+  }
+}
