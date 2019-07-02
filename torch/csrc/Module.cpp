@@ -44,6 +44,7 @@
 #include <torch/csrc/jit/init.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/onnx/init.h>
+#include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
 #ifdef USE_CUDNN
@@ -462,7 +463,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(
-          c10::DeviceTypeName(torch::tensors::get_default_tensor_type().device_type(),
+          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_tensor_type_id()),
                               /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
@@ -644,6 +645,7 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);

@@ -329,6 +329,19 @@ void AliasDb::analyzeImpl(Node* node) {
 
   if (analysis == AliasAnalysisKind::CONSERVATIVE) {
     TORCH_INTERNAL_ASSERT(!node->kind().is_aten() && !node->kind().is_prim(), "aten:: and prim:: operators should not use AliasAnalysisKind::CONSERVATIVE but ", node->kind().toDisplayString(), " does.");
+
+    // TODO A previous implementation of alias analysis always accessed node->schema ,
+    // which cause the schema caches in the Node class to be filled for the full graph.
+    // Unfortunately, our JIT passes started relying on that, so we need to keep doing this.
+    // Details: in caffe2/torch/onnx/utils.py, _jit_pass_onnx is called on an invalid
+    // JIT graph because we called _jit_pass_erase_number_types right before and
+    // ints are now Tensors instead. So if _jit_pass_onnx tries to look up operator schemas,
+    // it will crash. However, _jit_pass_constant_propagation, which is called before it,
+    // runs alias analysis and prefills the schema cache in the all Node instances
+    // so that _jit_pass_onnx doesn't look up operators to get the schemas anymore.
+    // We should fix this.
+    node->schema(); // fill the schema cache in the Node class
+
     return analyzeConservative(node);
   }
 
