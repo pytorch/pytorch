@@ -106,7 +106,7 @@ _IterableDatasetStopIteration = namedtuple('_IterableDatasetStopIteration', ['wo
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, seed, init_fn, worker_id,
-                 num_workers, collate_fn_args=None):
+                 num_workers):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -134,8 +134,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             if init_fn is not None:
                 init_fn(worker_id)
 
-            fetcher = _DatasetKind.create_fetcher(dataset_kind, dataset, auto_collation, collate_fn, drop_last,
-                                                  collate_fn_args)
+            fetcher = _DatasetKind.create_fetcher(dataset_kind, dataset, auto_collation, collate_fn, drop_last)
         except Exception:
             init_exception = ExceptionWrapper(sys.exc_info())
 

@@ -12,7 +12,7 @@ from torch._six import container_abcs, string_classes, int_classes
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
 
-def default_convert(data, _=None):
+def default_convert(data):
     r"""Converts each NumPy array data field into a tensor"""
 
     elem_type = type(data)
@@ -40,7 +40,7 @@ default_collate_err_msg_format = (
     "dicts or lists; found {}")
 
 
-def default_collate(batch, _=None):
+def default_collate(batch):
     r"""Puts each data field into a tensor with outer dimension batch size"""
 
     elem = batch[0]
