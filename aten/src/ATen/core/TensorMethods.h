@@ -691,9 +691,9 @@ inline Tensor & Tensor::sinh_() {
     static auto table = globalATenDispatch().getOpTable("aten::sinh_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
-inline Tensor Tensor::detach() const {
-    static auto table = globalATenDispatch().getOpTable("aten::detach(Tensor self) -> Tensor");
-    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+inline Tensor Tensor::detach(bool allow_tensor_metadata_change) const {
+    static auto table = globalATenDispatch().getOpTable("aten::detach(Tensor self, *, bool allow_tensor_metadata_change=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, allow_tensor_metadata_change);
 }
 inline Tensor & Tensor::detach_() {
     static auto table = globalATenDispatch().getOpTable("aten::detach_(Tensor(a!) self) -> Tensor(a!)");
