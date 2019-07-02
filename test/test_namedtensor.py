@@ -71,6 +71,41 @@ class TestNamedTensor(TestCase):
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
 
+    def test_info_smoke(self):
+        # Smoke test for info functions / methods / attributes on named tensors.
+        tensor = torch.empty(1, 1, names=('N', 'D'))
+
+        tensor.device
+        tensor.dtype
+        tensor.get_device()
+        tensor.is_complex()
+        tensor.is_floating_point()
+        tensor.is_nonzero()
+        torch.is_same_size(tensor, tensor)
+        torch.is_signed(tensor)
+        tensor.layout
+        tensor.numel()
+        tensor.dim()
+        tensor.element_size()
+        tensor.is_contiguous()
+        tensor.is_cuda
+        tensor.is_leaf
+        tensor.is_pinned()
+        tensor.is_shared()
+        tensor.is_sparse
+        tensor.ndimension()
+        tensor.nelement()
+        tensor.shape
+        tensor.size()
+        tensor.storage()
+        tensor.storage_offset()
+        tensor.storage_type()
+        tensor.stride()
+        tensor.data
+        tensor.data_ptr()
+        tensor.ndim
+        tensor.item()
+
     def test_unary_fns(self):
         TestCase = namedtuple('TestCase', ['name', 'lambd'])
 
@@ -115,25 +150,33 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('clamp_max', 2),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
+            fn_method_and_inplace('digamma'),
             fn_method_and_inplace('erf'),
             fn_method_and_inplace('erfc'),
+            fn_method_and_inplace('erfinv'),
             fn_method_and_inplace('exp'),
             fn_method_and_inplace('expm1'),
             fn_method_and_inplace('floor'),
             fn_method_and_inplace('frac'),
+            fn_method_and_inplace('lgamma'),
             fn_method_and_inplace('log'),
             fn_method_and_inplace('log10'),
             fn_method_and_inplace('log1p'),
             fn_method_and_inplace('log2'),
             fn_method_and_inplace('neg'),
+            [TestCase('polygamma', lambda t: torch.polygamma(1, t))],
+            method('polygamma_', 1),
             fn_method_and_inplace('reciprocal'),
             fn_method_and_inplace('round'),
             fn_method_and_inplace('rsqrt'),
+            fn_method_and_inplace('sigmoid'),
             fn_method_and_inplace('sin'),
             fn_method_and_inplace('sinh'),
             fn_method_and_inplace('sqrt'),
             fn_method_and_inplace('tan'),
+            fn_method_and_inplace('tanh'),
             fn_method_and_inplace('trunc'),
+            method('zero_'),
             method('fill_', 1),
             method('fill_', torch.tensor(3.14)),
         ]
