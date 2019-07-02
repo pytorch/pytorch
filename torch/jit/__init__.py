@@ -1610,7 +1610,7 @@ if _enabled:
                 super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
         def __dir__(self):
-            return sorted(Module.__dir__(self) + self._method_names())
+            return sorted(Module.__dir__(self) + self._c._method_names())
 
         def define(self, lang):
             # We use frames_up=1 to get to the proper surrounding scope. The stack
