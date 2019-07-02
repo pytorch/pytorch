@@ -2,6 +2,61 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch._C
 
+def format_time(time_us=None, time_ms=None, time_s=None):
+    '''Defines how to format time'''
+    assert sum([time_us is not None, time_ms is not None, time_s is not None]) == 1
+    if time_us is None:
+        if time_ms is not None:
+            time_us = time_ms * 1000.0
+        elif time_s is not None:
+            time_us = time_s * 1000.0 * 1000.0
+        else:
+            assert False, "Incorrect code :)"
+
+    US_IN_SECOND = 1000.0 * 1000.0
+    US_IN_MS = 1000.0
+    if time_us >= US_IN_SECOND:
+        return '{:.3f}s'.format(time_us / US_IN_SECOND)
+    if time_us >= US_IN_MS:
+        return '{:.3f}ms'.format(time_us / US_IN_MS)
+    return '{:.3f}us'.format(time_us)
+
+
+class ExecutionStats(object):
+    def __init__(self, c_stats, benchmark_config):
+        self._c_stats = c_stats
+        self.benchmark_config = benchmark_config
+
+    @property
+    def latency_avg_ms(self):
+        return self._c_stats.latency_avg_ms
+
+    @property
+    def num_iters(self):
+        return self._c_stats.num_iters
+
+    @property
+    def iters_per_second(self):
+        '''
+        Returns total number of iterations per second across all calling threads
+        '''
+        return self.num_iters / self.total_time_seconds
+
+    @property
+    def total_time_seconds(self):
+        return self.num_iters * (
+            self.latency_avg_ms / 1000.0) / self.benchmark_config.num_calling_threads
+
+
+    def __str__(self):
+        return '\n'.join([
+            "Average latency per example: " + format_time(time_ms=self.latency_avg_ms),
+            "Total number of iterations: {}".format(self.num_iters),
+            "Total number of iterations per second (across all threads): {:.2f}".format(self.iters_per_second),
+            "Total time: " + format_time(time_s=self.total_time_seconds)
+        ])
+
+
 class ThroughputBenchmark(object):
     '''
     This class is a wrapper around a c++ component throughput_benchmark::ThroughputBenchmark
@@ -84,4 +139,5 @@ class ThroughputBenchmark(object):
         config.num_calling_threads = num_calling_threads
         config.num_warmup_iters = num_warmup_iters
         config.num_iters = num_iters
-        return self._benchmark.benchmark(config)
+        c_stats = self._benchmark.benchmark(config)
+        return ExecutionStats(c_stats, config)

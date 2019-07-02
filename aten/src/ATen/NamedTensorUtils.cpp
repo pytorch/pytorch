@@ -155,6 +155,11 @@ void propagate_names(Tensor& result, const Tensor& src) {
   at::internal_set_names_inplace(result, src.names());
 }
 
+void propagate_names(TensorImpl* result, TensorImpl* src) {
+  const auto names = at::impl::internal_get_names(src);
+  at::impl::internal_set_names_inplace(result, names);
+}
+
 } // namespace namedinference
 } // namespace at
 #endif

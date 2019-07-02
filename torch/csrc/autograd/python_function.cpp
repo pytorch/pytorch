@@ -45,7 +45,7 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
-  : type(&var.dispatch_type())
+  : backend(tensorTypeIdToBackend(var.type_id()))
   , device(var.device())
   , scalar_type(var.scalar_type())
   , size(var.sizes().vec())
@@ -55,7 +55,8 @@ VariableInfo::VariableInfo(const Variable& var)
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   // NB: This will NOT work if we ever get mixed device gradients
   device_guard.reset_device(device);
-  return at::zeros(size, type->options(scalar_type));
+  return at::zeros(size,
+    at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)).is_variable(true));
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
