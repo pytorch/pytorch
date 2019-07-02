@@ -15,5 +15,5 @@ default_activation_qoptions = {
 QConfig = namedtuple('QConfig',
                      ['weight', 'activation'])
 
-default_qconfig = QConfig(default_weight_observer(default_weight_qoptions),
-                          default_observer(default_activation_qoptions))
+default_qconfig = QConfig(default_weight_observer(),
+                          default_observer())

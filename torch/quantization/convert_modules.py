@@ -3,7 +3,19 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch
 from .observer import *
-import heapq
+
+class QuantWrapper(nn.Module):
+    def __init__(self, module, qconfig):
+        super(QuantWrapper, self).__init__()
+        self.quant = QuantStub(qconfig)
+        self.dequant = DeQuantStub()
+        self.module = module
+
+    def forward(self, X):
+        X = self.quant(X)
+        self.module.forward(X)
+        X = self.dequant(X)
+        return X
 
 def _observer_forward_hook(self, input, output):
     self.observer(output)
@@ -38,11 +50,13 @@ def add_observer(module, qconfig_dict, qconfig_parent=None, prefix=''):
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
+        return QuantWrapper(module, module.qconfig)
 
     for name, child in module.named_children():
         if name != 'observer':
             module_prefix = prefix + '.' + name if prefix else name
-            add_observer(child, qconfig_dict, module.qconfig, module_prefix)
+            module._modules[name] = add_observer(child, qconfig_dict, module.qconfig, module_prefix)
+    return module
 
 def get_config_key(name, qconfig_dict):
     if name in qconfig_dict:
@@ -60,20 +74,22 @@ def get_module(model, name):
         model = model._modules[splits[i]]
     return model
 
-def _quant_forward_pre_hook(self, input):
-    return self.quant(input[0])
+def add_quant_dequant_module(module, qconfig_dict, name):
+    assert name != ''
+    qconfig = qconfig_dict[name]
+    splits = name.split('.')
+    print('splits:', splits)
+    for split in splits:
+        parent_module = module
+        module = module._modules[split]
+        print(module, parent_module)
+        if len(module._modules) == 0:
+            parent_module._modules[split] = QuantWrapper(module, qconfig)
 
-def _dequant_forward_hook(self, input, output):
-    return self.dequant(output)
-
-def add_quant_dequant_hooks(module):
-    module.register_forward_pre_hook(_quant_forward_pre_hook)
-    module.register_forward_hook(_dequant_forward_hook)
-
-def add_quant_dequant_module(module, qconfig):
-    module.add_module('quant', QuantStub(qconfig))
-    module.add_module('dequant', DeQuantStub())
-    add_quant_dequant_hooks(module)
+    assert parent_module is not module
+    # only wrap leaf module
+    # if len(module._modules) == 0:
+    #     parent_module._modules[splits[-1]] = QuantWrapper(module, qconfig)
 
 def add_quant_dequant(module, qconfig_dict):
     r"""Add QuantStub and DeQuantStub module and add quant dequant calls using
@@ -86,7 +102,10 @@ def add_quant_dequant(module, qconfig_dict):
             mod_key_set.add(dict_key)
 
     for name in mod_key_set:
-        add_quant_dequant_module(get_module(module, name), qconfig_dict[name])
+        if name == '':
+            module = QuantWrapper(module, qconfig_dict[name])
+        else:
+            add_quant_dequant_module(module, qconfig_dict, name)
     return module
 
 def prepare(module, qconfig_dict):
@@ -100,8 +119,7 @@ def prepare(module, qconfig_dict):
         qconfig_dict: dictionary that maps from name of submodule to quantization
                       configuration
     """
-    add_observer(module, qconfig_dict)
-    add_quant_dequant(module, qconfig_dict)
+    return add_observer(module, qconfig_dict)
 
 class QuantStub(nn.Module):
     r"""Quantize stub module which replaces the quantized module
@@ -125,6 +143,7 @@ class DeQuantStub(nn.Module):
     def forward(self, x):
         return x
 
+# TODO: add quantizable_modules argument
 def quantize(module, qconfig_dict, eval_fn, eval_args):
     r"""Converts a float module to quantized module.
 
@@ -133,7 +152,7 @@ def quantize(module, qconfig_dict, eval_fn, eval_args):
     after that we will call `convert` which will convert the module to a
     quantized module.
     """
-    prepare(module, qconfig_dict)
+    module = prepare(module, qconfig_dict)
     eval_fn(module, *eval_args)
     convert_to_quantized(module)
     return module
@@ -156,7 +175,7 @@ def convert_to_quantized(module):
 
     return module_swapped
 
-DEFAULT_MODULE_MAPPING = {
+DEFAULT_SWAP_MODULE_MAPPING = {
     torch.nn.Linear: nnq.Linear,
     torch.nn.ReLU: nnq.ReLU,
 }
@@ -166,16 +185,13 @@ STUB_MODULE_MAPPING = {
     DeQuantStub: nnq.DeQuantize
 }
 
-def swap_module(mod, mapping=DEFAULT_MODULE_MAPPING):
+def swap_module(mod, mapping=DEFAULT_SWAP_MODULE_MAPPING):
     r"""Swaps the module if it has a quantized counterpart.
     """
     new_mod = mod
     if hasattr(mod, 'observer'):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
-            # TODO: should we do this?
-            if hasattr(mod, 'quant') and hasattr(mod, 'dequant'):
-                add_quant_dequant_hooks(new_mod)
 
     if type(mod) in STUB_MODULE_MAPPING:
         new_mod = STUB_MODULE_MAPPING[type(mod)].from_float(mod)

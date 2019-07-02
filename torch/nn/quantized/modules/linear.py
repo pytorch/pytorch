@@ -32,8 +32,8 @@ class Quantize(Module):
         self.out_dtype = out_dtype
 
     def forward(self, X):
-        return torch.quantize_linear(X, self.out_scale.item(), \
-                self.out_zero_point.item(), self.out_dtype)
+        return torch.quantize_linear(X, self.out_scale.item(),
+                                     self.out_zero_point.item(), self.out_dtype)
 
     @staticmethod
     def from_float(mod):
@@ -144,22 +144,37 @@ class Linear(NNLinear):
         return
 
     @staticmethod
-    def from_float(mod):
+    def from_float(mod, qparams_dict=None):
+        r"""Create a quantized module from a float module or qparams_dict
+
+            Args: `mod` a float module, either produced by torch.quantization utilities
+            or directly from user
+            Args: `qprams_dict` if `mod` is created directly by user, we will
+            need the dictionary to have entries of quantization parameters for
+            `activation` and `weight`, only torch.per_tensor_affine is supported
+            right now
+        """
         assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
-        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-        activation_observer = mod.observer
-        act_qparams = activation_observer.calculate_qparams()
-        weight_observer = mod.qconfig.weight()
-        weight_observer(mod.weight)
-        wt_qparams = weight_observer.calculate_qparams()
+        if qparams_dict:
+            assert('activation' in qparams_dict)
+            assert('weight' in qparams_dict)
+            act_qparams = qparams_dict['activation']
+            wt_qparams = qparams_dict['weight']
+        else:
+            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+            activation_observer = mod.observer
+            act_qparams = activation_observer.calculate_qparams()
+            weight_observer = mod.qconfig.weight()
+            weight_observer(mod.weight)
+            wt_qparams = weight_observer.calculate_qparams()
         bias_qparams = torch.zeros(2)
         bias_scale = (wt_qparams[0] * act_qparams[0]).float()
         qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long(), torch.qint8)
         qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
-        qlinear._bias = qbias
+        qlinear.bias = qbias
         qlinear.out_scale = torch.tensor([act_qparams[0]])
         qlinear.out_zero_point = torch.tensor([act_qparams[1]])
         return qlinear
