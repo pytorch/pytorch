@@ -622,9 +622,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_2dimslice(self):
         self._test_index_generic(lambda input: input[0:1, 0:1])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_neg_slice2dim(self):
         self._test_index_generic(lambda input: input[0:-1, 0:-1])
 
@@ -634,9 +636,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_tensor_index_2d_1dconstant(self):
         self._test_index_generic(lambda input: input[1, torch.tensor([0, 2])])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_tensor_index_2d_1dslice(self):
         self._test_index_generic(lambda input: input[torch.tensor([0, 2]), 0:1])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_tensor_index_2d_1dslice_first(self):
         self._test_index_generic(lambda input: input[1:3, torch.tensor([0, 2])])
 
@@ -647,15 +651,18 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self._test_index_generic(
             lambda input: input[:, torch.tensor([[0, 2], [1, 1]]), :, torch.tensor([2, 1]), torch.tensor([0, 3])])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_tensor_index_advanced_indexing2(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), None, 2:4, torch.tensor([[1, 3], [4, 0]])])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_tensor_index_advanced_indexing3(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([1]), 2:4, torch.tensor([[1], [4]])])
 
     def test_tensor_index_advanced_indexing_consecutive(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([[1, 3], [4, 0]]), None])
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_index_advanced_indexing_masked(self):
         self._test_index_generic(
             lambda input: input[:, torch.tensor([1, 0, 1, 0], dtype=torch.uint8), torch.tensor([[1, 3], [4, 0]]), None])

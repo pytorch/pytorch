@@ -1717,6 +1717,9 @@ def masked_fill(g, self, mask, value):
 
 
 def index(g, self, index):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, operator_s="index")
+
     if sym_help._is_packed_list(index):
         indices = sym_help._unpack_list(index)
     else:
