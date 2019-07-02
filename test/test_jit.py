@@ -12,6 +12,7 @@ from torch.testing import FileCheck
 import torch
 import torch.cuda
 import torch.jit
+from torch.jit import unimplemented_math_ops
 import torch.jit._logging
 import torch.jit.frontend
 import torch.jit.quantized
@@ -47,11 +48,13 @@ import copy
 import inspect
 import math
 import numpy as np
+import numbers
 import io
 import os
 import pickle
 import pickletools
 import random
+import re
 import shutil
 import sys
 import tempfile
@@ -3323,6 +3326,82 @@ def foo(xyz):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
+    def test_serialized_source_ranges(self):
+
+        class FooTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest()
+        loaded = self.getExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_jit.py:{}'.format(lineno + 3)):
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_serialized_source_ranges2(self):
+
+        class FooTest2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                raise RuntimeError('foo')
+
+        _, lineno = inspect.getsourcelines(FooTest2)
+
+        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+            ft = FooTest2()
+            loaded = self.getExportImportCopy(ft)
+            loaded()
+
+    def test_serialized_source_ranges_dont_jitter(self):
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, lim):
+                first = 1
+                second = 1
+                i = 1
+                somenum = 5
+                dontmutateme = 3
+                third = 0
+                while bool(i < lim):
+                    third = first + second
+                    first = second
+                    second = third
+                    j = 0
+                    while j < 10:
+                        somenum = somenum * 2
+                        j = j + 1
+                    i = i + j
+                    i = i + dontmutateme
+
+                st = second + third
+                fs = first + second
+                return third, st, fs
+
+        ft3 = FooTest3()
+
+        def debug_records_from_mod(mod):
+            buffer = io.BytesIO()
+            torch.jit.save(ft3, buffer)
+            buffer.seek(0)
+            archive = zipfile.ZipFile(buffer)
+            debug_file = archive.open('archive/debug/archive.pkl')
+            return pickle.load(debug_file), buffer
+
+        records1, buffer = debug_records_from_mod(ft3)
+
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        records2, buffer = debug_records_from_mod(loaded)
+
+        buffer.seek(0)
+        loaded2 = torch.jit.load(buffer)
+        records3, _ = debug_records_from_mod(loaded2)
+
+        self.assertEqual(records1, records2)
+        self.assertEqual(records2, records3)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -5084,41 +5163,107 @@ a")
                 if res_python != res_script:
                     if isinstance(res_python, Exception):
                         continue
-
                     if type(res_python) == type(res_script):
                         if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
                             continue
                         if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
-                           .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
+                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
+                    if isinstance(res_python, numbers.Number) and isinstance(res_script, numbers.Number):
+                        mx_val = max(abs(res_python), abs(res_script))
+                        prec = 1e-4 * mx_val
+                    else:
+                        prec = (1e-4)
+                    self.assertEqual(res_python, res_script, message=msg, prec=prec)
 
-        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
-                           "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
-                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh", "degrees", "radians"]
-        binary_float_ops = ["atan2", "fmod", "copysign"]
-        for op in unary_float_ops:
-            checkMathWrap(op, 1)
-        for op in binary_float_ops:
-            checkMathWrap(op, 2)
 
-        checkMath("modf", 1, ret_type="Tuple[float, float]")
-        checkMath("frexp", 1, ret_type="Tuple[float, int]")
-        checkMath("isnan", 1, ret_type="bool")
-        checkMath("isinf", 1, ret_type="bool")
-        checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
-                  vals=[(i, j) for i in float_vals for j in range(-10, 10)])
-        checkMath("pow", 2, is_float=False, ret_type="int")
-        checkMath("pow", 2, is_float=True, ret_type="float")
-        if not PY2:
-            checkMathWrap("floor", ret_type="int")
-            checkMathWrap("ceil", ret_type="int")
-            checkMathWrap("gcd", 2, is_float=False, ret_type="int")
-            checkMath("isfinite", 1, ret_type="bool")
-        if PY37:
-            checkMathWrap("remainder", 2)
-        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
+        # https://stackoverflow.com/a/48567936
+        def get_parameter_count(func):
+            """Count parameter of a function.
+
+            Supports Python functions (and built-in functions).
+            If a function takes *args, then -1 is returned
+            """
+
+            # If the function is a builtin function we use our
+            # approach. If it's an ordinary Python function we
+            # fallback by using the the built-in extraction
+            # functions (see else case), otherwise
+            if isinstance(func, types.BuiltinFunctionType):
+                try:
+                    arg_test = 999
+                    s = [None] * arg_test
+                    func(*s)
+                except TypeError as e:
+                    message = str(e)
+                    found = re.match(
+                        r"[\w]+\(\) takes ([0-9]{1,3}) positional argument[s]* but " +
+                        str(arg_test) + " were given", message)
+                    if found:
+                        return int(found.group(1))
+
+                    if "takes no arguments" in message:
+                        return 0
+                    elif "takes at most" in message:
+                        found = re.match(
+                            r"[\w]+\(\) takes at most ([0-9]{1,3}).+", message)
+                        if found:
+                            return int(found.group(1))
+                    elif "takes exactly" in message:
+                        # string can contain 'takes 1' or 'takes one',
+                        # depending on the Python version
+                        found = re.match(
+                            r"[\w]+\(\) takes exactly ([0-9]{1,3}|[\w]+).+", message)
+                        if found:
+                            return 1 if found.group(1) == "one" \
+                                    else int(found.group(1))
+                return -1  # *args
+            else:
+                try:
+                    if PY3:
+                        argspec = inspect.getfullargspec(func)
+                    else:
+                        argspec = inspect.getargspec(func)
+                except:
+                    raise TypeError("unable to determine parameter count")
+
+                return -1 if argspec.varargs else len(argspec.args)
+
+        ops = [x for x in dir(math) if callable(getattr(math, x))]
+        for op in ops:
+            if op in unimplemented_math_ops:
+                continue
+            if op.startswith("__"):
+                continue
+            elif op == "modf":
+                checkMath("modf", 1, ret_type="Tuple[float, float]")
+            elif op in ["isnan", "isinf", "isfinite"]:
+                checkMath(op, 1, ret_type="bool")
+            elif op in ["floor", "ceil"]:
+                if not PY2:
+                     checkMathWrap(op, ret_type="int")
+            elif op == "factorial":
+                checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
+            elif op == "frexp":
+                checkMath("frexp", 1, ret_type="Tuple[float, int]")
+            elif op == "gcd":
+                checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+            elif op == "ldexp":
+                checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
+                          vals=[(i, j) for i in float_vals for j in range(-10, 10)])
+            elif op == "log":
+                checkMathWrap("log", 1)
+            elif op == "pow":
+                checkMath("pow", 2, is_float=False, ret_type="int")
+                checkMath("pow", 2, is_float=True, ret_type="float")
+            else:
+                func = getattr(math, op)
+                param_count = get_parameter_count(func)
+                if param_count == 1:
+                    checkMathWrap(op, 1)
+                else:
+                    checkMathWrap(op, 2)
 
     def test_if_nest_while(self):
         def func(a, b):
@@ -6477,73 +6622,6 @@ a")
             fb = FileCheck().check_count("2", 2).check_not("1").check_count("2", 2)
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
-
-    def _dtype_to_expect(self, dtype, dim=0):
-        param = ', '.join(['*'] * dim)
-        param = '(' + param + ')'
-        if(dtype == torch.float32):
-            return "Float" + param
-        if(dtype == torch.float64):
-            return "Double" + param
-        if(dtype == torch.int64):
-            return "Long" + param
-        if(dtype == torch.int32):
-            return "Int" + param
-
-    def _test_dtype_op_shape(self, ops, args, input_dims=1):
-        if input_dims < 1:
-            raise 'input dims must be at least 1'
-        dtypes = [torch.float32, torch.float64, torch.int64, torch.int32]
-        str_args = ', '.join([str(arg) for arg in args]) + (', ' if len(args) else '')
-        tensor_data = ('[' * input_dims) + '1, 2, 3' + (input_dims * ']')
-        template = dedent('''
-        def func():
-            return {return_line}
-        ''')
-
-        for op in ops:
-            for dtype in (dtypes + [None]):
-                for tensor_type in dtypes:
-                    # a couple of ops aren't implemented for non-floating types
-                    if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
-                        if op in ['mean', 'softmax', 'log_softmax']:
-                            continue
-                    return_line = "torch.tensor({}, dtype={}).{}({}dtype={})".format(tensor_data, tensor_type, op, str_args, dtype)
-                    # uncomment for debugging a failed test:
-                    # print("testing {}".format(return_line))
-                    code = template.format(return_line=return_line)
-                    scope = {}
-                    exec(code, globals(), scope)
-                    cu = torch.jit.CompilationUnit(code)
-                    graph = cu.func.graph
-                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
-                    input_array = [1, 2, 3]
-                    for _ in range(1, input_dims):
-                        input_array = [input_array]
-                    t = torch.tensor(input_array, dtype=tensor_type)
-                    attr = getattr(t, op)
-                    kwargs = {'dtype': dtype}
-                    result = attr(*args, **kwargs)
-                    expect = self._dtype_to_expect(result.dtype, result.dim())
-                    FileCheck().check("aten::tensor").check(expect).run(graph)
-
-    def test_dtype_op_shape(self):
-        ops = ['sum', 'mean', 'prod']
-        self._test_dtype_op_shape(ops, args=[])
-        self._test_dtype_op_shape(ops, args=[0, False])
-
-        ops = ['sum', 'mean']
-        self._test_dtype_op_shape(ops, args=[[0, 1], False], input_dims=4)
-
-        ops = ['prod']
-        self._test_dtype_op_shape(ops, args=[0, False])
-        self._test_dtype_op_shape(ops, args=[0, True])
-
-    def test_dtype_op_shape2(self):
-        ops = ['cumprod', 'cumsum', 'softmax', 'log_softmax']
-        self._test_dtype_op_shape(ops, args=[0])
-
-        self._test_dtype_op_shape(ops, args=[1], input_dims=4)
 
     def test_filecheck_parse(self):
         def test_check():
@@ -12691,6 +12769,13 @@ a")
             @torch.jit.script
             def fn():
                 return random.randint()
+
+    def test_dir(self):
+        class M(torch.jit.ScriptModule):
+            def forward(self, t):
+                return t
+
+        self.assertTrue('forward' in dir(M()))
 
     def test_inferred_error_msg(self):
         """

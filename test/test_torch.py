@@ -10525,6 +10525,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor(2.0000e-05)''')
 
+        # test print boolean tensor
+        x = torch.tensor([True])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([True])''')
+
+        x = torch.tensor(True)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor(True)''')
+
         # [Numpy] test print float in sci_mode when min < 0.0001.
         x = torch.tensor([0.00002])
         self.assertEqual(x.__repr__(), str(x))
