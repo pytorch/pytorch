@@ -1,5 +1,5 @@
 #pragma once
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
