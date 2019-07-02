@@ -13,7 +13,6 @@ import torch.onnx
 import torch.onnx.utils
 
 from functools import partial
-from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
@@ -206,6 +205,7 @@ def _slice(g, input, axes, starts, ends):
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
+
 def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
@@ -219,47 +219,13 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
             return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
     return symbolic
 
-def overload_by_arg_count(fn):
-    @wraps(fn)
-    def wrapper(g, *args):
-        overloads = fn(g, *args)
-        last_exception = None
-        for overload in overloads:
-            arg_descriptors = overload._arg_descriptors
-            if len(arg_descriptors) == len(args):
-                return overload(g, *args)
-        raise NotImplementedError("Unknown aten::{} signature".format(fn.__name__))
-    return wrapper
+mean = _reduce_op_symbolic('ReduceMean')
+sum = _reduce_op_symbolic('ReduceSum')
+prod = _reduce_op_symbolic('ReduceProd', allow_multi_dim_support=False)  # torch.prod does not support multidimensional 'dim'
 
-def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
-    symbolic = _reduce_op_symbolic(onnx_op, allow_multi_dim_support=allow_multi_dim_support)
 
-    @overload_by_arg_count
-    def reduce(g, *args, **kwargs):
-        @parse_args('v', 'none')
-        def reduce_nodim(g, self, dtype):
-            if dtype.node().kind() != 'prim::Constant':
-                return _unimplemented(name, "dtype")
-            return symbolic(g, self)
-
-        dim_desc = 'is' if allow_multi_dim_support else 'i'
-
-        @parse_args('v', dim_desc, 'i', 'none')
-        def reduce_dim(g, self, dim, keepdim, dtype):
-            if dtype.node().kind() != 'prim::Constant':
-                return _unimplemented(name, "dtype")
-            return symbolic(g, self, dim, keepdim)
-        return reduce_nodim, reduce_dim
-    return reduce
-
-sum = _reduce_with_dtype('ReduceSum', 'sum')
-mean = _reduce_with_dtype('ReduceMean', 'mean')
-prod = _reduce_with_dtype('ReduceProd', 'prod', allow_multi_dim_support=False)  # torch.prod does not support multidimensional 'dim'
-
-@parse_args('v', 'i', 'none')
-def cumsum(g, input, dim, dtype):
-    if dtype.node().kind() != 'prim::Constant':
-        return _unimplemented(name, "dtype")
+@parse_args('v', 'i')
+def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
@@ -478,7 +444,7 @@ def glu(g, input, dim):
     return g.op('Mul', first, g.op('Sigmoid', second))
 
 
-@parse_args('v', 'i', 'none')
+@parse_args('v', 'i', 'i')
 def softmax(g, input, dim, dtype=None):
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
@@ -503,16 +469,14 @@ def softmax(g, input, dim, dtype=None):
             dim = input.type().dim() + dim
         if input.type().dim() == dim + 1:
             softmax = g.op('Softmax', input, axis_i=dim)
-            if dtype and dtype.node().kind() != 'prim::Constant':
-                parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-                softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+            if dtype:
+                softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[dtype])
             return softmax
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
     softmax = g.op('Div', exp, sum)
-    if dtype and dtype.node().kind() != 'prim::Constant':
-        parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-        softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+    if dtype:
+        softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[dtype])
     return softmax
 
 
@@ -826,8 +790,8 @@ def where(g, condition, self, other):
     return g.op("Where", condition, self, other)
 
 
-@parse_args('v', 'i', 'none')
-def log_softmax(g, input, dim, dtype=None):
+@parse_args('v', 'i', 'i')
+def log_softmax(g, input, dim=None, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     if dim < 0:
@@ -835,7 +799,7 @@ def log_softmax(g, input, dim, dtype=None):
     if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return_op = g.op("LogSoftmax", input, axis_i=dim)
-    if dtype and dtype.node().kind() != 'prim::Constant':
+    if dtype:
         return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
     return return_op
 
