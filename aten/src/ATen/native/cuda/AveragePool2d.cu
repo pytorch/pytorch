@@ -197,6 +197,7 @@ void avg_pool2d_out_cuda_template(
                 output_data,
                 divisor_override.value());
       }
+    );
   } else {
     if (count_include_pad) {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
