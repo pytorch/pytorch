@@ -294,7 +294,6 @@ class CMake:
                       NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
                       NCCL_ROOT_DIR=NCCL_ROOT_DIR,
                       NCCL_SYSTEM_LIB=NCCL_SYSTEM_LIB,
-                      NCCL_EXTERNAL=USE_NCCL,
                       CMAKE_INSTALL_PREFIX=install_dir,
                       CMAKE_C_FLAGS=cflags,
                       CMAKE_CXX_FLAGS=cflags,
