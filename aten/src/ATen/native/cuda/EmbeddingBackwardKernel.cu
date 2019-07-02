@@ -14,7 +14,6 @@
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
-#include <torch/types.h>
 
 namespace at {
 namespace native {
@@ -277,8 +276,8 @@ Tensor embedding_backward_cuda_kernel(
       // should match `acc_type`
       using partial_weight_t = acc_type<scalar_t, true>;
       TensorOptions op;
-      if(grad.dtype() == torch::kFloat16) {
-          op = grad.options().dtype(torch::kFloat32);
+      if(grad.dtype() == at::kHalf) {
+          op = grad.options().dtype(at::kFloat);
       } else {
           op = grad.options();
       }
