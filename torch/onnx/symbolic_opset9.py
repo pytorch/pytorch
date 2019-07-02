@@ -874,6 +874,33 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         return res
 
 
+@parse_args('v', 'is', 'v', 'v', 'f', 'i')
+def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, weight, bias, normalized_shape_i=normalized_shape,
+                    eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
+
+    axes = [-i for i in range(len(normalized_shape), 0, -1)]
+
+    two_cst = g.op("Constant", value_t=torch.tensor(2.))
+    eps_cst = g.op("Constant", value_t=torch.tensor(eps))
+
+    mean = g.op("ReduceMean", input, axes_i=axes)
+    numerator = sub(g, input, mean)
+    # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
+    variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
+    denominator = sqrt(g, add(g, variance, eps_cst))
+
+    layer_norm = div(g, numerator, denominator)
+
+    if not (weight is None or weight.node().mustBeNone()):
+        layer_norm = mul(g, layer_norm, weight)
+    if not (bias is None or bias.node().mustBeNone()):
+        layer_norm = add(g, layer_norm, bias)
+
+    return layer_norm
+
+
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
@@ -935,12 +962,6 @@ def type_as(g, self, other):
     else:
         # We don't know the type of other, bail by emitting ATen
         return g.op("ATen", self, other, operator_s="type_as")
-
-
-@parse_args('v', 'is', 'v', 'v', 'f', 'i')
-def layer_norm(g, self, normalized_shape, weight, bias, eps, cudnn_enable):
-    return g.op("ATen", self, weight, bias, normalized_shape_i=normalized_shape,
-                eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
 
 
 @parse_args('v', 'v', 'i', 'f')
