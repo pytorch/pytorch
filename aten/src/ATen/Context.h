@@ -8,6 +8,7 @@
 #include <ATen/LegacyTHDispatcher.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
+#include <ATen/CPUGenerator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -57,13 +58,28 @@ class CAFFE2_API Context {
       LegacyTHDispatch::LegacyTHDispatcherUniquePtr{t, LegacyTHDispatcherDeleter([](LegacyTHDispatcher* p) { delete p; }) });
   }
 
-  Generator & defaultGenerator(DeviceType device_type) {
+  Generator & defaultGenerator(Device device) {
+    DeviceType device_type = device.type();
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
-    auto & generator = generator_registry[static_cast<int>(device_type)];
-    if(!generator)
-      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
-    return *generator;
+    if (device_type == at::kCPU) {
+      return *at::detail::getDefaultCPUGenerator();
+    } else if (device_type == at::kCUDA) {
+      return *at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+    } else {
+      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+    }
+  }
+  Device getDeviceFromPtr(void* data, DeviceType device_type) {
+    initCUDAIfNeeded(device_type);
+    initHIPIfNeeded(device_type);
+    if (device_type == at::kCPU) {
+      return DeviceType::CPU;
+    } else if (device_type == at::kCUDA) {
+      return at::detail::getCUDAHooks().getDeviceFromPtr(data);
+    } else {
+      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+    }
   }
   bool hasOpenMP() const;
   bool hasMKL() const;
@@ -86,8 +102,6 @@ class CAFFE2_API Context {
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-      generator_registry[static_cast<int>(DeviceType::CUDA)] =
-        detail::getCUDAHooks().initCUDAGenerator(this);
       detail::getCUDAHooks().registerCUDATypes(this);
     });
     return thc_state.get();
@@ -95,8 +109,6 @@ class CAFFE2_API Context {
   THHState* lazyInitHIP() {
     std::call_once(thh_init,[&] {
       thh_state = detail::getHIPHooks().initHIP();
-      generator_registry[static_cast<int>(DeviceType::HIP)] =
-        detail::getHIPHooks().initHIPGenerator(this);
       detail::getHIPHooks().registerHIPTypes(this);
     });
     return thh_state.get();
@@ -130,8 +142,6 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  std::unique_ptr<Generator>
-    generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
@@ -252,11 +262,24 @@ static inline bool hasMKLDNN() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  globalContext().defaultGenerator(DeviceType::CPU).manualSeed(seed);
+  auto& gen = globalContext().defaultGenerator(DeviceType::CPU);
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen.mutex_);
+    gen.set_current_seed(seed);
+  }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
-  if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
-    globalContext().defaultGenerator(DeviceType::CUDA).manualSeedAll(seed);
+  int num_gpus = detail::getCUDAHooks().getNumGPUs();
+  if (hasCUDA() && num_gpus > 0) {
+    for (int i = 0; i < num_gpus; i++) {
+      auto& cuda_gen = globalContext().defaultGenerator(Device(at::kCUDA, i));
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(cuda_gen.mutex_);
+        cuda_gen.set_current_seed(seed);
+      }
+    }
   }
 }
 

@@ -273,15 +273,10 @@ def _generate_function_classes(scope_dict):
     exceptions = {
         'Linear',
         'IndexLinear',
-        'SpatialFullConvolution',
         'SpatialConvolutionMM',
         'TemporalConvolution',
-        'SpatialAveragePooling',
         'SpatialMaxUnpooling',
-        'VolumetricAveragePooling',
         'VolumetricMaxUnpooling',
-        'VolumetricConvolution',
-        'VolumetricFullConvolution',
         'VolumetricConvolutionMM',
         'TemporalMaxPooling',
         'BatchNormalization',
@@ -297,9 +292,6 @@ def _generate_function_classes(scope_dict):
     }
     name_remap = {
         'TemporalConvolution': 'Conv1d',
-        'SpatialDilatedConvolution': 'DilatedConv2d',
-        'SpatialMaxUnpooling': 'MaxUnpool2d',
-        'VolumetricMaxUnpooling': 'MaxUnpool3d',
         'HardTanh': 'Hardtanh',
         'HardShrink': 'Hardshrink',
         'SoftPlus': 'Softplus',

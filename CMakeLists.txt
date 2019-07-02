@@ -62,6 +62,12 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+  set(CPU_INTEL ON)
+else ()
+  set(CPU_INTEL OFF)
+endif ()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -126,7 +132,10 @@ option(USE_SYSTEM_EIGEN_INSTALL
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(USE_MKLDNN "Use MKLDNN" OFF)
+cmake_dependent_option(
+  USE_MKLDNN "Use MKLDNN. Only available on x86 and x86_64." ON
+  "CPU_INTEL" OFF)
+set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -140,7 +149,7 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 
 # Used when building Caffe2 through setup.py
-option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
+option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
 
 # /Z7 override option
 # When generating debug symbols, CMake default to use the flag /Zi.
@@ -148,7 +157,7 @@ option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside t
 # But some users don't use sccache; this override is for them.
 option(MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON)
 
-SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
+set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
 # For MSVC,
 # 1. Replace /Zi and /ZI with /Z7

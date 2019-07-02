@@ -16,7 +16,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
-from torch._C import ListType, _propagate_and_assign_input_and_output_shapes
+from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -214,10 +214,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
     torch._C._jit_pass_prepare_division_for_onnx(graph)
-    # onnx only supports tensors, so we turn all out number types into tensors
-    torch._C._jit_pass_erase_number_types(graph)
     # onnx does not support tuples, so try to remove them
     torch._C._jit_pass_lower_all_tuples(graph)
+    # onnx only supports tensors, so we turn all out number types into tensors
+    torch._C._jit_pass_erase_number_types(graph)
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
@@ -287,18 +287,19 @@ def _model_to_graph(model, args, verbose=False, training=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            method = model.forward
-            params = method.initial_ivalues()
-            graph = _propagate_and_assign_input_and_output_shapes(
-                method.graph, tuple(args) + tuple(params), example_outputs, False, propagate)
+            method_graph, params = model.forward._lowered_graph()
+            in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
+            graph = _propagate_and_assign_input_shapes(
+                method_graph, tuple(in_vars), False, propagate)
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
     elif isinstance(model, torch.jit.Function):
         assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript Function"
         method = model
         params = ()
-        graph = _propagate_and_assign_input_and_output_shapes(
-            model.graph, tuple(args), example_outputs, False, propagate)
+        in_vars, in_desc = torch.jit._flatten(tuple(args))
+        graph = _propagate_and_assign_input_shapes(
+            model.graph, tuple(in_vars), False, propagate)
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         state_dict = _unique_state_dict(model)
@@ -309,10 +310,14 @@ def _model_to_graph(model, args, verbose=False, training=False,
             param_names = list(state_dict.keys())
             for i, inp in enumerate(graph_inputs):
                 if i >= user_input_num:
-                    inp.setUniqueName(param_names[i - user_input_num])
+                    inp.setDebugName(param_names[i - user_input_num])
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop)
+
+    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.Function):
+        out_vars, _ = torch.jit._flatten(tuple(example_outputs))
+        graph = _assign_output_shapes(graph, out_vars)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
@@ -327,7 +332,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     flatten_args, _ = torch._C._jit_flatten(args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
-    input_and_param_names = [val.uniqueName() for val in graph.inputs()]
+    input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
@@ -457,8 +462,8 @@ def _set_input_and_output_names(graph, input_names, output_names):
                 "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
         for name, node in zip(name_list, node_list):
-            if node.uniqueName() != name:
-                node.setUniqueName(name)
+            if node.debugName() != name:
+                node.setDebugName(name)
     set_names(list(graph.inputs()), input_names, 'input')
     set_names(list(graph.outputs()), output_names, 'output')
 
@@ -770,9 +775,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     if(hasattr(model, 'graph')):
         # Extracting set of valid input/output names that shall be used for dynamic_axes
         if (input_names is None) or len(input_names) == 0:
-            input_names = [x.uniqueName() for x in model.graph.inputs()]
+            input_names = [x.debugName() for x in model.graph.inputs()]
         if (output_names is None) or len(output_names) == 0:
-            output_names = [y.uniqueName() for y in model.graph.outputs()]
+            output_names = [y.debugName() for y in model.graph.outputs()]
 
     valid_names = set()
     if input_names is not None:
