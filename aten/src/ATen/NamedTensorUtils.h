@@ -1,5 +1,5 @@
 #pragma once
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/NamedTensor.h>
 #include <ATen/core/Tensor.h>

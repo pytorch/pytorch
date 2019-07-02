@@ -16,7 +16,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
@@ -69,7 +69,7 @@ Tensor& _clamp_out_cpu(
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
   return result;
@@ -81,7 +81,7 @@ Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
   legacy::cpu::_th_clamp_max_out(result, self, max);
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
   return result;
@@ -93,7 +93,7 @@ Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   legacy::cpu::_th_clamp_min_out(result, self, min);
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
   return result;
@@ -137,7 +137,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 }
 
 static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
 #endif
 }

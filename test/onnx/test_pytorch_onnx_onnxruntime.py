@@ -9,13 +9,14 @@ import torch
 import numpy as np
 import io
 
-from test_pytorch_onnx_caffe2 import skipIfUnsupportedMinOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+
 
 class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
 
-    def run_test(self, model, inputs):
+    def run_test(self, model, inputs, rtol=1e-05, atol=1e-08):
         outputs = model(inputs)
 
         # export the model to ONNX
@@ -50,10 +51,12 @@ class TestONNXRuntime(unittest.TestCase):
             "number of outputs differ"
 
         if isinstance(outputs, torch.Tensor):
-            assert np.allclose(get_numpy_value(outputs), ort_outs[0])
+            assert np.allclose(get_numpy_value(outputs), ort_outs[0],
+                               rtol=rtol, atol=atol)
         else :
             for i in range(0, len(outputs)):
-                assert np.allclose(get_numpy_value_at_index(outputs, i), ort_outs[i])
+                assert np.allclose(get_numpy_value_at_index(outputs, i), ort_outs[i],
+                                   rtol=rtol, atol=atol)
 
     def test_full_trace(self):
         class FullModel(torch.nn.Module):
@@ -128,6 +131,11 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=[1, 1, 0.5, 0.5])
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
+
+    def test_layer_norm(self):
+        model = torch.nn.LayerNorm([10, 10])
+        x = torch.randn(20, 5, 10, 10)
+        self.run_test(model, x, rtol=1e-05, atol=1e-07)
 
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
