@@ -17,7 +17,7 @@ namespace script {
 TORCH_API void import_methods(
     // CompilationUnit in which to look up any classes used
     const CompilationUnit& lib_cu,
-    const std::shared_ptr<script::Module>& mod,
+    const script::Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     // Callback to import any dependencies of this source before compiling

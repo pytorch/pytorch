@@ -36,18 +36,16 @@ class TestFuser(JitTestCase):
         self.assertEqual(func(a), a.abs() * 2)
         self.assertAllFused(func.graph_for(a))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_abs_cpu(self):
         self._test_fused_abs()
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @skipIfRocm
     def test_abs_cuda(self):
         self._test_fused_abs(device="cuda")
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_arg_configurations_smoke_cuda(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
@@ -63,7 +61,6 @@ class TestFuser(JitTestCase):
         traced_f = torch.jit.trace(f, (x, y,))
         self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_broadcast_cuda(self):
@@ -78,7 +75,6 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(scaleshift, inputs)
         self.assertAllFused(ge.graph_for(*inputs))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
     def test_cuda_half(self):
@@ -114,7 +110,6 @@ class TestFuser(JitTestCase):
                 grads_half = [t.half() for t in grads]
                 self.assertEqual(grads_half, fusion_grads)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_checks_cat_inputs(self):
@@ -133,7 +128,6 @@ class TestFuser(JitTestCase):
         self.assertEqual(f(x, y).shape, (3, 4))
         self.assertAllFused(f.graph_for(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     @skipIfRocm
     def test_chunk_cuda(self):
@@ -178,17 +172,15 @@ class TestFuser(JitTestCase):
             for fn in fns:
                 self.checkScript(fn, [tensor])
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_chunk_correctness(self):
         return self._test_chunk_correctness(self, 'cpu')
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_chunk_correctness_cuda(self):
         return self._test_chunk_correctness(self, 'cuda')
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_chunk_distributes_cuda(self):
@@ -204,7 +196,6 @@ class TestFuser(JitTestCase):
         FileCheck().check("broadcast_tensors").check('with prim::FusionGroup_0') \
             .check_count('ConstantChunk', 2, exactly=True).run(str(graph))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_chunk_motion_deduplicates_inputs(self):
@@ -228,7 +219,6 @@ class TestFuser(JitTestCase):
             fusion_group = list(forward_graph.nodes())[-1]
             self.assertEqual(len(list(fusion_group.inputs())), 1)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     @skipIfRocm
     def test_chunk_multiple_cuda(self):
@@ -250,7 +240,6 @@ class TestFuser(JitTestCase):
         ge = self.checkScript(fn, inputs)
         self.assertAllFused(ge.graph_for(*inputs))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_clamp(self):
@@ -281,7 +270,6 @@ class TestFuser(JitTestCase):
             graph = backward_graph(s)
             self.assertAllFused(graph)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_dropout(self):
@@ -296,7 +284,6 @@ class TestFuser(JitTestCase):
         graph = backward_graph(s)
         self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_comparison_eq_ne(self):
@@ -321,7 +308,6 @@ class TestFuser(JitTestCase):
         z = z * mask + y
         return z
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_comparison_gt_lt_cuda(self):
@@ -331,7 +317,6 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(self.fn_test_comparison_gt_lt, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_comparison_ge_le_cuda(self):
@@ -352,7 +337,6 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes",
                                                             "aten::_size_if_not_equal"))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_addcmul_cuda(self):
@@ -367,7 +351,6 @@ class TestFuser(JitTestCase):
         graph = ge.graph_for(t, t1, t2)
         self.assertAllFused(graph)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_lerp_cuda(self):
@@ -391,7 +374,6 @@ class TestFuser(JitTestCase):
         graph = ge_weight_tensor.graph_for(start, end)
         self.assertAllFused(graph)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_concat_cuda(self):
@@ -406,7 +388,6 @@ class TestFuser(JitTestCase):
         self.assertAllFused(graph)
         FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_concat_invariant_cuda(self):
@@ -430,7 +411,6 @@ class TestFuser(JitTestCase):
     def fn_test_exp(x, y):
         return (x + .5 * y).exp()
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_exp_cuda(self):
@@ -440,7 +420,6 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(self.fn_test_exp, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_fuse_decompose_normalization(self):
@@ -494,7 +473,6 @@ class TestFuser(JitTestCase):
         test_norm_decompose(lm, ['aten::batch_norm_stats'],
                             ['aten::layer_norm('], ['aten::sub', 'aten::mul', 'aten::add'])
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_threshold(self):
@@ -507,7 +485,6 @@ class TestFuser(JitTestCase):
         self.assertEqual(f(x), scripted(x))
         self.assertAllFused(scripted.graph_for(x))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_scalar_arg_cuda(self):
@@ -525,7 +502,7 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_fuser_deduplication(self):
         # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
@@ -545,7 +522,7 @@ class TestFuser(JitTestCase):
         # check that a, b share storage, i.e. were generated as a single output in the fuser
         self.assertEqual(ga.data_ptr(), gb.data_ptr())
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_fuser_iou(self):
         # This checks if most of Intersection over Union is fused.
@@ -586,7 +563,6 @@ class TestFuser(JitTestCase):
         graph = backward_graph(s)
         self.assertAllFused(graph, except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @skipIfRocm
@@ -608,7 +584,6 @@ class TestFuser(JitTestCase):
         ge(*inputs_cuda0)
         ge(*inputs_cuda1)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @skipIfRocm
@@ -640,7 +615,6 @@ class TestFuser(JitTestCase):
         # XXX: This assumes that the same kernel isn't already used by another test
         self.assertEqual(new_cache_size - prev_cache_size, 1)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @skipIfRocm
     def test_nonzero_device_cuda(self):
@@ -654,7 +628,6 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(doit, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_lstm_cuda(self):
@@ -674,7 +647,6 @@ class TestFuser(JitTestCase):
         self.assertAllFused(backward, except_for=("aten::t", "aten::mm",
                                                   "aten::_grad_sum_to_size"))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_lstm_concat_cuda(self):
@@ -683,7 +655,6 @@ class TestFuser(JitTestCase):
         graph = ge.graph_for(*inputs)
         FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_lstm_gates_permutations_cuda(self):
@@ -708,7 +679,6 @@ class TestFuser(JitTestCase):
             self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_lstm_traced_cuda(self):
@@ -719,7 +689,7 @@ class TestFuser(JitTestCase):
             .check_not("aten::tanh").check("FusionGroup").check_next("TupleConstruct") \
             .check_next("return").check_not("FusionGroup_1").run(str(graph))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     @enable_cpu_fuser
     def test_lstm_traced_cpu(self):
@@ -737,7 +707,6 @@ class TestFuser(JitTestCase):
             else:
                 raise
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_milstm_cuda(self):
@@ -751,7 +720,6 @@ class TestFuser(JitTestCase):
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_rand_cuda(self):
@@ -781,7 +749,6 @@ class TestFuser(JitTestCase):
     def fn_test_relu(x, y):
         return F.relu(x + .5 * y)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_relu_cuda(self):
@@ -791,7 +758,6 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(self.fn_test_relu, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_erf_cuda(self):
@@ -805,7 +771,6 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
                                                          "aten::_size_if_not_equal"))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_rand_broadcast_cuda(self):
@@ -828,7 +793,7 @@ class TestFuser(JitTestCase):
         out = script_f(x, y)
         self.assertEqual(out[0], out[1])
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_scalar(self):
         def fn(x, y):
@@ -839,7 +804,6 @@ class TestFuser(JitTestCase):
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_small_constant_cuda(self):
@@ -851,7 +815,6 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(fn_test_small_constant, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_tensor_scalar_ops_cuda(self):
@@ -878,7 +841,7 @@ class TestFuser(JitTestCase):
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_where_and_typing(self):
         def f(x, y):
@@ -897,8 +860,6 @@ class TestFuser(JitTestCase):
         self.assertEqual(result2, expected2)
         self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_grad_sum_to_size_elimination(self):
@@ -934,22 +895,6 @@ class TestFuser(JitTestCase):
             self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
             self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "prim::Param"]), 3 - i)
 
-
-    @unittest.skipIf(not IS_WINDOWS, "Test that the fuser is disabled on Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_windows_cuda(self):
-        def scaleshift(x, scale, shift):
-            return x * scale + shift
-
-        inputs = [
-            torch.randn(4, 4, dtype=torch.float, device='cuda'),
-            torch.randn(4, dtype=torch.float, device='cuda'),
-            torch.randn(4, dtype=torch.float, device='cuda'),
-        ]
-
-        ge = self.checkScript(scaleshift, inputs)
-        self.assertGraphContainsExactly(
-            ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
 
 if __name__ == '__main__':
     run_tests()

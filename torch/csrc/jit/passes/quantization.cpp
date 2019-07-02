@@ -124,7 +124,7 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
 Node* createQuantNode(Value* v, Graph* g) {
   Node* quant = g->create(at::Symbol::fromQualString("aten::quantize_linear"));
   TORCH_INTERNAL_ASSERT(quant != nullptr, "Failed to create quant node");
-  quant->output()->setUniqueName(v->uniqueName() + ".quant");
+  quant->output()->setDebugName(v->debugName() + ".quant");
   return quant;
 }
 
@@ -133,7 +133,7 @@ Node* createDeQuantNode(Value* v, Graph* g) {
   Node* dequant =
       g->create(at::Symbol::fromQualString("aten::_dequantize_linear"));
   TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
-  dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
+  dequant->output()->setDebugName(v->debugName() + ".dequant");
   return dequant;
 }
 
@@ -141,7 +141,7 @@ Node* createDeQuantNode(Value* v, Graph* g) {
 Node* createIntReprNode(Value* v, Graph* g) {
   Node* intrepr = g->create(at::Symbol::fromQualString("aten::int_repr"));
   TORCH_INTERNAL_ASSERT(intrepr != nullptr, "Failed to create inttensor node");
-  intrepr->output()->setUniqueName(v->uniqueName() + ".intrepr");
+  intrepr->output()->setDebugName(v->debugName() + ".intrepr");
   return intrepr;
 }
 
@@ -223,7 +223,7 @@ static Node* addObserverFor(
 
   // We need to pass the value name to observer function - create a constant
   // holding this name.
-  Value* vname = insert_point->owningGraph()->insertConstant(v->uniqueName());
+  Value* vname = insert_point->owningGraph()->insertConstant(v->debugName());
 
   // Create a new observer node. We just need to clone the original one.
   Node* observerNode = insert_point->owningGraph()->createClone(
@@ -233,7 +233,7 @@ static Node* addObserverFor(
   // be used instead of the original value v.
   Value* observedValue = observerNode->addOutput();
   observedValue->setType(v->type());
-  observedValue->setUniqueName(v->uniqueName() + ".observed");
+  observedValue->setDebugName(v->debugName() + ".observed");
 
   // Now we can add the inputs.
   observerNode->addInput(v);
@@ -314,10 +314,10 @@ void InsertObserverNodes(
 }
 
 void InsertObserverNodes(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     Node* observer_node) {
-  script::Method method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj.get_method(method_name);
   InsertObserverNodes(method.graph(), observer_node, method.num_inputs());
 }
 
@@ -460,11 +460,11 @@ void InsertQuantDequantNodes(
 }
 
 void InsertQuantDequantNodes(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
         qparam_dict) {
-  script::Method method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj.get_method(method_name);
   InsertQuantDequantNodes(method.graph(), qparam_dict);
 }
 
@@ -546,18 +546,18 @@ void InsertQuantDequantNodesForParam(
 // qparamfunc for different qschemes and params.
 template <typename Fn>
 void InsertQuantDequantNodesForParam(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
     const Fn& getQParamFunc,
     at::ScalarType t) {
-  script::Method method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj.get_method(method_name);
   InsertQuantDequantNodesForParam(method, param_name, getQParamFunc, t);
 }
 
 // Explicit Supported Template specialization for getQParamFunc.
 template TORCH_API void InsertQuantDequantNodesForParam(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
     const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
@@ -565,7 +565,7 @@ template TORCH_API void InsertQuantDequantNodesForParam(
     at::ScalarType t);
 
 template TORCH_API void InsertQuantDequantNodesForParam(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
     const std::function<std::tuple<std::string, float, int>(float, float)>&

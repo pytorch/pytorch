@@ -20,6 +20,10 @@ struct CAFFE2_API Dimname {
 
   bool can_refer_to(const Dimname& other) const;
 
+  bool is_normal() const { return type_ == NameType::NORMAL; }
+  bool is_wildcard() const { return type_ == NameType::WILDCARD; }
+  bool is_tagged() const { return type_ == NameType::TAGGED; }
+
  private:
   Dimname(Symbol name)
     : untagged_name_(name), full_name_(name), type_(NameType::NORMAL) {}
@@ -46,7 +50,7 @@ bool CAFFE2_API is_valid_identifier(const std::string& name);
 CAFFE2_API c10::optional<Dimname> unify(Dimname dimname, Dimname other);
 CAFFE2_API bool match(Dimname dimname, Dimname other);
 
-std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
+CAFFE2_API std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
 
 } // namespace at
 #endif

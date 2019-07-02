@@ -365,6 +365,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
             self.params.append(param.parameter)
             if isinstance(param, layers.LayerParameter):
+                logger.info("Add parameter regularizer {0}".format(param.parameter))
                 self.param_to_reg[param.parameter] = param.regularizer
             elif isinstance(param, ParameterInfo):
                 # TODO:
@@ -613,12 +614,15 @@ class LayerModelHelper(model_helper.ModelHelper):
         train_init_net,
         blob_to_device=None,
     ):
+        logger.info("apply regularizer on loss")
         for param, regularizer in viewitems(self.param_to_reg):
             if regularizer is None:
                 continue
+            logger.info("add regularizer {0} for param {1} to loss".format(regularizer, param))
             assert isinstance(regularizer, Regularizer)
             added_loss_blob = regularizer(train_net, train_init_net, param, grad=None,
                                           by=RegularizationBy.ON_LOSS)
+            logger.info(added_loss_blob)
             if added_loss_blob is not None:
                 self.add_loss(
                     schema.Scalar(blob=added_loss_blob),
@@ -632,6 +636,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
+        logger.info("apply regulizer after optimizer")
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
@@ -639,6 +644,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             if regularizer is None:
                 continue
             assert isinstance(regularizer, Regularizer)
+            logger.info("add regularizer {0} for param {1} to optimizer".format(regularizer, param))
             device = get_param_device(
                 param,
                 grad_map.get(str(param)),
