@@ -28,7 +28,7 @@ class SGDW(Optimizer):
     __ http://www.cs.toronto.edu/%7Ehinton/absps/momentum.pdf
 
     .. note::
-        The implementation of SGDW with Momentum/Nesterov subtly differs from
+        The implementation of SGD with Momentum/Nesterov subtly differs from
         Sutskever et. al. and implementations in some other frameworks.
 
         Considering the specific case of Momentum, the update can be written as
@@ -107,8 +107,11 @@ class SGDW(Optimizer):
                     else:
                         d_p = buf
 
-                # Apply momentum and decay
+                # Apply momentum
                 p.data.add_(-group['lr'], d_p)
-                p.data.add_(-group['lr'], group['weight_decay'])
+
+                # Apply weight decay
+                if weight_decay != 0:
+                    p.data.add_(-group['lr'], weight_decay)
 
         return loss
