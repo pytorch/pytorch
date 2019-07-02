@@ -501,6 +501,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::is_mkldnn(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mkldnn());
+           return 0;
+         }),
+     Operator(
          "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor a;
@@ -958,7 +966,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::List<IValue> vals;
+               c10::impl::GenericList vals;
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
