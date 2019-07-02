@@ -276,6 +276,21 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
             optim.SGD(None, lr=1e-2, momentum=-0.5)
 
+    def test_sgdw(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGDW([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGDW(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGDW(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+
     def test_sgd_sparse(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SGD(params, lr=5e-3)
@@ -641,7 +656,7 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            for e in range(epochs):                
+            for e in range(epochs):
                 self.opt.step()
                 scheduler.step()
             self.assertTrue(len(ws) == 0, "No warning should be raised")
@@ -655,7 +670,7 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            for e in range(epochs):                
+            for e in range(epochs):
                 self.opt.step()
                 scheduler.step(e)
             self.assertTrue(len(ws) == 0, "No warning should be raised")

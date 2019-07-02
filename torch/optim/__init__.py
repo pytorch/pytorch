@@ -13,6 +13,7 @@ from .sparse_adam import SparseAdam  # noqa: F401
 from .adamax import Adamax  # noqa: F401
 from .asgd import ASGD  # noqa: F401
 from .sgd import SGD  # noqa: F401
+from .sgdw import SGDW
 from .rprop import Rprop  # noqa: F401
 from .rmsprop import RMSprop  # noqa: F401
 from .optimizer import Optimizer  # noqa: F401
@@ -27,6 +28,7 @@ del sparse_adam
 del adamax
 del asgd
 del sgd
+del sgdw
 del rprop
 del rmsprop
 del optimizer

@@ -111,6 +111,16 @@
         ]
     },
     {
+        "algorithm": "sgdw",
+        "config": [
+            {},
+            {"learningRate": 1e-4},
+            {"learningRate": 1e-4, "momentum": 0.95, "dampening": 0.9},
+            {"learningRate": 1e-4, "nesterov": true, "momentum": 0.95, "dampening": 0},
+            {"weightDecay": 0.2}
+        ]
+    },
+    {
         "algorithm": "lbfgs",
         "config": [
             {},
