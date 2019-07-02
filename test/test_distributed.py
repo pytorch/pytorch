@@ -1561,7 +1561,8 @@ class _DistTestBase(object):
         ).cuda(rank)
 
         for i in range(100):
-            model(input_var[rank].cuda(rank))
+            y = model(input_var[rank].cuda(rank))
+            y.mean().backward()
 
         running_mean, running_var = model.module.running_mean, model.module.running_var
         torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
