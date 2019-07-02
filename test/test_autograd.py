@@ -12,6 +12,7 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul
 from functools import reduce
+from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
@@ -3194,6 +3195,31 @@ for shape in [(1,), ()]:
 """
         s = TestCase.runWithPytorchAPIUsageStderr(code)
         self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
+
+    def test_checkpointing(self):
+        num_inp = 2000
+        nz_inp = 10
+        nz_out = 10
+        nz_bottleneck = 1000
+
+        # small proxy network for some complex reasoning we want to do per input
+        module = nn.Sequential(
+            nn.Linear(nz_inp, nz_bottleneck),
+            nn.ReLU(),
+            nn.Linear(nz_bottleneck, nz_inp)
+        )
+
+        feat_combined = []
+        for r in range(num_inp):
+            data_r = torch.Tensor(1, nz_inp)
+            data_r.uniform_()
+            data_r.requires_grad=True
+            feat_r = checkpoint(module, data_r)
+            feat_combined.append(feat_r)
+
+        # compute mean as a proxy for some joint reasoning
+        mean_combined = torch.stack(feat_combined).mean()
+        mean_combined.backward()
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

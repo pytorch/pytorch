@@ -33,6 +33,9 @@ static Engine& get_python_engine() {
 namespace torch { namespace autograd { namespace python {
 
 PythonEngine::PythonEngine () {
+  AutoGIL gil;
+  // Set this lower than actual python recursion limit to avoid RecursionError
+  // The amount was determined by experimenting with different limits locally
   max_recursion_depth_ = 0.1*Py_GetRecursionLimit();
 }
 

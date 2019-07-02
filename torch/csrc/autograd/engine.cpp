@@ -53,6 +53,8 @@ static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
 static thread_local int current_depth = 0;
+// Total nested reentrant backwards calls over all threads for this device
+static thread_local int total_depth = 0;
 
 struct FunctionTask {
   GraphTask* base_;
@@ -84,10 +86,10 @@ struct CompareFunctionTaskTime {
       return false;
     } else if (!t2.fn_) {
       return true;
-    } else if (t1.base_== t2.base_) {
+    } else if (t1.getReentrantDepth() == t2.getReentrantDepth()) {
       return t1.fn_->sequence_nr() < t2.fn_->sequence_nr();
     } else {
-      return t1.getReentrantDepth() <= t2.getReentrantDepth();
+      return t1.getReentrantDepth() < t2.getReentrantDepth();
     }
    }
 };
@@ -356,7 +358,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
     }
   }
 
-  if (graph_task) {
+  if (graph_task && current_depth == 0) {
     graph_task->not_done_.notify_all();
   }
 }
@@ -373,6 +375,7 @@ void Engine::reentrant_thread_init() {
     tp_shared->graphtasks_queue_.pop();
     lk.unlock();
     set_device(graph_task->owner_);
+    total_depth = graph_task->reentrant_depth_;
     thread_main(graph_task);
   }
 }
@@ -666,16 +669,15 @@ auto Engine::execute(const edge_list& roots,
     });
   } else {
     graph_task.owner_ = worker_device;
-    graph_task.reentrant_depth_ = num_reentrant_threads_[worker_device+1]*max_recursion_depth_+current_depth;
+    ++total_depth;
+    graph_task.reentrant_depth_ = total_depth;
     if(current_depth >= max_recursion_depth_){
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
-      ++num_reentrant_threads_[worker_device+1];
       add_thread_pool_task(&graph_task);
       graph_task.not_done_.wait(lock, [&graph_task]{
         return graph_task.outstanding_tasks_.load() == 0;
       });
-      --num_reentrant_threads_[worker_device+1];
     } else {
       // Get back to work while we wait for our new graph_task to
       // complete!
@@ -684,6 +686,7 @@ auto Engine::execute(const edge_list& roots,
       thread_main(&graph_task);
       --current_depth;
     }
+    --total_depth;
   }
 
   // Check for an exception while running backwards
@@ -772,7 +775,6 @@ auto Engine::start_threads() -> void {
   ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues_)
     queue.reset(new ReadyQueue());
-  num_reentrant_threads_ = std::vector<int>(num_threads);
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
