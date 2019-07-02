@@ -185,6 +185,7 @@ Tensor VariableType::detach(const Tensor & self, bool allow_tensor_metadata_chan
     node = graph->create(jit::aten::detach, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
+    jit::tracer::addInputs(node, "allow_tensor_metadata_change", allow_tensor_metadata_change);
     graph->insertNode(node);
 
   }
