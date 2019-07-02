@@ -3323,6 +3323,82 @@ def foo(xyz):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
+    def test_serialized_source_ranges(self):
+
+        class FooTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest()
+        loaded = self.getExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_jit.py:{}'.format(lineno + 3)):
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_serialized_source_ranges2(self):
+
+        class FooTest2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                raise RuntimeError('foo')
+
+        _, lineno = inspect.getsourcelines(FooTest2)
+
+        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+            ft = FooTest2()
+            loaded = self.getExportImportCopy(ft)
+            loaded()
+
+    def test_serialized_source_ranges_dont_jitter(self):
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, lim):
+                first = 1
+                second = 1
+                i = 1
+                somenum = 5
+                dontmutateme = 3
+                third = 0
+                while bool(i < lim):
+                    third = first + second
+                    first = second
+                    second = third
+                    j = 0
+                    while j < 10:
+                        somenum = somenum * 2
+                        j = j + 1
+                    i = i + j
+                    i = i + dontmutateme
+
+                st = second + third
+                fs = first + second
+                return third, st, fs
+
+        ft3 = FooTest3()
+
+        def debug_records_from_mod(mod):
+            buffer = io.BytesIO()
+            torch.jit.save(ft3, buffer)
+            buffer.seek(0)
+            archive = zipfile.ZipFile(buffer)
+            debug_file = archive.open('archive/debug/archive.pkl')
+            return pickle.load(debug_file), buffer
+
+        records1, buffer = debug_records_from_mod(ft3)
+
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        records2, buffer = debug_records_from_mod(loaded)
+
+        buffer.seek(0)
+        loaded2 = torch.jit.load(buffer)
+        records3, _ = debug_records_from_mod(loaded2)
+
+        self.assertEqual(records1, records2)
+        self.assertEqual(records2, records3)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -12629,6 +12705,13 @@ a")
             def fn():
                 return random.randint()
 
+    def test_dir(self):
+        class M(torch.jit.ScriptModule):
+            def forward(self, t):
+                return t
+
+        self.assertTrue('forward' in dir(M()))
+
     def test_inferred_error_msg(self):
         """
         Test that when we get a type mismatch on a function where we inferred
@@ -15797,7 +15880,10 @@ class TestList(JitTestCase):
 
 class TestDict(JitTestCase):
     def dict(self):
-        return {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}
+
+    def dict2(self):
+        return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
 
     def test_keys(self):
         @torch.jit.script
@@ -15822,6 +15908,118 @@ class TestDict(JitTestCase):
             return len(x)
 
         self.checkScript(length, (self.dict(),))
+
+    def test_copy(self):
+        def func(x):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            return x.copy()
+
+        self.checkScript(func, (self.dict(),))
+
+    def test_items(self):
+        def func(x):
+            # type: (Dict[str, Tensor]) -> List[Tuple[str, Tensor]]
+            return x.items()
+
+        # The value returned by Python is in arbitrary order, so we can't use
+        # checkScript
+        scripted_func = torch.jit.script(func)
+
+        eager_out = (func(self.dict()))
+        script_out = (scripted_func(self.dict()))
+
+        self.assertEqual(len(eager_out), len(script_out))
+        for item in eager_out:
+            self.assertTrue(item in script_out)
+
+    def test_pop(self):
+        def pop(x, key):
+            # type: (Dict[str, Tensor], str) -> Tuple[Tensor, Dict[str, Tensor]]
+            return x.pop(key), x
+
+        # checkScript doesn't copy the inputs, so we can't use it since this mutates
+        # the dict
+        def tester(fn, *args):
+            eager_out = fn(self.dict(), *args)
+            script_out = torch.jit.script(fn)(self.dict(), *args)
+            self.assertEqual(eager_out, script_out)
+
+        tester(pop, 'a')
+
+        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+            torch.jit.script(pop)(self.dict(), 'x')
+
+
+        def default_pop(x, key, default):
+            # type: (Dict[str, Tensor], str, Tensor) -> Tuple[Tensor, Dict[str, Tensor]]
+            return x.pop(key, default), x
+
+        tester(default_pop, 'a', torch.randn(2, 2))
+        tester(default_pop, 'x', torch.randn(2, 2))
+
+    def test_setdefault(self):
+        def setdefault(x, key, default):
+            # type: (Dict[str, Tensor], str, Tensor) -> Dict[str, Tensor]
+            x.setdefault(key, default)
+            return x
+
+        self.checkScript(setdefault, (self.dict(), 'a', torch.randn(2, 2)))
+        self.checkScript(setdefault, (self.dict(), 'nonexistant', torch.randn(2, 2)))
+
+    def test_update(self):
+        def update(a, b):
+            # type: (Dict[str, Tensor], Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]
+            a.update(b)
+            return a, b
+
+        self.checkScript(update, (self.dict(), self.dict()))
+        self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_popitem(self):
+        @torch.jit.script
+        def popitem(x):
+            # type: (Dict[str, Tensor]) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]
+            item = x.popitem()
+            return item, x
+
+        # The value returned by Python is arbitrary, so we can't use checkScript
+        eager_in = self.dict()
+        eager_out = (eager_in.popitem(), eager_in)
+
+        script_out = popitem(self.dict())
+
+        # Check that an item was removed
+        self.assertEqual(len(eager_out[1]), len(script_out[1]))
+
+        # Check that the item is the correct types
+        if PY2:
+            self.assertTrue(isinstance(script_out[0][0], unicode))
+        else:
+            self.assertTrue(isinstance(script_out[0][0], str))
+        self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
+
+    def test_clear(self):
+        def clear(x):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            x.clear()
+            return x
+
+        self.checkScript(clear, (self.dict(),))
+
+    def test_get(self):
+        def get(x, key):
+            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+            return x.get(key)
+
+        self.checkScript(get, (self.dict(), 'a'))
+        self.checkScript(get, (self.dict(), "doesn't exist"))
+
+        def get_default(x, key):
+            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+            return x.get(key, torch.randn(2, 2))
+
+        self.checkScript(get, (self.dict(), 'a'))
+        self.checkScript(get, (self.dict(), "doesn't exist"))
 
     def test_basic(self):
         def simple(x):
@@ -15881,6 +16079,13 @@ class TestDict(JitTestCase):
             return a
 
         self.assertEqual(fn(), {'ok': 10})
+
+    def test_key_type(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected key type 'None' to subtype"):
+            @torch.jit.script
+            def fn(a):
+                # type: (Dict[str, int]) -> int
+                return a[None]
 
     def test_loop(self):
         @torch.jit.script
