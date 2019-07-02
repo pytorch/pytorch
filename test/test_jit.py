@@ -3323,6 +3323,82 @@ def foo(xyz):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
+    def test_serialized_source_ranges(self):
+
+        class FooTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest()
+        loaded = self.getExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_jit.py:{}'.format(lineno + 3)):
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_serialized_source_ranges2(self):
+
+        class FooTest2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                raise RuntimeError('foo')
+
+        _, lineno = inspect.getsourcelines(FooTest2)
+
+        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+            ft = FooTest2()
+            loaded = self.getExportImportCopy(ft)
+            loaded()
+
+    def test_serialized_source_ranges_dont_jitter(self):
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, lim):
+                first = 1
+                second = 1
+                i = 1
+                somenum = 5
+                dontmutateme = 3
+                third = 0
+                while bool(i < lim):
+                    third = first + second
+                    first = second
+                    second = third
+                    j = 0
+                    while j < 10:
+                        somenum = somenum * 2
+                        j = j + 1
+                    i = i + j
+                    i = i + dontmutateme
+
+                st = second + third
+                fs = first + second
+                return third, st, fs
+
+        ft3 = FooTest3()
+
+        def debug_records_from_mod(mod):
+            buffer = io.BytesIO()
+            torch.jit.save(ft3, buffer)
+            buffer.seek(0)
+            archive = zipfile.ZipFile(buffer)
+            debug_file = archive.open('archive/debug/archive.pkl')
+            return pickle.load(debug_file), buffer
+
+        records1, buffer = debug_records_from_mod(ft3)
+
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        records2, buffer = debug_records_from_mod(loaded)
+
+        buffer.seek(0)
+        loaded2 = torch.jit.load(buffer)
+        records3, _ = debug_records_from_mod(loaded2)
+
+        self.assertEqual(records1, records2)
+        self.assertEqual(records2, records3)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -6477,73 +6553,6 @@ a")
             fb = FileCheck().check_count("2", 2).check_not("1").check_count("2", 2)
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
-
-    def _dtype_to_expect(self, dtype, dim=0):
-        param = ', '.join(['*'] * dim)
-        param = '(' + param + ')'
-        if(dtype == torch.float32):
-            return "Float" + param
-        if(dtype == torch.float64):
-            return "Double" + param
-        if(dtype == torch.int64):
-            return "Long" + param
-        if(dtype == torch.int32):
-            return "Int" + param
-
-    def _test_dtype_op_shape(self, ops, args, input_dims=1):
-        if input_dims < 1:
-            raise 'input dims must be at least 1'
-        dtypes = [torch.float32, torch.float64, torch.int64, torch.int32]
-        str_args = ', '.join([str(arg) for arg in args]) + (', ' if len(args) else '')
-        tensor_data = ('[' * input_dims) + '1, 2, 3' + (input_dims * ']')
-        template = dedent('''
-        def func():
-            return {return_line}
-        ''')
-
-        for op in ops:
-            for dtype in (dtypes + [None]):
-                for tensor_type in dtypes:
-                    # a couple of ops aren't implemented for non-floating types
-                    if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
-                        if op in ['mean', 'softmax', 'log_softmax']:
-                            continue
-                    return_line = "torch.tensor({}, dtype={}).{}({}dtype={})".format(tensor_data, tensor_type, op, str_args, dtype)
-                    # uncomment for debugging a failed test:
-                    # print("testing {}".format(return_line))
-                    code = template.format(return_line=return_line)
-                    scope = {}
-                    exec(code, globals(), scope)
-                    cu = torch.jit.CompilationUnit(code)
-                    graph = cu.func.graph
-                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
-                    input_array = [1, 2, 3]
-                    for _ in range(1, input_dims):
-                        input_array = [input_array]
-                    t = torch.tensor(input_array, dtype=tensor_type)
-                    attr = getattr(t, op)
-                    kwargs = {'dtype': dtype}
-                    result = attr(*args, **kwargs)
-                    expect = self._dtype_to_expect(result.dtype, result.dim())
-                    FileCheck().check("aten::tensor").check(expect).run(graph)
-
-    def test_dtype_op_shape(self):
-        ops = ['sum', 'mean', 'prod']
-        self._test_dtype_op_shape(ops, args=[])
-        self._test_dtype_op_shape(ops, args=[0, False])
-
-        ops = ['sum', 'mean']
-        self._test_dtype_op_shape(ops, args=[[0, 1], False], input_dims=4)
-
-        ops = ['prod']
-        self._test_dtype_op_shape(ops, args=[0, False])
-        self._test_dtype_op_shape(ops, args=[0, True])
-
-    def test_dtype_op_shape2(self):
-        ops = ['cumprod', 'cumsum', 'softmax', 'log_softmax']
-        self._test_dtype_op_shape(ops, args=[0])
-
-        self._test_dtype_op_shape(ops, args=[1], input_dims=4)
 
     def test_filecheck_parse(self):
         def test_check():
@@ -12691,6 +12700,13 @@ a")
             @torch.jit.script
             def fn():
                 return random.randint()
+
+    def test_dir(self):
+        class M(torch.jit.ScriptModule):
+            def forward(self, t):
+                return t
+
+        self.assertTrue('forward' in dir(M()))
 
     def test_inferred_error_msg(self):
         """

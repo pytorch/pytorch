@@ -601,15 +601,27 @@
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
-- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: cumsum(Tensor self, int dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-
-- func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+- func: cumsum(Tensor self, int dim) -> Tensor
   variants: function, method
 
-- func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cumsum(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+
+- func: cumsum(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: cumprod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: cumprod(Tensor self, int dim) -> Tensor
+  variants: function, method
+
+- func: cumprod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+
+- func: cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
 
@@ -1024,22 +1036,27 @@
 - func: is_floating_point(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_complex(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_nonzero(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_signed(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
 
@@ -1175,7 +1192,11 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
-- func: log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: log_softmax(Tensor self, int dim, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: log_softmax(Tensor self, int dim) -> Tensor
   variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -1229,13 +1250,27 @@
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
-- func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: mean(Tensor self, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: mean(Tensor self) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: mean(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: mean(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+
+- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: mean(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
 
 - func: median(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -1664,6 +1699,7 @@
     MkldnnCPU: mkldnn_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: relu_
@@ -1742,6 +1778,7 @@
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
 
 - func: sigmoid(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: sigmoid
@@ -1749,6 +1786,7 @@
     MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _sigmoid__cpu
@@ -1756,6 +1794,7 @@
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _sigmoid_out_cpu
     CUDA: _sigmoid_out_cuda
@@ -1815,7 +1854,11 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
-- func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: softmax(Tensor self, int dim, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: softmax(Tensor self, int dim) -> Tensor
   variants: function, method
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -1913,13 +1956,27 @@
   variants: function, method
   device_guard: False
 
-- func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: sum(Tensor self, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: sum(Tensor self) -> Tensor
   variants: function, method
 
-- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: sum(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: sum(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+
+- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: sum(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
@@ -1956,13 +2013,27 @@
 
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: prod(Tensor self, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: prod(Tensor self) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: prod(Tensor self, int dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: prod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+
+- func: prod(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: prod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
 
 - func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False
@@ -1990,15 +2061,18 @@
     CUDA: _tan_out_cuda
 
 - func: tanh(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _tanh__cpu
     CUDA: _tanh__cuda
 
 - func: tanh(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
@@ -2312,6 +2386,7 @@
     SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_zero_
@@ -2595,6 +2670,7 @@
     SparseCUDA: is_coalesced_sparse
   requires_tensor: True
   device_guard: False
+  named_guard: False
 
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
@@ -2663,6 +2739,7 @@
 - func: numel(Tensor self) -> int
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -2765,6 +2842,7 @@
 
 - func: item(Tensor self) -> Scalar
   variants: method
+  named_guard: False
 
 # NB: Does NOT check precondition that numel == 1
 - func: _local_scalar_dense(Tensor self) -> Scalar
@@ -2772,6 +2850,7 @@
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
   variants: function
+  named_guard: False
 
 # Fused RNN kernels
 - func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor, Tensor)
@@ -3165,6 +3244,7 @@
     CUDA: legacy::cuda::_th_irshift_
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_lgamma_
@@ -3189,18 +3269,21 @@
     CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_digamma_
     CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_polygamma_
     CUDA: legacy::cuda::_th_polygamma_
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_erfinv_
@@ -3802,44 +3885,52 @@
     CUDA: legacy::cuda::_th_multinomial_alias_draw
 
 - func: lgamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_lgamma_out
     CUDA: legacy::cuda::_th_lgamma_out
 
 - func: lgamma(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_lgamma
     CUDA: legacy::cuda::_th_lgamma
 
 - func: digamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_digamma_out
     CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_digamma
     CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_polygamma_out
     CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_polygamma
     CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_erfinv_out
     CUDA: legacy::cuda::_th_erfinv_out
 
 - func: erfinv(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_erfinv
