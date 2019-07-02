@@ -40,7 +40,7 @@ import onnx
 import caffe2.python.onnx.backend as c2
 
 from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
-from test_pytorch_common import skipIfUnsupportedOpsetVersion
+from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 import verify
 
 skip = unittest.skip
@@ -2043,19 +2043,19 @@ TestCaffe2BackendEmbed_opset9 = type(str("TestCaffe2BackendEmbed_opset9"),
 # opset 7 tests
 TestCaffe2Backend_opset7 = type(str("TestCaffe2Backend_opset7"),
                                 (unittest.TestCase,),
-                                dict(TestCaffe2Backend.__dict__, opset_version=7))
+                                dict(TestCaffe2Backend_opset9.__dict__, opset_version=7))
 TestCaffe2BackendEmbed_opset7 = type(str("TestCaffe2BackendEmbed_opset7"),
                                      (unittest.TestCase,),
-                                     dict(TestCaffe2Backend.__dict__,
+                                     dict(TestCaffe2Backend_opset9.__dict__,
                                           embed_params=True, opset_version=7))
 
 # opset 8 tests
 TestCaffe2Backend_opset8 = type(str("TestCaffe2Backend_opset8"),
                                 (unittest.TestCase,),
-                                dict(TestCaffe2Backend.__dict__, opset_version=8))
+                                dict(TestCaffe2Backend_opset9.__dict__, opset_version=8))
 TestCaffe2BackendEmbed_opset8 = type(str("TestCaffe2BackendEmbed_opset8"),
                                      (unittest.TestCase,),
-                                     dict(TestCaffe2Backend.__dict__,
+                                     dict(TestCaffe2Backend_opset9.__dict__,
                                           embed_params=True, opset_version=8))
 
 # opset 10 tests
