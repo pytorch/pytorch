@@ -25,6 +25,7 @@
 
 using at::Backend;
 using at::Device;
+using at::DeviceType;
 using at::IntArrayRef;
 using at::kCPU;
 using at::kCUDA;
@@ -41,8 +42,38 @@ namespace torch { namespace utils {
 namespace {
 const int MAX_DIMS = 128;
 
-void maybe_initialize_cuda(const Type &type) {
-  if (type.is_cuda()) {
+Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
+  switch (d) {
+    case DeviceType::CPU:
+      return backendToCPU(b);
+    case DeviceType::CUDA:
+      return backendToCUDA(b);
+    case DeviceType::HIP:
+      return backendToHIP(b);
+    case DeviceType::MSNPU:
+      TORCH_CHECK(!isSparse(b), "Sparse not implemented for MSNPU");
+      return Backend::MSNPU;
+    case DeviceType::XLA:
+      TORCH_CHECK(!isSparse(b), "Sparse not implemented for XLA");
+      return Backend::XLA;
+    default:
+      AT_ERROR("Unknown device type");
+  }
+}
+
+TensorOptions options(c10::TensorTypeId type_id, at::ScalarType scalar_type, const c10::optional<Device>& device=c10::nullopt) {
+  auto options = TensorOptions(scalar_type)
+      .device(computeDeviceType(type_id))
+      .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
+      .is_variable(true);
+  if (device.has_value()) {
+    return options.device(device);
+  }
+  return options;
+}
+
+void maybe_initialize_cuda(c10::TensorTypeId type_id) {
+  if (backendToDeviceType(tensorTypeIdToBackend(type_id)) == kCUDA) {
     torch::utils::cuda_lazy_init();
   }
 }
@@ -53,39 +84,39 @@ void maybe_initialize_cuda(const Device device) {
   }
 }
 
-Tensor dispatch_zeros(const Type& type, const ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
-  maybe_initialize_cuda(type);
+Tensor dispatch_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
+  maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, type.options(scalar_type, std::move(device)));
+  return torch::zeros(sizes, options(type_id, scalar_type, device));
 }
 
-Tensor dispatch_ones(const Type& type, const ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
-  maybe_initialize_cuda(type);
+Tensor dispatch_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
+  maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::ones(sizes, type.options(scalar_type, std::move(device)));
+  return torch::ones(sizes, options(type_id, scalar_type, device));
 }
 
-Tensor dispatch_full(const Type& type, const ScalarType scalar_type, Scalar fill_value, optional<Device> device, IntArrayRef sizes) {
-  maybe_initialize_cuda(type);
+Tensor dispatch_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, Scalar fill_value, const optional<Device>& device, IntArrayRef sizes) {
+  maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::full(sizes, fill_value, type.options(scalar_type, std::move(device)));
+  return torch::full(sizes, fill_value, options(type_id, scalar_type, device));
 }
 
-Tensor new_with_sizes(const Type& type, const ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
-  maybe_initialize_cuda(type);
+Tensor new_with_sizes(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
+  maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::empty(sizes, type.options(scalar_type, std::move(device)));
+  return torch::empty(sizes, options(type_id, scalar_type, device));
 }
 
-Tensor new_with_storage(const Type& type, const ScalarType scalar_type, Storage storage) {
-  auto tensor = at::empty({}, type.options(scalar_type));
+Tensor new_with_storage(c10::TensorTypeId type_id, at::ScalarType scalar_type, Storage storage) {
+  auto tensor = at::empty({}, options(type_id, scalar_type));
   tensor.set_(std::move(storage));
   return tensor;
 }
 
-Tensor new_with_tensor(const Type& type, const ScalarType scalar_type, const Tensor& other) {
-  if (other.dispatch_type() != type) {
-    throw TypeError("expected %s (got %s)", type.toString(), other.type().toString().c_str());
+Tensor new_with_tensor(c10::TensorTypeId type_id, at::ScalarType scalar_type, const Tensor& other) {
+  if (other.type_id() != type_id) {
+    throw TypeError("expected %s (got %s)", type_id, other.type_id());
   }
   if (other.scalar_type() != scalar_type) {
     throw TypeError("expected %s (got %s)", toString(scalar_type), toString(other.scalar_type()));
@@ -190,8 +221,8 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
 }
 
 Tensor internal_new_from_data(
-    const Type& type,
-    ScalarType scalar_type,
+    c10::TensorTypeId type_id,
+    at::ScalarType scalar_type,
     c10::optional<Device> device_opt,
     PyObject* data,
     bool copy_variables,
@@ -212,7 +243,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(type.device_type()));
+    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(computeDeviceType(type_id)));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -223,7 +254,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
     auto tensor = autograd::make_variable(tensor_from_cuda_array_interface(data), /*requires_grad=*/false);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
+    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -233,7 +264,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
+    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -246,41 +277,41 @@ Tensor internal_new_from_data(
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       inferred_scalar_type, tensor.dtype().itemsize(), data);
-  auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
+  auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
 }
 
 Tensor new_from_data_copy(
-    const Type& type,
-    ScalarType scalar_type,
+    c10::TensorTypeId type_id,
+    at::ScalarType scalar_type,
     c10::optional<Device> device,
     PyObject* data) {
-  return internal_new_from_data(type, scalar_type, std::move(device), data, true, true, false);
+  return internal_new_from_data(type_id, scalar_type, std::move(device), data, true, true, false);
 }
 
 Tensor legacy_new_from_sequence(
-    const Type& type,
-    ScalarType scalar_type,
+    c10::TensorTypeId type_id,
+    at::ScalarType scalar_type,
     c10::optional<Device> device,
     PyObject* data) {
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
-  return internal_new_from_data(type, scalar_type, std::move(device), data, false, false, false);
+  return internal_new_from_data(type_id, scalar_type, std::move(device), data, false, false, false);
 }
 
-void check_legacy_ctor_device(const Type& type, c10::optional<Device> device) {
+void check_legacy_ctor_device(c10::TensorTypeId type_id, c10::optional<Device> device) {
   if (device.has_value()) {
-    TORCH_CHECK(type.device_type() == device.value().type(),
-             "legacy constructor for device type: ", type.device_type(),
+    TORCH_CHECK(computeDeviceType(type_id) == device.value().type(),
+             "legacy constructor for device type: ", computeDeviceType(type_id),
              " was passed device type: ", device.value().type(),
-             ", but device type must be: ", type.device_type());
+             ", but device type must be: ", computeDeviceType(type_id));
   }
 }
 
-Tensor legacy_sparse_tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor legacy_sparse_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
     "new(*, int64_t cdata)|hidden",
@@ -292,36 +323,36 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, ScalarType scalar_type, PyObj
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
-    check_legacy_ctor_device(type, deviceOptional);
-    return at::empty({0}, type.options(scalar_type, r.deviceOptional(0)));
+    check_legacy_ctor_device(type_id, deviceOptional);
+    return at::empty({0}, options(type_id, scalar_type, deviceOptional));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
   } else if (r.idx == 2) {
     auto deviceOptional = r.deviceOptional(2);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     auto deviceOptional = r.deviceOptional(3);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type, scalar_type, deviceOptional, r.pyobject(0));
+      return legacy_new_from_sequence(type_id, scalar_type, deviceOptional, r.pyobject(0));
     }
-    return new_with_sizes(type, scalar_type, r.deviceOptional(1), r.intlist(0));
+    return new_with_sizes(type_id, scalar_type, r.deviceOptional(1), r.intlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
 
-Tensor legacy_sparse_tensor_new(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor legacy_sparse_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
     "new(*, int64_t cdata)|hidden",
@@ -333,9 +364,9 @@ Tensor legacy_sparse_tensor_new(const Type& type, ScalarType scalar_type, PyObje
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::empty({0}, type.options(scalar_type));
+    return at::empty({0}, options(type_id, scalar_type));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
@@ -343,40 +374,44 @@ Tensor legacy_sparse_tensor_new(const Type& type, ScalarType scalar_type, PyObje
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(2);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(3);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type, scalar_type, deviceOptional, r.pyobject(0));
+      return legacy_new_from_sequence(type_id, scalar_type, deviceOptional, r.pyobject(0));
     }
-    return new_with_sizes(type, scalar_type, r.deviceOptional(1), r.intlist(0));
+    return new_with_sizes(type_id, scalar_type, r.deviceOptional(1), r.intlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
-const Type& typeWithDefault(PythonArgs& r, int64_t dtype_idx, int64_t device_idx, const Type& type, ScalarType scalar_type) {
-  const auto scalartype = r.scalartypeWithDefault(dtype_idx, scalar_type);
-  const Device types_device_type(type.device_type());
-  const auto device_type = r.isNone(device_idx) ? types_device_type : r.device(device_idx).type();
-  return torch::getVariableType(scalartype, *torch::getLayout(type.backend()), device_type);
+c10::TensorTypeId typeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::TensorTypeId type_id) {
+  auto device_type = r.isNone(device_idx) ? computeDeviceType(type_id) : r.device(device_idx).type();
+  return backendToTensorTypeId(backendToBackendOfDeviceType(tensorTypeIdToBackend(type_id), device_type));
+}
+
+// NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
+c10::TensorTypeId denseTypeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::TensorTypeId type_id) {
+  auto device_type = r.isNone(device_idx) ? computeDeviceType(type_id) : r.device(device_idx).type();
+  return backendToTensorTypeId(toDense(backendToBackendOfDeviceType(tensorTypeIdToBackend(type_id), device_type)));
 }
 } // namespace
 
-Tensor legacy_tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor legacy_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
     "new(Storage storage)",
@@ -386,43 +421,43 @@ Tensor legacy_tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* ar
     "new(PyObject* data, *, Device? device=None)",
   });
 
-  if (type.is_sparse()) {
-    return legacy_sparse_tensor_ctor(type, scalar_type, args, kwargs);
+  if (isSparse(tensorTypeIdToBackend(type_id))) {
+    return legacy_sparse_tensor_ctor(type_id, scalar_type, args, kwargs);
   }
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::empty({0}, type.options(scalar_type));
+    return at::empty({0}, options(type_id, scalar_type));
   } else if (r.idx == 1) {
-    return new_with_storage(type, scalar_type, r.storage(0));
+    return new_with_storage(type_id, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
   } else if (r.idx == 3) {
-    return new_with_tensor(type, scalar_type, r.tensor(0));
+    return new_with_tensor(type_id, scalar_type, r.tensor(0));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type, scalar_type, deviceOptional, r.pyobject(0));
+      return legacy_new_from_sequence(type_id, scalar_type, deviceOptional, r.pyobject(0));
     }
-    return new_with_sizes(type, scalar_type, r.deviceOptional(1), r.intlist(0));
+    return new_with_sizes(type_id, scalar_type, r.deviceOptional(1), r.intlist(0));
   } else if (r.idx == 5) {
     auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(type, deviceOptional);
-    return legacy_new_from_sequence(type, scalar_type, deviceOptional, r.pyobject(0));
+    check_legacy_ctor_device(type_id, deviceOptional);
+    return legacy_new_from_sequence(type_id, scalar_type, deviceOptional, r.pyobject(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
 
-Tensor legacy_tensor_new(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor legacy_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
     "new(Storage storage)",
@@ -432,59 +467,58 @@ Tensor legacy_tensor_new(const Type& type, ScalarType scalar_type, PyObject* arg
     "new(PyObject* data, *, Device? device=None)",
   });
 
-  if (type.is_sparse()) {
-    return legacy_sparse_tensor_new(type, scalar_type, args, kwargs);
+  if (isSparse(tensorTypeIdToBackend(type_id))) {
+    return legacy_sparse_tensor_new(type_id, scalar_type, args, kwargs);
   }
 
   ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::empty({0}, type.options(scalar_type));
+    return at::empty({0}, options(type_id, scalar_type));
   } else if (r.idx == 1) {
-    return new_with_storage(type, scalar_type, r.storage(0));
+    return new_with_storage(type_id, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
   } else if (r.idx == 3) {
-    return new_with_tensor(type, scalar_type, r.tensor(0));
+    return new_with_tensor(type_id, scalar_type, r.tensor(0));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(type, deviceOptional);
+    check_legacy_ctor_device(type_id, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type, scalar_type, deviceOptional, r.pyobject(0));
+      return legacy_new_from_sequence(type_id, scalar_type, deviceOptional, r.pyobject(0));
     }
-    return new_with_sizes(type, scalar_type, r.deviceOptional(1), r.intlist(0));
+    return new_with_sizes(type_id, scalar_type, r.deviceOptional(1), r.intlist(0));
   } else if (r.idx == 5) {
     auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(type, deviceOptional);
-    return legacy_new_from_sequence(type, scalar_type, r.deviceOptional(1), r.pyobject(0));
+    check_legacy_ctor_device(type_id, deviceOptional);
+    return legacy_new_from_sequence(type_id, scalar_type, r.deviceOptional(1), r.pyobject(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
 
 Tensor indexing_tensor_from_data(
-    const Type& type,
-    ScalarType scalar_type,
+    c10::TensorTypeId type_id,
+    at::ScalarType scalar_type,
     c10::optional<Device> device,
     PyObject* data) {
   // Specific to tensor indexing, converts an indexing list to an
   // indexing tensor (type Byte or Long)
   ScalarType inferred_scalar_type = infer_scalar_type(data);
   if (inferred_scalar_type == ScalarType::Byte || inferred_scalar_type == ScalarType::Bool) {
-    auto& idx_type = type.toScalarType(inferred_scalar_type);
-    return internal_new_from_data(idx_type, inferred_scalar_type, std::move(device), data, false, false, false);
+    return internal_new_from_data(type_id, inferred_scalar_type, std::move(device), data, false, false, false);
   } else {
-    return internal_new_from_data(type, scalar_type, std::move(device), data, false, false, false);
+    return internal_new_from_data(type_id, scalar_type, std::move(device), data, false, false, false);
   }
 }
 
-Tensor sparse_coo_tensor_ctor(const Type& default_type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor sparse_coo_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
     "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
@@ -495,35 +529,31 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, ScalarType scalar_type, 
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     bool type_inference = r.isNone(2);
-    const auto& type = typeWithDefault(r, 2, 3, default_type, scalar_type);
+    const auto inferred_type_id = denseTypeIdWithDefault(r, 3, type_id);
     const auto inferred_scalar_type = r.scalartypeWithDefault(2, scalar_type);
-    const auto& values_type = type.toDense();
     at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
-    Tensor values = internal_new_from_data(values_type, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
-    const auto& indices_type = values.dispatch_type().toScalarType(kLong);
-    Tensor indices = internal_new_from_data(indices_type, kLong, r.deviceOptional(3), r.pyobject(0), false, true, false);
+    Tensor values = internal_new_from_data(inferred_type_id, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
+    Tensor indices = internal_new_from_data(values.type_id(), kLong, r.deviceOptional(3), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
-    const auto& type = typeWithDefault(r, 3, 4, default_type, scalar_type);
+    const auto inferred_type_id = denseTypeIdWithDefault(r, 4, type_id);
     const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
-    const auto& values_type = type.toDense();
     at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
-    Tensor values = internal_new_from_data(values_type, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
-    const auto& indices_type = values.dispatch_type().toScalarType(kLong);
-    Tensor indices = internal_new_from_data(indices_type, kLong, r.deviceOptional(4), r.pyobject(0), false, true, false);
+    Tensor values = internal_new_from_data(inferred_type_id, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
+    Tensor indices = internal_new_from_data(values.type_id(), kLong, r.deviceOptional(4), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
-    const auto& type = typeWithDefault(r, 1, 2, default_type, scalar_type);
-    const auto actual_scalar_type = r.scalartypeWithDefault(1, scalar_type);
+    const auto inferred_type_id = typeIdWithDefault(r, 2, type_id);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(1, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(2));
-    return at::sparse_coo_tensor(r.intlist(0), type.options(actual_scalar_type).layout(at::kSparse)).set_requires_grad(r.toBool(3));
+    return at::sparse_coo_tensor(r.intlist(0), options(inferred_type_id, inferred_scalar_type).layout(at::kSparse)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }
 
-Tensor tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
   });
@@ -542,7 +572,7 @@ Tensor tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyO
     bool pin_memory = r.toBool(3);
     bool args_requires_grad = r.toBool(4);
     auto new_tensor = internal_new_from_data(
-               typeWithDefault(r, 1, 2, type, scalar_type),
+               typeIdWithDefault(r, 2, type_id),
                r.scalartypeWithDefault(1, scalar_type),
                r.deviceOptional(2),
                data,
@@ -557,7 +587,7 @@ Tensor tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyO
   throw std::runtime_error("tensor(): invalid arguments");
 }
 
-Tensor as_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor as_tensor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   // TODO: add requires_grad once we decide on semantics for sharing data.
   static PythonArgParser parser({
     "as_tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None)",
@@ -568,7 +598,7 @@ Tensor as_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyObj
   if (r.idx == 0) {
     bool type_inference = r.isNone(1);
     return internal_new_from_data(
-        typeWithDefault(r, 1, 2, type, scalar_type),
+        typeIdWithDefault(r, 2, type_id),
         r.scalartypeWithDefault(1, scalar_type),
         r.deviceOptional(2),
         r.pyobject(0),
@@ -579,7 +609,7 @@ Tensor as_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyObj
   throw std::runtime_error("tensor(): invalid arguments");
 }
 
-Tensor new_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor new_tensor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
@@ -596,7 +626,7 @@ Tensor new_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyOb
 
     bool args_requires_grad = r.toBool(3);
     auto new_tensor = new_from_data_copy(
-               typeWithDefault(r, 1, 2, type, scalar_type),
+               typeIdWithDefault(r, 2, type_id),
                r.scalartypeWithDefault(1, scalar_type),
                r.deviceOptional(2),
                data);
@@ -607,7 +637,7 @@ Tensor new_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyOb
   throw std::runtime_error("new_tensor(): invalid arguments");
 }
 
-Tensor new_empty(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor new_empty(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_empty(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
@@ -615,14 +645,14 @@ Tensor new_empty(const Type& type, ScalarType scalar_type, PyObject* args, PyObj
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const auto& actual_type = typeWithDefault(r, 1, 2, type, scalar_type);
+    const auto actual_type_id = typeIdWithDefault(r, 2, type_id);
     const auto actual_scalar_type = r.scalartypeWithDefault(1, scalar_type);
-    return new_with_sizes(actual_type, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(4));
+    return new_with_sizes(actual_type_id, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(4));
   }
   throw std::runtime_error("new_empty(): invalid arguments");
 }
 
-Tensor new_full(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor new_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_full(IntArrayRef size, Scalar fill_value, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/true);
@@ -630,14 +660,14 @@ Tensor new_full(const Type& type, ScalarType scalar_type, PyObject* args, PyObje
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const auto& actual_type = typeWithDefault(r, 2, 3, type, scalar_type);
+    const auto actual_type_id = typeIdWithDefault(r, 3, type_id);
     const auto actual_scalar_type = r.scalartypeWithDefault(2, scalar_type);
-    return dispatch_full(actual_type, actual_scalar_type, r.scalar(1), r.deviceOptional(3), r.intlist(0)).set_requires_grad(r.toBool(4));
+    return dispatch_full(actual_type_id, actual_scalar_type, r.scalar(1), r.deviceOptional(3), r.intlist(0)).set_requires_grad(r.toBool(4));
   }
   throw std::runtime_error("new_full(): invalid arguments");
 }
 
-Tensor new_ones(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor new_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_ones(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/true);
@@ -645,14 +675,14 @@ Tensor new_ones(const Type& type, ScalarType scalar_type, PyObject* args, PyObje
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const auto& actual_type = typeWithDefault(r, 1, 2, type, scalar_type);
+    const auto actual_type_id = typeIdWithDefault(r, 2, type_id);
     const auto actual_scalar_type = r.scalartypeWithDefault(1, scalar_type);
-    return dispatch_ones(actual_type, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
+    return dispatch_ones(actual_type_id, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("new_ones(): invalid arguments");
 }
 
-Tensor new_zeros(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor new_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_zeros(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/true);
@@ -660,9 +690,9 @@ Tensor new_zeros(const Type& type, ScalarType scalar_type, PyObject* args, PyObj
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const auto& actual_type = typeWithDefault(r, 1, 2, type, scalar_type);
+    const auto actual_type_id = typeIdWithDefault(r, 2, type_id);
     const auto actual_scalar_type = r.scalartypeWithDefault(1, scalar_type);
-    return dispatch_zeros(actual_type, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
+    return dispatch_zeros(actual_type_id, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("new_zeros(): invalid arguments");
 }

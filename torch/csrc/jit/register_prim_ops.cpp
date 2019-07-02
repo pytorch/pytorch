@@ -501,6 +501,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::is_mkldnn(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mkldnn());
+           return 0;
+         }),
+     Operator(
          "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor a;
@@ -2225,6 +2233,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
     DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
+    DEFINE_UNARY_OP(aten::log2, std::log2(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
@@ -2234,6 +2243,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
     DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::atan2, std::atan2(a, b)),
+    DEFINE_BINARY_FLOAT_OP(aten::hypot, std::hypot(a, b)),
     DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
     DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
     DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),

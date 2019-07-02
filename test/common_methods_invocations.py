@@ -342,7 +342,6 @@ def method_tests():
         ('mean', (), NO_ARGS, 'scalar', (True,)),
         ('mean', (), (0,), 'scalar_dim', (True,), [0]),
         ('mean', (), (0, True,), 'scalar_keepdim_dim', (True,), [0]),
-        ('mean', (S, S, S), (), 'dtype', (True,), (), (), ident, {'dtype': torch.float64}),
         ('kthvalue', (S, S, S), (2,)),
         ('kthvalue', (), (1,), 'scalar'),
         ('kthvalue', (S, S, S), (2, 1,), 'dim', (), [1]),

@@ -9,7 +9,6 @@
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
@@ -50,11 +49,6 @@ void window_function_checks(
       function_name,
       " requires non-negative window_length, got window_length=",
       window_length);
-}
-
-// FIXME: point to LegacyTHDispatcher.
-const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
-  return at::getType(options);
 }
 
 } // namespace

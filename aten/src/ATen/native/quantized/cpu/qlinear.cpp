@@ -1,23 +1,23 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 
 #include <algorithm>
+#include <string>
 
 namespace at {
 namespace native {
 namespace {
 
 template <bool ReluFused>
-class QLinearInt8 final : public c10::OperatorKernel {
+class QLinearInt8 final : public torch::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   at::Tensor operator()(
       at::Tensor input,
       at::Tensor packed_weight,
-      at::Tensor bias,
+      c10::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point) {
     // uint8 * int8 -> uint8 (no quantization/dequantization)
@@ -54,7 +54,8 @@ class QLinearInt8 final : public c10::OperatorKernel {
     int64_t K = input.size(input.dim() - 1);
     TORCH_CHECK(
         K == static_cast<int64_t>(packB->numRows()),
-        "The number of rows in the packB should be equal to K");
+        "The number of rows in the packB should be equal to K: " +
+            std::to_string(K));
 
     float input_scale_float = input.q_scale();
     int32_t input_zero_point_int32 = input.q_zero_point();
@@ -96,11 +97,14 @@ class QLinearInt8 final : public c10::OperatorKernel {
     fbgemm::DoNothing<> doNothingObj{};
 
     const int32_t* bias_ptr = nullptr;
-    if (bias.dim() != 0) {
-      TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
-      TORCH_CHECK(bias.size(0) == N, "bias should have N elements");
+    if (bias.has_value()) {
+      Tensor bias_vec = bias.value_or(Tensor());
+      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias_vec.size(0) == N,
+          "bias should have N elements: " + std::to_string(N));
       // TODO: contiguous is called for further jit optimizations.
-      auto bias_contig = bias.contiguous();
+      auto bias_contig = bias_vec.contiguous();
       bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
     }
 
@@ -145,7 +149,7 @@ class QLinearInt8 final : public c10::OperatorKernel {
   at::Tensor operator()(
       at::Tensor /* input */,
       at::Tensor /* packed_weight */,
-      at::Tensor /* bias */,
+      c10::optional<Tensor> /* bias */,
       double /* output_scale */,
       int64_t /* output_zero_point */) {
     // We make a strong guarantee that models using these operators will have
@@ -158,13 +162,13 @@ class QLinearInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry =
-    c10::RegisterOperators()
-        .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor? b=None, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            c10::RegisterOperators::options()
-              .kernel<QLinearInt8<false>>(QuantizedCPUTensorId()))
-        .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor? b=None, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-            c10::RegisterOperators::options()
-              .kernel<QLinearInt8<true>>(QuantizedCPUTensorId()));
+    torch::RegisterOperators()
+        .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+            torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
+                QuantizedCPUTensorId()))
+        .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+            torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
+                QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at
