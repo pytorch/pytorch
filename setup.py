@@ -39,9 +39,6 @@
 #   BUILD_TEST=0
 #     disables the test build
 #
-#   USE_MIOPEN=0
-#     disables the MIOpen build
-#
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
@@ -190,7 +187,6 @@ from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
-from tools.setup_helpers.miopen import MIOPEN_LIBRARY, MIOPEN_INCLUDE_DIR
 from tools.setup_helpers.nccl import NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
 
 try:
@@ -378,10 +374,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
         else:
             report('-- Not using cuDNN')
-        if cmake_cache_vars['USE_MIOPEN']:
-            report('-- Detected MIOpen at ' + MIOPEN_LIBRARY + ', ' + MIOPEN_INCLUDE_DIR)
-        else:
-            report('-- Not using MIOpen')
         if cmake_cache_vars['USE_CUDA']:
             report('-- Detected CUDA at ' + CUDA_HOME)
         else:
