@@ -1,6 +1,22 @@
 import torch
 import torch.nn.functional as F
 
+orig_embedding = torch.nn.functional.embedding
+
+def embedding_monkey(input, weight, padding_idx=None, max_norm=None,
+                     norm_type=2., scale_grad_by_freq=False, sparse=False):
+    if isinstance(input, NestedTensor):
+        ret_tensors = []
+        for tensor in input.tensors:
+            ret_tensors.append(orig_embedding(tensor, weight, padding_idx,
+                                        max_norm, norm_type, scale_grad_by_freq,
+                                        sparse))
+        return NestedTensor(ret_tensors)
+    else:
+        return orig_embedding(input, weight, padding_idx, max_norm, norm_type,
+                             scale_grad_by_freq, sparse)
+    return ret
+
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
 
@@ -15,13 +31,6 @@ def make_nested_tensor(obj):
             return NestedTensor([])
         for obj_ in obj:
             assert(torch.is_tensor(obj_))
-        dim = obj[0].dim()
-        layout = obj[0].layout
-        device = obj[0].device
-        for obj_ in obj:
-            assert(dim == obj_.dim())
-            assert(layout == obj_.layout)
-            assert(device == obj_.device)
         tensors = []
         for obj_ in obj:
             tensors.append(obj_.clone().detach())
@@ -32,12 +41,22 @@ class NestedTensor():
     def __init__(self, tensors):
         for tensor in tensors:
             assert torch.is_tensor(tensor)
+        # TODO: Empty NestedTensor behavior
+        if len(tensors) == 0:
+            return self
+        self.dim = tensors[0].dim()
+        self.layout = tensors[0].layout
+        self.device = tensors[0].device
+        self.dtype = tensors[0].dtype
+        for tensor in tensors:
+            assert(self.dim == tensor.dim())
+            assert(self.layout == tensor.layout)
+            assert(self.device == tensor.device)
+            assert(self.dtype == tensor.dtype)
         self.tensors = tensors
 
     def __getattribute__(self, attr):
         if attr == 'shape':
-            raise NotImplementedError()
-        if attr == 'dtype':
             raise NotImplementedError()
         return super().__getattribute__(attr)
 
@@ -78,20 +97,20 @@ class NestedTensor():
 
     # Tensor ops
     def detach(self):
-        return __loop__apply(lambda x: x.detach())
+        return self.__loop__apply(lambda x: x.detach())
 
     def backward(self):
         for tensor in self.tensors:
             tensor.backward()
 
     def clone(self):
-        return __loop__apply(lambda x: x.clone())
+        return self.__loop__apply(lambda x: x.clone())
 
     def type(self, dtype):
-        return __loop__apply(lambda x: x.type(dtype))
+        return self.__loop__apply(lambda x: x.type(dtype))
 
     def to(self, device):
-        return __loop__apply(lambda x: x.to(device))
+        return self.__loop__apply(lambda x: x.to(device))
 
     def unbind(self):
         return tuple(self.tensors)

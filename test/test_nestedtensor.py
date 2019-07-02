@@ -129,15 +129,13 @@ def test_embedding_monkey():
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
     c = embedding(a, b)
     d = torch.nestedtensor([torch.tensor([[7, 8, 9], [10, 11, 12], [10, 11, 12]])])
-    assert (c.tensor == d.tensor).all()
-    assert (c.mask == d.mask).all()
+    assert (c == d).all()
 
     a = torch.nestedtensor([torch.tensor([[1, 2], [0, 0]])])
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
     c = embedding(a, b)
     d = torch.nestedtensor([torch.tensor([[[7, 8, 9], [10, 11, 12]], [[4, 5, 6], [4, 5, 6]]])])
-    assert (c.tensor == d.tensor).all()
-    assert (c.mask == d.mask).all()
+    assert (c == d).all()
 
     return
     a = torch.tensor([[]])
@@ -325,11 +323,24 @@ def test_unbind():
     print(a.unbind())
 
 
+def test_equal():
+    a1 = torch.nestedtensor([torch.tensor([1, 2]), 
+                             torch.tensor([7, 8])])
+    a2 = torch.nestedtensor([torch.tensor([1, 2]), 
+                             torch.tensor([7, 8])])
+    a3 = torch.nestedtensor([torch.tensor([3, 4]), 
+                             torch.tensor([5, 6])])
+    import pdb; pdb.set_trace()
+
+
+
+
 # TODO: Carefully test reference passing vs. value passing for each function
 # TODO: Add more tests for variable length examples
 if __name__ == "__main__":
     test_unbind()
     test_nested_size()
+    test_equal()
     # test_embedding_monkey()
     # test_nested_cross_entropy_loss()
     # test_nested_linear()
