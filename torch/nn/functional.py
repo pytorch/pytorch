@@ -1319,10 +1319,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
         https://arxiv.org/abs/1611.01144
     """
 
-    if eps != 1e-10:
-        warnings.warn("`eps` parameter is deprecated and has no effect.")
-
-    gumbels = -torch.empty_like(logits).exponential_().log()  # ~Gumbel(0,1)
+    gumbels = - (torch.empty_like(logits).exponential_() + eps).log()  # ~Gumbel(0,1)
     gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)
 
