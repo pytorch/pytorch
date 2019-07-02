@@ -123,6 +123,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/class_type.cpp",
     "torch/csrc/jit/script/parser.cpp",
     "torch/csrc/jit/script/jit_exception.cpp",
+    "torch/csrc/jit/source_range_serialization.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
