@@ -304,3 +304,14 @@ TEST(TensorTest, Item_CUDA) {
     ASSERT_EQ(scalar.to<int>(), 123);
   }
 }
+
+TEST(TensorTest, SetRequiresGradInplace) {
+  auto tensor = torch::empty({3, 4}, at::TensorOptions().requires_grad(false));
+  ASSERT_FALSE(tensor.requires_grad());
+
+  tensor.requires_grad_(true);
+  ASSERT_TRUE(tensor.requires_grad());
+
+  tensor.requires_grad_(false);
+  ASSERT_FALSE(tensor.requires_grad());
+}
