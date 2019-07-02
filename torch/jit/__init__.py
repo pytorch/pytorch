@@ -2,7 +2,8 @@ import torch._C
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, Parameter, Sequential
-from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
+from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args, \
+    FrontendError
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
@@ -1007,13 +1008,13 @@ def _make_strong_submodule(field, module, parent):
     return new_strong_submodule
 
 
-def _try_compile_fn(fn):
+def _try_compile_fn(fn, loc):
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
 
     if not inspect.isfunction(fn) and not inspect.ismethod(fn):
-        raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
+        raise FrontendError(loc, "`{}` is not a function. Recursive scripting only supports "
                            "Python functions or methods currently.\n"
                            "Consider manually annotating `{}` with @torch.jit.script.".format(fn, fn))
 
