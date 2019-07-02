@@ -375,9 +375,11 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=False):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+    from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
+    _set_operator_export_type(operator_export_type)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
@@ -401,9 +403,11 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     __IN_ONNX_EXPORT = True
     try:
         from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+        from torch.onnx.symbolic_helper import _set_operator_export_type
         if opset_version is None:
             opset_version = _default_onnx_opset_version
         _set_opset_version(opset_version)
+        _set_operator_export_type(operator_export_type)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,

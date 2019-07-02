@@ -40,6 +40,7 @@ import onnx
 import caffe2.python.onnx.backend as c2
 
 from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
+from test_pytorch_common import skipIfUnsupportedOpsetVersion
 import verify
 
 skip = unittest.skip
@@ -51,31 +52,6 @@ def skipIfEmbed(func):
             raise unittest.SkipTest("Skip embed_params verify test")
         return func(self)
     return wrapper
-
-# skips tests for all versions below min_opset_version.
-# if exporting the op is only supported after a specific version,
-# add this wrapper to prevent running the test for opset_versions
-# smaller than the currently tested opset_version
-def skipIfUnsupportedMinOpsetVersion(min_opset_version):
-    def skip_dec(func):
-        def wrapper(self):
-            if self.opset_version < min_opset_version:
-                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
-            return func(self)
-        return wrapper
-    return skip_dec
-
-# skips tests for opset_versions listed in unsupported_opset_versions.
-# if the caffe2 test cannot be run for a specific version, add this wrapper
-# (for example, an op was modified but the change is not supported in caffe2)
-def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
-    def skip_dec(func):
-        def wrapper(self):
-            if self.opset_version in unsupported_opset_versions:
-                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
-            return func(self)
-        return wrapper
-    return skip_dec
 
 # def import_model(proto, input, workspace=None, use_gpu=True):
 #    model_def = onnx.ModelProto.FromString(proto)
@@ -140,7 +116,7 @@ model_urls = {
 }
 
 
-class TestCaffe2Backend(unittest.TestCase):
+class TestCaffe2Backend_opset9(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     embed_params = False
@@ -918,20 +894,6 @@ class TestCaffe2Backend(unittest.TestCase):
                     return torch.cumsum(x, **params)
             x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
-
-    def test_layer_norm(self):
-        shape = (20, 5, 10, 10)
-
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-                self.ln = torch.nn.LayerNorm([5, 10, 10])
-
-            def forward(self, x):
-                return self.ln(x)
-
-        x = torch.randn(*shape)
-        self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_cosine_similarity(self):
         shape = (100, 128)
@@ -1993,7 +1955,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
             **extra_kwargs)
 
     f.__name__ = test_name
-    setattr(TestCaffe2Backend, f.__name__, f)
+    setattr(TestCaffe2Backend_opset9, f.__name__, f)
 
 
 def setup_rnn_tests():
@@ -2040,7 +2002,7 @@ def setup_rnn_tests():
             test_count += 1
 
     # sanity check that a representative example does exist
-    TestCaffe2Backend.test_gru_trilayer_forward_with_initial_state_without_sequence_lengths_with_dropout
+    TestCaffe2Backend_opset9.test_gru_trilayer_forward_with_initial_state_without_sequence_lengths_with_dropout
 
     # make sure no one accidentally disables all the tests without
     # noticing
@@ -2049,17 +2011,18 @@ setup_rnn_tests()
 
 # add the same test suite as above, but switch embed_params=False
 # to embed_params=True
-TestCaffe2BackendEmbed = type(str("TestCaffe2BackendEmbed"),
-                              (unittest.TestCase,),
-                              dict(TestCaffe2Backend.__dict__, embed_params=True))
+TestCaffe2BackendEmbed_opset9 = type(str("TestCaffe2BackendEmbed_opset9"),
+                                     (unittest.TestCase,),
+                                     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True))
 
 # opset 10 tests
 TestCaffe2Backend_opset10 = type(str("TestCaffe2Backend_opset10"),
                                  (unittest.TestCase,),
-                                 dict(TestCaffe2Backend.__dict__, opset_version=10))
+                                 dict(TestCaffe2Backend_opset9.__dict__, opset_version=10))
+
 TestCaffe2BackendEmbed_opset10 = type(str("TestCaffe2BackendEmbed_opset10"),
                                       (unittest.TestCase,),
-                                      dict(TestCaffe2Backend.__dict__,
+                                      dict(TestCaffe2Backend_opset9.__dict__,
                                            embed_params=True, opset_version=10))
 
 
