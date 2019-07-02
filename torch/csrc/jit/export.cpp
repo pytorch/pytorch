@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/source_range_serialization.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -659,8 +660,11 @@ void ScriptModuleSerializer::convertClass(
 
   std::vector<c10::NamedTypePtr> class_deps;
   std::ostringstream class_stream;
+  // TODO: serialize for classes
+  SourceRangeRecords source_ranges;
   PythonPrint(
       class_stream,
+      source_ranges,
       class_type,
       tensor_table_,
       class_deps,
@@ -905,9 +909,11 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.class_compilation_unit()->get_functions().size() > 0) {
     std::ostringstream methods;
+    SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
+        source_ranges,
         *module.class_compilation_unit(),
         /*is_method=*/true,
         tensor_table_,
@@ -921,6 +927,19 @@ void ScriptModuleSerializer::convertModule(
     writer_.writeRecord(
         filename.str(), methods_str.c_str(), methods_str.size());
     record->set_key(filename.str());
+
+    // Write out debug records
+    torch::RecordRef* debug_record =
+        module_def->mutable_torchscript_debug_arena();
+
+    SourceRangePickler source_range_pickler;
+    source_range_pickler.pickle(source_ranges);
+    const auto& range_data = source_range_pickler.get_data();
+    std::stringstream debug_filename;
+    debug_filename << "debug/" << module_name.str() << ".pkl";
+    writer_.writeRecord(
+        debug_filename.str(), range_data.data(), range_data.size());
+    debug_record->set_key(debug_filename.str());
   }
 
   for (script::Slot s : module.get_module_slots()) {

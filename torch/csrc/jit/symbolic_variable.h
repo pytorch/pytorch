@@ -260,20 +260,13 @@ struct SymbolicVariable {
   SymbolicVariable sinh() const {
     return create(t("sinh"), {*this})[0];
   }
-  SymbolicVariable sum(c10::optional<c10::ScalarType> dtype=c10::nullopt) const {
-    return create(t("sum"), {*this, insertNullable(dtype)})[0];
+  SymbolicVariable sum() const {
+    return create(t("sum"), {*this})[0];
   }
-  SymbolicVariable sum(
-    int dim,
-    bool keepdim,
-    c10::optional<c10::ScalarType> dtype = c10::nullopt) const
-  {
+  SymbolicVariable sum(int dim, bool keepdim) const {
     return create(
         t("sum"),
-        {*this,
-          insertConstant(at::IntArrayRef{dim}),
-          insertConstant(keepdim),
-          insertNullable(dtype)})[0];
+        {*this, insertConstant(at::IntArrayRef{dim}), insertConstant(keepdim)})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
     return create(t("squeeze"), {*this, dim})[0];
@@ -317,22 +310,10 @@ struct SymbolicVariable {
       v->setType(other_type->contiguous());
     return *this;
   }
-
-  Value * insertNullable(c10::optional<c10::ScalarType> value) const {
-    if (value != c10::nullopt) {
-      return insertConstant(static_cast<int64_t>(*value));
-    } else {
-      return v->owningGraph()
-          ->insertNode(v->owningGraph()->createNone(IntType::get()))
-          ->output();
-    }
-  }
-
   SymbolicVariable toType(TypePtr type) const {
     v->setType(type);
     return *this;
   }
-
   SymbolicVariable typeLikeWithScalarType(
       SymbolicVariable other,
       at::ScalarType type) const {
