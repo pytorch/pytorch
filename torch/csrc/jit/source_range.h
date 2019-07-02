@@ -131,6 +131,15 @@ struct CAFFE2_API SourceRange {
         (size_t)col_offset);
   }
 
+  bool operator==(const SourceRange& rhs) const {
+    return start() == rhs.start() && end() == rhs.end() &&
+        source() == rhs.source();
+  }
+
+  bool operator!=(const SourceRange& rhs) const {
+    return !(*this == rhs);
+  }
+
  private:
   std::shared_ptr<Source> source_;
   size_t start_;
