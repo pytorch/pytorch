@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
@@ -53,6 +54,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
       } break;
     }
   }
+  EliminateDeadCode(block);
 }
 
 void EraseNumberTypes(const std::shared_ptr<Graph>& graph) {
