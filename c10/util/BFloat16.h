@@ -10,28 +10,22 @@
 namespace c10 {
 
 namespace detail {
-  inline C10_HOST_DEVICE bool isSmallEndian() {
-    int num = 1;
-    return *(char *)&num == 1;
-  }
-
   inline C10_HOST_DEVICE float f32_from_bits(uint16_t src) {
-    float res = 0;
-    uint16_t* tmp = reinterpret_cast<uint16_t*>(&res);
-    if (isSmallEndian()) {
-      tmp[0] = 0;
-      tmp[1] = src;
-    } else {
-      tmp[0] = src;
-      tmp[1] = 0;
-    }
+    float* res = 0;
+    uint32_t tmp = src;
+    tmp <<= 16;
 
-    return res;
+    // We should be using memcpy in order to respect the strict aliasing rule
+    // but it fails in the HIP environment.
+    res = reinterpret_cast<float*>(&tmp);
+    return *res;
   }
 
   inline C10_HOST_DEVICE uint16_t bits_from_f32(float src) {
-    uint16_t* res = reinterpret_cast<uint16_t*>(&src);
-    return isSmallEndian() ? res[1] : res[0];
+    // We should be using memcpy in order to respect the strict aliasing rule
+    // but it fails in the HIP environment.
+    uint32_t* res = reinterpret_cast<uint32_t*>(&src);
+    return *res >>= 16;
   }
 } // namespace detail
 
