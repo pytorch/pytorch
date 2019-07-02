@@ -1,3 +1,8 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import torch
 from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -8,7 +13,6 @@ import torch.onnx
 import torch.onnx.utils
 
 from functools import partial
-from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
@@ -201,56 +205,27 @@ def _slice(g, input, axes, starts, ends):
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
-def _reduce_op_symbolic(onnx_op_name):
+
+def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
             # all-reduce path
             return g.op(onnx_op_name, self, keepdims_i=0)
         else:
             # dim-reduce path
-            dim, keepdim = sym_help._get_const(dim, 'i', 'dim'), sym_help._get_const(keepdim, 'i', 'keepdim')
-            return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
+            desc = 'is' if allow_multi_dim_support else 'i'
+            dim, keepdim = sym_help._get_const(dim, desc, 'dim'), sym_help._get_const(keepdim, 'i', 'keepdim')
+            dim_list = dim if allow_multi_dim_support else [dim] 
+            return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
     return symbolic
 
-def overload_by_arg_count(fn):
-    @wraps(fn)
-    def wrapper(g, *args):
-        overloads = fn(g, *args)
-        last_exception = None
-        for overload in overloads:
-            arg_descriptors = overload._arg_descriptors
-            if len(arg_descriptors) == len(args):
-                return overload(g, *args)
-        raise NotImplementedError("Unknown aten::{} signature".format(fn.__name__))
-    return wrapper
+mean = _reduce_op_symbolic('ReduceMean')
+sum = _reduce_op_symbolic('ReduceSum')
+prod = _reduce_op_symbolic('ReduceProd', allow_multi_dim_support=False)  # torch.prod does not support multidimensional 'dim'
 
-def _reduce_with_dtype(onnx_op, name):
-    symbolic = _reduce_op_symbolic(onnx_op)
 
-    @overload_by_arg_count
-    def reduce(g, *args, **kwargs):
-        @parse_args('v', 'none')
-        def reduce_nodim(g, self, dtype):
-            if dtype.node().kind() != 'prim::Constant':
-                return _unimplemented(name, "dtype")
-            return symbolic(g, self)
-
-        @parse_args('v', 'i', 'i', 'none')
-        def reduce_dim(g, self, dim, keepdim, dtype):
-            if dtype.node().kind() != 'prim::Constant':
-                return _unimplemented(name, "dtype")
-            return symbolic(g, self, dim, keepdim)
-        return reduce_nodim, reduce_dim
-    return reduce
-
-sum = _reduce_with_dtype('ReduceSum', 'sum')
-mean = _reduce_with_dtype('ReduceMean', 'mean')
-prod = _reduce_with_dtype('ReduceProd', 'prod')
-
-@parse_args('v', 'i', 'none')
-def cumsum(g, input, dim, dtype):
-    if dtype.node().kind() != 'prim::Constant':
-        return _unimplemented(name, "dtype")
+@parse_args('v', 'i')
+def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
@@ -469,7 +444,7 @@ def glu(g, input, dim):
     return g.op('Mul', first, g.op('Sigmoid', second))
 
 
-@parse_args('v', 'i', 'none')
+@parse_args('v', 'i', 'i')
 def softmax(g, input, dim, dtype=None):
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
@@ -494,16 +469,14 @@ def softmax(g, input, dim, dtype=None):
             dim = input.type().dim() + dim
         if input.type().dim() == dim + 1:
             softmax = g.op('Softmax', input, axis_i=dim)
-            if dtype and dtype.node().kind() != 'prim::Constant':
-                parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-                softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+            if dtype:
+                softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[dtype])
             return softmax
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
     softmax = g.op('Div', exp, sum)
-    if dtype and dtype.node().kind() != 'prim::Constant':
-        parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-        softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+    if dtype:
+        softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[dtype])
     return softmax
 
 
@@ -817,8 +790,8 @@ def where(g, condition, self, other):
     return g.op("Where", condition, self, other)
 
 
-@parse_args('v', 'i', 'none')
-def log_softmax(g, input, dim, dtype=None):
+@parse_args('v', 'i', 'i')
+def log_softmax(g, input, dim=None, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     if dim < 0:
@@ -826,7 +799,7 @@ def log_softmax(g, input, dim, dtype=None):
     if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return_op = g.op("LogSoftmax", input, axis_i=dim)
-    if dtype and dtype.node().kind() != 'prim::Constant':
+    if dtype:
         return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
     return return_op
 
@@ -901,6 +874,33 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         return res
 
 
+@parse_args('v', 'is', 'v', 'v', 'f', 'i')
+def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, weight, bias, normalized_shape_i=normalized_shape,
+                    eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
+
+    axes = [-i for i in range(len(normalized_shape), 0, -1)]
+
+    two_cst = g.op("Constant", value_t=torch.tensor(2.))
+    eps_cst = g.op("Constant", value_t=torch.tensor(eps))
+
+    mean = g.op("ReduceMean", input, axes_i=axes)
+    numerator = sub(g, input, mean)
+    # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
+    variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
+    denominator = sqrt(g, add(g, variance, eps_cst))
+
+    layer_norm = div(g, numerator, denominator)
+
+    if not (weight is None or weight.node().mustBeNone()):
+        layer_norm = mul(g, layer_norm, weight)
+    if not (bias is None or bias.node().mustBeNone()):
+        layer_norm = add(g, layer_norm, bias)
+
+    return layer_norm
+
+
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
@@ -962,12 +962,6 @@ def type_as(g, self, other):
     else:
         # We don't know the type of other, bail by emitting ATen
         return g.op("ATen", self, other, operator_s="type_as")
-
-
-@parse_args('v', 'is', 'v', 'v', 'f', 'i')
-def layer_norm(g, self, normalized_shape, weight, bias, eps, cudnn_enable):
-    return g.op("ATen", self, weight, bias, normalized_shape_i=normalized_shape,
-                eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
 
 
 @parse_args('v', 'v', 'i', 'f')
@@ -1085,7 +1079,7 @@ alpha_dropout_ = alpha_dropout
 feature_alpha_dropout_ = feature_alpha_dropout
 
 
-@parse_args('v', 't', 'i', 'i')
+@parse_args('v', 't', 'is', 'i')
 def norm(g, self, p, dim, keepdim):
     if p == 1:
         f = _reduce_op_symbolic("ReduceL1")
@@ -1629,3 +1623,8 @@ def gather(g, self, dim, index, sparse_grad=False):
     index = g.op("Cast", g.op("OneHot", index, depth, values, axis_i=dim), to_i=sym_help.cast_pytorch_to_onnx[dtype])
     mul = g.op("Mul", g.op("Unsqueeze", self, axes_i=[dim + 1]), index)
     return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
+
+
+@parse_args('v', 'is', 'i')
+def logsumexp(g, input, dim, keepdim):
+    return g.op('ReduceLogSumExp', input, axes_i=dim, keepdims_i=keepdim)

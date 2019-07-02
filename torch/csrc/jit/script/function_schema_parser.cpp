@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/schema_type_parser.h>
 #include <c10/util/string_utils.h>
+#include <ATen/core/Reduction.h>
 
 #include <functional>
 #include <memory>

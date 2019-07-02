@@ -118,7 +118,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
   }
-  AT_ERROR("Tag not found\n");
+  AT_ERROR("Tag not found: ", v.tagKind());
 }
 
 #undef TORCH_FORALL_TAGS
