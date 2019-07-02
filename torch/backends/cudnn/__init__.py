@@ -27,7 +27,20 @@ __allow_nonbracketed_mutation_flag = True
 
 
 def find_cudnn_windows_lib():
-    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE, stderr=PIPE, stdin=PIPE)
+    # Override the default search process
+    # Fixes https://github.com/pytorch/pytorch/issues/20202
+    # The libary selection will be done in these directories one by one
+    # 1. [Package Root]\Lib 
+    #    That's where our libraries are in, which should be loaded first.
+    # 2. Default directories
+    #    That is stored in the environment variable `PATH`.
+    test_env = os.environ.copy()
+    old_path = test_env['PATH']
+    th_dll_path = os.path.join(os.path.dirname(
+        os.path.dirname(os.path.dirname(__file__))), 'lib')
+    test_env['PATH'] = ';'.join([th_dll_path, old_path])
+    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE,
+                 stderr=PIPE, stdin=PIPE, env=test_env)
     out, err = proc.communicate()
     out = out.decode().strip()
     if len(out) > 0:

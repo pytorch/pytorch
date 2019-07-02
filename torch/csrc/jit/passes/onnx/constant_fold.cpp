@@ -38,7 +38,7 @@ ValueToParamPairMap buildValueToParamsMap(
     const ParamMap& paramsDict) {
   ValueToParamPairMap valsToParamsMap;
   for (auto& input : b->inputs()) {
-    auto it = paramsDict.find(input->uniqueName());
+    auto it = paramsDict.find(input->debugName());
     if (it != paramsDict.end()) {
       valsToParamsMap.emplace(input, *it);
     }
@@ -87,8 +87,22 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     }
     updated_val = inputTensorValues[0];
     for (size_t i = 0; i < axesAttr.size(); ++i) {
-      updated_val = at::narrow(
-          updated_val, axesAttr[i], startsAttr[i], endsAttr[i] - startsAttr[i]);
+      // ONNX slice accepts negative starts and ends values.
+      int64_t axis = axesAttr[i], start = startsAttr[i], end = endsAttr[i];
+      if (start < 0) {
+        start = updated_val.sizes()[axis] + start;
+      }
+      if (end < 0) {
+        end = updated_val.sizes()[axis] + end;
+      }
+      // index higher than dimension is treated as the end.
+      if (end > updated_val.sizes()[axis]) {
+        end = updated_val.sizes()[axis];
+      }      
+      int64_t length = end - start;
+      if (length < 0 || start > updated_val.sizes()[axis] - length)
+        return c10::nullopt;
+      updated_val = at::narrow(updated_val, axis, start, length);
     }
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Concat) {
@@ -186,11 +200,15 @@ bool areNodeInputsConstant(
       [&valsToParamsMap](Value* v) { return isConstant(v, valsToParamsMap); });
 }
 
-std::vector<Node*> getOnnxConstParents(Node* node) {
+std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
   std::vector<Node*> parentNodes;
   for (auto val : node->inputs()) {
-    if (val->node()->kind() == onnx::Constant) {
-      parentNodes.push_back(val->node());
+    // If the parent of 'node' is an onnx::Constant node,
+    // and 'node' is the only downstream node it serves (this
+    // is important), then push it in the list to remove.
+    if (val->node()->kind() == onnx::Constant &&
+        val->uses().size() == 1) {
+          parentNodes.push_back(val->node());
     }
   }
   return parentNodes;
@@ -234,7 +252,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
     auto newSourceNodeOutput = b->addInput();
     valsToParamsMap.insert(
         {newSourceNodeOutput,
-         std::make_pair(newSourceNodeOutput->uniqueName(), updatedVal)});
+         std::make_pair(newSourceNodeOutput->debugName(), updatedVal)});
     newSourceNodeOutput->inferTypeFrom(updatedVal);
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
 
@@ -245,7 +263,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
     // below), and then remove the current node. If the parent was
     // an initializer (not onnx::Constant) then they are all removed
     // by eraseUnusedBlockInputs() call (below) outside the loop.
-    auto onnxConstParents = getOnnxConstParents(node);
+    auto onnxConstParents = getOnnxConstParentsToRemove(node);
     node->removeAllInputs();
     for (auto* n : onnxConstParents) {
       n->destroy();

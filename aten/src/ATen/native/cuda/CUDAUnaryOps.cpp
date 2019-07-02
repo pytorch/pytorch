@@ -1,4 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at { namespace native {
 
@@ -12,41 +16,52 @@ Tensor& _clamp_out_cuda(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    _th_clamp_out(result, self, *min, *max);
+    legacy::cuda::_th_clamp_out(result, self, *min, *max);
   } else if (max) {
-    _th_clamp_max_out(result, self, *max);
+    legacy::cuda::_th_clamp_max_out(result, self, *max);
   } else if (min) {
-    _th_clamp_min_out(result, self, *min);
+    legacy::cuda::_th_clamp_min_out(result, self, *min);
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
   return result;
 }
 
 Tensor& _clamp_max__cuda(Tensor& self, Scalar max) {
-  return _th_clamp_max_out(self, self, max);
+  return legacy::cuda::_th_clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cuda(Tensor& result, const Tensor& self, Scalar max) {
-  return _th_clamp_max_out(result, self, max);
+  legacy::cuda::_th_clamp_max_out(result, self, max);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
-  return _th_clamp_min_out(self, self, min);
+  return legacy::cuda::_th_clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
-  return _th_clamp_min_out(result, self, min);
+  legacy::cuda::_th_clamp_min_out(result, self, min);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 // These are just forwarding stubs
 
 #define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \
   Tensor& _##op##__cuda(Tensor& self) {                          \
-    return at::_th_##op##_out(self, self);                       \
+    return legacy::cuda::_th_##op##_out(self, self);         \
   }                                                              \
   Tensor& _##op##_out_cuda(Tensor& result, const Tensor& self) { \
-    return at::_th_##op##_out(result, self);                     \
+    return legacy::cuda::_th_##op##_out(result, self);       \
   }
 
 

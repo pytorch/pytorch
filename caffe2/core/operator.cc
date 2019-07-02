@@ -14,8 +14,11 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/core/List.h>
+#endif
 
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 
 C10_DEFINE_int(
     caffe2_operator_max_engine_name_length,
@@ -29,8 +32,14 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     caffe2_operator_throw_if_fp_exceptions,
     false,
-    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
-    "FE_OVERFLOW) are detected when running any operator.");
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID) "
+    "are detected when running any operator. FE_OVERFLOW is handled separately "
+    "by caffe2_operator_throw_if_fp_overflow_exceptions option.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_overflow_exceptions,
+    false,
+    "If set, throws if floating point exception FE_OVERFLOW is detected when "
+    "running any operator.");
 
 namespace caffe2 {
 
@@ -40,9 +49,13 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+      newstyle_outputs_(),
+#endif
       input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;
+  inputs_.reserve(operator_def.input_size());
   for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
@@ -56,6 +69,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 
   GetOperatorLogger()(operator_def);
 
+  outputs_.reserve(operator_def.output_size());
   for (const string& output_str : operator_def.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
@@ -63,8 +77,11 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 namespace {
-int compute_input_size_(const std::vector<c10::IValue>& inputs) {
+int
+C10_UNUSED  // Suppress unused function warning on mobile.
+compute_input_size_(const std::vector<c10::IValue>& inputs) {
   if (inputs.empty()) {
     return 0;
   }
@@ -95,7 +112,7 @@ int compute_input_size_(const std::vector<c10::IValue>& inputs) {
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
-    std::vector<at::Tensor> outputs)
+    c10::List<at::Tensor> outputs)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(std::move(inputs)),
       newstyle_outputs_(std::move(outputs)),
@@ -103,8 +120,12 @@ OperatorBase::OperatorBase(
   input_tensors_.resize(input_size_);
   output_tensors_.resize(newstyle_outputs_.size());
 }
+#endif
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
+  CAFFE_ENFORCE(
+      isLegacyOperator(),
+      "InputTensorShapes() not supported for operators exported to c10.");
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
@@ -376,6 +397,7 @@ C10_DEFINE_REGISTRY(
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
+  C10_LOG_API_USAGE_ONCE("caffe2.gradient_maker");
   std::unique_ptr<GradientMakerBase> maker(
       GradientRegistry()->Create(def.type(), def, g_output));
   CAFFE_ENFORCE(maker,
@@ -577,18 +599,43 @@ TensorShapes InferBlobShapesAndTypes(
   return tps;
 }
 
-void LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b) {
-  const int8::Int8TensorCPU* i8tc =
+void LoadInt8TensorInfoOfBlob(
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis,
+    const Blob* b) {
+  const int8::Int8TensorCPU* int8_tensor =
       static_cast<const int8::Int8TensorCPU*>(b->GetRaw());
-  *scale = i8tc->scale;
-  *offset = i8tc->zero_point;
+  scale->clear();
+  offset->clear();
+  scale->push_back(int8_tensor->scale);
+  offset->push_back(int8_tensor->zero_point);
+  *axis = 1;
 }
 
 TensorShape GetTensorShapeOfBlob(const Blob* b) {
+  TensorShape tp;
+#ifndef C10_MOBILE
+  auto function_ptr =
+      ExternalTensorFunctionsBaseRegistry()->Create(b->meta().id());
+  if (function_ptr != nullptr) {
+    // This is dnnlowp tensor and we cant deal with it using regular path
+    auto dtype = function_ptr->GetExternalTensorType(b->GetRaw());
+    tp.set_data_type(TypeMetaToDataType(dtype));
+
+    size_t _capacity;
+    DeviceOption _device;
+    auto dshape =
+        function_ptr->GetExternalTensorInfo(b->GetRaw(), &_capacity, &_device);
+    for (auto d : dshape) {
+      tp.add_dims(d);
+    }
+    return tp;
+  }
+#endif
+
   TypeCall type_fun = GetTypeCallFunction(b->meta().id());
   TensorInfoCall tensor_info_fun = GetTensorInfoFunction(b->meta().id());
-  TensorShape tp;
-
   if (type_fun) {
     tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
   }
@@ -737,9 +784,21 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
 
 c10::optional<int> OperatorBase::argumentIndexWithName(
     const std::string& name) const {
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
   return getFunctionSchema().argumentIndexWithName(name);
+#else
+  CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
+#endif
 }
 
 OperatorBase::~OperatorBase() noexcept = default;
+
+#ifndef C10_MOBILE
+C10_DEFINE_TYPED_REGISTRY(
+    ExternalTensorFunctionsBaseRegistry,
+    TypeIdentifier,
+    ExternalTensorFunctionsBase,
+    std::unique_ptr);
+#endif
 
 }  // namespace caffe2

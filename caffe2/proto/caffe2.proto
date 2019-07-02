@@ -126,6 +126,17 @@ message QTensorProto {
   repeated int32 data = 6 [packed = true];
   optional string name = 7;
   optional TensorProto.DataType data_type = 8 [default = INT32];
+
+  // Multi-group quantization params
+  repeated double scales = 9;
+  repeated double biases = 10;
+
+  // Multi-group quantization needed, indicates in which dimension
+  // we do the "group wise quantization"
+  optional int32 axis = 11;
+
+  // It should be true if it is a multi-group quantization proto
+  optional bool is_multiparam = 12 [default = false];
 }
 
 // TensorProtos stores multiple TensorProto objects in one single proto. This

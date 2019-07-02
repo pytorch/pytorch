@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <string>
 
 namespace torch {

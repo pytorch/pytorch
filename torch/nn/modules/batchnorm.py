@@ -15,7 +15,8 @@ from ..._jit_internal import weak_module, weak_script_method
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
-                     'running_mean', 'running_var', 'num_batches_tracked']
+                     'running_mean', 'running_var', 'num_batches_tracked',
+                     'num_features', 'affine']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
@@ -50,7 +51,7 @@ class _BatchNorm(Module):
     def reset_parameters(self):
         self.reset_running_stats()
         if self.affine:
-            init.uniform_(self.weight)
+            init.ones_(self.weight)
             init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
@@ -114,8 +115,8 @@ class BatchNorm1d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
-    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
+    to 1 and the elements of :math:`\beta` are set to 0.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -188,8 +189,8 @@ class BatchNorm2d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
-    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
+    to 1 and the elements of :math:`\beta` are set to 0.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -262,8 +263,8 @@ class BatchNorm3d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
-    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
+    to 1 and the elements of :math:`\beta` are set to 0.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -400,7 +401,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> output = m(input)
 
         >>> # network is nn.BatchNorm layer
-        >>> sync_bn_network = torch.nn.utils.convert_sync_batchnorm(network, process_group)
+        >>> sync_bn_network = nn.SyncBatchNorm.convert_sync_batchnorm(network, process_group)
         >>> # only single gpu per process is currently supported
         >>> ddp_sync_bn_network = torch.nn.parallel.DistributedDataParallel(
         >>>                         sync_bn_network,
@@ -505,6 +506,6 @@ class SyncBatchNorm(_BatchNorm):
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked
         for name, child in module.named_children():
-            module_output.add_module(name, cls.convert_sync_batchnorm(child))
+            module_output.add_module(name, cls.convert_sync_batchnorm(child, process_group))
         del module
         return module_output

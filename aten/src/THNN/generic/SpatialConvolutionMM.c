@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/div_rtn.h>
+#include <ATen/Parallel.h>
 
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
         THTensor *input, THTensor *gradOutput,
@@ -189,33 +190,35 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   else
   {
     int64_t T = input->size(0);
-    int64_t t;
 
     THTensor_(resize3d)(finput, T, kW*kH*nInputPlane, outputHeight*outputWidth);
     THTensor_(resize4d)(output, T, nOutputPlane, outputHeight, outputWidth);
 
-#pragma omp parallel for private(t)
-    for(t = 0; t < T; t++)
-    {
-      THTensor *input_t = THTensor_(newSelect)(input, 0, t);
-      THTensor *output_t = THTensor_(newSelect)(output, 0, t);
-      THTensor *finput_t = THTensor_(newSelect)(finput, 0, t);
+    at::parallel_for(0, T, 0, [&](int64_t start, int64_t end) {
+      for(auto t = start; t < end; t++)
+      {
+        THTensor *input_t = THTensor_(newSelect)(input, 0, t);
+        THTensor *output_t = THTensor_(newSelect)(output, 0, t);
+        THTensor *finput_t = THTensor_(newSelect)(finput, 0, t);
 
-      THNN_(SpatialConvolutionMM_updateOutput_frame)
-        (input_t, output_t, weight, bias, finput_t,
-         kW, kH, dW, dH, padW, padH,
-         nInputPlane, inputWidth, inputHeight,
-         nOutputPlane, outputWidth, outputHeight);
+        THNN_(SpatialConvolutionMM_updateOutput_frame)
+          (input_t, output_t, weight, bias, finput_t,
+           kW, kH, dW, dH, padW, padH,
+           nInputPlane, inputWidth, inputHeight,
+           nOutputPlane, outputWidth, outputHeight);
 
-      c10::raw::intrusive_ptr::decref(input_t);
-      c10::raw::intrusive_ptr::decref(output_t);
-      c10::raw::intrusive_ptr::decref(finput_t);
-    }
+        c10::raw::intrusive_ptr::decref(input_t);
+        c10::raw::intrusive_ptr::decref(output_t);
+        c10::raw::intrusive_ptr::decref(finput_t);
+      }
+    });
   }
 
   c10::raw::intrusive_ptr::decref(input);
   c10::raw::intrusive_ptr::decref(weight);
 }
+
+#if !defined(TH_REAL_IS_LONG)
 
 static void THNN_(SpatialConvolutionMM_updateGradInput_frame)(
           THTensor *gradInput,
@@ -286,23 +289,23 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   else
   {
     int64_t T = input->size(0);
-    int64_t t;
 
-#pragma omp parallel for private(t)
-    for(t = 0; t < T; t++)
-    {
-      THTensor *gradInput_t = THTensor_(newSelect)(gradInput, 0, t);
-      THTensor *gradOutput_t = THTensor_(newSelect)(gradOutput, 0, t);
-      THTensor *fgradInput_t = THTensor_(newSelect)(fgradInput, 0, t);
+    at::parallel_for(0, T, 0, [&](int64_t start, int64_t end) {
+      for (auto t = start; t < end; t++)
+      {
+        THTensor *gradInput_t = THTensor_(newSelect)(gradInput, 0, t);
+        THTensor *gradOutput_t = THTensor_(newSelect)(gradOutput, 0, t);
+        THTensor *fgradInput_t = THTensor_(newSelect)(fgradInput, 0, t);
 
-      THNN_(SpatialConvolutionMM_updateGradInput_frame)(gradInput_t, gradOutput_t,
-                                                        tweight, fgradInput_t,
-                                                        kW, kH, dW, dH, padW, padH);
+        THNN_(SpatialConvolutionMM_updateGradInput_frame)(gradInput_t, gradOutput_t,
+                                                          tweight, fgradInput_t,
+                                                          kW, kH, dW, dH, padW, padH);
 
-      c10::raw::intrusive_ptr::decref(gradInput_t);
-      c10::raw::intrusive_ptr::decref(gradOutput_t);
-      c10::raw::intrusive_ptr::decref(fgradInput_t);
-    }
+        c10::raw::intrusive_ptr::decref(gradInput_t);
+        c10::raw::intrusive_ptr::decref(gradOutput_t);
+        c10::raw::intrusive_ptr::decref(fgradInput_t);
+      }
+    });
   }
 
   c10::raw::intrusive_ptr::decref(tweight);
@@ -411,5 +414,5 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
     c10::raw::intrusive_ptr::decref(gradWeight);
   }
 }
-
+#endif
 #endif

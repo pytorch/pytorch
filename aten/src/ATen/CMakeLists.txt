@@ -116,6 +116,12 @@ IF(NOT AT_LINK_STYLE)
   SET(AT_LINK_STYLE SHARED)
 ENDIF()
 
+IF (USE_TBB)
+  message("ATen is compiled with TBB (${TBB_ROOT_DIR})")
+  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb)
+ENDIF()
+
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
@@ -205,7 +211,7 @@ endif(MKLDNN_FOUND)
 
 list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 
-if(NOT MSVC AND NOT EMSCRIPTEN)
+if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   # Preserve values for the main build
   set(__aten_sleef_build_shared_libs ${BUILD_SHARED_LIBS})
   set(__aten_sleef_build_tests ${BUILD_TESTS})
@@ -252,12 +258,7 @@ IF(USE_CUDA AND NOT USE_ROCM)
 
     # build fake CuFFT lib in build dir
     EXECUTE_PROCESS(COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc)
-    if(${CUDA_VERSION_MAJOR} EQUAL "8")
-      SET(CUFFT_FAKELINK_OPTIONS
-        --generate-code arch=compute_35,code=sm_35
-        --generate-code arch=compute_50,code=sm_50
-        --generate-code arch=compute_60,code=sm_60)
-    elseif(${CUDA_VERSION_MAJOR} EQUAL "9")
+    if(${CUDA_VERSION_MAJOR} EQUAL "9")
       SET(CUFFT_FAKELINK_OPTIONS
         --generate-code arch=compute_35,code=sm_35
         --generate-code arch=compute_50,code=sm_50

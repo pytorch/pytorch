@@ -8,10 +8,6 @@
 #include <ATen/cpu/vml.h>
 #include <c10/util/C++17.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 #include <algorithm>
 #include <cstring>
 #include <type_traits>

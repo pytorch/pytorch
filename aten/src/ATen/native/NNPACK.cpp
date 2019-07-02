@@ -57,11 +57,8 @@ bool _nnpack_available() {
 
 #include <stdlib.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#else
+#include <ATen/Parallel.h>
 #include <thread>
-#endif
 
 namespace at {
 namespace native {
@@ -84,8 +81,8 @@ pthreadpool_t nnpack_threadpool() {
       }
     }
     unsigned int threads;
-#ifdef _OPENMP
-    threads = omp_get_num_threads();
+#ifdef INTRA_OP_PARALLEL
+    threads = at::get_num_threads();
 #else
     threads = std::thread::hardware_concurrency();
 #endif

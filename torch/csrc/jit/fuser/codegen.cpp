@@ -402,6 +402,7 @@ std::string generateKernel(
     //  Access for other types is common to CUDA and CPU kernels.
     if (input.second.has_value()) {
       const auto is_half = input.second.has_value() && ((*input.second).scalar_type == at::ScalarType::Half);
+      const auto is_bool = input.second.has_value() && ((*input.second).scalar_type == at::ScalarType::Bool);
       if (is_half) {
         AT_ASSERT(use_cuda);
         env.s(
@@ -409,7 +410,12 @@ std::string generateKernel(
             format("__half2float(t${formal}.data[t${formal}_offset])", env));
         has_half_tensor = true;
       } else if (use_cuda) {
-        env.s("access", format("__ldg(&t${formal}.data[t${formal}_offset])", env));
+        // No __ldg overload for bool
+        if (is_bool) {
+          env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+        } else {
+          env.s("access", format("__ldg(&t${formal}.data[t${formal}_offset])", env));
+        }
       } else {
         env.s("access", format("t${formal}.data[t${formal}_offset]", env));
       }

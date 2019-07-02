@@ -17,6 +17,9 @@ function cleanup {
 
 set -ex
 
+# Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
+SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
+
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
@@ -89,7 +92,7 @@ if which sccache > /dev/null; then
   sccache --zero-stats
   function sccache_epilogue() {
     echo '=================== sccache compilation log ==================='
-    python "$(dirname "${BASH_SOURCE[0]}")/print_sccache_log.py" ~/sccache_error.log
+    python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
     echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
     sccache --show-stats
     sccache --stop-server || true
@@ -116,21 +119,7 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
   exit 1
 fi
 
-if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/disabled-configs.txt"; then
-  echo "Job is explicitly disabled, SKIPPING"
-  exit 0
-else
-  echo "Job is not disabled, proceeding"
-fi
-
-if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/enabled-configs.txt"; then
-  echo "Job is enabled, proceeding"
-else
-  echo "Job is not enabled, FAILING now (revert changes to enabled-configs.txt to fix this)"
-  exit 1
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
@@ -141,7 +130,7 @@ fi
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version 3.5, so we only do it in two builds that we know should use conda.
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn7-py2* ]] || \
+  if [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py2* ]] || \
      [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
     if ! which conda; then
       echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
@@ -157,6 +146,12 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
     fi
   fi
 fi
+
+function pip_install() {
+  local pkg=$1
+  # retry 3 times
+  pip install -q ${pkg} --user || pip install -q ${pkg} --user || pip install -q ${pkg} --user
+}
 
 function get_exit_code() {
   set +e
