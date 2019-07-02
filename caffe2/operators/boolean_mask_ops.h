@@ -1,5 +1,5 @@
-#ifndef BOOLEAN_MASK_OPS_H
-#define BOOLEAN_MASK_OPS_H
+#ifndef CAFFE2_OPERATORS_BOOLEAN_MASK_OPS_H_
+#define CAFFE2_OPERATORS_BOOLEAN_MASK_OPS_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -17,6 +17,27 @@ class BooleanMaskOp final : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override;
+};
+
+template <class Context>
+class BooleanMaskOpGradient final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  BooleanMaskOpGradient(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  /* Calculating the gradient of the Boolean Mask operator
+   * requires access to the original mask that's passed in,
+   * and the gradient to backpropagate.
+   */
+  bool RunOnDevice() override {
+    return DispatchHelper<
+        TensorTypes<bool, std::int32_t, std::int64_t, float, double>>::
+        call(this, Input(1));
+  }
+
+  template <typename T>
+  bool DoRunWithType();
 };
 
 template <class Context>

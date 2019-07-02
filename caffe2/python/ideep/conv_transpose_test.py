@@ -20,7 +20,7 @@ class ConvTransposeTest(hu.HypothesisTestCase):
            adj=st.integers(0, 2),
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
-           output_channels=st.integers(1, 7),
+           output_channels=st.integers(1, 8),
            batch_size=st.integers(1, 3),
            use_bias=st.booleans(),
            training_mode=st.booleans(),

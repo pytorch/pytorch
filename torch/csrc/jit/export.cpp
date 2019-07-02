@@ -130,7 +130,7 @@ class EncoderBase {
       const std::shared_ptr<Graph>& graph,
       const std::map<std::string, at::Tensor>& initializers =
         std::map<std::string, at::Tensor>(),
-      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
         std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   void EncodeBlock(
@@ -138,7 +138,7 @@ class EncoderBase {
       const Block* block,
       const std::map<std::string, at::Tensor>& initializers =
         std::map<std::string, at::Tensor>(),
-      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
         std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   virtual void EncodeTensor(
@@ -154,7 +154,7 @@ class EncoderBase {
       onnx::GraphProto* graph_proto,
       onnx::ValueInfoProto* v,
       const Value* n,
-      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
         std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   void AddAttribute(
@@ -214,7 +214,7 @@ void EncoderBase::EncodeValueInfo(
     onnx::ValueInfoProto* v,
     const Value* n,
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
-  std::string name = n->uniqueName();
+  std::string name = n->debugName();
   v->set_name(name);
   if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
     onnx::TypeProto* t = v->mutable_type();
@@ -285,11 +285,11 @@ void EncoderBase::EncodeBlock(
       if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
-        p_n->add_input(input->uniqueName());
+        p_n->add_input(input->debugName());
       }
     }
     for (auto output : node->outputs()) {
-      p_n->add_output(output->uniqueName());
+      p_n->add_output(output->debugName());
       EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (!node->kind().is_onnx()) {
@@ -547,7 +547,7 @@ class ScriptModuleSerializer final {
   IValue moduleGetState(const script::Module& module);
   bool moduleHasValidGetSetState(const script::Module& module);
 
-  void convertClass(const ClassTypePtr& type, torch::ModelDef* model_def);
+  void convertClass(const c10::NamedTypePtr& type, torch::ModelDef* model_def);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -560,10 +560,10 @@ class ScriptModuleSerializer final {
   std::vector<IValue> pickled_ivalues_;
 
   // all classes used by this module hierarchy
-  std::vector<ClassTypePtr> class_table_;
-  OrderedDict<ClassTypePtr, std::string> converted_classes_;
-  std::unordered_map<ClassTypePtr, std::vector<ClassTypePtr>> class_to_deps_;
-
+  std::vector<c10::NamedTypePtr> class_table_;
+  OrderedDict<c10::NamedTypePtr, std::string> converted_classes_;
+  std::unordered_map<c10::NamedTypePtr, std::vector<c10::NamedTypePtr>>
+      class_to_deps_;
 };
 
 // ScriptModuleSerializer's methods
@@ -630,7 +630,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   // to maintain dependency order.
   std::unordered_set<std::string> written_files;
   for (const auto& item : converted_classes_) {
-    const ClassTypePtr& class_type = item.key();
+    const c10::NamedTypePtr& class_type = item.key();
     const std::string filename =
         ImportExportHelpers::qualifierToPath(class_type->qualifier());
     if (written_files.count(filename)) {
@@ -651,13 +651,13 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 // python print the class and add to the converted_classes_. Recursively
 // python print all classes that this class depends on.
 void ScriptModuleSerializer::convertClass(
-    const ClassTypePtr& class_type,
+    const c10::NamedTypePtr& class_type,
     torch::ModelDef* model_def) {
   if (converted_classes_.contains(class_type)) {
     return;
   }
 
-  std::vector<ClassTypePtr> class_deps;
+  std::vector<c10::NamedTypePtr> class_deps;
   std::ostringstream class_stream;
   PythonPrint(
       class_stream,
@@ -740,7 +740,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
   // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.class_compilation_unit().find_function("__setstate__");
+  auto setstate = module.class_compilation_unit()->find_function("__setstate__");
   if (setstate == nullptr) {
     return false;
   }
@@ -780,15 +780,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
 
 /// Run module.__getstate__() and return the result
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
-  auto getstate = module.find_method("__getstate__");
-  TORCH_CHECK(
-      getstate != nullptr,
-      "Cannot call '__getstate__' method because"
-      " it does not exist");
-
-  Stack stack;
-  getstate->run(stack);
-  return stack.at(0);
+  return module.get_method("__getstate__")({});
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -911,12 +903,12 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.class_compilation_unit().get_functions().size() > 0) {
+  if (module.class_compilation_unit()->get_functions().size() > 0) {
     std::ostringstream methods;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
-        module.class_compilation_unit(),
+        *module.class_compilation_unit(),
         /*is_method=*/true,
         tensor_table_,
         class_table_,
@@ -931,9 +923,9 @@ void ScriptModuleSerializer::convertModule(
     record->set_key(filename.str());
   }
 
-  for (const auto& elem : module.get_modules()) {
+  for (script::Slot s : module.get_module_slots()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem, module_name.str(), elem->name(), sub_def);
+    convertModule(s.to_module(), module_name.str(), s.name(), sub_def);
   }
 }
 

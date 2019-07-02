@@ -58,18 +58,24 @@ struct FunctionTask {
   // gradients flowing here.  Once all the dependencies are finished, we
   // use the contents of this buffer to run the function.
   InputBuffer inputs_;
+  // When worker receives a task with isShutdownTask = true, it will immediately
+  // exit. The engine sends a shutdown task to every queue upon its destruction.
+  bool isShutdownTask_;
 
-  FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
+  FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
     : base_(base)
     , fn_(std::move(fn))
-    , inputs_(std::move(inputs)) {}
+    , inputs_(std::move(inputs))
+    , isShutdownTask_(isShutdownTask) {}
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
-// Empty FunctionTask are first.
+// Shutdown tasks are first and then empty FunctionTask are next.
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
-    if (!t1.fn_) {
+    if (t2.isShutdownTask_) {
+      return true;
+    } else if (!t1.fn_ || t1.isShutdownTask_) {
       return false;
     } else if (!t2.fn_) {
       return true;
@@ -81,10 +87,13 @@ struct CompareFunctionTaskTime {
 
 struct ReadyQueue {
   std::priority_queue<FunctionTask, std::vector<FunctionTask>, CompareFunctionTaskTime> heap_;
+  // To notify threads waiting on the ReadyQueue of available tasks on the heap_
   std::condition_variable not_empty_;
+  // To protect read and writes to heap_
   std::mutex mutex_;
 
   void push(FunctionTask item);
+  void pushShutdownTask();
   FunctionTask pop();
 };
 
@@ -108,22 +117,15 @@ struct ReadyQueue {
 // because then all of our backward executions (including the one we
 // just started) will deadlock!
 //
-// Here's our cunning idea: instead of blocking, just get back to work
-// on whatever task queue you should have been working on previously
-// (this is saved via the thread local variable worker_device)!  There are
-// "simply" two things you have to arrange for:
+// We maintain a pool of threads waiting for work to do
+// When a reentrant backwards call occurs, the current thread blocks
+// and a thread from the pool is woken up to complete the blocking tasks and an
+// any other tasks that would have been assigned to that worker. If there are no
+// threads available, a new thread is spawned. The new thread will continue
+// processing tasks from the same ReadyQueue as the parent worker
 //
-//  - We have to promptly kick ourselves out of the thread_main() loop
-//    when our graph_task complete, because we need to unblock the
-//    parent function tasks that started the reentrant execution in
-//    the first place.  This is why thread_main() takes an optional
-//    graph_task as input.
-//
-//  - When we finish a GraphTask, we have to make sure we wake up the worker
-//    thread so that it actually has a chance to exit the thread_main()
-//    loop.  Thus the faffing about in thread_main() after
-//    evaluate_function() completes.
-
+// When the GraphTask is finished, the parent worker thread that is waiting on
+// the task is notified and the current thread returns to the pool.
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
@@ -132,9 +134,12 @@ struct GraphTask {
   // true, it signals all threads to stop executing.
   std::atomic_bool has_error_;
   std::atomic<uint64_t> outstanding_tasks_;
+  // It is safe to read grad_mode_ and keep_graph_ without synchronization
   bool keep_graph_;
   bool grad_mode_;
 
+  // To protect reads/writes to no_ready_, dependencies_ , captured_vars_ and
+  // exception_
   std::mutex mutex_;
   // Notified when a task finishes executing.  Check outstanding_tasks_ to see
   // if all tasks are done.
@@ -161,6 +166,7 @@ struct GraphTask {
   // get executed. If it's not empty, only functions that have an entry and this entry
   // has needed == True should be executed.
   // exec_info_.empty() means it's .backward(), otherwise it's .grad().
+  // exec_info_ is safe to read without synchronization
   std::unordered_map<Function*, ExecInfo> exec_info_;
   std::vector<Variable> captured_vars_;
 
@@ -168,6 +174,7 @@ struct GraphTask {
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
+  // Safe to read owner_ without synchronizaton
   int owner_;
 
   bool can_checkpoint() {
@@ -184,6 +191,7 @@ struct GraphTask {
 
 auto ReadyQueue::push(FunctionTask item) -> void {
   {
+    // Lock mutex for writing to heap_
     std::lock_guard<std::mutex> lock(mutex_);
     ++item.base_->outstanding_tasks_;
     heap_.push(std::move(item));
@@ -191,7 +199,16 @@ auto ReadyQueue::push(FunctionTask item) -> void {
   not_empty_.notify_one();
 }
 
+auto ReadyQueue::pushShutdownTask() -> void {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    heap_.push(FunctionTask(nullptr, nullptr, InputBuffer(0), true));
+  }
+  not_empty_.notify_one();
+}
+
 auto ReadyQueue::pop() -> FunctionTask {
+  // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this]{ return !heap_.empty(); });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -201,8 +218,42 @@ auto ReadyQueue::pop() -> FunctionTask {
 
 Engine::Engine() = default;
 
-// This Engine's ReadyQueues and their corresponding threads are leaked here
-Engine::~Engine() = default;
+// Send shutdown tasks to all ReadyQueues if no backward tasks are running
+// Even though readyQueue should be empty, shutdown tasks have the highest
+// priority
+Engine::~Engine() {
+  bool noBackward = true;
+  for (auto& queue: ready_queues_) {
+    std::lock_guard<std::mutex> lock(queue->mutex_);
+    noBackward =  noBackward && queue->heap_.empty();
+  }
+  if (noBackward) {
+    for (auto& queue : ready_queues_) {
+     queue->pushShutdownTask();
+    }
+  }
+  // Othewise threads are leaked
+}
+
+void Engine::set_device(int device) {
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with cuda, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  //
+  // Don't use DeviceGuard here because its destructor may be called before the
+  // device is reset. This is fine because the device is thread local.
+  if (device != -1) {
+    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      if (impl && device < impl->deviceCount()) {
+        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
+      }
+    }
+  }
+  worker_device = device;
+}
 
 auto Engine::thread_init(int device) -> void {
   at::init_num_threads();
@@ -223,31 +274,7 @@ auto Engine::thread_init(int device) -> void {
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
-  //
-  // NB: We MUST NOT construct the guard for device -1,
-  // as in some settings we compile with cuda, but
-  // have lazy stubs for CUDA functionality (so actually
-  // attempting to setup a guard(-1) will cause an
-  // error, because it will still query cudaGetDevice).
-  //
-  // NB: These are not OptionalCUDAGuard/etc because engine.cpp
-  // is built as part of the CPU-only library; so we need to
-  // dynamic dispatch.
-  //
-  // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
-  // are movable.
-  std::array<c10::OptionalDeviceGuard,
-             static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
-      guards;  // Guards! Guards!
-  if (device != -1) {
-    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
-      auto* impl = c10::impl::device_guard_impl_registry[i].load();
-      if (impl && device < impl->deviceCount()) {
-        guards[i].reset_device(at::Device(static_cast<c10::DeviceType>(i), device));
-      }
-    }
-  }
-  worker_device = device;
+  set_device(device);
   thread_main(nullptr);
 }
 
@@ -271,6 +298,12 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   // Note [Reentrant backwards]
   while (!graph_task || graph_task->outstanding_tasks_ > 0) {
     FunctionTask task = queue->pop();
+    // This will only work if the worker is running a non backward task
+    // TODO Needs to be fixed this to work in all cases
+    if (task.isShutdownTask_) {
+      C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
+      break;
+    }
     if (task.fn_ && !task.base_->has_error_.load()) {
       GradMode::set_enabled(task.base_->grad_mode_);
       try {
@@ -286,6 +319,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
     // Task from a non-worker thread. Easy case.
     if (base_owner == NO_DEVICE) {
       if (--task.base_->outstanding_tasks_ == 0) {
+        // Lock mutex to notify the GraphTask waiting on not_done_
         std::lock_guard<std::mutex> lock(task.base_->mutex_);
         task.base_->not_done_.notify_all();
       }
@@ -307,9 +341,30 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
       }
     }
   }
+
+  if (graph_task) {
+    graph_task->not_done_.notify_all();
+  }
+}
+
+void Engine::reentrant_thread_init() {
+  at::init_num_threads();
+  auto tp_shared= thread_pool_shared_;
+  while(true) {
+    std::unique_lock<std::mutex> lk(tp_shared->mutex_);
+    ++thread_pool_shared_->num_workers_;
+    tp_shared->work_.wait(lk, [&tp_shared]{ return !tp_shared->graphtasks_queue_.empty();});
+    --thread_pool_shared_->num_workers_;
+    auto graph_task = tp_shared->graphtasks_queue_.front();
+    tp_shared->graphtasks_queue_.pop();
+    lk.unlock();
+    set_device(graph_task->owner_);
+    thread_main(graph_task);
+  }
 }
 
 auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void {
+  // Lock mutex for writing to task.base_->exception_
   std::lock_guard<std::mutex> lock(task.base_->mutex_);
   if (!task.base_->has_error_.load()) {
     if (AnomalyMode::is_enabled()) {
@@ -440,6 +495,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   if (!exec_info_.empty()) {
     auto & fn_info = exec_info_.at(task.fn_.get());
     if (auto *capture_vec = fn_info.captures_.get()) {
+      // Lock mutex for writing to task.base_->captured_vars_
       std::lock_guard<std::mutex> lock(task.base_->mutex_);
       for (auto capture : *capture_vec) {
         task.base_->captured_vars_[capture.output_idx_] = task.inputs_[capture.input_idx_];
@@ -471,6 +527,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     }
   }
 
+  // Lock mutex for the accesses to GraphTask dependencies_ and not_ready_ below
   std::lock_guard<std::mutex> lock(task.base_->mutex_);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
@@ -572,9 +629,11 @@ auto Engine::execute(const edge_list& roots,
   });
 
   // Callbacks are only valid for the duration of this run and should always be cleared
+  // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
   GraphTask graph_task(keep_graph, create_graph);
+  // Lock mutex while GraphTask is being set up
   std::unique_lock<std::mutex> lock(graph_task.mutex_);
 
   // Now compute the dependencies for all executable functions and queue the root
@@ -595,9 +654,12 @@ auto Engine::execute(const edge_list& roots,
     // Get back to work while we wait for our new graph_task to
     // complete!
     // See Note [Reentrant backwards]
+    // If no extra threads remaining, create a new thread for reentrant call
     graph_task.owner_ = worker_device;
-    lock.unlock();
-    thread_main(&graph_task);
+    add_thread_pool_task(&graph_task);
+    graph_task.not_done_.wait(lock, [&graph_task]{
+      return graph_task.outstanding_tasks_.load() == 0;
+    });
   }
 
   // Check for an exception while running backwards
@@ -609,6 +671,7 @@ auto Engine::execute(const edge_list& roots,
     throw std::runtime_error("could not compute gradients for some functions");
   }
 
+  // Lock mutex during each iteration for accessing final_callbacks.size()
   // Unlocking is necessary, because the callback can register
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
@@ -685,10 +748,31 @@ auto Engine::start_threads() -> void {
   ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues_)
     queue.reset(new ReadyQueue());
+
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+
   for (int i = 0; i < num_threads; ++i) {
     std::thread t(&Engine::thread_init, this, i - 1);
     t.detach();
   }
+}
+
+void Engine::add_thread_pool_task(GraphTask *graph_task) {
+  std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
+  // There may already be some items on the graphtasks_queue_ added by other
+  // threads but not enough workers to get to the the new task that will be
+  // added
+  bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
+  thread_pool_shared_->graphtasks_queue_.push(graph_task);
+  // Don't need to be holding the lock while actually creating the thread
+  lck.unlock();
+  if (create_thread) {
+    std::thread t(&Engine::reentrant_thread_init, this);
+    t.detach();
+  }
+  // This works even if new thread is created because wait() will test the
+  // predicate before waiting
+  thread_pool_shared_->work_.notify_one();
 }
 
 void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) {

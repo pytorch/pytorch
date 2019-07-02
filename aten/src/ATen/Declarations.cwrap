@@ -163,6 +163,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THIndexTensor* result
       output: True
@@ -327,6 +328,8 @@
 [[
   name: _th_scatter_
   return: argument 0
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   options:
     - cname: scatter
@@ -348,6 +351,8 @@
   name: _th_scatter_add_
   return: argument 0
   cname: scatterAdd
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   arguments:
     - THTensor* self
@@ -359,6 +364,8 @@
 [[
   name: _th_gather
   cname: gather
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -373,9 +380,9 @@
 ]]
 [[
   name: _th_equal
-  cpu_bool: True
   cname: equal
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: bool
@@ -497,6 +504,8 @@
 [[
   name: _th_ixor_
   cname: __ixor__
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -1757,6 +1766,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1961,6 +1971,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1973,6 +1984,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1992,6 +2004,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - arguments:
       - arg: THTensor* result
@@ -2066,6 +2079,7 @@
   cname: addr
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2102,7 +2116,7 @@
   cname: addr
   variants: function
   return: argument 0
-  scalar_check: False
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2119,6 +2133,7 @@
   cname: addmv
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2136,6 +2151,7 @@
   return: argument 0
   options:
     - cname: addmm
+      scalar_check: false
       arguments:
         - arg: THTensor* result
           output: True
@@ -2155,6 +2171,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2172,6 +2189,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2211,6 +2229,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2311,33 +2330,6 @@
     - THTensor* A
 ]]
 [[
-  name: _th_symeig
-  cname: syev
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* res1
-      output: True
-    - arg: THTensor* res2
-      output: True
-    - THTensor* self
-    - arg: bool eigenvectors
-      if_true: V
-      if_false: N
-      default: N
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
-]]
-[[
   name: _th_eig
   cname: geev
   types:
@@ -2401,6 +2393,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* output
       output: True
@@ -2449,6 +2442,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* res1
       output: True
@@ -2467,6 +2461,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2510,6 +2505,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
