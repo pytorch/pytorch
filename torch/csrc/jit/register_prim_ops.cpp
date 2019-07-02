@@ -540,6 +540,15 @@ RegisterOperators reg(
            pop(stack, a);
            push(stack, a.is_cuda());
            return 0;
+      },
+      aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_mkldnn(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mkldnn());
+           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -1593,12 +1602,11 @@ int listNe<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-Operation listList(const Node* node) {
-  return [=](Stack& stack) {
-    // Intentional no-op, needed to match Python semantics for list(iterable),
-    // but in JIT these will already be lists
-    return 0;
-  };
+template <typename T>
+int listList(Stack& stack) {
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  push(stack, a.copy());
+  return 0;
 }
 
 template <class T>
@@ -1608,16 +1616,25 @@ int listAdd(Stack& stack) {
   pop(stack, a, b);
 
   c10::List<T> ret;
-  const auto total_size = a.size() + b.size();
-  ret.reserve(total_size);
-  for (T a_element : a) {
-    ret.push_back(std::move(a_element));
-  }
-  for (T b_element : b) {
-    ret.push_back(std::move(b_element));
+
+  if (a.use_count() == 1) {
+    ret = std::move(a);
+  } else {
+    ret = a.copy();
   }
 
+  ret.append(std::move(b));
+
   push(stack, std::move(ret));
+  return 0;
+}
+
+template <class T>
+int listInplaceAdd(Stack& stack) {
+  c10::List<T> b = pop(stack).to<List<T>>();
+  c10::List<T> a = pop(stack).to<List<T>>();
+  a.append(std::move(b));
+  push(stack, std::move(a));
   return 0;
 }
 
@@ -2110,13 +2127,19 @@ RegisterOperators reg2({
           listAdd<c_type::value_type>,                                              \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
+          "aten::add_(" decl_type "[](a!) self, " decl_type "[] b) -> " decl_type   \
+          "[]",                                                                     \
+          listInplaceAdd<c_type::value_type>,                                       \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
           "aten::slice(" decl_type                                                  \
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
           listSlice<c_type::value_type>,                                            \
           aliasAnalysisFromSchema()),                                               \
-      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList,        \
-      aliasAnalysisFromSchema()),                                                   \
+      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]",                  \
+          listList<c_type::value_type>,                                             \
+          aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
           "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
           listMulIntLeft<c_type::value_type>,                                       \

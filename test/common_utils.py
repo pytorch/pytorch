@@ -25,6 +25,7 @@ from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
+import numpy as np
 import tempfile
 
 import __main__
@@ -538,11 +539,17 @@ class TestCase(expecttest.TestCase):
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
+            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
+            elif x.is_quantized and y.is_quantized:
+                self.assertEqual(x.qscheme(), y.qscheme())
+                self.assertEqual(x.q_scale(), y.q_scale())
+                self.assertEqual(x.q_zero_point(), y.q_zero_point())
+                self.assertEqual(x.int_repr(), y.int_repr())
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -1074,3 +1081,29 @@ else:
                 check_test_defined_in_running_script(test)
                 test_suite.addTest(test)
         return test_suite
+
+# Quantization references
+def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
+    """Quantizes a numpy array."""
+    if qmin is None:
+        qmin = np.iinfo(dtype).min
+    if qmax is None:
+        qmax = np.iinfo(dtype).max
+    qx = np.round(x / scale + zero_point).astype(np.int64)
+    qx = np.clip(qx, qmin, qmax)
+    qx = qx.astype(dtype)
+    return qx
+
+
+def _dequantize(qx, scale, zero_point):
+    """Dequantizes a numpy array."""
+    x = (qx.astype(np.float) - zero_point) * scale
+    return x
+
+
+def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
+    """Requantizes a numpy array, i.e., intermediate int32 or int16 values are
+    converted back to given type"""
+    qx = (x * multiplier).round() + zero_point
+    qx = np.clip(qx, qmin, qmax).astype(qtype)
+    return qx
