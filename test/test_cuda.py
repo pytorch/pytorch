@@ -1089,38 +1089,7 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_neg(self, lambda t: t.cuda())
 
     def test_bitwise_not(self):
-        res = 0xffff - torch.arange(127, dtype=torch.int8, device='cuda')
-        for t in (torch.cuda.BoolTensor, torch.cuda.ByteTensor,
-                  torch.cuda.LongTensor, torch.cuda.IntTensor, torch.cuda.ShortTensor, torch.cuda.CharTensor):
-            if t == torch.cuda.BoolTensor:
-                a = torch.cuda.BoolTensor([True, False])
-                expected_res = torch.cuda.BoolTensor([False, True])
-            else:
-                a = torch.arange(127, dtype=t.dtype, device='cuda')
-                expected_res = res.type(t)
-            # new tensor
-            self.assertEqual(expected_res, a.bitwise_not())
-            # out
-            b = t()
-            torch.bitwise_not(a, out=b)
-            self.assertEqual(expected_res, b)
-            # in-place
-            a.bitwise_not_()
-            self.assertEqual(expected_res, a)
-
-        # test exceptions
-        for t in (torch.cuda.HalfTensor, torch.cuda.FloatTensor, torch.cuda.DoubleTensor):
-            a = torch.zeros(10, dtype=t.dtype, device='cuda')
-            # new tensor
-            with self.assertRaises(RuntimeError):
-                a.bitwise_not()
-            # out
-            b = t()
-            with self.assertRaises(RuntimeError):
-                torch.bitwise_not(a, out=b)
-            # in-place
-            with self.assertRaises(RuntimeError):
-                a.bitwise_not_()
+        _TestTorchMixin._test_bitwise_not(self, 'cuda')
 
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())

@@ -136,6 +136,24 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
+Tensor bitwise_not(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::bitwise_not_out(result, self);
+}
+
+Tensor& bitwise_not_(Tensor& self) {
+  return at::bitwise_not_out(self, self);
+}
+
+Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
+  checkBackend("bitwise_not", {result}, self.type().backend());
+  assert_no_internal_overlap(result, "bitwise_not");
+  auto iter = TensorIterator::unary_op(result, self);
+  bitwise_not_stub(iter->device_type(), *iter);
+  propagate_names_if_namedtensor_enabled(result, self);
+  return result;
+}
+
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
@@ -161,7 +179,6 @@ IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(bitwise_not)
 IMPLEMENT_UNARY_OP_VEC(ceil)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
