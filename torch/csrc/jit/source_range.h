@@ -117,6 +117,20 @@ struct CAFFE2_API SourceRange {
     return ss.str();
   }
 
+  c10::optional<std::tuple<std::string, size_t, size_t>> file_line_col() const {
+    if (!source_ || !source()->filename()) {
+      return c10::nullopt;
+    }
+
+    auto lineno = source_->lineno_for_offset(start_);
+    auto col_offset = (int)start_ - (int)source_->offset_for_line(lineno);
+    // TODO: c10::optional<>::value returns an rvalue ref so can't use it here??
+    return std::make_tuple<std::string, size_t, size_t>(
+        source_->filename().value_or(""),
+        source_->lineno_to_source_lineno(lineno),
+        (size_t)col_offset);
+  }
+
  private:
   std::shared_ptr<Source> source_;
   size_t start_;
