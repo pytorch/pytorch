@@ -223,36 +223,36 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           if (w >= 14) {
             return true;  
           }
-        } else if ((ch >= 32) and (w >=28)) {
+        } else if ((ch >= 32) && (w >=28)) {
           return true;
         }
       } else if (bs >= 64) {
-        if ((ch >= 256) and (w >= 14)) {
+        if ((ch >= 256) && (w >= 14)) {
           return true;
-        } else if ((ch >= 32) and (w >= 28)) {
+        } else if ((ch >= 32) && (w >= 28)) {
           return true;
         }
       } else if (bs >= 32) {
-        if ((ch >= 256) and (w >= 14)) {
+        if ((ch >= 256) && (w >= 14)) {
           return true;
-        } else if ((ch >= 128) and (w >= 28)) {
+        } else if ((ch >= 128) && (w >= 28)) {
           return true;
-        } else if ((ch >= 32) and (w >= 56)) {
+        } else if ((ch >= 32) && (w >= 56)) {
           return true;
         }
       } else if (bs >= 16) {
-        if ((ch >= 1024) and (w >= 14)) {
+        if ((ch >= 1024) && (w >= 14)) {
           return true;
         }
-        if ((ch >= 256) and (w >= 28)) {
+        if ((ch >= 256) && (w >= 28)) {
           return true;
-        } else if ((ch >= 32) and (w >= 56)) {
+        } else if ((ch >= 32) && (w >= 56)) {
           return true;
         }
       } else if (bs >= 8) {
-        if ((ch >= 512) and (w >= 28)) {
+        if ((ch >= 512) && (w >= 28)) {
           return true;
-        } else if ((ch >= 64) and (w >= 56)) {
+        } else if ((ch >= 64) && (w >= 56)) {
           return true;
         }
       }
@@ -266,37 +266,37 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
       if (bs >= 128) {
         if (ch >= 1024) {
           return true;
-        } else if ((ch >= 512) and (w >= 14)) {
+        } else if ((ch >= 512) && (w >= 14)) {
           return true;
         } else if (w >= 28) {
           return true;
         }
       } else if (bs >= 64) {
-        if ((ch >= 512) and (w >= 14)) {
+        if ((ch >= 512) && (w >= 14)) {
           return true;
         } else if (w >= 28) {
           return true;
         }
       } else if (bs >= 32) {
-        if ((ch >= 1024) and (w >= 14)) {
+        if ((ch >= 1024) && (w >= 14)) {
           return true;
         } else if (w >= 28) {
           return true;
         }
       } else if (bs >= 16) {
-        if ((ch >= 512) and (w >= 28)) {
+        if ((ch >= 512) && (w >= 28)) {
           return true;
         } else if (w >= 56) {
           return true;
         }
       } else if (bs >= 8) {
-        if ((ch >= 1024) and (w >= 28)) {
+        if ((ch >= 1024) && (w >= 28)) {
           return true;
         } else if (w >= 56) {
           return true;
         } 
       } else if (bs >= 1) {
-        if ((ch >= 512) and (w >=112)) {
+        if ((ch >= 512) && (w >=112)) {
           return true;
         }
       }
