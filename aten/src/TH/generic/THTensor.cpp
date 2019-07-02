@@ -4,6 +4,9 @@
 
 #include <ATen/InferSize.h>
 #include <new>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 /**** access methods ****/
 THStorage *THTensor_(storage)(const THTensor *self)

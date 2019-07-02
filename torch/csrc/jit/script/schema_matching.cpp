@@ -436,8 +436,13 @@ static Value* packOutputs(
   if (values.size() == 1) {
     return values[0];
   }
+  std::shared_ptr<FunctionSchema> schema;
+  if (field_names) {
+    schema = TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName(), field_names.value(), fmap(values, [](Value* v) { return v->type(); }));
+  }
   return g
-      .insertNode(g.createTuple(values, std::move(field_names), c10::nullopt))
+      .insertNode(
+          g.createTuple(values, c10::nullopt, std::move(schema)))
       ->output();
 }
 

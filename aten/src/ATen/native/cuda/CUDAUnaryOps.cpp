@@ -1,5 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at { namespace native {
 
@@ -21,6 +24,9 @@ Tensor& _clamp_out_cuda(
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
   return result;
 }
 
@@ -29,7 +35,11 @@ Tensor& _clamp_max__cuda(Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_max_out_cuda(Tensor& result, const Tensor& self, Scalar max) {
-  return legacy::cuda::_th_clamp_max_out(result, self, max);
+  legacy::cuda::_th_clamp_max_out(result, self, max);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
@@ -37,7 +47,11 @@ Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
-  return legacy::cuda::_th_clamp_min_out(result, self, min);
+  legacy::cuda::_th_clamp_min_out(result, self, min);
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 // These are just forwarding stubs

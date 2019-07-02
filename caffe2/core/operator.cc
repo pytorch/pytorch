@@ -50,7 +50,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-      newstyle_outputs_(c10::make_list<at::Tensor>()),
+      newstyle_outputs_(),
 #endif
       input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {
@@ -112,7 +112,7 @@ compute_input_size_(const std::vector<c10::IValue>& inputs) {
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
-    c10::ListPtr<at::Tensor> outputs)
+    c10::List<at::Tensor> outputs)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(std::move(inputs)),
       newstyle_outputs_(std::move(outputs)),

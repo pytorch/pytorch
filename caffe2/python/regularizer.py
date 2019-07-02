@@ -99,6 +99,24 @@ class L2Norm(Regularizer):
         return output_blob
 
 
+class ElasticNet(Regularizer):
+    def __init__(self, l1, l2):
+        super(ElasticNet, self).__init__()
+        self.l1 = l1
+        self.l2 = l2
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        output_blob = net.NextScopedBlob(param + "_elastic_net_regularization")
+        l2_blob = net.NextScopedBlob(param + "_l2_blob")
+        l1_blob = net.NextScopedBlob(param + "_l1_blob")
+        net.LpNorm([param], [l2_blob], p=2)
+        net.LpNorm([param], [l1_blob], p=1)
+        net.Scale([l2_blob], [l2_blob], scale=self.l2)
+        net.Scale([l1_blob], [l1_blob], scale=self.l1)
+        net.Add([l1_blob, l2_blob], [output_blob])
+        return output_blob
+
+
 class MaxNorm(Regularizer):
     def __init__(self, norm=1.0):
         super(MaxNorm, self).__init__()

@@ -163,7 +163,7 @@ static std::string getElementName(const Element* e) {
   if (e->value == nullptr) {
     return "WILDCARD";
   } else {
-    return e->value->uniqueName();
+    return e->value->debugName();
   }
 }
 
@@ -197,7 +197,7 @@ void AliasDb::dump() const {
   //   std::cout << *node;
   //   std::cout << "  ";
   //   for (const auto value : values) {
-  //     std::cout << value->uniqueName() << ", ";
+  //     std::cout << value->debugName() << ", ";
   //   }
   //   std::cout << "\n";
   // }

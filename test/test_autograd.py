@@ -3314,21 +3314,21 @@ def add_test(
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                 if not exclude_tensor_method(name, test_name):
+                    output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                     output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
                     if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
                         output_tensor = torch.DoubleTensor((output_tensor,))
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops
 
-                def fn(*inputs):
-                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
-                    return output_process_fn(output)
+                    def fn(*inputs):
+                        output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                        return output_process_fn(output)
 
-                if not is_inplace and name not in EXCLUDE_GRADCHECK:
-                    run_grad_and_gradgrad_checks(self, name, test_name, fn,
-                                                 output_variable, (self_variable,) + args_variable)
+                    if not is_inplace and name not in EXCLUDE_GRADCHECK:
+                        run_grad_and_gradgrad_checks(self, name, test_name, fn,
+                                                     output_variable, (self_variable,) + args_variable)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -3339,14 +3339,19 @@ def add_test(
                     f_args_variable = (self_variable,) + args_variable
                     f_args_tensor = (self_tensor,) + args_tensor
                     # could run the gradchecks again, but skip since we did it for the methods above.
+                    run_gradcheck = exclude_tensor_method(name, test_name) and not is_inplace and name not in EXCLUDE_GRADCHECK
                     run_functional_checks(self, test_name, name, fn,
-                                          False, f_args_variable, f_args_tensor)
+                                          run_gradcheck, f_args_variable, f_args_tensor)
 
                 # check for correct type of input.data and input.grad.data
                 if not is_inplace:
                     self_variable = create_input((self_size,), requires_grad=True)[0][0]
                     args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs)
-                    output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                    if hasattr(self_variable, name):
+                        output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                    else:
+                        self_and_args_variable = (self_variable,) + args_variable
+                        output_variable = getattr(torch, name)(*self_and_args_variable, **kwargs_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
                         if output_variable.is_sparse:
                             rand = randn_like(output_variable.to_dense()).to_sparse()

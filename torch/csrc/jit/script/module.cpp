@@ -34,13 +34,12 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) {
+void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
   ExportModule(*this, out, extra_files);
 }
 
-void Module::save(
-    const std::string& filename,
-    const ExtraFilesMap& extra_files) {
+void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
+    const {
   ExportModule(*this, filename, extra_files);
 }
 
@@ -64,15 +63,15 @@ void Module::to_impl(
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // First call `to()` on every child module.
-  for (auto& child : get_modules()) {
-    child->to_impl(device, dtype, non_blocking);
+  for (Module child : get_modules()) {
+    child.to_impl(device, dtype, non_blocking);
   }
   // Then convert every of our parameters.
-  for (auto& parameter : get_parameters()) {
+  for (Slot parameter : get_parameters()) {
     module_state_to(parameter, device, dtype, non_blocking);
   }
   // Then convert every tensor attributes (buffers).
-  for (auto& attr : get_attributes()) {
+  for (Slot attr : get_attributes()) {
     if (attr.type()->isSubtypeOf(TensorType::get())) {
       module_state_to(attr, device, dtype, non_blocking);
     }
@@ -164,9 +163,12 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(const Module* owner, std::shared_ptr<Function> function)
-    : owner_(owner), function_(std::move(function)) {}
+Method::Method(ModulePtr owner, std::shared_ptr<Function> function)
+    : owner_(std::move(owner)), function_(std::move(function)) {}
 
+Module Method::owner() const {
+  return Module(owner_);
+}
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner().module_object());
   function_->run(stack);
@@ -204,27 +206,22 @@ void Module::copy_into(
     std::unordered_map<TypePtr, TypePtr>& type_remap,
     std::vector<std::string> names) const {
   auto curr = module_lookup(names);
-  type_remap[module_object()->type()] = curr->module_object()->type();
-  for (auto& param : get_parameters()) {
-    curr->register_parameter(
-        param.name(),
-        param.value().toTensor(),
-        /*is_buffer=*/false);
-  }
-  for (auto& attr : get_attributes()) {
-    curr->register_attribute(attr.name(), attr.type(), attr.value());
-  }
+  type_remap[module_object()->type()] = curr.module_object()->type();
 
-  for (auto& mod : get_modules()) {
-    names.push_back(mod->field_name());
-    // Submodules must be translated first, otherwise parameter_remap entries
-    // will not be filled in for methods of this module.
-    mod->copy_into(module_lookup, type_remap, names);
-    names.pop_back();
+  for (Slot s : curr.get_slots()) {
+    if (s.is_module()) {
+      names.push_back(s.name());
+      // Submodules must be translated first, otherwise parameter_remap entries
+      // will not be filled in for methods of this module.
+      s.to_module().copy_into(module_lookup, type_remap, names);
+      names.pop_back();
+    } else {
+      curr.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+    }
   }
 
   for (auto& fn : class_compilation_unit()->get_functions()) {
-    curr->clone_method(*this, fn->name(), type_remap);
+    curr.clone_method(*this, fn->name(), type_remap);
   }
 }
 
@@ -258,24 +255,22 @@ void Module::clone_method(
 
 void Module::clone_method(const Module& orig, const std::string& name) {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  std::vector<std::pair<const Module*, const Module*>> to_scan = {
-      {&orig, this}};
+  std::vector<std::pair<Module, Module>> to_scan = {{orig, *this}};
   while (!to_scan.empty()) {
     auto entry = to_scan.back();
     to_scan.pop_back();
-    type_remap[entry.first->module_object()->type()] =
-        entry.second->module_object()->type();
-    for (const auto& sub : entry.first->get_modules()) {
-      to_scan.emplace_back(
-          sub.get(), entry.second->get_module(sub->field_name()).get());
+    type_remap[entry.first.module_object()->type()] =
+        entry.second.module_object()->type();
+    for (Slot s : entry.first.get_module_slots()) {
+      to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
     }
   }
   return clone_method(orig, name, type_remap);
 }
 
 void Module::train(bool on) {
-  for (auto& submod : get_modules()) {
-    submod->train(on);
+  for (auto submod : get_modules()) {
+    submod.train(on);
   }
   if (auto slot = find_attribute("training")) {
     slot->setValue(on);
@@ -309,6 +304,37 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
 
   return obj;
+}
+
+slot_list Module::get_parameters() const {
+  return slot_list(*this, EntityType::PARAMETER);
+}
+
+slot_list Module::get_attributes() const {
+  return slot_list(*this, EntityType::ATTRIBUTE);
+}
+
+slot_list Module::get_module_slots() const {
+  return slot_list(*this, EntityType::MODULE);
+}
+
+slot_list Module::get_slots() const {
+  return slot_list(*this, c10::nullopt);
+}
+
+Module Slot::to_module() const {
+  return Module(value().toObject());
+}
+
+module_list Module::get_modules() const {
+  return module_list(*this, EntityType::MODULE);
+}
+
+void Module::apply(const std::function<void(Module&)>& fn) {
+  for (auto submod : get_modules()) {
+    submod.apply(fn);
+  }
+  fn(*this);
 }
 
 } // namespace script
