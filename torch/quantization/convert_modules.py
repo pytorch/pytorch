@@ -58,56 +58,6 @@ def add_observer(module, qconfig_dict, qconfig_parent=None, prefix=''):
             module._modules[name] = add_observer(child, qconfig_dict, module.qconfig, module_prefix)
     return module
 
-def get_config_key(name, qconfig_dict):
-    if name in qconfig_dict:
-        return name
-    elif '.' in name:
-        parent = name.rsplit('.', 1)[0]
-        return get_config_key(parent, qconfig_dict)
-    return None
-
-def get_module(model, name):
-    if name == '':
-        return model
-    splits = name.split('.')
-    for i in range(len(splits)):
-        model = model._modules[splits[i]]
-    return model
-
-def add_quant_dequant_module(module, qconfig_dict, name):
-    assert name != ''
-    qconfig = qconfig_dict[name]
-    splits = name.split('.')
-    print('splits:', splits)
-    for split in splits:
-        parent_module = module
-        module = module._modules[split]
-        print(module, parent_module)
-        if len(module._modules) == 0:
-            parent_module._modules[split] = QuantWrapper(module, qconfig)
-
-    assert parent_module is not module
-    # only wrap leaf module
-    # if len(module._modules) == 0:
-    #     parent_module._modules[splits[-1]] = QuantWrapper(module, qconfig)
-
-def add_quant_dequant(module, qconfig_dict):
-    r"""Add QuantStub and DeQuantStub module and add quant dequant calls using
-    forward hooks
-    """
-    mod_key_set = set()
-    for name, _ in module.named_modules():
-        dict_key = get_config_key(name, qconfig_dict)
-        if dict_key is not None:
-            mod_key_set.add(dict_key)
-
-    for name in mod_key_set:
-        if name == '':
-            module = QuantWrapper(module, qconfig_dict[name])
-        else:
-            add_quant_dequant_module(module, qconfig_dict, name)
-    return module
-
 def prepare(module, qconfig_dict):
     r"""Prepares the module for calibration according to qconfig_dict.
 
