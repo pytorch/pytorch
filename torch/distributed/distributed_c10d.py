@@ -85,7 +85,7 @@ dist_backend = Backend
 class reduce_op(object):
     r"""
     Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
-    ``MIN``, and ``MAX``.
+    ``MIN``, ``MAX``, and ``XOR``.
 
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
     """

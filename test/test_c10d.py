@@ -139,6 +139,11 @@ def simple_reduce_tests(rank, world_size):
             torch.Tensor([rank + 1.0]),
             torch.Tensor([world_size]),
         ),
+        (
+            c10d.ReduceOp.XOR,
+            torch.LongTensor([(rank + 1) % 2]),
+            torch.LongTensor([((world_size + 1) / 2) % 2]),
+        ),
     ]
 
 
@@ -164,6 +169,11 @@ def simple_multi_input_reduce_tests(rank, world_size):
             [torch.Tensor([2 * rank + 1.0]), torch.Tensor([2 * rank + 2.0])],
             torch.Tensor([2 * world_size]),
         ),
+        (
+            c10d.ReduceOp.XOR,
+            [torch.LongTensor([(rank + 1) % 2]), torch.LongTensor([rank % 2])],
+            torch.LongTensor([(world_size / 2) % 2]),
+        )
     ]
 
 

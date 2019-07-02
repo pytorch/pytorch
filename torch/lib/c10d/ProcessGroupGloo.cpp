@@ -84,7 +84,9 @@ class GlooStore : public ::gloo::rendezvous::Store {
 
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
-template <typename T>
+// Implementation for non-integral types.
+template <typename T,
+          typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
 ReduceFunc toFunction(const ReduceOp& r) {
   switch (r) {
     case ReduceOp::SUM:
@@ -95,6 +97,41 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&::gloo::min<T>);
     case ReduceOp::MAX:
       return ReduceFunc(&::gloo::max<T>);
+    case ReduceOp::XOR:
+      throw std::runtime_error("ReduceOp.XOR invalid for non-integral dtypes");
+    case ReduceOp::UNUSED:
+      break;
+  }
+
+  throw std::runtime_error("Unhandled ReduceOp");
+}
+
+// Implementation for XOR reduction type.
+template <typename T>
+inline void XOR(void* c_, const void* a_, const void* b_, size_t n) {
+  T* c = static_cast<T*>(c_);
+  const T* a = static_cast<const T*>(a_);
+  const T* b = static_cast<const T*>(b_);
+  for (auto i = 0; i < n; i++) {
+    c[i] = a[i] ^ b[i];
+  }
+}
+
+// Implementation for integral types.
+template <typename T,
+          typename std::enable_if_t<std::is_integral<T>::value, int> = 0>
+ReduceFunc toFunction(const ReduceOp& r) {
+  switch (r) {
+    case ReduceOp::SUM:
+      return ReduceFunc(&::gloo::sum<T>);
+    case ReduceOp::PRODUCT:
+      return ReduceFunc(&::gloo::product<T>);
+    case ReduceOp::MIN:
+      return ReduceFunc(&::gloo::min<T>);
+    case ReduceOp::MAX:
+      return ReduceFunc(&::gloo::max<T>);
+    case ReduceOp::XOR:
+      return ReduceFunc(&XOR<T>);
     case ReduceOp::UNUSED:
       break;
   }

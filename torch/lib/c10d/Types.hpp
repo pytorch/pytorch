@@ -10,6 +10,7 @@ enum class ReduceOp : std::uint8_t {
   PRODUCT,
   MIN,
   MAX,
+  XOR,
   UNUSED,
 };
 
