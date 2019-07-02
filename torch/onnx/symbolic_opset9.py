@@ -1466,7 +1466,7 @@ def _dim_arange(g, like, dim):
     return g.op("_caffe2::Range", stop)
 
 
-def detach(g, input):
+def detach(g, input, allow_tensor_metadata_change):
     # Erase aten::detach nodes because ONNX is inference only
     return input
 
