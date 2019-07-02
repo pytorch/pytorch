@@ -130,7 +130,7 @@ Tensor& _sigmoid__cpu(Tensor& self) {
   return at::sigmoid_out(self, self);
 }
 Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
-  checkBackend("sigmoid", {result}, Backend::CPU);
+  checkBackend("sigmoid", result, Backend::CPU);
   assert_no_internal_overlap(result, "sigmoid");
   auto iter = TensorIterator::unary_op(result, self);
   sigmoid_stub(iter->device_type(), *iter);
@@ -150,7 +150,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     return at::op##_out(self, self);                            \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, {result}, Backend::CPU);                  \
+    checkBackend(#op, result, Backend::CPU);                    \
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
