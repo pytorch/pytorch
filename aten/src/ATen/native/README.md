@@ -279,7 +279,7 @@ matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 named_guard: False
 ```
 
-Experimental: this option is ignored unless compiling with USE_NAMEDTENSOR=1.
+Experimental: this option is ignored unless compiling with BUILD_NAMEDTENSOR=1.
 By default, (`named_guard: True`) ATen code generation will generate a check
 that all tensor inputs to the function are unnamed. This is used to incrementally
 implement named tensors; if a function supports named tensors, then it'll have
