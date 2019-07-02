@@ -267,9 +267,10 @@ class ChunkDataset(IterableDataset):
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
-    def __init__(self, dataset):
+    def __init__(self, dataset, collate_fn=None):
         super(ChunkDataset, self).__init__()
         self.dataset = dataset
+        self.collate_fn = collate_fn
 
     def __iter__(self):
         return self
@@ -281,6 +282,8 @@ class ChunkDataset(IterableDataset):
         batch = self.dataset.get_batch()
         if batch is None:
             raise StopIteration
+        if self.collate_fn is not None:
+            return self.collate_fn(batch)
         return batch
 
     def reset(self):
