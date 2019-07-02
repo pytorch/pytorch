@@ -192,6 +192,7 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
 bool Operator::matches(const Node* node) const {
   // wrong name
   if (node->kind().toQualString() != schema().name()) {
+    std::cout << "Operator::matches here1" << std::endl;
     return false;
   }
   at::ArrayRef<const Value*> actuals = node->inputs();
@@ -199,6 +200,7 @@ bool Operator::matches(const Node* node) const {
 
   // not enough inputs
   if (actuals.size() < formals.size())
+    std::cout << "Operator::matches here2" << std::endl;
     return false;
 
   TypeEnv type_env;
@@ -206,19 +208,23 @@ bool Operator::matches(const Node* node) const {
     const MatchTypeReturn matched_type =
         matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
     if (!matched_type.type) {
+      std::cout << "Operator::matches here3" << std::endl;
       return false;
     }
     TypePtr formal = *matched_type.type;
     if (!actuals[i]->type()->isSubtypeOf(formal)) {
+      std::cout << "Operator::matches here4" << std::endl;
       return false;
     }
   }
 
   // too many inputs
   if (!schema().is_vararg() && actuals.size() != formals.size()) {
+    std::cout << "Operator::matches here5" << std::endl;
     return false;
   }
 
+  std::cout << "Operator::matches here6" << std::endl;
   return true;
 }
 
