@@ -304,3 +304,5 @@ TEST(TensorTest, Item_CUDA) {
     ASSERT_EQ(scalar.to<int>(), 123);
   }
 }
+
+// yf225 TODO: add `detach()` and `detach(/*allow_tensor_metadata_change=*/true)` tests

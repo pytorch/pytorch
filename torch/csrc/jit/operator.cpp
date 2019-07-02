@@ -190,6 +190,9 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
 }
 
 bool Operator::matches(const Node* node) const {
+  std::cout << schema().name() << std::endl;
+  std::cout << schema().arguments().size() << std::endl;
+  
   // wrong name
   if (node->kind().toQualString() != schema().name()) {
     std::cout << "Operator::matches here1" << std::endl;
