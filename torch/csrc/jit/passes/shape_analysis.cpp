@@ -239,7 +239,7 @@ class ShapePropagator {
                          ->create(
                              aten::expand,
                              {node->inputs().at(input_idx),
-                              graph->insertConstant(expected_size),
+                              graph->insertConstant(c10::impl::toList(expected_size)),
                               graph->insertConstant(false)})
                          ->insertBefore(node);
       PropagateShapeOnNode(expand);
@@ -635,7 +635,7 @@ class ShapePropagator {
 
   static c10::optional<size_t> determineListSize(Value* list) {
     AT_ASSERT(list->type()->cast<ListType>());
-    if (auto shape = constant_as<std::vector<int64_t>>(list)) {
+    if (auto shape = constant_as<c10::List<int64_t>>(list)) {
       return shape->size();
     }
     auto input_node = list->node();
@@ -1289,7 +1289,7 @@ class ShapePropagator {
             "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto maybe_size = node->get<std::vector<int64_t>>(attr::size)) {
+          if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
             return factory_with_ndim(node, maybe_size->size());
           }
           return {};
@@ -1697,7 +1697,7 @@ class ShapePropagator {
                    /*const_inputs=*/{attr::dim, attr::keepdim})) {
       auto& tp = tensor_types.at(0);
       auto sizes = tp->sizes();
-      auto dims = node->get<std::vector<int64_t>>(attr::dim).value();
+      auto dims = node->get<c10::List<int64_t>>(attr::dim).value();
       bool keepdim = node->get<bool>(attr::keepdim).value();
       std::reverse(dims.begin(), dims.end());
       for (int64_t dim : dims) {
@@ -1742,18 +1742,18 @@ class ShapePropagator {
     } else if (node->matches(
                    "aten::view(Tensor self, int[] size) -> Tensor",
                    /*const_inputs=*/attr::size)) {
-      auto sizes = node->get<std::vector<int64_t>>(attr::size).value();
+      auto sizes = node->get<c10::List<int64_t>>(attr::size).value();
       bool inferred = false;
       size_t inferred_idx;
       int64_t size_product = 1;
       for (size_t i = 0; i < sizes.size(); ++i) {
-        if (sizes[i] == -1) {
+        if (sizes.get(i) == -1) {
           if (inferred)
             throw propagation_error();
           inferred = true;
           inferred_idx = i;
         } else {
-          size_product *= sizes[i];
+          size_product *= sizes.get(i);
         }
       }
 
@@ -1765,7 +1765,7 @@ class ShapePropagator {
         int64_t inferred_size = numel / size_product;
         sizes[inferred_idx] = inferred_size;
       }
-      node->output()->setType(tensor_types.at(0)->withSizes(sizes));
+      node->output()->setType(tensor_types.at(0)->withSizes(c10::impl::toVector(std::move(sizes))));
       return true;
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
@@ -1787,7 +1787,7 @@ class ShapePropagator {
       std::tie(sizes, strides) = at::inferExpandGeometry(
           tp->sizes(),
           tp->strides(),
-          node->get<std::vector<int64_t>>(attr::size).value());
+          c10::impl::toVector(node->get<c10::List<int64_t>>(attr::size).value()));
       node->output()->setType(tp->withSizesStrides(sizes, strides));
       return true;
     } else if (
