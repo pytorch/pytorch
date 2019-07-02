@@ -559,7 +559,7 @@ inline IValue::IValue(c10::List<int64_t> v)
 inline IValue::IValue(std::vector<int64_t> v)
 : IValue(c10::impl::toList(v)) {}
 inline IValue::IValue(c10::ArrayRef<int64_t> v)
-: IValue(c10::make_list<int64_t>(v)) {}
+: IValue(c10::List<int64_t>(v)) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 : tag(Tag::String), is_intrusive_ptr(true) {
@@ -593,15 +593,13 @@ inline IValue::IValue(c10::impl::GenericList v)
 : tag(Tag::GenericList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.impl_.release();
 }
-inline IValue::IValue(std::vector<IValue> v)
-: IValue(c10::impl::toList(std::move(v))) {}
 
 template<class T> inline IValue::IValue(c10::List<T> v)
 : IValue(impl::toGenericList<T>(std::move(v))) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
 }
 template<class T> inline IValue::IValue(std::vector<T> v)
-: IValue(impl::make_generic_list()) {
+: IValue(impl::GenericList()) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
@@ -619,7 +617,7 @@ inline IValue::IValue(c10::Dict<Key, Value> v)
 : IValue(impl::toGenericDict(std::move(v))) {}
 
 template<class Key, class Value> inline IValue::IValue(std::unordered_map<Key, Value> v)
-: IValue(impl::make_generic_dict()) {
+: IValue(Dict<Key, Value>()) {
   auto dict = to<c10::Dict<Key, Value>>();
   dict.reserve(v.size());
   for (auto& e : v) {

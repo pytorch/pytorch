@@ -8,8 +8,6 @@ from itertools import chain
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
-IS_PPC = (platform.machine() == 'ppc64le')
-IS_ARM = (platform.machine() == 'aarch64')
 
 IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version or any([x.startswith('CONDA') for x in os.environ])
 CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
@@ -47,7 +45,7 @@ def hotpatch_var(var, prefix='USE_'):
 def hotpatch_build_env_vars():
     # Before we run the setup_helpers, let's look for NO_* and WITH_*
     # variables and hotpatch environment with the USE_* equivalent
-    use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
+    use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
                     'OPENCV', 'TENSORRT', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL',
                     'GLOO_IBVERBS']
     list(map(hotpatch_var, use_env_vars))
@@ -60,5 +58,3 @@ hotpatch_build_env_vars()
 
 DEBUG = check_env_flag('DEBUG')
 REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
-USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF' if IS_PPC or IS_ARM else 'ON')
-NAMEDTENSOR_ENABLED = check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')

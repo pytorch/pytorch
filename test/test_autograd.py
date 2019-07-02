@@ -3203,7 +3203,7 @@ for shape in [(1,), ()]:
             def forward(ctx, x):
                 with torch.enable_grad():
                     ctx.x = Variable(x.data, requires_grad=True)
-                    ctx.x = ctx.x-1
+                    ctx.x = ctx.x - 1
                 return ctx.x.detach()
 
             @staticmethod
@@ -3215,7 +3215,47 @@ for shape in [(1,), ()]:
                 return x
 
         v = torch.tensor(2000.0, requires_grad=True)
+        # This will cause stack overflow if reentrant calls are handled
+        # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
+
+    def test_reentrant_priority(self):
+        order = []
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                order.append("MyFunction")
+                return x
+
+        class Reentrant(Function):
+            @staticmethod
+            def forward(ctx, x):
+                with torch.enable_grad():
+                    ctx.x = Variable(x.data, requires_grad=True)
+                    ctx.x = ctx.x - 1
+                return ctx.x.detach()
+
+            @staticmethod
+            def backward(ctx, x):
+                order.append("Reentrant")
+                if ctx.x < 0:
+                    return x
+                with torch.enable_grad():
+                    Reentrant.apply(ctx.x).backward()
+                return x
+
+        a = MyFunction.apply(torch.tensor(6.0, requires_grad=True))
+        b = Reentrant.apply(torch.tensor(9.0, requires_grad=True))
+        v = a * b
+        v.backward()
+        # Reentrant tasks should be prioritized so the MyFunction backwards
+        # must be called last
+        self.assertEqual(order.count("Reentrant"), 10)
+        self.assertEqual(order[-1],"MyFunction")
 
     @slowTest
     def test_checkpointing(self):
@@ -3235,7 +3275,7 @@ for shape in [(1,), ()]:
         for r in range(num_inp):
             data_r = torch.Tensor(1, nz_inp)
             data_r.uniform_()
-            data_r.requires_grad=True
+            data_r.requires_grad = True
             feat_r = checkpoint(module, data_r)
             feat_combined.append(feat_r)
 

@@ -124,7 +124,7 @@ struct CaptureList {
           ++var_capture_it;
         } break;
         case CAPTURE_LIST: {
-          c10::List<at::Tensor> lst = c10::make_list<at::Tensor>();
+          c10::List<at::Tensor> lst;
           auto size = *size_it++;
           for (size_t i = 0; i < size; i++) {
             lst.emplace_back(var_capture_it->unpack(saved_for));

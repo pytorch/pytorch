@@ -358,6 +358,8 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
     }
   }
 
+  // When current_depth is 0 this worker thread is done and we need to notify
+  // the parent thread waiting on the graph_task
   if (graph_task && current_depth == 0) {
     graph_task->not_done_.notify_all();
   }
