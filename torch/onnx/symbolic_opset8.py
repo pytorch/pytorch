@@ -72,14 +72,14 @@ def _try_cast_integer_to_float(g, *args):
     if args[0].type().kind() == "DimensionedTensorType" or args[0].type().kind() == "CompleteTensorType":
         old_type = args[0].type().scalarType()
         if old_type not in floating_scalar_types:
-            args = [_cast_Float(g, arg, False) for arg in args]
+            args = tuple(_cast_Float(g, arg, False) for arg in args)
         else:
-            return (None, *args)
+            return (None,) + args
     else:
         warnings.warn("Only floating datatype is supported for these operators: "
                       "{Greater, Less, MatMul, PRelu, Gemm, Flatten}. This might cause "
                       "the onnx model to be incorrect, if inputs have integer datatypes.")
-    return (old_type, *args)
+    return (old_type,) + args
 
 
 def _cast_to_type(g, input, to_type):

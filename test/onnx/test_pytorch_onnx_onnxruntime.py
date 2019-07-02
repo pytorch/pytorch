@@ -171,6 +171,8 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
+    # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
+    @skipIfUnsupportedOpsetVersion([10])
     def test_interpolate_output_size(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
