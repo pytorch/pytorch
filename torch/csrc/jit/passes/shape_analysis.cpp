@@ -1453,7 +1453,7 @@ class ShapePropagator {
         node->output()->setType(type->withDim(1));
         return true;
       }
-    } else if (node->matches("aten::detach(Tensor self) -> Tensor")) {
+    } else if (node->matches("aten::detach(Tensor self, *, bool allow_tensor_metadata_change=False) -> Tensor")) {
       if (auto type = input_type(0)) {
         node->output()->setType(type->withRequiresGrad(false));
         return true;
