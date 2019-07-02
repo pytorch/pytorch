@@ -2339,6 +2339,7 @@ class TestCuda(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
+    # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipIfRocm
     def test_stft(self):
         _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
