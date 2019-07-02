@@ -453,7 +453,7 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
 
 void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "random_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_cuda", [&] {
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       // define lambda to mod with range and add base
       auto random_func = [range, base] __device__ (uint64_t rand) {
@@ -516,7 +516,7 @@ void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Gen
     if (std::is_same<scalar_t, double>::value) {
       // define lambda for cauchy transformation
       auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(median + sigma * 
+        return static_cast<scalar_t>(median + sigma *
                 ::tan(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
       };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
@@ -526,7 +526,7 @@ void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Gen
     } else {
       // use __tanf fast approximation for peak bandwidth
       auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(median + sigma * 
+        return static_cast<scalar_t>(median + sigma *
                 __tanf(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
       };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,

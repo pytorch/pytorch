@@ -135,8 +135,8 @@ void TensorIterator::compute_types() {
           op.dtype = op.tensor.scalar_type();
           has_cpu_scalar = true;
         } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
-            !op.is_output &&
-            op.tensor.scalar_type() == kHalf && common_dtype == kFloat &&
+            !op.is_output && op.tensor.scalar_type() == kHalf
+            && common_dtype == kFloat &&
             op.tensor.device().is_cuda() && common_device.is_cuda()) {
           // allow input tensor type upcasting for fp16 to fp32 in fused kernel
           // on GPU

@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/Config.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 
 // Defines the accumulation type for a scalar type.
 // Example:

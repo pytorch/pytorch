@@ -509,7 +509,7 @@ class TestCase(expecttest.TestCase):
                 if a.numel() > 0:
                     if ((a.device.type == 'cpu' and a.dtype == torch.float16) or
                         (a.device.type == 'cpu' and a.dtype == torch.bfloat16)):
-                        # CPU half tensors don't have the methods we need below
+                        # CPU half and Bfloat16 tensors don't have the methods we need below
                         a = a.to(torch.float32)
                     b = b.to(a)
 
@@ -522,6 +522,9 @@ class TestCase(expecttest.TestCase):
                             a = a.to(torch.int)
                             b = b.to(torch.int)
 
+                        print(a)
+                        print(b)
+                        print('\n')
                         diff = a - b
                         if a.is_floating_point():
                             # check that NaNs are in the same locations

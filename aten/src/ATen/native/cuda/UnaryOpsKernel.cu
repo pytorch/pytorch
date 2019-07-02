@@ -18,7 +18,8 @@ void fill_kernel_impl(TensorIterator& iter, Scalar value_scalar) {
 }
 
 static void fill_kernel_cuda(TensorIterator& iter, Scalar value) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "fill_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half,
+                             at::ScalarType::BFloat16, iter.dtype(), "fill_cuda", [&]() {
     fill_kernel_impl<scalar_t>(iter, value);
   });
 }
