@@ -136,7 +136,6 @@ void preprocessCaffe2Ops(Block* block) {
       }
     }
   }
-  EliminateDeadCode(block);
 }
 
 void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
@@ -345,7 +344,6 @@ void BlockToONNX(
     env.at(output)->setType(output->type());
   }
 
-  EliminateDeadCode(ctx.block);
 }
 
 } // namespace jit
