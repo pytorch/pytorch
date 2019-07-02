@@ -177,7 +177,7 @@ void avg_pool2d_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "avg_pool2d_out_cuda_frame",
       [&] {
-        using accscalar_t = acc_type<scalar_t, false>;
+        using accscalar_t = acc_type<scalar_t, true>;
 
         scalar_t *output_data = output.data<scalar_t>();
         scalar_t *input_data = input.data<scalar_t>();
