@@ -5078,48 +5078,61 @@ a")
                 if debug:
                     print("in: ", a, b)
                     print("out: ", res_python, res_script)
-                # We can't use assertEqual because of a couple of differences:
-                # 1. nan == nan should return true
-                # 2. When python functions throw an exception, we usually want to silently ignore them.
-                # (ie: We want to return `nan` for math.sqrt(-5))
-                if res_python != res_script:
-                    if isinstance(res_python, Exception):
+                if type(res_python) == type(res_script):
+                    if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
                         continue
+                    if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
+                        continue
+                msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
+                        .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
+                if isinstance(res_python, numbers.Number) and isinstance(res_script, numbers.Number):
+                    mx_val = max(abs(res_python), abs(res_script))
+                    prec = 1e-4 * mx_val
+                else:
+                    prec = (1e-4)
+                self.assertEqual(res_python, res_script, message=msg, prec=prec)
 
-                    if type(res_python) == type(res_script):
-                        if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
-                            continue
-                        if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
-                            continue
-                    msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
-                           .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
 
-        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
-                           "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
-                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh", "degrees", "radians"]
-        binary_float_ops = ["atan2", "fmod", "copysign"]
-        for op in unary_float_ops:
-            checkMathWrap(op, 1)
-        for op in binary_float_ops:
-            checkMathWrap(op, 2)
+        ops = [x for x in dir(math) if callable(getattr(math, x))]
+        for op in ops:
+            if op in unimplemented_math_ops:
+                continue
+            if op.startswith("__"):
+                continue
+            elif op == "modf":
+                checkMath("modf", 1, ret_type="Tuple[float, float]")
+            elif op in ["isnan", "isinf", "isfinite"]:
+                checkMath(op, 1, ret_type="bool")
+            elif op in ["floor", "ceil"]:
+                if not PY2:
+                     checkMathWrap(op, ret_type="int")
+            elif op == "factorial":
+                checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
+            elif op == "frexp":
+                checkMath("frexp", 1, ret_type="Tuple[float, int]")
+            elif op == "gcd":
+                checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+            elif op == "ldexp":
+                checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
+                          vals=[(i, j) for i in float_vals for j in range(-10, 10)])
+            elif op == "log":
+                checkMathWrap("log", 1)
+            elif op == "pow":
+                checkMath("pow", 2, is_float=False, ret_type="int")
+                checkMath("pow", 2, is_float=True, ret_type="float")
+            else:
+                func = getattr(math, op)
+                param_count = 0
 
-        checkMath("modf", 1, ret_type="Tuple[float, float]")
-        checkMath("frexp", 1, ret_type="Tuple[float, int]")
-        checkMath("isnan", 1, ret_type="bool")
-        checkMath("isinf", 1, ret_type="bool")
-        checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
-                  vals=[(i, j) for i in float_vals for j in range(-10, 10)])
-        checkMath("pow", 2, is_float=False, ret_type="int")
-        checkMath("pow", 2, is_float=True, ret_type="float")
-        if not PY2:
-            checkMathWrap("floor", ret_type="int")
-            checkMathWrap("ceil", ret_type="int")
-            checkMathWrap("gcd", 2, is_float=False, ret_type="int")
-            checkMath("isfinite", 1, ret_type="bool")
-        if PY37:
-            checkMathWrap("remainder", 2)
-        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
+                 def num_args(f):  # Parses the docstring for builtin functions
+                    spec = f.__doc__.split('\n')[0]
+                    args = spec[spec.find('(') + 1:spec.find(')')]
+                    return args.count(',') + 1 if args else 0
+                param_count = num_args(func)
+                if param_count == 1:
+                    checkMathWrap(op, 1)
+                else:
+                    checkMathWrap(op, 2)
 
     def test_if_nest_while(self):
         def func(a, b):
