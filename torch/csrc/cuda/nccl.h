@@ -29,18 +29,16 @@ static inline void NCCL_CHECK(ncclResult_t status) {
 
 struct AutoNcclGroup {
   AutoNcclGroup() {
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclGroupStart());
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #endif
   }
   ~AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclGroupEnd());
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
 #endif
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
 };
 
