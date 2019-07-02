@@ -35,7 +35,7 @@ void removePrintOps(Block* block) {
   }
 }
 
-void removePrintOps(std::shared_ptr<Graph>& graph) {
+void RemovePrintOps(std::shared_ptr<Graph>& graph) {
   removePrintOps(graph->block());
 }
 
@@ -94,20 +94,14 @@ void preprocessCaffe2Ops(Block* block) {
         }
         if (type->isSubclass(TypeKind::TensorType)) {
           it->addInput(origin_input);
-        } else if (type->kind() == TypeKind::BoolType || type->kind() == TypeKind::FloatType || type->kind() == TypeKind::IntType) {
+        } else if (type->kind() == TypeKind::BoolType || type->kind() == TypeKind::IntType) {
           const auto* constant_node = origin_input->node();
           AT_ASSERT(constant_node->kind() == prim::Constant);
-          const auto& tensor = constant_node->t(attr::value);
-          AT_ASSERT(tensor.numel() == 1);
-          if (type->kind() == TypeKind::IntType || type->kind() == TypeKind::BoolType) {
-            it->i_(Symbol::attr(arg.name()), tensor.item().to<int64_t>());
-          } else if (type->kind() == TypeKind::FloatType) {
-            it->f_(Symbol::attr(arg.name()), tensor.item().to<float>());
-          } else {
-            // TODO handle the StringType, no c10 op accept String as argument yet
-            throw std::runtime_error("Unhandled scalar arg: " + arg.name() +
-                ", type: " + c10::typeKindToString(type->kind()));
-          }
+          it->i_(Symbol::attr(arg.name()), constant_node->i(attr::value));
+        } else if (type->kind() == TypeKind::FloatType) {
+          const auto* constant_node = origin_input->node();
+          AT_ASSERT(constant_node->kind() == prim::Constant);
+          it->f_(Symbol::attr(arg.name()), constant_node->f(attr::value));
         } else if (type->kind() == TypeKind::StringType) {
           const auto* constant_node = origin_input->node();
           AT_ASSERT(constant_node->kind() == prim::Constant);
@@ -129,9 +123,7 @@ void preprocessCaffe2Ops(Block* block) {
             for (const auto* elem_input : list_node->inputs()) {
               const auto* constant_node = elem_input->node();
               AT_ASSERT(constant_node->kind() == prim::Constant);
-              const auto& tensor = constant_node->t(attr::value);
-              AT_ASSERT(tensor.numel() == 1);
-              values.push_back(tensor.item().to<double>());
+              values.push_back(constant_node->f(attr::value));
             }
             it->fs_(Symbol::attr(arg.name()), values);
           } else {
@@ -147,7 +139,7 @@ void preprocessCaffe2Ops(Block* block) {
   EliminateDeadCode(block);
 }
 
-void preprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
+void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
   preprocessCaffe2Ops(graph->block());
 }
 
@@ -157,8 +149,6 @@ std::shared_ptr<Graph> ToONNX(
     ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
-  removePrintOps(graph);
-  preprocessCaffe2Ops(graph);
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
 }

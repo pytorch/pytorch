@@ -49,7 +49,7 @@ class TestUtilityFuns(TestCase):
         assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_slice(self):
-        class SliceModule(torch.nn.Module):
+        class NarrowModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
                 b = torch.narrow(a, 0, 0, 1)
@@ -57,7 +57,44 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(1, 3)
-        graph, _, __ = utils._model_to_graph(SliceModule(), (x, ),
+        graph, _, __ = utils._model_to_graph(NarrowModule(), (x, ),
+                                             do_constant_folding=True,
+                                             _disable_torch_constant_prop=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Slice"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_slice_index_exceeds_dim(self):
+        class SliceIndexExceedsDimModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+                b = a[1:10]         # index exceeds dimension
+                return b + x
+
+        _set_opset_version(9)
+        x = torch.ones(1, 3)
+        graph, _, __ = utils._model_to_graph(SliceIndexExceedsDimModule(), (x, ),
+                                             do_constant_folding=True,
+                                             _disable_torch_constant_prop=True)
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Slice"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_slice_negative_index(self):
+        class SliceNegativeIndexModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+                b = a[0:-1]        # index relative to the end
+                return b + x
+
+        _set_opset_version(9)
+        x = torch.ones(1, 3)
+        graph, _, __ = utils._model_to_graph(SliceNegativeIndexModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():

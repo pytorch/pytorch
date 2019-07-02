@@ -8,7 +8,7 @@ using namespace at;
 
 static int test_int;
 
-Tensor empty_override(IntArrayRef size, const TensorOptions & options) {
+Tensor empty_override(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> optional_memory_format) {
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
@@ -26,7 +26,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
+    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
     &empty_override);
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
@@ -55,7 +55,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(
     globalATenDispatch().registerOp(
       Backend::MSNPU,
-      "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
+      "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       &empty_override)
   );
 }

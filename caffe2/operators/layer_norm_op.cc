@@ -157,8 +157,7 @@ void LayerNormGradientOp<CPUContext>::GammaBetaBackward(
     const T* rstd,
     const T* g_scale,
     T* dgamma,
-    T* dbeta,
-    T* /* scratch */) {
+    T* dbeta) {
   math::Set<T, CPUContext>(N, T(0), dgamma, &context_);
   math::Set<T, CPUContext>(N, T(0), dbeta, &context_);
   ConstEigenArrayMap<T> dYxX_arr(dYxX, N, M);

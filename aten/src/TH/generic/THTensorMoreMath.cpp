@@ -5,6 +5,9 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP) \
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
@@ -1025,6 +1028,12 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
+static void THTensor_(propagate_names_if_named_tensor_enabled)(THTensor* result, THTensor* src) {
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(result, src);
+#endif
+}
+
 #define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, THRESHOLD) \
   void THTensor_(NAME)(THTensor *r_, THTensor *t) \
   { \
@@ -1033,6 +1042,7 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
     int r_Contig = THTensor_(isContiguous)(r_); \
     int tContig = THTensor_(isContiguous)(t); \
     TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
+    THTensor_(propagate_names_if_named_tensor_enabled)(r_, t); \
   }
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC) \
@@ -1050,6 +1060,7 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
     } else { \
       TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
     } \
+    THTensor_(propagate_names_if_named_tensor_enabled)(r_, t); \
   }
 
 #define LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC) \
@@ -1130,10 +1141,13 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 
 void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
   switch (n) {
-    case 0: THTensor_(digamma)(r_, t); return;
-    case 1: THTensor_(trigamma)(r_, t); return;
+    case 0: THTensor_(digamma)(r_, t); break;
+    case 1: THTensor_(trigamma)(r_, t); break;
     default: THError("polygamma(n,x) is not implemented for n>=2");
   }
+#ifdef NAMEDTENSOR_ENABLED
+  at::namedinference::propagate_names(r_, t);
+#endif
 }
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)

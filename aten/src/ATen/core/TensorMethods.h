@@ -56,18 +56,15 @@ inline TensorOptions Tensor::options() const {
                         .is_variable(is_variable());
 }
 
-inline void Tensor::backward(
-    c10::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) {
-  dispatch_type().backward(*this, std::move(gradient), keep_graph, create_graph);
-}
-
-inline void Tensor::set_data(Tensor new_data) {
-  dispatch_type().set_data(*this, new_data);
-}
-
 // all static inline to allow for inlining of the non-dynamic part of dispatch
+inline void Tensor::backward(const Tensor & gradient, bool keep_graph, bool create_graph) const {
+    static auto table = globalATenDispatch().getOpTable("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void");
+    return table->getOp<void (const Tensor &, const Tensor &, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, gradient, keep_graph, create_graph);
+}
+inline void Tensor::set_data(const Tensor & new_data) const {
+    static auto table = globalATenDispatch().getOpTable("aten::set_data(Tensor(a!) self, Tensor new_data) -> void");
+    return table->getOp<void (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, new_data);
+}
 inline Tensor Tensor::abs() const {
     static auto table = globalATenDispatch().getOpTable("aten::abs(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
@@ -684,6 +681,12 @@ inline Tensor & Tensor::rsqrt_() {
     static auto table = globalATenDispatch().getOpTable("aten::rsqrt_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
+#ifdef NAMEDTENSOR_ENABLED
+inline Tensor Tensor::select(Dimname dim, int64_t index) const {
+    static auto table = globalATenDispatch().getOpTable("aten::select(Tensor(a) self, Dimname dim, int index) -> Tensor(a)");
+    return table->getOp<Tensor (const Tensor &, Dimname, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, index);
+}
+#endif
 inline Tensor Tensor::select(int64_t dim, int64_t index) const {
     static auto table = globalATenDispatch().getOpTable("aten::select(Tensor(a) self, int dim, int index) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, index);
@@ -1064,13 +1067,13 @@ inline Tensor Tensor::dequantize() const {
     static auto table = globalATenDispatch().getOpTable("aten::dequantize(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
-inline Scalar Tensor::q_scale() const {
-    static auto table = globalATenDispatch().getOpTable("aten::q_scale(Tensor self) -> Scalar");
-    return table->getOp<Scalar (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+inline double Tensor::q_scale() const {
+    static auto table = globalATenDispatch().getOpTable("aten::q_scale(Tensor self) -> float");
+    return table->getOp<double (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
-inline Scalar Tensor::q_zero_point() const {
-    static auto table = globalATenDispatch().getOpTable("aten::q_zero_point(Tensor self) -> Scalar");
-    return table->getOp<Scalar (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+inline int64_t Tensor::q_zero_point() const {
+    static auto table = globalATenDispatch().getOpTable("aten::q_zero_point(Tensor self) -> int");
+    return table->getOp<int64_t (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::int_repr() const {
     static auto table = globalATenDispatch().getOpTable("aten::int_repr(Tensor self) -> Tensor");
@@ -1773,8 +1776,7 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::is_named() const {
-  auto* named_tensor_meta = get_named_tensor_meta();
-  return named_tensor_meta != nullptr && named_tensor_meta->has_names();
+  return impl::internal_is_named(unsafeGetTensorImpl());
 }
 #endif
 
