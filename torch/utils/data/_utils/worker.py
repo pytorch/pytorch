@@ -132,7 +132,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
 
         try:
             if init_fn is not None:
-                init_fn(worker_id, dataset)
+                init_fn(worker_id)
 
             fetcher = _DatasetKind.create_fetcher(dataset_kind, dataset, auto_collation, collate_fn, drop_last,
                                                   collate_fn_args)
