@@ -160,7 +160,6 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
 #endif
-  return result;
 }
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
