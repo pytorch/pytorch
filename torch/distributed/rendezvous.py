@@ -4,6 +4,9 @@ except ImportError:
     from urlparse import urlparse
 
 import os
+import socket
+from .process_group import *
+from ._object import _broadcast_object
 from . import FileStore, TCPStore
 
 
@@ -147,6 +150,46 @@ def _env_rendezvous_handler(url):
     raise RuntimeError("Unable to perform rerendezvous using env:// method")
 
 
+def _mpi_rendezvous_handler(url):
+    def _error(msg):
+        return _rendezvous_error("mpi:// rendezvous: " + msg)
+
+    if not url.startswith("mpi://"):
+        raise _error("URL must start with `mpi://`")
+
+    if not is_mpi_available():
+        raise _error("MPI backend not available")
+
+    result = urlparse(url)
+    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
+    port = int(query.get("port", 0))
+
+    def get_local_address(port=0):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            addr = s.getsockname()
+        except OSError:
+            raise _error("Unable to determine IP address of rank 0")
+        finally:
+            s.close()
+        if port != 0:
+            return (addr[0], port)
+        return addr
+
+    process_group = ProcessGroupMPI.create([])
+    addr = _broadcast_object(process_group, get_local_address(port))
+    rank = process_group.rank()
+    world_size = process_group.size()
+    store = TCPStore(addr[0], addr[1], world_size, rank == 0)
+    del process_group
+    yield (store, rank, world_size)
+
+    # If this configuration is invalidated, there is nothing we can do about it
+    raise RuntimeError("Unable to perform re-rendezvous using mpi:// method")
+
+
 register_rendezvous_handler("file", _file_rendezvous_handler)
 register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
 register_rendezvous_handler("env", _env_rendezvous_handler)
+register_rendezvous_handler("mpi", _mpi_rendezvous_handler)

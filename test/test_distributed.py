@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
+import errno
 import fcntl
 import multiprocessing
 import os
@@ -30,7 +31,7 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 BACKEND = os.environ["BACKEND"]
-TEMP_DIR = os.environ["TEMP_DIR"]
+TEMP_DIR = os.getenv("TEMP_DIR", "/tmp/pytorch-test-distributed")
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
 DEFAULT_TIMEOUT = 300
@@ -138,6 +139,12 @@ def skip_if_no_gpu(func):
 
 
 def skip_if_small_worldsize(func):
+    # Short circuit if we're not spawning processes for every test
+    if BACKEND == 'mpi' or INIT_METHOD == 'mpi://':
+        if int(os.environ["WORLD_SIZE"]) <= 2:
+            return unittest.skip("worldsize is too small to run group tests")
+        return lambda func: func
+
     func.skip_if_small_worldsize = True
 
     @wraps(func)
@@ -187,6 +194,15 @@ def require_num_gpus(n):
     `torch.cuda.is_initialized()` will cause lazy initialization of a
     CUDA runtime API context, and CUDA doesn't support forking.
     """
+
+    # Short circuit if we're not spawning processes for every test
+    if BACKEND == 'mpi' or INIT_METHOD == 'mpi://':
+        if not torch.cuda.is_available():
+            return unittest.skip("CUDA is not available")
+        if torch.cuda.device_count() < n:
+            return unittest.skip("One unique GPU per process is not available")
+        return lambda func: func
+
     def decorator(func):
         func.skip_if_no_gpu = True
 
@@ -238,7 +254,13 @@ class Barrier(object):
         cls.barrier_id = 0
         barrier_dir = os.path.join(TEMP_DIR, "barrier")
         for f_name in os.listdir(barrier_dir):
-            os.unlink(os.path.join(barrier_dir, f_name))
+            try:
+                os.unlink(os.path.join(barrier_dir, f_name))
+            except OSError as ex:
+                if ex.errno == errno.ENOENT:
+                    pass
+                else:
+                    raise
 
     @classmethod
     def sync(cls, wait_for=None, timeout=5):
@@ -1550,7 +1572,8 @@ class _DistTestBase(object):
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
 
-if BACKEND == "gloo" or BACKEND == "nccl":
+
+if (BACKEND == "gloo" or BACKEND == "nccl") and INIT_METHOD != "mpi://":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
     class TestDistBackend(TestCase, _DistTestBase):
@@ -1674,17 +1697,42 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             self.assertEqual(first_process.exitcode, 0)
 
 
-elif BACKEND == "mpi":
+elif BACKEND == "mpi" or INIT_METHOD == "mpi://":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
-    dist.init_process_group(init_method=INIT_METHOD, backend="mpi")
 
-    class TestMPI(TestCase, _DistTestBase):
-        pass
+    # Force MPI initialization method to use a fixed port
+    INIT_METHOD = "mpi://?port=%d" % MASTER_PORT
+
+    class TestDistBackend(TestCase, _DistTestBase):
+        @classmethod
+        def setUpClass(cls):
+            Barrier.init()
+
+        def setUp(self):
+            super(TestDistBackend, self).setUp()
+            dist.init_process_group(init_method=INIT_METHOD, backend=BACKEND)
+
+        def tearDown(self):
+            super(TestDistBackend, self).tearDown()
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"
+
+    def mkdir_p(path):
+        try:
+            os.makedirs(path)
+        except OSError as ex:
+            if ex.errno == errno.EEXIST and os.path.isdir(path):
+                pass
+            else:
+                raise
+
+    # Ensure the test directories exist and are empty
+    mkdir_p(os.path.join(TEMP_DIR, 'barrier'))
+    mkdir_p(os.path.join(TEMP_DIR, 'test_dir'))
 
     run_tests()

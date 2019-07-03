@@ -176,7 +176,9 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
 
 
 def test_distributed(executable, test_module, test_directory, options):
-    mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
+    mpi_available = \
+        subprocess.call('command -v mpiexec', shell=True) == 0 and \
+        dist.is_mpi_available()
     if options.verbose and not mpi_available:
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')
@@ -184,18 +186,20 @@ def test_distributed(executable, test_module, test_directory, options):
     for backend, env_vars in config.items():
         if backend == 'mpi' and not mpi_available:
             continue
-        for with_init_file in {True, False}:
+        for init_method in ['file://', 'env://', 'mpi://']:
+            if backend == 'mpi' and init_method.startswith('mpi:'):
+                continue
             tmp_dir = tempfile.mkdtemp()
             if options.verbose:
-                with_init = ' with file init_method' if with_init_file else ''
                 print_to_stderr(
-                    'Running distributed tests for the {} backend{}'.format(
-                        backend, with_init))
+                    'Running distributed tests' +
+                    ' for the {} backend'.format(backend) +
+                    ' with initialization method {}'.format(init_method))
             os.environ['TEMP_DIR'] = tmp_dir
             os.environ['BACKEND'] = backend
-            os.environ['INIT_METHOD'] = 'env://'
+            os.environ['INIT_METHOD'] = init_method
             os.environ.update(env_vars)
-            if with_init_file:
+            if init_method.startswith('file:'):
                 if test_module == "test_distributed":
                     init_method = 'file://{}/'.format(tmp_dir)
                 else:
@@ -204,15 +208,14 @@ def test_distributed(executable, test_module, test_directory, options):
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
-                if backend == 'mpi':
+                if backend == 'mpi' or init_method.startswith('mpi:'):
                     # test mpiexec for --noprefix option
                     with open(os.devnull, 'w') as devnull:
                         noprefix_opt = '--noprefix' if subprocess.call(
                             'mpiexec -n 1 --noprefix bash -c ""', shell=True,
                             stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
-
-                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
-
+                    n = env_vars["WORLD_SIZE"]
+                    mpiexec = ['mpiexec', '-n', n, noprefix_opt] + executable
                     return_code = run_test(mpiexec, test_module,
                                            test_directory, options)
                 else:

@@ -1,3 +1,4 @@
+import os
 import torch
 import warnings
 from torch._six import string_classes
@@ -7,6 +8,7 @@ from datetime import timedelta
 # TODO: specify __all__
 
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
+from .process_group import *
 from . import (
     AllreduceOptions,
     BroadcastOptions,
@@ -17,27 +19,6 @@ from . import (
 )
 from . import ReduceOp
 from . import PrefixStore
-
-
-_MPI_AVAILABLE = True
-_NCCL_AVAILABLE = True
-_GLOO_AVAILABLE = True
-
-
-try:
-    from. import ProcessGroupMPI
-except ImportError:
-    _MPI_AVAILABLE = False
-
-try:
-    from. import ProcessGroupNCCL
-except ImportError:
-    _NCCL_AVAILABLE = False
-
-try:
-    from. import ProcessGroupGloo
-except ImportError:
-    _GLOO_AVAILABLE = False
 
 
 class Backend(object):
@@ -232,30 +213,6 @@ def _check_tensor_list(param, param_name):
                            "to be a List[torch.Tensor] type".format(param_name))
 
 
-def is_mpi_available():
-    """
-    Checks if the MPI backend is available.
-
-    """
-    return _MPI_AVAILABLE
-
-
-def is_nccl_available():
-    """
-    Checks if the NCCL backend is available.
-
-    """
-    return _NCCL_AVAILABLE
-
-
-def is_gloo_available():
-    """
-    Checks if the Gloo backend is available.
-
-    """
-    return _GLOO_AVAILABLE
-
-
 def is_initialized():
     """
     Checking if the default process group has been initialized
@@ -340,9 +297,10 @@ def init_process_group(backend,
             must have exclusive access to every GPU it uses, as sharing GPUs
             between processes can result in deadlocks.
         init_method (str, optional): URL specifying how to initialize the
-                                     process group. Default is "env://" if no
-                                     ``init_method`` or ``store`` is specified.
-                                     Mutually exclusive with ``store``.
+                                     process group. Default is "env://" or
+                                     "mpi://" if no ``init_method`` or
+                                     ``store`` is specified. Mutually
+                                     exclusive with ``store``.
         world_size (int, optional): Number of processes participating in
                                     the job. Required if ``store`` is specified.
         rank (int, optional): Rank of the current process.
@@ -379,7 +337,10 @@ def init_process_group(backend,
         assert world_size > 0, 'world_size must be positive if using store'
         assert rank >= 0, 'rank must be non-negative if using store'
     elif init_method is None:
-        init_method = "env://"
+        if is_mpi_available() and "OMPI_COMM_WORLD_SIZE" in os.environ:
+            init_method = "mpi://"
+        else:
+            init_method = "env://"
 
     backend = Backend(backend)
 
