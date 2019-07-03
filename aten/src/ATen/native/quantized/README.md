@@ -69,7 +69,7 @@ class QuantizedAnd final : public torch::OperatorKernel {
 };
 ```
 
-### Step 2. Register the kernel
+### Step 2a. Register the kernel
 
 The registration is done using the `torch::RegisterOperators().op(...)`.
 
@@ -90,25 +90,52 @@ This translates to `torch._ops.ops.quantized.and` function in Python of the appr
 To attach a kernel to it, use `.kernel<KERNEL_CLASS>(DISPATCH_KEY)`.
 In quantized ops you almost always want to use the `QuantizedCPUTensorId()` dispatcher.
 
+### Step 2b. [Optional] Registering the operation with the `native_functions.yaml`
+
+In some cases, if the signature of the quantized function and its non-quantized counterpart are the same, it is worth adding it to the `ATen/native/native_functions.yaml`.
+A detailed explanation on this file can be found [here](https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/README.md).
+
+**If adding a new entry to the `native_functions.yaml`:**
+
+```yaml
+- func: quantized_and(Tensor qa, Tensor qb) -> Tensor
+  dispatch:
+    QuantizedCPU: quantized_and
+```
+
+**If adding to an existing entry in the `native_functions.yaml`:**
+
+If you find an entry in the yaml file, and would like to add a quantized kernel to it, you can just add a new dispatch entry for it.
+For example, let's assume there existed a `logical_and` function in the YAML file.
+In that case, modification would look as:
+
+```yaml
+- func: logical_and(Tensor a, Tensor b) -> Tensor
+  dispatch:
+    CPU: _logical_and_cpu    # Assume this existed
+    CUDA: _logical_and_cuda  # Assume this existed
+    QuantizedCPU: quantized_and  # We add this line
+```
+
 ### Putting it all together
 
 The final file `ATen/native/quantized/cpu/qand.cpp` would look as follows
 
 ```c++
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>  // Need that for the `native_functions.yaml`
 #include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native {
-namespace {
-
 Tensor quantized_and(Tensor qa, Tensor qb) {
   // The awesome op implementation...
   return qc;
 }
 
+namespace {
 class QuantizedAnd final : public torch::OperatorKernel {
  public:
   Tensor operator(Tensor qa, Tensor qb) {
@@ -144,6 +171,7 @@ ATEN_NATIVE_CPP = glob([
 
 - *`caffe2/aten/src/ATen/CMakeLists.txt`* -- Again, following the example, you must add your paths.
 The current quantization paths are added as
+
 ```bash
 FILE(GLOB native_quantized_cpp
           "native/quantized/*.cpp"
@@ -170,7 +198,7 @@ def quantized_and(qa, qb):
 ### C++
 
 You should not need to use the registered kernels in C++.
-Although **not officially** supported, you can use the following
+Although **officially not supported**, you can use the following
 
 ```c++
 namespace at { namespace native {
