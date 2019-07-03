@@ -102,7 +102,7 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
   }
   auto& tensor = ((THPVariable*)_new_state)->cdata;
   if (tensor.layout() != kStrided || tensor.device().type() != kCPU || tensor.scalar_type() != kByte) {
-    auto type_name = torch::utils::type_to_string(tensor.dispatch_type(), tensor.scalar_type());
+    auto type_name = torch::utils::type_to_string(tensor.type());
     throw TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
   }
   if (self->cdata->device().type() == at::kCPU) {

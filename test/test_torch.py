@@ -7921,6 +7921,10 @@ class _TestTorchMixin(object):
         actual = torch.gather(src, 2, idx)
         self.assertEqual(actual, expected, 0)
 
+        # Bool test case
+        t = torch.tensor([[False, True], [True, True]])
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]])), torch.tensor([[False, False], [True, True]]))
+
     def test_gather(self):
         self._test_gather(self, lambda t: t)
 
@@ -7974,6 +7978,24 @@ class _TestTorchMixin(object):
 
     def test_scatterFill(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
+
+    def test_scatter_bool(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([[True, True, True], [True, True, True]], device=device)
+            res = torch.zeros(3, 3, dtype=torch.bool, device=device)
+            res = res.scatter_(0, torch.tensor([[0, 1, 2], [0, 1, 2]], device=device), x)
+            self.assertEqual(res, torch.tensor([[True, False, False], 
+                                                [False, True, False], 
+                                                [False, False, True]], device=device))
+
+    def test_scatter_add_bool(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([[True, True, True, True, True], [True, True, True, True, True]], device=device)
+            res = torch.zeros(3, 5, dtype=torch.bool, device=device)
+            res = res.scatter_add_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]], device=device), x)
+            self.assertEqual(res, torch.tensor([[True, True, True, True, True], 
+                                                [False, True, False, True, False], 
+                                                [True, False, True, False, True]], device=device))
 
     def test_masked_scatter(self):
         for dtype in [torch.uint8, torch.bool]:
@@ -9300,8 +9322,9 @@ class _TestTorchMixin(object):
                     if TEST_NUMPY:
                         tup1 = torch.nonzero(tensor, as_tuple=True)
                         tup2 = tensor.nonzero(as_tuple=True)
+                        tup3 = torch.where(tensor)
                         np1 = tensor.cpu().numpy().nonzero()
-                        for t in (tup1, tup2):
+                        for t in (tup1, tup2, tup3):
                             self.assertEqual(len(t), len(np1))
                             for i in range(len(t)):
                                 self.assertEqual(t[i].cpu().numpy(), np1[i])
@@ -9542,6 +9565,10 @@ class _TestTorchMixin(object):
         self.assertEqual(r[50:].mean(), 1, 0.2)
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+        r = torch.normal(2, 3, (100, 100))
+        self.assertEqual(r.mean(), 2, 0.2)
+        self.assertEqual(r.std(), 3, 0.2)
 
     def test_generator_cpu(self):
         # test default generators are equal
@@ -10503,6 +10530,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor(2.0000e-05)''')
 
+        # test print boolean tensor
+        x = torch.tensor([True])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([True])''')
+
+        x = torch.tensor(True)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor(True)''')
+
         # [Numpy] test print float in sci_mode when min < 0.0001.
         x = torch.tensor([0.00002])
         self.assertEqual(x.__repr__(), str(x))
@@ -10852,6 +10888,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # implements `==`
             for i in range(len(array)):
                 self.assertEqual(tensor_from_array[i], array[i])
+
+        # Test unsupported type
+        array = np.array([1, 2, 3, 4], dtype=np.complex)
+        with self.assertRaises(TypeError):
+            tensor_from_array = torch.from_numpy(array)
 
         # check storage offset
         x = np.linspace(1, 125, 125)
@@ -11757,7 +11798,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1], device="cuda"))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).cuda())
-        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.set_default_tensor_type(torch.cuda.FloatTensor))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
 
     def test_cast_binary_op(self):

@@ -6,6 +6,7 @@
 namespace c10 {
 
 template<class T> TypePtr getTypePtr();
+std::string toString(TypePtr typePtr);
 
 template<class T>
 List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements)
@@ -62,8 +63,7 @@ template<class T>
 List<T> toTypedList(impl::GenericList list) {
   static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
   if (list.impl_->elementType.has_value()) {
-    // TODO Show types in error message: TORCH_INTERNAL_ASSERT(getTypePtr<T>() == list.impl_->elementType, "Tried to cast a List with element type ", (*list.impl_->elementType)->str(), " to a list with different element type ", getTypePtr<T>()->str());
-    TORCH_INTERNAL_ASSERT(getTypePtr<T>() == list.impl_->elementType, "Tried to cast a List to a list with different element type");
+    TORCH_INTERNAL_ASSERT(*getTypePtr<T>() == **list.impl_->elementType, "Tried to cast a List<", toString(*list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
   } else {
     // The list wasn't created with type info, but we're just about to convert it to a concrete type.
     // Store that type info to the list so that future conversions are checked against it.
@@ -237,6 +237,15 @@ void List<T>::push_back(const T& value) const {
 template<class T>
 void List<T>::push_back(T&& value) const {
   impl_->list.push_back(detail::list_element_from<T, StorageT>(std::move(value)));
+}
+
+template<class T>
+void List<T>::append(List<T> b) const {
+  if (b.use_count() == 1) {
+    impl_->list.insert(impl_->list.end(), make_move_iterator(b.impl_->list.begin()), make_move_iterator(b.impl_->list.end()));
+  } else {
+    impl_->list.insert(impl_->list.end(), b.impl_->list.begin(), b.impl_->list.end());
+  }
 }
 
 template<class T>

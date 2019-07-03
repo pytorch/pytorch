@@ -62,6 +62,12 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+  set(CPU_INTEL ON)
+else ()
+  set(CPU_INTEL OFF)
+endif ()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -75,6 +81,7 @@ option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
+option(BUILD_NAMEDTENSOR "Experimental: compile with namedtensor support" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -94,7 +101,6 @@ cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
-option(NAMEDTENSOR_ENABLED "Experimental: compile with namedtensor support" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -126,7 +132,13 @@ option(USE_SYSTEM_EIGEN_INSTALL
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(USE_MKLDNN "Use MKLDNN" OFF)
+cmake_dependent_option(
+  USE_MKLDNN "Use MKLDNN. Only available on x86 and x86_64." ON
+  "CPU_INTEL" OFF)
+set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
+cmake_dependent_option(
+    USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
+    "USE_MKLDNN" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -273,8 +285,8 @@ if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
 endif()
 
-if(NAMEDTENSOR_ENABLED)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMEDTENSOR_ENABLED")
+if(BUILD_NAMEDTENSOR)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DBUILD_NAMEDTENSOR")
 endif()
 
 # ---[ Whitelist file if whitelist is specified

@@ -6,6 +6,7 @@
 namespace c10 {
 
 template<class T> TypePtr getTypePtr();
+std::string toString(TypePtr typePtr);
 
 namespace impl {
 inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
@@ -27,10 +28,8 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
   if (dict.impl_->elementTypes.has_value()) {
-    // TODO Show types in error message: TORCH_INTERNAL_ASSERT(getTypePtr<Key>() == dict.impl_->elementTypes->keyType, "Tried to cast a Dict with key type ", (*dict.impl_->elementTypes->keyType)->str(), " to a dict with different key type ", getTypePtr<Key>()->str());
-    TORCH_INTERNAL_ASSERT(getTypePtr<Key>() == dict.impl_->elementTypes->keyType, "Tried to cast a Dict to a dict with different key type");
-    // TODO Show types in error message: TORCH_INTERNAL_ASSERT(getTypePtr<Value>() == dict.impl_->elementTypes->valueType, "Tried to cast a Dict with value type ", (*dict.impl_->elementTypes->valueType)->str(), " to a dict with different value type ", getTypePtr<Value>()->str());
-    TORCH_INTERNAL_ASSERT(getTypePtr<Value>() == dict.impl_->elementTypes->valueType, "Tried to cast a Dict to a dict with different value type");
+    TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes->keyType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes->keyType), ", ", toString(dict.impl_->elementTypes->valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Key types mismatch.");
+    TORCH_INTERNAL_ASSERT(*getTypePtr<Value>() == *dict.impl_->elementTypes->valueType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes->keyType), ", ", toString(dict.impl_->elementTypes->valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Value types mismatch.");
   } else {
     // The dict wasn't created with type info, but we're just about to convert it to a concrete type.
     // Store that type info to the dict so that future conversions are checked against it.
@@ -71,8 +70,8 @@ inline intrusive_ptr<DictImpl> DictImpl::copy() const {
 template<class Key, class Value>
 Dict<Key, Value>::Dict()
   :Dict(make_intrusive<detail::DictImpl>(
-      typename detail::DictImpl::dict_map_type(),
-      {getTypePtr<Key>(), getTypePtr<Value>()})) {
+      detail::DictImpl::dict_map_type(),
+      detail::DictImpl::DictElementTypes{getTypePtr<Key>(), getTypePtr<Value>()})) {
 }
 
 template<>
@@ -92,7 +91,7 @@ Dict<Key, Value>::Dict(
   TypePtr> keyType,
   TypePtr valueType)
 : Dict(make_intrusive<detail::DictImpl>(
-    typename detail::DictImpl::dict_map_type(),
+    detail::DictImpl::dict_map_type(),
     detail::DictImpl::DictElementTypes {std::move(keyType), std::move(valueType)})) {
 }
 
@@ -107,7 +106,7 @@ Dict<Key, Value>::Dict(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::
 template<class Key, class Value>
 Dict<Key, Value>& Dict<Key, Value>::operator=(Dict&& rhs) noexcept {
   impl_ = std::move(rhs.impl_);
-  rhs.impl_ = make_intrusive<detail::DictImpl>(impl_->elementTypes);
+  rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
   return *this;
 }
 

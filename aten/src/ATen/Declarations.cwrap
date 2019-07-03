@@ -328,6 +328,8 @@
 [[
   name: _th_scatter_
   return: argument 0
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   options:
     - cname: scatter
@@ -349,6 +351,8 @@
   name: _th_scatter_add_
   return: argument 0
   cname: scatterAdd
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   arguments:
     - THTensor* self
@@ -360,6 +364,8 @@
 [[
   name: _th_gather
   cname: gather
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0

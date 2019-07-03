@@ -384,23 +384,31 @@ inline IValue toIValue(
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
           if (!N || !py::isinstance<py::int_>(obj)) {
-            return py::cast<std::vector<int64_t>>(obj);
+            return c10::impl::toList(py::cast<std::vector<int64_t>>(obj));
           } else {
             double value = py::cast<int64_t>(obj);
-            std::vector<double> repeated(*N, value);
+            c10::List<double> repeated;
+            repeated.reserve(*N);
+            for (int i = 0; i < *N; ++i) {
+              repeated.push_back(value);
+            }
             return repeated;
           }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
-            return py::cast<std::vector<double>>(obj);
+            return c10::impl::toList(py::cast<std::vector<double>>(obj));
           } else {
             double value = py::cast<double>(obj);
-            std::vector<double> repeated(*N, value);
+            c10::List<double> repeated;
+            repeated.reserve(*N);
+            for (int i = 0; i < *N; ++i) {
+              repeated.push_back(value);
+            }
             return repeated;
           }
         case TypeKind::DimensionedTensorType:
         case TypeKind::TensorType:
-          return py::cast<std::vector<at::Tensor>>(obj);
+          return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
           return createGenericList(obj, elem_type);
       }
@@ -582,7 +590,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return pyObj;
   } else {
-    AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
+    AT_ERROR(
+        "Missing cases in 'toPyObject'! Can't convert ",
+        ivalue.tagKind(),
+        " to a Python object");
   }
 }
 
@@ -721,6 +732,9 @@ inline py::object invokeScriptFunctionFromPython(
     AutoNoGIL no_gil_guard;
     callee.run(stack);
   }
+  AT_CHECK(
+      stack.size() > 0,
+      "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
 
