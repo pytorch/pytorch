@@ -127,6 +127,11 @@ void initJITBindings(PyObject* module) {
             return EliminateDeadCode(g->block()); // overload resolution
           })
       .def(
+          "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
+          [](std::shared_ptr<Graph>& g) {
+            return EliminateDeadCode(g->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload resolution
+          })
+      .def(
           "_jit_pass_cse",
           [](std::shared_ptr<Graph>& g) {
             return EliminateCommonSubexpression(g); // overload resolution
