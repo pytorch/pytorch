@@ -148,7 +148,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = as_variable_ref(r.tensor(1)).variable_data();
+  auto data = as_variable_ref(r.tensor(1)).detach();
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
   // allow the following use case for backward compatibility:
   //

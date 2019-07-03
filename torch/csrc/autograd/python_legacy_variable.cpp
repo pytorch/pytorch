@@ -54,7 +54,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
         .is_variable(true);
     var = at::empty({0}, options);
   } else if (THPVariable_Check(data)) {
-    var = ((THPVariable*)data)->cdata.variable_data();
+    var = ((THPVariable*)data)->cdata.detach();
   } else {
     throw torch::TypeError("Variable data has to be a tensor, but got %s",
         Py_TYPE(data)->tp_name);
