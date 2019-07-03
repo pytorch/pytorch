@@ -95,7 +95,7 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
       typename... Args,
       typename std::enable_if<(sizeof...(Args) < function_traits<SomeFunction>::number_of_parameters - 1)>::type* = nullptr>
   Function bind(SomeFunction f, Args... args) {
-    return std::bind(f, std::placeholders::_1, std::forward<Args>(args)..., c10::nullopt);
+    return bind(f, std::forward<Args>(args)..., c10::nullopt);
   }
 
   template <
