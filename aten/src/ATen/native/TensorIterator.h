@@ -171,7 +171,8 @@ struct CAFFE2_API TensorIterator {
   /// Accessors for each operand
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
-  ScalarType dtype(int arg=0) const { return operands_[arg].dtype; }
+  ScalarType dtype(int arg=0) const { return operands_[arg].tensor.scalar_type(); }
+  ScalarType op_dtype(int arg=0) const { return operands_[arg].dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
@@ -184,6 +185,16 @@ struct CAFFE2_API TensorIterator {
   Tensor output(int arg=0) const {
     AT_ASSERT(arg < num_outputs_);
     return operands_[arg].tensor;
+  }
+
+  void cast_outputs() {
+    if (compute_common_dtype_) {
+      for(int i=0; i < noutputs(); i++) {
+        if (dtype(i) != op_dtype(i)) {
+          operands_[i].tensor = operands_[i].tensor.to(op_dtype(i));
+        }
+      }
+    }
   }
 
   Tensor input(int arg=0) const {

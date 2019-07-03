@@ -21,19 +21,20 @@ class TestTypePromotion(TestCase):
     def test_inplace(self):
         int_tensor = torch.ones([4, 4, 4], dtype=torch.int32, device=self.device)
 
-        self.assertRaisesRegex(RuntimeError, "doesn't match the", lambda: int_tensor.add_(1.5))
+        self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: int_tensor.add_(1.5))
 
         expected = torch.ones([4, 4, 4], device=self.device)
         expected = expected.to(torch.int32)
-        self.assertEqual(int_tensor, expected)
 
         long_tensor = torch.ones([4, 4, 4], dtype=torch.int64, device=self.device)
-        self.assertRaisesRegex(RuntimeError, "doesn't match the", lambda: int_tensor.add_(long_tensor))
-        # int_tensor.add_(long_tensor)
-        # self.assertEqual(int_tensor, expected + 1)
-        int_tensor.add_(int_tensor)
+        int_tensor.add_(long_tensor)
         int_tensor.add_(1)
         self.assertEqual(int_tensor, expected + 2)
+
+        byte_tensor = torch.ByteTensor([1, 1, 1])
+        half_tensor = torch.HalfTensor([1, 1, 1])
+        # byte is unsigned, half is signed.
+        self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: byte_tensor.add_(half_tensor))
 
     # some basic examples
 
@@ -94,6 +95,26 @@ class TestTypePromotion(TestCase):
         self.assertEqual((half + 100000).dtype, torch.float16)  # inf
         default_tensor = torch.tensor(100000.0, device=self.device)
         self.assertEqual((half + default_tensor).dtype, torch.get_default_dtype())
+
+    def test_alternate_result(self):
+        f = torch.tensor([1, 1, 1, 1], dtype=torch.float, device=self.device)
+        o = torch.tensor([0, 0, 0, 0], dtype=torch.long, device=self.device)
+        self.assertRaisesRegex(RuntimeError,
+            "can't be cast to",
+            lambda: torch.add(f, f, out=o))
+        d = torch.tensor([1, 1, 1, 1], dtype=torch.double, device=self.device)
+        torch.add(f, f, out=d)
+        self.assertEqual(d.dtype, torch.double)
+        self.assertEqual(f + f, d)
+
+    def test_mixed_type_backward(self):
+        f = torch.ones([3, 3], dtype=torch.float, requires_grad=True, device=self.device)
+        ten = torch.tensor([10], dtype=torch.double, device=self.device)
+        tens = f * ten
+        s = (tens + 2).sum()
+        s.backward()
+        self.assertEqual(f.grad, tens)
+
 
     # verifies that a.add(b) is the same as a.to(b.dtype).add(b) in cases
     # where that should hold.

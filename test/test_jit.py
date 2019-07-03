@@ -5120,7 +5120,7 @@ a")
 
         x = torch.zeros(3, 4, dtype=torch.long)
         graph = _propagate_shapes(fn.graph, (x,), False)
-        FileCheck().check('Long(*, *) = aten::add').run(graph)
+        FileCheck().check('Float(*, *) = aten::add').run(graph)
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
@@ -6397,7 +6397,10 @@ a")
             scope = {}
             execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
-            self.assertEqual(cu.func(tensor), scope['func'](tensor))
+            message = 'with code `{} {} {}` and t={}'.format(args[0], op, args[1], tensor)
+            res1 = cu.func(tensor)
+            res2 = scope['func'](tensor)
+            self.assertEqual(res1, res2, message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
 
         var_int = [2, -2]
         var_float = [1.4321, -1.2]
@@ -6421,7 +6424,6 @@ a")
             # % operator does not take: const % tensor
             if op == '%' and swap_args is True:
                 continue
-
             test(op, const, swap_args)
 
     def test_tensor_number_math(self):

@@ -1254,7 +1254,7 @@ inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return CompleteTensorType::create(at::kLong, at::kCPU, {});
   }
-  AT_ERROR("unknown number type", typ->str());
+  AT_ERROR("unknown number type: ", typ->str());
 }
 
 inline TypePtr CompleteTensorType::fromBoolType() {

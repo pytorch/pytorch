@@ -217,6 +217,11 @@ static inline bool isIntegralType(ScalarType t) {
       t == ScalarType::Long || t == ScalarType::Short);
 }
 
+static inline bool isSignedType(ScalarType t) {
+  return (
+    t != ScalarType::Byte && t != ScalarType::Char && t != ScalarType::QUInt8);
+}
+
 static inline bool isFloatingType(ScalarType t) {
   return (
       t == ScalarType::Double || t == ScalarType::Float ||
@@ -281,7 +286,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   }
   if (isComplexType(a) || isComplexType(b)) {
     AT_ERROR(
-        "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
+        "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be for ", toString(a), " and ", toString(b));
   }
 
   // For QInt types, we only allow exact match

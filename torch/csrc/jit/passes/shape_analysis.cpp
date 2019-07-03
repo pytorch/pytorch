@@ -180,7 +180,6 @@ class ShapePropagator {
   template <typename T>
   c10::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node* node) {
     std::vector<std::shared_ptr<T>> tensor_types;
-
     auto& schema = node->schema();
     auto& args = schema.arguments();
     // can't handle varargs primitives because we don't know what should be a
@@ -201,8 +200,46 @@ class ShapePropagator {
         continue;
       }
     }
-
     return tensor_types;
+  }
+
+  c10::ScalarType typeToScalarType(c10::TypePtr type) {
+    if (auto cast = type->cast<CompleteTensorType>()) {
+      return cast->scalarType();
+    } else if(auto cast = type->cast<DimensionedTensorType>()) {
+      return cast->scalarType();
+    } else if (auto cast = type->cast<FloatType>()) {
+      return c10::ScalarType::Float;
+    } else if (auto cast = type->cast<IntType>()) {
+      return c10::ScalarType::Long;
+    } else if (auto cast = type->cast<BoolType>()) {
+      return c10::ScalarType::Bool;
+    }
+    return c10::ScalarType::Undefined;
+  }
+
+  c10::ScalarType getScalarType(Node *node) {
+    c10::ScalarType ret = c10::ScalarType::Undefined;
+    auto& args = node->schema().arguments();
+    for (size_t i = 0 ; i < args.size() ; i++ ) { //auto arg : args ) {
+      auto arg = args[i];
+      auto dtype = typeToScalarType(arg.type());
+      auto inputDtype = typeToScalarType(node->inputs()[i]->type());
+      if (dtype != c10::ScalarType::Undefined) { //}->cast<DimensionedTensorType>()) {
+        if (ret == c10::ScalarType::Undefined ) {
+          ret = dtype;
+        } else {
+          ret = c10::promoteTypes(ret, dtype);
+        }
+      } else if (inputDtype != c10::ScalarType::Undefined) {
+        if (ret == c10::ScalarType::Undefined) {
+          ret = inputDtype;
+        } else {
+          ret = c10::promoteTypes(ret, inputDtype);
+        }
+      }
+    }
+    return ret;
   }
 
   bool mergeTypes(
@@ -662,18 +699,18 @@ class ShapePropagator {
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
     static const auto broadcast =
         [](std::vector<DimensionedTensorTypePtr>& tensor_types,
-           size_t arg_for_type) -> DimensionedTensorTypePtr {
+           at::ScalarType t) -> DimensionedTensorTypePtr {
       if (tensor_types.size() == 1) {
-        return tensor_types[0];
+          return tensor_types[0]->toScalarType(t);
       }
       AT_ASSERT(!tensor_types.empty());
-      auto any_type = tensor_types[arg_for_type];
+      auto any_type = tensor_types[0];
       auto max_dims = any_type->dim();
       for (auto& type : tensor_types) {
-        max_dims = std::max(max_dims, type->dim());
+          max_dims = std::max(max_dims, type->dim());
       }
       return DimensionedTensorType::create(
-          any_type->scalarType(), any_type->device(), max_dims);
+          t, any_type->device(), max_dims);
     };
 
     using type_vec_t = std::vector<DimensionedTensorTypePtr>;
@@ -833,14 +870,7 @@ class ShapePropagator {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
             AT_ASSERT(maybe_tensor_types->size() >= 2);
-            auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
-            auto second_scalar_type = (*maybe_tensor_types)[1]->scalarType();
-            size_t arg_for_type = 0;
-            if (c10::promoteTypes(first_scalar_type, second_scalar_type) !=
-                first_scalar_type) {
-              arg_for_type = 1;
-            }
-            return {broadcast(*maybe_tensor_types, arg_for_type)};
+            return {broadcast(*maybe_tensor_types, getScalarType(node))};
           }
           return {};
         }};
@@ -854,7 +884,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, 0)};
+            return {broadcast(*maybe_tensor_types, getScalarType(node))};
           }
           return {};
         }};
@@ -886,7 +916,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, 0)};
+            return {broadcast(*maybe_tensor_types, getScalarType(node))};
           }
           return {};
         }};
@@ -900,7 +930,8 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, 1)};
+
+            return {broadcast(*maybe_tensor_types, getScalarType(node))};
           }
           return {};
         }};
@@ -958,7 +989,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, 0)->toScalarType(at::kByte)};
+            return {broadcast(*maybe_tensor_types, at::kByte)};
           }
           return {};
         }};
@@ -1220,9 +1251,6 @@ class ShapePropagator {
       at::optional<IValue> maybe_layout_option = node->get(attr::layout);
       if (!maybe_layout_option)
         return {};
-      auto layout =
-          (maybe_layout_option->isNone() ? at::kStrided
-                                         : maybe_layout_option->toLayout());
 
       at::optional<IValue> maybe_device_option = node->get(attr::device);
       if (!maybe_device_option)
@@ -1558,7 +1586,7 @@ class ShapePropagator {
         } else {
           // Batched matrix multiply (possibly with squeeze + unsqueeze if one
           // argument is 1D)
-          auto type = broadcast(tensor_types, 0);
+          auto type = broadcast(tensor_types, tensor_types[0]->scalarType());
           if (tensor_types.at(0)->dim() == 1 ||
               tensor_types.at(1)->dim() == 1) {
             type = type->withDim(type->dim() - 1);

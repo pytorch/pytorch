@@ -129,13 +129,12 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
 }
 
 // just checks for safe promotion.
-static bool can_promote(const ScalarType& from, const ScalarType& to) {
+static bool can_cast(const ScalarType& from, const ScalarType& to) {
   // we disallow float -> integral, e.g., float_tensor *= int is disallowed.
   if (isFloatingType(from) && isIntegralType(to)) {
     return false;
   }
-  // if destination dtype is smaller, would lose information.
-  if (elementSize(from) > elementSize(to)) {
+  if (isSignedType(from) && ! isSignedType(to) ) {
     return false;
   }
   return true;
@@ -185,24 +184,25 @@ void TensorIterator::compute_types() {
       if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
       {
         if (op.is_output) {
-          if (!can_promote(common_dtype, op.tensor.scalar_type())) {
+          if (!can_cast(common_dtype, op.tensor.scalar_type())) {
             AT_ERROR("result type ", common_dtype,
-              " doesn't match the desired output type ",
+              " can't be cast to the desired output type ",
               op.tensor.scalar_type());
           }
-        } else {
-          auto tensor = op.tensor;
-          op.tensor = tensor.to(common_dtype);
+          // to convert result back to a provided output type.
           op.dtype = op.tensor.scalar_type();
-          auto original_element_size = tensor.element_size();
-          auto new_element_size = op.tensor.element_size();
-          // stride size (in bytes) can change if we change the dtype.
-          if ( original_element_size != new_element_size ) {
-            for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
-              auto stride = op.stride_bytes[i] / original_element_size;
-              op.stride_bytes[i] = stride * new_element_size;
-            }
-          }
+        } else {
+          op.dtype = common_dtype;
+        }
+        auto tensor = op.tensor;
+        op.tensor = tensor.to(common_dtype);
+        auto original_element_size = tensor.element_size();
+        auto new_element_size = op.tensor.element_size();
+
+        // stride size (in bytes) can change if we change the dtype.
+        for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
+          auto stride = op.stride_bytes[i] / original_element_size;
+          op.stride_bytes[i] = stride * new_element_size;
         }
       }
       if (op.tensor.defined() && op.device != op.tensor.device()) {
