@@ -51,7 +51,8 @@ void RNNImplBase<Derived>::reset() {
 
   for (int64_t layer = 0; layer < options.layers_; ++layer) {
     for (auto direction = 0; direction < num_directions; direction++) {
-      const auto layer_input_size = layer == 0 ? options.input_size_ : options.hidden_size_ * num_directions;
+      const auto layer_input_size = layer == 0 ? options.input_size_ :
+        options.hidden_size_ * num_directions;
       const auto suffix = direction == 1 ? "_reverse" : "";
       const auto layer_idx = (layer * num_directions) + direction;
       w_ih[layer_idx] = this->register_parameter(
@@ -63,9 +64,11 @@ void RNNImplBase<Derived>::reset() {
 
       if (options.with_bias_) {
         b_ih[layer_idx] = this->register_parameter(
-            "bias_ih_l" + std::to_string(layer) + suffix, torch::empty({gate_size}));
+          "bias_ih_l" + std::to_string(layer) + suffix,
+          torch::empty({gate_size}));
         b_hh[layer_idx] = this->register_parameter(
-            "bias_hh_l" + std::to_string(layer) + suffix, torch::empty({gate_size}));
+          "bias_hh_l" + std::to_string(layer) + suffix,
+          torch::empty({gate_size}));
       }
     }
   }
