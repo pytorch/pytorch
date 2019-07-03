@@ -8,9 +8,20 @@
 
 #include <functional>
 #include <utility>
+//#include <torch/nn/modules/bind_utils.h>
 
 namespace torch {
 namespace nn {
+
+template<class Func>
+struct function_traits {
+  static_assert(!std::is_same<Func, Func>::value, "In function_traits<Func>, Func must be a plain function type.");
+};
+
+template<class Result, class... Args>
+struct function_traits<Result(*)(Args...)> {
+  static constexpr auto number_of_parameters = sizeof...(Args);
+};
 
 /// Wraps a function in a `Module`.
 ///
@@ -62,15 +73,39 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
   /// Constructs a `Functional` from a function object.
   explicit FunctionalImpl(Function function);
 
+  template <typename SomeFunction,
+      typename... Args,
+      typename std::enable_if<(sizeof...(Args) > function_traits<SomeFunction>::number_of_parameters - 1)>::type* = nullptr>
+  Function bind(SomeFunction f, Args... args) {
+    static_assert(!std::is_same<SomeFunction, SomeFunction>::value, "Number of arguments is more then function can accept");
+  }
+
+  template <typename SomeFunction,
+      typename... Args,
+      typename std::enable_if<(sizeof...(Args) == function_traits<SomeFunction>::number_of_parameters - 1)>::type* = nullptr>
+  Function bind(SomeFunction f, Args... args) {
+    return std::bind(f, std::placeholders::_1, std::forward<Args>(args)...);
+  }
+
+  // This is a workaround to be able to bind a function that has optional argument at the end of function's signature
+  // and this argument was not provided through args
+  // It was added to be able to support backward compatibility with previous signature of the function avg_pool2d
+  // Other solutions can be: move to gcc 4.9.0 and use lambda or break BC and force to add optional parameters to Functional
+  template <typename SomeFunction,
+      typename... Args,
+      typename std::enable_if<(sizeof...(Args) < function_traits<SomeFunction>::number_of_parameters - 1)>::type* = nullptr>
+  Function bind(SomeFunction f, Args... args) {
+    return std::bind(f, std::placeholders::_1, std::forward<Args>(args)..., c10::nullopt);
+  }
+
   template <
       typename SomeFunction,
       typename... Args,
       typename = torch::enable_if_t<(sizeof...(Args) > 0)>>
   explicit FunctionalImpl(SomeFunction original_function, Args&&... args)
-      : function_(std::bind(
-            original_function,
-            /*input=*/std::placeholders::_1,
-            std::forward<Args>(args)...)) {
+    :function_(bind(
+        original_function,
+        args...)) {
     // std::bind is normally evil, but (1) gcc is broken w.r.t. handling
     // parameter pack expansion in lambdas and (2) moving parameter packs into
     // a lambda only works with C++14, so std::bind is the more move-aware

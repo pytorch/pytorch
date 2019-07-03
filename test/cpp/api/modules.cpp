@@ -238,6 +238,18 @@ TEST_F(ModulesTest, FunctionalArgumentBinding) {
   ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
 }
 
+TEST_F(ModulesTest, FunctionalWithoutOptionalArgumentBinding) {
+auto functional =
+    Functional(torch::avg_pool2d, 2, 2, 0, false, true);
+ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
+}
+
+TEST_F(ModulesTest, FunctionalWithOptionalArgumentBinding) {
+auto functional =
+    Functional(torch::avg_pool2d, 2, 2, 0, false, true, 1);
+ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
+}
+
 TEST_F(ModulesTest, BatchNormStateful) {
   BatchNorm bn(5);
 
