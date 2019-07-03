@@ -9565,6 +9565,10 @@ class _TestTorchMixin(object):
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
+        r = torch.normal(2, 3, (100, 100))
+        self.assertEqual(r.mean(), 2, 0.2)
+        self.assertEqual(r.std(), 3, 0.2)
+
     def test_generator_cpu(self):
         # test default generators are equal
         self.assertEqual(torch.default_generator, torch.default_generator)

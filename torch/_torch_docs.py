@@ -3593,6 +3593,22 @@ Example::
 
     >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
+
+.. function:: normal(mean, std, size, *, out=None) -> Tensor
+
+Similar to the function above, but the means and standard deviations are shared
+among all drawn elements. The resulting tensor has size given by :attr:`size`.
+
+Args:
+    mean (float): the mean for all distributions
+    std (float): the standard deviation for all distributions
+    size (int...): a sequence of integers defining the shape of the output tensor.
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.normal(2, 3, size=(1, 4))
+    tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
 """)
 
 add_docstr(torch.numel,
