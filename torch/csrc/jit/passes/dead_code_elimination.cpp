@@ -15,9 +15,10 @@ using namespace ::c10::prim;
 
 class DeadCodeEliminator {
  public:
-  explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
-      : aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
-  DeadCodeEliminator() = default;
+  explicit DeadCodeEliminator(std::shared_ptr<Graph> graph, DCESideEffectPolicy sideEffectPolicy)
+      : sideEffectPolicy_(sideEffectPolicy), aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
+  DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
+  : sideEffectPolicy_(sideEffectPolicy) {}
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
   // we mark "live" nodes that are necessary for the output. Nodes that have
@@ -127,7 +128,7 @@ class DeadCodeEliminator {
   void mark(Block* block) {
     // Mark all nodes with side effects.
     for (auto node : block->nodes()) {
-      if (hasSideEffects(node)) {
+      if (sideEffectPolicy_ == DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS && hasSideEffects(node)) {
         mark(node);
       }
     }
@@ -284,6 +285,7 @@ class DeadCodeEliminator {
     }
   }
 
+  DCESideEffectPolicy sideEffectPolicy_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
@@ -292,18 +294,19 @@ class DeadCodeEliminator {
       [](const std::unordered_set<const Value*>&) {};
 };
 
-void EliminateDeadCode(const std::shared_ptr<Graph>& graph) {
-  DeadCodeEliminator(graph).run(graph->block(), /*recurse=*/true);
+void EliminateDeadCode(const std::shared_ptr<Graph>& graph, DCESideEffectPolicy sideEffectPolicy) {
+  DeadCodeEliminator(graph, sideEffectPolicy).run(graph->block(), /*recurse=*/true);
 }
 
-void EliminateDeadCode(Block* block, bool recurse) {
-  DeadCodeEliminator().run(block, recurse);
+void EliminateDeadCode(Block* block, bool recurse, DCESideEffectPolicy sideEffectPolicy) {
+  DeadCodeEliminator(sideEffectPolicy).run(block, recurse);
 }
 
 void EliminateDeadCode(
     Block* block,
-    std::function<void(const std::unordered_set<const Value*>&)> cb) {
-  DeadCodeEliminator eliminator;
+    std::function<void(const std::unordered_set<const Value*>&)> cb,
+    DCESideEffectPolicy sideEffectPolicy) {
+  DeadCodeEliminator eliminator(sideEffectPolicy);
   eliminator.setDeleteCallback(std::move(cb));
   eliminator.run(block, /*recurse=*/true);
 }
