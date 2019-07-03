@@ -223,6 +223,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_lint(graph)
 
         torch._C._jit_pass_onnx_remove_print(graph)
+
         torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
         # onnx only supports tensors, so we turn all out number types into tensors
@@ -232,7 +233,13 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_onnx_peephole(graph)
         torch._C._jit_pass_lint(graph)
-    torch._C._jit_pass_dce(graph)
+
+    # graph is not a valid jit graph anymore because types have been replaced
+    # (e.g. int with Tensor), so it now contains operators that don't actually
+    # exist. We can't run normal dead code elimination because it'd fail trying
+    # to look up if an operator has side effects, but we can run a dead code
+    # elimination variant that doesn't need to look up if an op has side effects.
+    torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
     torch._C._jit_pass_lint(graph)
     torch._C._jit_pass_fixup_onnx_loops(graph)
     torch._C._jit_pass_lint(graph)
