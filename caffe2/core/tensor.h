@@ -189,6 +189,7 @@ class CAFFE2_API Tensor final {
    * 'async' parameter triggers async copy for CUDA tensors
    */
   void CopyFrom(const Tensor& src, bool async = false) {
+    AT_ASSERT(!impl_->is_variable() || (impl_->is_variable() && !(impl_->requires_grad() && GradMode::is_enabled())));  // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
     AT_ASSERTM(
         src.impl_->is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
