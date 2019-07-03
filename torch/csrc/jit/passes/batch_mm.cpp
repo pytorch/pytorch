@@ -16,6 +16,14 @@
 namespace torch {
 namespace jit {
 
+namespace {
+c10::OperatorOptions aliasAnalysisIsSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
+}
+}
+
 // This pass looks for trees in the graph, where leaves are mm ops, and the
 // inner vertices are add nodes. Once we have such a tree they can be reduced to
 // two concats and a single mm (basically into a single multiply of a wide
@@ -152,7 +160,7 @@ RegisterOperators mm_tree_reduction_reg(
         }
         return 0;
       };
-    })});
+    }, aliasAnalysisIsSpecialCase())});
 
 // TreeTokens will be used to label nodes of the graph, if the nodes will fit
 // our mm/add tree pattern. Basically we do dynamic programming on DAGs, where
@@ -354,7 +362,7 @@ RegisterOperators mm_batch_side_reg(
 
         return 0;
       };
-    })});
+    }, aliasAnalysisIsSpecialCase())});
 
 std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,
