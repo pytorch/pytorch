@@ -53,7 +53,7 @@ static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
 static thread_local int current_depth = 0;
-// Total nested reentrant backwards calls over all threads for this device
+// Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
 
 struct FunctionTask {
@@ -186,19 +186,19 @@ struct GraphTask {
   // Safe to read owner_ and reentrant_depth_ without synchronizaton
   int owner_;
   // The number of parent graph tasks for this graph task
-  int reentrant_depth_;
+  const int reentrant_depth_;
 
   bool can_checkpoint() {
     return exec_info_.empty();
   }
 
-  GraphTask(bool keep_graph, bool grad_mode)
+  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth = 0)
     : has_error_(false)
     , outstanding_tasks_(0)
     , keep_graph_(keep_graph)
     , grad_mode_(grad_mode)
     , owner_(NO_DEVICE)
-    , reentrant_depth_(0) {}
+    , reentrant_depth_(reentrant_depth) {}
 };
 
 int FunctionTask::getReentrantDepth() const {
@@ -232,7 +232,8 @@ auto ReadyQueue::pop() -> FunctionTask {
   return task;
 }
 
-Engine::Engine() : max_recursion_depth_(0) {}
+// This limit is based on the default python recursion limit which is 1000
+Engine::Engine() : max_recursion_depth_(100) {}
 
 // Send shutdown tasks to all ReadyQueues if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest
@@ -655,7 +656,7 @@ auto Engine::execute(const edge_list& roots,
   // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
-  GraphTask graph_task(keep_graph, create_graph);
+  GraphTask graph_task(keep_graph, create_graph, worker_device == NO_DEVICE ? 0 : total_depth+1);
   // Lock mutex while GraphTask is being set up
   std::unique_lock<std::mutex> lock(graph_task.mutex_);
 
@@ -676,7 +677,6 @@ auto Engine::execute(const edge_list& roots,
   } else {
     graph_task.owner_ = worker_device;
     ++total_depth;
-    graph_task.reentrant_depth_ = total_depth;
     if(current_depth >= max_recursion_depth_){
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
