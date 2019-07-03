@@ -136,6 +136,7 @@ void preprocessCaffe2Ops(Block* block) {
       }
     }
   }
+  EliminateDeadCode(block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
@@ -343,7 +344,7 @@ void BlockToONNX(
     ctx.block->registerOutput(env.at(output));
     env.at(output)->setType(output->type());
   }
-
+  EliminateDeadCode(ctx.block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 } // namespace jit

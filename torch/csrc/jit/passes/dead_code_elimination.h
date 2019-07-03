@@ -18,7 +18,7 @@ enum class DCESideEffectPolicy : uint8_t {
   // with this flag, dead code elimination will not check if a node has side
   // effects and treat nodes with side effects like any other node,
   // i.e. delete them if their outputs aren't used anywhere.
-  IGNORE_SIDE_EFFECTS
+  ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS
 };
 
 TORCH_API void EliminateDeadCode(const std::shared_ptr<Graph>& graph, DCESideEffectPolicy sideEffectPolicy = DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS);
