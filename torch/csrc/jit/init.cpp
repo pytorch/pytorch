@@ -107,6 +107,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)
+      .def("_jit_pass_onnx_remove_print", RemovePrintOps)
+      .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
@@ -123,6 +125,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
+          })
+      .def(
+          "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
+          [](std::shared_ptr<Graph>& g) {
+            return EliminateDeadCode(g->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload resolution
           })
       .def(
           "_jit_pass_cse",

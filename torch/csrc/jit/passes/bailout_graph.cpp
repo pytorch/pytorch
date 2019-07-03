@@ -154,8 +154,8 @@ struct BailOutInserter {
   // any given bailout point
   void addUnoptimizedFuncToBailouts() {
     auto unoptimized_graph = graph_->copy();
-    auto unopt_func =
-        graph_->create(prim::GraphHolder)->insertAfter(graph_->param_node());
+    auto unopt_func = graph_->create(prim::BailoutTemplate)
+                          ->insertAfter(graph_->param_node());
 
     // Returns an int so that we have an easy way to do graph traversal
     unopt_func->output()->setType(IntType::get());

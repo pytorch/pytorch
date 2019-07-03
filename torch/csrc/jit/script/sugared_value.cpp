@@ -73,6 +73,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         "device",
         "shape",
         "is_cuda",
+        "is_mkldnn",
         "requires_grad",
     };
     if (fields.count(field)) {
