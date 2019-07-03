@@ -152,7 +152,7 @@ namespace c10 {
   _(aten, bin)                       \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
-  _(prim, GraphHolder)               \
+  _(prim, BailoutTemplate)           \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -290,7 +290,7 @@ struct CAFFE2_API Symbol {
   static Symbol prim(const std::string & s);
   static Symbol user(const std::string & s);
   static Symbol caffe2(const std::string & s);
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   static Symbol dimname(const std::string & s);
 #endif
   // TODO: eliminate me
@@ -302,7 +302,7 @@ struct CAFFE2_API Symbol {
   bool is_onnx() const;
   bool is_user() const;
   bool is_caffe2() const;
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   bool is_dimname() const;
 #endif
 
@@ -365,7 +365,7 @@ inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualStri
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
 inline Symbol Symbol::user(const std::string & s) { return Symbol::fromQualString("user::" + s); }
 inline Symbol Symbol::caffe2(const std::string & s) { return Symbol::fromQualString("_caffe2::" + s); }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 inline Symbol Symbol::dimname(const std::string & s) { return Symbol::fromQualString("dimname::" + s); }
 #endif
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
@@ -374,7 +374,7 @@ inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 inline bool Symbol::is_user() const { return ns() == namespaces::user; }
 inline bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 inline bool Symbol::is_dimname() const { return ns() == namespaces::dimname; }
 #endif
 

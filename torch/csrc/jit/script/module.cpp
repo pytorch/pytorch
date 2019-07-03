@@ -164,7 +164,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
 }
 
 Method::Method(ModulePtr owner, Function* function)
-    : owner_(owner), function_(function) {}
+    : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);
@@ -297,7 +297,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   // Create a bare object with correct number of slots
   const size_t numAttrs = classType->numAttributes();
   auto obj = c10::ivalue::Object::create(
-      class_compilation_unit(), classType, numAttrs);
+      c10::StrongTypePtr(class_compilation_unit(), classType), numAttrs);
 
   // Invoke the `__init__()` of the class with the arguments provided.
   Stack stackWithSelf = {obj};
