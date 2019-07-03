@@ -57,6 +57,14 @@ class DeadCodeEliminator {
       Graph& g = *node->g(attr::Subgraph);
       for (size_t i = 0; i < g.inputs().size(); ++i) {
         if (!g.inputs().at(i)->hasUses()) {
+          GRAPH_UPDATE(
+              "Dead ",
+              i,
+              "-th input ",
+              node->inputs().at(i)->debugName(),
+              "(",
+              g.inputs().at(i)->debugName(),
+              " in a subgraph) will be removed");
           g.eraseInput(i);
           node->removeInput(i);
         }
@@ -208,6 +216,13 @@ class DeadCodeEliminator {
       // Reverse_block is inlined in grad_desc.f before it's separated
       // to grad_desc.df.
       if (!(marked_.count(node) || node->hasUses())) {
+        GRAPH_UPDATE(
+            "Node ",
+            it->kind().toQualString(),
+            " w/ output ",
+            (node->outputs().size() > 0 ? node->outputs().at(0)->debugName()
+                                        : "n/a"),
+            " will be removed");
         it.destroyCurrent();
       }
     }
@@ -257,8 +272,20 @@ class DeadCodeEliminator {
     for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
       size_t i = i_1 - 1;
       if (!node->outputs().at(i)->hasUses()) {
+        GRAPH_UPDATE(
+            "Dead ",
+            i,
+            "-th ouput ",
+            node->outputs().at(i)->debugName(),
+            " of node ",
+            node->kind().toQualString(),
+            " will be removed");
         node->eraseOutput(i);
         for (Block* b : node->blocks()) {
+          GRAPH_UPDATE(
+              "\tCorresponding block output ",
+              b->outputs().at(i)->debugName(),
+              " will be removed");
           b->eraseOutput(i);
         }
       }
@@ -277,12 +304,45 @@ class DeadCodeEliminator {
       size_t i = i_1 - 1;
       if (!node->outputs().at(i)->hasUses() &&
           !loop_body->inputs().at(loop_body_offset + i)->hasUses()) {
+        log_dead_loop_outputs(node, i, loop_input_offset, loop_body_offset);
         node->eraseOutput(i);
         node->removeInput(loop_input_offset + i);
         loop_body->eraseInput(loop_body_offset + i);
         loop_body->eraseOutput(loop_body_offset + i);
       }
     }
+  }
+
+  void log_dead_loop_outputs(
+      Node* node,
+      size_t i,
+      size_t loop_input_offset,
+      size_t loop_body_offset) {
+    auto loop_body = node->blocks().at(0);
+    GRAPH_UPDATE(
+        "Dead ",
+        loop_input_offset + i,
+        "-th input ",
+        node->inputs().at(i)->debugName(),
+        " will be removed");
+    GRAPH_UPDATE(
+        "Dead ",
+        i,
+        "-th output ",
+        node->outputs().at(i)->debugName(),
+        " will be removed");
+    GRAPH_UPDATE(
+        "\tDead block input ",
+        loop_body->inputs().at(loop_body_offset + i)->debugName(),
+        "at offset ",
+        loop_body_offset + i,
+        " will be removed");
+    GRAPH_UPDATE(
+        "\tDead block output ",
+        loop_body->outputs().at(loop_body_offset + i)->debugName(),
+        "at offset ",
+        loop_body_offset + i,
+        " will be removed");
   }
 
   DCESideEffectPolicy sideEffectPolicy_;
@@ -296,6 +356,7 @@ class DeadCodeEliminator {
 
 void EliminateDeadCode(const std::shared_ptr<Graph>& graph, DCESideEffectPolicy sideEffectPolicy) {
   DeadCodeEliminator(graph, sideEffectPolicy).run(graph->block(), /*recurse=*/true);
+  GRAPH_DUMP("After EliminateDeadCode: ", graph);
 }
 
 void EliminateDeadCode(Block* block, bool recurse, DCESideEffectPolicy sideEffectPolicy) {
