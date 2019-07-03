@@ -5,8 +5,12 @@
  */
 
 #include <gtest/gtest.h>
-#include <ATen/core/op_registration/test_helpers.h>
 
+// This file intentionally tests some deprecated APIs
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
+#include <ATen/core/op_registration/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <functional>
@@ -981,3 +985,5 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 }
 
 }
+
+#pragma GCC diagnostic pop

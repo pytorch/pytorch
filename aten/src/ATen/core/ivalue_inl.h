@@ -413,6 +413,7 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
+C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -443,6 +444,7 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
+C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
@@ -593,8 +595,6 @@ inline IValue::IValue(c10::impl::GenericList v)
 : tag(Tag::GenericList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.impl_.release();
 }
-inline IValue::IValue(std::vector<IValue> v)
-: IValue(c10::impl::toList(std::move(v))) {}
 
 template<class T> inline IValue::IValue(c10::List<T> v)
 : IValue(impl::toGenericList<T>(std::move(v))) {
@@ -619,7 +619,7 @@ inline IValue::IValue(c10::Dict<Key, Value> v)
 : IValue(impl::toGenericDict(std::move(v))) {}
 
 template<class Key, class Value> inline IValue::IValue(std::unordered_map<Key, Value> v)
-: IValue(impl::GenericDict()) {
+: IValue(Dict<Key, Value>()) {
   auto dict = to<c10::Dict<Key, Value>>();
   dict.reserve(v.size());
   for (auto& e : v) {

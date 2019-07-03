@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -43,8 +42,11 @@ template <bool ReLUFused = false>
 class QCat final : public torch::OperatorKernel {
  public:
   Tensor operator()(const std::vector<Tensor>& qxs, int64_t axis,
-                    double scale, int64_t zero_point) {
-    return quantized_cat<ReLUFused>(qxs, axis, scale, zero_point);
+                    c10::optional<double> scale,
+                    c10::optional<int64_t> zero_point) {
+    double _scale = scale ? *scale : qxs[0].q_scale();
+    int64_t _zero_point = zero_point ? *zero_point : qxs[0].q_zero_point();
+    return quantized_cat<ReLUFused>(qxs, axis, _scale, _zero_point);
   }
 };
 
@@ -61,11 +63,11 @@ class QCatOut final : public torch::OperatorKernel {
 };
 
 static auto registry = torch::RegisterOperators()
-.op("quantized::cat(Tensor[] qx, int axis, float scale, int zero_point)"
+.op("quantized::cat(Tensor[] qx, int axis, float? scale, int? zero_point)"
     " -> Tensor",
     torch::RegisterOperators::options()
       .kernel<QCat<false>>(QuantizedCPUTensorId()))
-.op("quantized::cat_relu(Tensor[] qx, int axis, float scale, int zero_point)"
+.op("quantized::cat_relu(Tensor[] qx, int axis, float? scale, int? zero_point)"
     " -> Tensor",
     torch::RegisterOperators::options()
       .kernel<QCat<true>>(QuantizedCPUTensorId()))
