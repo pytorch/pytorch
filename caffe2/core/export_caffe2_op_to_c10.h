@@ -59,12 +59,14 @@ inline void _call_caffe2_op_from_c10(
   const size_t num_inputs = schema.arguments().size() -
       1; // -1 because the last argument is the list of preallocated tensors
 
-  c10::List<torch::autograd::Variable> outputs;
+  c10::List<at::Tensor> outputs;
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
-    // they haven't been passed in. Pass a list of uninitialized tensors to
+    // they haven't been passed in. Pass a list of uninitialized Variables to
     // the caffe2 operator as preallocated outputs.
-    outputs.resize(num_outputs);
+    for (size_t i = 0; i < num_outputs; i++) {
+      outputs.push_back(torch::autograd::Variable());
+    }
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
     outputs = std::move(preallocated_outputs).toTensorList();
