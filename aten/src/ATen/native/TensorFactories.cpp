@@ -464,6 +464,18 @@ Tensor& randn_out(Tensor& result, IntArrayRef size, Generator* generator) {
   return result.normal_(0, 1, generator);
 }
 
+Tensor normal(double mean, double std, IntArrayRef size,
+              Generator* generator, const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  return result.normal_(mean, std, generator);
+}
+
+Tensor& normal_out(Tensor& result, double mean, double std,
+                   IntArrayRef size, Generator* generator) {
+  result.resize_(size);
+  return result.normal_(mean, std, generator);
+}
+
 Tensor randn_like(const Tensor& self) {
   return native::randn_like(self, self.options());
 }
