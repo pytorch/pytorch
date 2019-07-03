@@ -528,8 +528,10 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> classes;
+            SourceRangeRecords source_ranges;
             PythonPrint(
                 ss,
+                source_ranges,
                 *self.class_compilation_unit(),
                 true,
                 tensors,
@@ -615,7 +617,15 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> classes;
-            PythonPrint(ss, *self.function_, false, tensors, classes, false);
+            SourceRangeRecords source_ranges;
+            PythonPrint(
+                ss,
+                source_ranges,
+                *self.function_,
+                false,
+                tensors,
+                classes,
+                false);
             return ss.str();
           })
       .def(
@@ -645,7 +655,9 @@ void initJitScriptBindings(PyObject* module) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> classes;
-        PythonPrint(ss, self.function(), true, tensors, classes, false);
+        SourceRangeRecords source_ranges;
+        PythonPrint(
+            ss, source_ranges, self.function(), true, tensors, classes, false);
         return ss.str();
       });
   m.def(
@@ -774,14 +786,23 @@ void initJitScriptBindings(PyObject* module) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
     std::vector<c10::NamedTypePtr> classes;
+    SourceRangeRecords source_ranges;
     if (auto self = as_module(obj)) {
       PythonPrint(
-          ss, *self->class_compilation_unit(), true, constants, classes, true);
+          ss,
+          source_ranges,
+          *self->class_compilation_unit(),
+          true,
+          constants,
+          classes,
+          true);
     } else if (auto self = as_function(obj)) {
-      PythonPrint(ss, *self->function_, false, constants, classes, true);
+      PythonPrint(
+          ss, source_ranges, *self->function_, false, constants, classes, true);
     } else {
-      auto& fn = py::cast<StrongFunctionPtr&>(obj);
-      PythonPrint(ss, *fn.function_, true, constants, classes, true);
+      auto& m = py::cast<Method&>(obj);
+      PythonPrint(
+          ss, source_ranges, m.function(), true, constants, classes, true);
     }
     return std::make_pair(ss.str(), std::move(constants));
   });

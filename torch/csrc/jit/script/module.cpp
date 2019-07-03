@@ -164,7 +164,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
 }
 
 Method::Method(ModulePtr owner, Function* function)
-    : owner_(owner), function_(function) {}
+    : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);
