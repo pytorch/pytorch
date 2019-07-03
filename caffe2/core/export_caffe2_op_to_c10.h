@@ -45,7 +45,10 @@ inline void _call_caffe2_op_from_c10(
   // (if not ivalue::None) contains a preallocated output tensor for each
   // operator output.
 
+  // As an invariant, we don't want any autograd gradients to be tracked in
+  // Caffe2 operators.
   torch::NoGradGuard guard;
+
   AT_ASSERT(
       schema.arguments().size() != 0 &&
       schema.arguments().back().type()->isSubtypeOf(
