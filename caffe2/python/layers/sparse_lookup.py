@@ -13,8 +13,11 @@ from caffe2.python.layers.layers import (
     get_key,
     IdList,
     IdScoreList,
+    IdListWithEvicted,
+    IdScoreListWithEvicted,
     LayerPsParam,
     ModelLayer,
+    almost_equal_schemas,
 )
 import collections
 import functools
@@ -52,13 +55,12 @@ def get_sparse_lookup_trainer_version(version):
         "Unexpected version of sparse_lookup layer {0}".format(version)
     return version
 
-
 def _is_id_list(input_record):
-    return schema.equal_schemas(input_record, IdList)
+    return almost_equal_schemas(input_record, IdList)
 
 
 def _is_id_score_list(input_record):
-    return schema.equal_schemas(input_record,
+    return almost_equal_schemas(input_record,
                                 IdScoreList,
                                 check_field_types=False)
 
@@ -99,18 +101,18 @@ class SparseLookup(ModelLayer):
                 "PositionWeighted only support IdScoreList, but got {} " +
                 "please use PositionWeighted layer to convert IdList " +
                 "to IdScoreList").format(repr(self.input_record))
-            self.external_weights = input_record.values()
+            self.external_weights = self.input_record.values()
 
         elif reducer == "RecencyWeighted":
             assert _is_id_score_list(self.input_record), (
                 "RecencyWeighted only supports IdScoreList.")
-            self.external_weights = input_record.values()
+            self.external_weights = self.input_record.values()
         self.reducer = reducer
 
-        input_dim = get_categorical_limit(input_record)
+        input_dim = get_categorical_limit(self.input_record)
         assert input_dim > 0, (
             "{} should have categorical limit > 0, but got {}".format(
-                get_key(input_record)(), input_dim))
+                get_key(self.input_record)(), input_dim))
 
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape

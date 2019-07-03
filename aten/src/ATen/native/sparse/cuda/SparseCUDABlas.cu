@@ -71,11 +71,6 @@ void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
     "cusparseXcoo2csr only supports m, nnz with the bound [val] <= ",
     INT_MAX);
 
-#ifdef __HIP_PLATFORM_HCC__
-  // current shortcoming in hip/rocSPARSE
-  if(nnz == 0 || m == 0) return;
-#endif
-
   int i_nnz = (int)nnz;
   int i_m = (int)m;
 
@@ -127,11 +122,6 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   int i_ldb = (int)ldb;
   int i_ldc = (int)ldc;
 
-#ifdef __HIP_PLATFORM_HCC__
-  // current shortcoming in hip/rocSPARSE
-  if(n == 0) return;
-#endif
-
   auto handle = setCUDASparseStream();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
@@ -154,11 +144,6 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   int i_ldb = (int)ldb;
   int i_ldc = (int)ldc;
 
-
-#ifdef __HIP_PLATFORM_HCC__
-  // current shortcoming in hip/rocSPARSE
-  if(n == 0) return;
-#endif
 
   auto handle = setCUDASparseStream();
   cusparseMatDescr_t desc;

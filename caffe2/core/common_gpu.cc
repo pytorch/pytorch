@@ -44,7 +44,7 @@ int NumCudaDevices() {
         LOG(ERROR) << "Found an unknown error - this may be due to an "
                       "incorrectly set up environment, e.g. changing env "
                       "variable CUDA_VISIBLE_DEVICES after program start. "
-                      "I will set the available devices to be zero.";
+                      "Setting the available devices to be zero.";
         count = 0;
         break;
       case cudaErrorMemoryAllocation:

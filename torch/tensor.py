@@ -43,8 +43,8 @@ class Tensor(torch._C._TensorBase):
                     self.storage_offset(),
                     tuple(self.size()),
                     self.stride(),
-                    self.q_scale().item(),
-                    self.q_zero_point().item(),
+                    self.q_scale(),
+                    self.q_zero_point(),
                     self.requires_grad,
                     OrderedDict())  # TODO: self.qscheme()
             return (torch._utils._rebuild_qtensor, args)

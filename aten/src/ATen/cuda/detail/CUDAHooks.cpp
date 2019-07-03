@@ -2,8 +2,8 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
-#include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
@@ -57,6 +57,10 @@ Generator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
+Device CUDAHooks::getDeviceFromPtr(void* data) const {
+  return at::cuda::getDeviceFromPtr(data);
+}
+
 bool CUDAHooks::hasCUDA() const {
   return at::cuda::is_available();
 }
@@ -84,10 +88,6 @@ int64_t CUDAHooks::current_device() const {
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
   return at::cuda::getPinnedMemoryAllocator();
-}
-
-void CUDAHooks::registerCUDATypes(Context* context) const {
-  register_cuda_types(context);
 }
 
 bool CUDAHooks::compiledWithCuDNN() const {
