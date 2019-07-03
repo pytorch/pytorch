@@ -113,11 +113,10 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   if (self.is_quantized() && src.is_quantized()) {
-    // TODO: uncomment after qscheme diff is landed
-    // TORCH_CHECK(self.qscheme() == src.qscheme(),
-    //             "Quantized Copy only works with same qscheme");
+    TORCH_CHECK(self.qscheme() == src.qscheme(),
+                "Quantized Copy only works with same qscheme");
     TORCH_CHECK(self.scalar_type() == src.scalar_type());
-    self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale().toDouble(), src.q_zero_point().toLong(), src.scalar_type()));
+    self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
   }
 
   auto builder = TensorIterator::Builder();

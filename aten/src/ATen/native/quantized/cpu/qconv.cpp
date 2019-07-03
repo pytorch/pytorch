@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -16,9 +15,9 @@ SmallVector<int64_t, 4> convOutputShape(
     int W, // input width
     int K, // output channels
     const std::vector<int64_t>& kernel,
-    const std::vector<int64_t>& stride,
-    const std::vector<int64_t>& padding,
-    const std::vector<int64_t>& dilation) {
+    const torch::List<int64_t>& stride,
+    const torch::List<int64_t>& padding,
+    const torch::List<int64_t>& dilation) {
   SmallVector<int64_t, 4> out_shape;
   out_shape.push_back(N);
 
@@ -69,9 +68,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       Tensor act,
       Tensor packed_weight,
       Tensor bias,
-      const std::vector<int64_t>& stride,
-      const std::vector<int64_t>& padding,
-      const std::vector<int64_t>& dilation,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
@@ -129,7 +128,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         conv_p,
         act_ptr,
         nullptr,
-        act.q_zero_point().toInt(),
+        act.q_zero_point(),
         row_offset_buf.data());
 
     fbgemm::DoNothing<> NoOpObj{};
@@ -138,8 +137,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     const auto* bias_ptr =
         reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
 
-    float act_scale = act.q_scale().toFloat();
-    int32_t act_zero_point = act.q_zero_point().toInt();
+    float act_scale = act.q_scale();
+    int32_t act_zero_point = act.q_zero_point();
 
     float weight_scale_float = pack_ptr.w_scale;
     int32_t weight_zero_point_int32 = pack_ptr.w_zp;
@@ -188,15 +187,15 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       Tensor /* activation */,
       Tensor /* packed_weight */,
       Tensor /* bias */,
-      const std::vector<int64_t>& /* stride */,
-      const std::vector<int64_t>& /* padding */,
-      const std::vector<int64_t>& /* dilation */,
-      const std::vector<int64_t>& /* output padding */,
+      torch::List<int64_t> /* stride */,
+      torch::List<int64_t> /* padding */,
+      torch::List<int64_t> /* dilation */,
+      torch::List<int64_t> /* output padding */,
       int64_t /* groups */,
       double /* output scale */,
       int64_t /* output_zero_point */) {
-    TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
+    TORCH_CHECK(false, "This PyTorch installation was not built "
+                       "with FBGEMM operators");
   }
 #endif // USE_FBGEMM
 };

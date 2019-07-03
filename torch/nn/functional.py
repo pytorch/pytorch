@@ -3091,23 +3091,29 @@ def _pad_circular(input, padding):
 
 
 @weak_script
-def multi_head_attention_forward(query,                  # type: Tensor
-                                 key,                    # type: Tensor
-                                 value,                  # type: Tensor
-                                 embed_dim_to_check,     # type: int
-                                 num_heads,              # type: int
-                                 in_proj_weight,         # type: Tensor
-                                 in_proj_bias,           # type: Tensor
-                                 bias_k,                 # type: Optional[Tensor]
-                                 bias_v,                 # type: Optional[Tensor]
-                                 add_zero_attn,          # type: bool
-                                 dropout_p,              # type: float
-                                 out_proj_weight,        # type: Tensor
-                                 out_proj_bias,          # type: Tensor
-                                 training=True,          # type: bool
-                                 key_padding_mask=None,  # type: Optional[Tensor]
-                                 need_weights=True,      # type: bool
-                                 attn_mask=None          # type: Optional[Tensor]
+def multi_head_attention_forward(query,                           # type: Tensor
+                                 key,                             # type: Tensor
+                                 value,                           # type: Tensor
+                                 embed_dim_to_check,              # type: int
+                                 num_heads,                       # type: int
+                                 in_proj_weight,                  # type: Tensor
+                                 in_proj_bias,                    # type: Tensor
+                                 bias_k,                          # type: Optional[Tensor]
+                                 bias_v,                          # type: Optional[Tensor]
+                                 add_zero_attn,                   # type: bool
+                                 dropout_p,                       # type: float
+                                 out_proj_weight,                 # type: Tensor
+                                 out_proj_bias,                   # type: Tensor
+                                 training=True,                   # type: bool
+                                 key_padding_mask=None,           # type: Optional[Tensor]
+                                 need_weights=True,               # type: bool
+                                 attn_mask=None,                  # type: Optional[Tensor]
+                                 use_separate_proj_weight=False,  # type: bool
+                                 q_proj_weight=None,              # type: Optional[Tensor]
+                                 k_proj_weight=None,              # type: Optional[Tensor]
+                                 v_proj_weight=None,              # type: Optional[Tensor]
+                                 static_k=None,                   # type: Optional[Tensor]
+                                 static_v=None                    # type: Optional[Tensor]
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -3124,9 +3130,16 @@ def multi_head_attention_forward(query,                  # type: Tensor
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention.
+            be ignored by the attention. This is an binary mask. When the value is True,
+            the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: mask that prevents attention to certain positions.
+        attn_mask: mask that prevents attention to certain positions. This is an additive mask
+            (i.e. the values will be added to the attention layer).
+        use_separate_proj_weight: the function accept the proj. weights for query, key, 
+            and value in differnt forms. If false, in_proj_weight will be used, which is 
+            a combination of q_proj_weight, k_proj_weight, v_proj_weight.
+        q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
+        static_k, static_v: static key and value used for attention operators.
 
 
     Shape:
@@ -3139,6 +3152,10 @@ def multi_head_attention_forward(query,                  # type: Tensor
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+        - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
+          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
+        - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
+          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
 
         Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
@@ -3159,73 +3176,104 @@ def multi_head_attention_forward(query,                  # type: Tensor
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    if qkv_same:
-        # self-attention
-        q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+    if use_separate_proj_weight is not True:
+        if qkv_same:
+            # self-attention
+            q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
-    elif kv_same:
-        # encoder-decoder attention
-        _b = in_proj_bias
-        _start = 0
-        _end = embed_dim
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        q = linear(query, _w, _b)
+        elif kv_same:
+            # encoder-decoder attention
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
+            _b = in_proj_bias
+            _start = 0
+            _end = embed_dim
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            q = linear(query, _w, _b)
 
-        if key is None:
-            assert value is None
-            k = None
-            v = None
+            if key is None:
+                assert value is None
+                k = None
+                v = None
+            else:
+
+                # This is inline in_proj function with in_proj_weight and in_proj_bias
+                _b = in_proj_bias
+                _start = embed_dim
+                _end = None
+                _w = in_proj_weight[_start:, :]
+                if _b is not None:
+                    _b = _b[_start:]
+                k, v = linear(key, _w, _b).chunk(2, dim=-1)
+
         else:
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
+            _b = in_proj_bias
+            _start = 0
+            _end = embed_dim
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            q = linear(query, _w, _b)
 
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
             _start = embed_dim
+            _end = embed_dim * 2
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            k = linear(key, _w, _b)
+
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
+            _b = in_proj_bias
+            _start = embed_dim * 2
             _end = None
             _w = in_proj_weight[_start:, :]
             if _b is not None:
                 _b = _b[_start:]
-            k, v = linear(key, _w, _b).chunk(2, dim=-1)
-
+            v = linear(value, _w, _b)
     else:
-        _b = in_proj_bias
-        _start = 0
-        _end = embed_dim
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        q = linear(query, _w, _b)
+        q_proj_weight_non_opt = torch.jit._unwrap_optional(q_proj_weight)
+        len1, len2 = q_proj_weight_non_opt.size()
+        assert len1 == embed_dim and len2 == query.size(-1)
 
-        _b = in_proj_bias
-        _start = embed_dim
-        _end = embed_dim * 2
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        k = linear(key, _w, _b)
+        k_proj_weight_non_opt = torch.jit._unwrap_optional(k_proj_weight)
+        len1, len2 = k_proj_weight_non_opt.size()
+        assert len1 == embed_dim and len2 == key.size(-1)
 
-        _b = in_proj_bias
-        _start = embed_dim * 2
-        _end = None
-        _w = in_proj_weight[_start:, :]
-        if _b is not None:
-            _b = _b[_start:]
-        v = linear(value, _w, _b)
-    q *= scaling
+        v_proj_weight_non_opt = torch.jit._unwrap_optional(v_proj_weight)
+        len1, len2 = v_proj_weight_non_opt.size()
+        assert len1 == embed_dim and len2 == value.size(-1)
+
+        if in_proj_bias is not None:
+            q = linear(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
+            k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim:(embed_dim * 2)])
+            v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2):])
+        else:
+            q = linear(query, q_proj_weight_non_opt, in_proj_bias)
+            k = linear(key, k_proj_weight_non_opt, in_proj_bias)
+            v = linear(value, v_proj_weight_non_opt, in_proj_bias)
+    q = q * scaling
 
     if bias_k is not None and bias_v is not None:
-        k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
-        v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
-        if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask,
-                                  torch.zeros((attn_mask.size(0), 1),
-                                              dtype=attn_mask.dtype,
-                                              device=attn_mask.device)], dim=1)
-        if key_padding_mask is not None:
-            key_padding_mask = torch.cat(
-                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                               dtype=key_padding_mask.dtype,
-                                               device=key_padding_mask.device)], dim=1)
+        if static_k is None and static_v is None:
+            k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+            v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+            if attn_mask is not None:
+                attn_mask = torch.cat([attn_mask,
+                                      torch.zeros((attn_mask.size(0), 1),
+                                                  dtype=attn_mask.dtype,
+                                                  device=attn_mask.device)], dim=1)
+            if key_padding_mask is not None:
+                key_padding_mask = torch.cat(
+                    [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
+                                                   dtype=key_padding_mask.dtype,
+                                                   device=key_padding_mask.device)], dim=1)
+        else:
+            assert static_k is None, "bias cannot be added to static key."
+            assert static_v is None, "bias cannot be added to static value."
     else:
         assert bias_k is None
         assert bias_v is None
@@ -3235,6 +3283,16 @@ def multi_head_attention_forward(query,                  # type: Tensor
         k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     if v is not None:
         v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+
+    if static_k is not None:
+        assert static_k.size(0) == bsz * num_heads 
+        assert static_k.size(2) == head_dim
+        k = static_k
+
+    if static_v is not None:
+        assert static_v.size(0) == bsz * num_heads 
+        assert static_v.size(2) == head_dim
+        v = static_v
 
     src_len = k.size(1)
 

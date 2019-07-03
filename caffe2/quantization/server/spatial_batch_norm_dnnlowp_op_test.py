@@ -25,6 +25,7 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
+        fuse_relu=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_spatial_bn_int(
@@ -36,6 +37,7 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
         order,
         in_quantized,
         out_quantized,
+        fuse_relu,
         gc,
         dc,
     ):
@@ -61,9 +63,16 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
 
         op_engine_list = [
             ("SpatialBN", ""),
-            ("SpatialBN", "DNNLOWP"),
-            ("Int8SpatialBN", "DNNLOWP"),
         ]
+        if fuse_relu:
+            op_engine_list += [
+                ("Int8SpatialBNRelu", "DNNLOWP"),
+            ]
+        else:
+            op_engine_list += [
+                ("SpatialBN", "DNNLOWP"),
+                ("Int8SpatialBN", "DNNLOWP"),
+            ]
 
         for op_type, engine in op_engine_list:
             net = core.Net("test_net")
@@ -90,6 +99,8 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
             net.Proto().op.extend([bn])
             if "DNNLOWP" in engine:
                 dnnlowp_utils.add_quantization_param_args(bn, outputs[0][0])
+            if fuse_relu and "DNNLOWP" not in engine:
+                net.Relu(["Y"], "Y")
 
             if do_dequantize:
                 dequantize = core.CreateOperator(
