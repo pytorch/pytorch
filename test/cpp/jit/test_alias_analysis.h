@@ -746,7 +746,7 @@ graph():
   {
     // test "conservative" analysis writes to the inside of a container.
     auto ops = torch::RegisterOperators(
-        "custom::conservative", [](std::vector<at::Tensor> in) { return in; });
+        "custom::conservative", [](torch::List<at::Tensor> in) { return in; });
 
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
@@ -776,7 +776,7 @@ graph():
     auto ops = torch::RegisterOperators().op(
         "uses::list",
         torch::RegisterOperators::options()
-            .catchAllKernel([](std::vector<at::Tensor> in) {
+            .catchAllKernel([](torch::List<at::Tensor> in) {
               return torch::rand({2, 3});
             })
             .aliasAnalysis(AliasAnalysisKind::PURE));
@@ -818,7 +818,7 @@ graph():
     auto ops = torch::RegisterOperators().op(
         "uses::list",
         torch::RegisterOperators::options()
-            .catchAllKernel([](std::vector<at::Tensor> in) {
+            .catchAllKernel([](torch::List<at::Tensor> in) {
               return torch::rand({2, 3});
             })
             .aliasAnalysis(AliasAnalysisKind::PURE));
