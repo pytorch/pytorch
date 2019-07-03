@@ -12141,8 +12141,6 @@ a")
                                                                   None, None, None, 0.0,
                                                                   model.mod.out_proj.weight,
                                                                   model.mod.out_proj.bias)[0]
-        # print(jit_out/py_out-1)
-        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
