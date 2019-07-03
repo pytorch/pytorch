@@ -509,24 +509,29 @@ class TestAvgPool(TestCase):
         joined_x = torch.cat(splited_x)
         return joined_x.view(1, joined_x.numel())
 
+    def _avg_pool2d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool2d(x, kernel_size) / size
+
+    def _avg_pool3d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool3d(x, kernel_size) / size
+
     def test_doubletensor_avg_pool2d(self):
-        def avg_pool2d(x, kernel_size):
-            size = reduce((lambda x, y: x * y), kernel_size)
-            return self._sum_pool2d(x, kernel_size) / size
         n, m = 5, 8
         input = torch.rand(1, 1, n, m)
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 acctual = torch.nn.functional.avg_pool2d(input[0], (i, j))
                 acctual = acctual.view(1, acctual.numel())
-                expected = avg_pool2d(input, (i, j))
+                expected = self._avg_pool2d(input, (i, j))
                 self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
 
     def test_avg_pool2d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
                                lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
 
-    def test_doubletensor_sum_pool2d(self):
+    def test_doubletensor_avg_pool2d_with_divisor(self):
         n, m = 3, 3
         input = torch.rand(1, 1, n, m)
         for i in range(1, n + 1):
@@ -538,9 +543,6 @@ class TestAvgPool(TestCase):
                     self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
 
     def test_doubletensor_avg_pool3d(self):
-        def avg_pool3d(x, kernel_size):
-            size = reduce((lambda x, y: x * y), kernel_size)
-            return self._sum_pool3d(x, kernel_size) / size
         h, w, d = 5, 6, 7
         input = torch.rand(h, w, d)
         for i in range(1, h + 1):
@@ -548,10 +550,10 @@ class TestAvgPool(TestCase):
                 for k in range(1, d + 1):
                     acctual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
                     acctual = acctual.view(1, acctual.numel())
-                    expected = avg_pool3d(input, (i, j, k))
+                    expected = self._avg_pool3d(input, (i, j, k))
                     self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
 
-    def test_doubletensor_sum_pool3d(self):
+    def test_doubletensor_avg_pool3d_with_divisor(self):
         h, w, d = 6, 5, 7
         input = torch.rand(h, w, d)
         for i in range(1, h + 1):
