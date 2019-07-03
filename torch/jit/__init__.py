@@ -1000,6 +1000,8 @@ def _disable_emit_hooks():
 def _create_method_from_fn(module, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
+    if not inspect.ismethod(fn):
+        return None
     stub = script_method(fn, _jit_internal.createResolutionCallbackFromClosure(fn))
     with _disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
