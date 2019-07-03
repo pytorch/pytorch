@@ -2293,7 +2293,7 @@ RegisterOperators reg2({
           }
           push(stack, min_element);
           return 0;
-        }),
+        }, aliasAnalysisFromSchema()),
 
     // Pass in two ops for handling int and float separately as % in C++ only
     // works for int The modulus calculation is different between C++ and Python
@@ -2664,9 +2664,9 @@ RegisterOperators reg2({
 
 #undef DEFINE_DIVMOD_MIXED_OP
 
-    Operator("aten::hash(str t) -> int", hashValue<std::string>),
-    Operator("aten::hash(int t) -> int", hashValue<int>),
-    Operator("aten::hash(float t) -> int", hashValue<double>),
+    Operator("aten::hash(str t) -> int", hashValue<std::string>, aliasAnalysisFromSchema()),
+    Operator("aten::hash(int t) -> int", hashValue<int>, aliasAnalysisFromSchema()),
+    Operator("aten::hash(float t) -> int", hashValue<double>, aliasAnalysisFromSchema()),
 });
 
 bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {

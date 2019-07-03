@@ -1163,6 +1163,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::SetAttr,
       prim::profile,
       prim::Print,
+      prim::CallFunction,
+      prim::CallMethod,
       aten::wait,
   };
 
