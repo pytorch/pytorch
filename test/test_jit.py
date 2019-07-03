@@ -10389,7 +10389,7 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "only supported on List, Dict, Tensor, Tuple, and str"):
+        with self.assertRaisesRegex(RuntimeError, "'int' object is not subscriptable"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8

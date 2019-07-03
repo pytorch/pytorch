@@ -2865,6 +2865,8 @@ struct to_ir {
 
       if (val->type()->cast<TupleType>()) {
         return emitTupleIndex(range, sv->asValue(val_range, method), idx);
+      } else if (val->type()->isSubtypeOf(TensorType::get())) {
+        return emitMultidimSlicing(range, val, subscript_exprs);
       } else {
         return sv->getitem(range, method, idx);
       }
