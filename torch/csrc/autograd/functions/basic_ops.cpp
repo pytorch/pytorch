@@ -19,7 +19,7 @@ auto DelayedError::apply(variable_list&& inputs) -> variable_list {
   variable_list outputs;
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {
-    outputs.emplace_back(var.defined() ? var : Variable());
+    outputs.emplace_back(var.defined() ? var.detach() : Variable());
   }
   return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
     return std::make_shared<Error>(msg, std::move(next_edges));

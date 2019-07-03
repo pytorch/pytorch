@@ -84,7 +84,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
         msg += "')'";
         throw std::runtime_error(msg);
       }
-      variable_results[i] = ((THPVariable*)obj)->cdata;
+      variable_results[i] = ((THPVariable*)obj)->cdata.detach();
     }
   }
 
