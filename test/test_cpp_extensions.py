@@ -622,6 +622,22 @@ class TestCppExtension(common.TestCase):
         finally:
             torch.set_default_dtype(initial_default)
 
+    def test_compilation_error_formatting(self):
+        # Test that the missing-semicolon error is being formatted 
+        # correctly. The pattern will match lines like this:
+        #
+        # int main() { return 0 }
+        #                      ^
+        #                      ;
+        # 
+        # Save yourself some effort and use regex101.com or the like
+        # if you need to update this.
+        pattern = r'int main\(\) { return 0 }\n\s+\^\s+;\n'
+        with self.assertRaisesRegex(RuntimeError, pattern):
+            torch.utils.cpp_extension.load_inline(
+                name="test_compilation_error_formatting",
+                cpp_sources="int main() { return 0 }") 
+
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod
