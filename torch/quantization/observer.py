@@ -54,7 +54,7 @@ class WeightObserver(Observer):
 
     def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine):
         super(WeightObserver, self).__init__(dtype, qscheme)
-        self.stats = torch.tensor([-6, 6], dtype=torch.float)
+        self.stats = None
 
     def forward(self, x):
         self.stats = torch.tensor([torch.min(x), torch.max(x)], dtype=torch.float)

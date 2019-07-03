@@ -91,6 +91,8 @@ class QuantWrapper(nn.Module):
 
 def add_quant_dequant(module):
     r"""Wrap the leaf child module in QuantWrapper if it has a valid qconfig
+    Note that this function will modify the children of module inplace and it
+    can return a new module which wraps the input module as well.
 
     Args:
         module: input module with qconfig attributes for all the leaf modules
@@ -105,6 +107,8 @@ def add_quant_dequant(module):
 
 def prepare(module, qconfig_dict):
     r"""Prepares the module for calibration or training given a qconfig_dict.
+    Note that the module will be modified inplace but in case the input module
+    is a leaf module, a wrapped module will be returned.
 
     Args:
         mod: input module
