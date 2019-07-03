@@ -160,9 +160,6 @@ class CAFFE2_API Tensor {
   size_t use_count() const noexcept {
     return impl_.use_count();
   }
-  size_t weak_use_count() const noexcept {
-    return impl_.weak_use_count();
-  }
 
   std::string toString() const;
 

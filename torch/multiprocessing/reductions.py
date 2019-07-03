@@ -17,25 +17,6 @@ except ImportError:
     pass
 
 
-class StorageWeakRef(object):
-    r"""A weak reference to a Storage.
-
-    The cdata member is a Python number containing the integer representation of
-    the Storage pointer."""
-
-    def __init__(self, storage):
-        self.cdata = storage._weak_ref()
-        # Save a direct reference to _free_weak_ref because the `torch` module
-        # might be cleared during Python shutdown before this module is cleared.
-        self._free_weak_ref = torch.Storage._free_weak_ref
-
-    def expired(self):
-        return torch.Storage._expired(self.cdata)
-
-    def __del__(self):
-        self._free_weak_ref(self.cdata)
-
-
 class SharedCache(dict):
     """dictionary from multiprocessing handles to StorageWeakRef"""
 
@@ -108,7 +89,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 ref_counter_offset,
                 event_handle,
                 event_sync_required)
-            shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
+            shared_cache[(storage_handle, storage_offset_bytes)] = storage
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
@@ -231,7 +212,7 @@ def reduce_tensor(tensor):
          event_handle,
          event_sync_required) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
-        shared_cache[handle] = StorageWeakRef(storage)
+        shared_cache[handle] = storage
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (rebuild_cuda_tensor,
@@ -287,7 +268,7 @@ def rebuild_storage_fd(cls, df, size):
         if storage is not None:
             return storage
         storage = cls._new_shared_fd(fd, size)
-        shared_cache[fd_id(fd)] = StorageWeakRef(storage)
+        shared_cache[fd_id(fd)] = storage
         return storage
     finally:
         os.close(fd)
@@ -298,7 +279,7 @@ def rebuild_storage_filename(cls, manager, handle, size):
     if storage is not None:
         return storage._shared_decref()
     storage = cls._new_shared_filename(manager, handle, size)
-    shared_cache[handle] = StorageWeakRef(storage)
+    shared_cache[handle] = storage
     return storage._shared_decref()
 
 
@@ -329,7 +310,7 @@ def reduce_storage(storage):
         metadata = (df, size)
         rebuild = rebuild_storage_fd
 
-    shared_cache[cache_key] = StorageWeakRef(storage)
+    shared_cache[cache_key] = storage
     return (rebuild, (type(storage),) + metadata)
 
 

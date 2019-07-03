@@ -7,11 +7,6 @@
 
 namespace c10 {
 class intrusive_ptr_target;
-namespace raw {
-  namespace weak_intrusive_ptr {
-    inline void incref(intrusive_ptr_target* self);
-  }
-}
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
  * performance because it does the refcounting intrusively
@@ -31,43 +26,25 @@ namespace raw {
 // was dynamically allocated (e.g., via make_intrusive).
 //
 // Thus, whenever you transmute a T* into a intrusive_ptr<T>, we check
-// and make sure that the refcount isn't zero (or, a more subtle
-// test for weak_intrusive_ptr<T>, for which the refcount may validly
-// be zero, but the weak refcount better not be zero), because that
+// and make sure that the refcount isn't zero, because that
 // tells us if the object was allocated by us.  If it wasn't, no
 // intrusive_ptr for you!
 
 class C10_API intrusive_ptr_target {
-  // Note [Weak references for intrusive refcounting]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Here's the scheme:
-  //
-  //  - refcount == number of strong references to the object
-  //    weakcount == number of weak references to the object,
-  //      plus one more if refcount > 0
-  //    An invariant: refcount > 0  =>  weakcount > 0
-  //
-  //  - THStorage stays live as long as there are any strong
-  //    or weak pointers to it (weakcount > 0, since strong
-  //    references count as a +1 to weakcount)
-  //
-  //  - finalizers are called and data_ptr is deallocated when refcount == 0
-  //
-  //  - Once refcount == 0, it can never again be > 0 (the transition
-  //    from > 0 to == 0 is monotonic)
-  //
-  //  - When you access THStorage via a weak pointer, you must
-  //    atomically increment the use count, if it is greater than 0.
-  //    If it is not, you must report that the storage is dead.
-  //
   mutable std::atomic<size_t> refcount_;
-  mutable std::atomic<size_t> weakcount_;
+  static std::atomic_int64_t unique_id_counter_;
+  int64_t unique_id_;
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;
-  template <typename T, typename NullType>
-  friend class weak_intrusive_ptr;
-  friend inline void raw::weak_intrusive_ptr::incref(intrusive_ptr_target* self);
+
+ public:
+  int64_t unique_id() {
+    if (unique_id_ == 0) {
+      unique_id_ = ++unique_id_counter_;
+    }
+    return unique_id_;
+  }
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -91,9 +68,6 @@ class C10_API intrusive_ptr_target {
     AT_ASSERTM(
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
-    AT_ASSERTM(
-        weakcount_.load() == 0,
-        "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(pop)
 #else
@@ -101,7 +75,7 @@ class C10_API intrusive_ptr_target {
 #endif
   }
 
-  constexpr intrusive_ptr_target() noexcept : refcount_(0), weakcount_(0) {}
+  constexpr intrusive_ptr_target() noexcept : refcount_(0), unique_id_(0) {}
 
   // intrusive_ptr_target supports copy and move: but refcount and weakcount don't
   // participate (since they are intrinsic properties of the memory location)
@@ -146,9 +120,6 @@ TTarget* assign_ptr_(TTarget* rhs) {
 }
 } // namespace detail
 
-template <class TTarget, class NullType>
-class weak_intrusive_ptr;
-
 template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
@@ -175,7 +146,6 @@ class intrusive_ptr final {
 
   template <class TTarget2, class NullType2>
   friend class intrusive_ptr;
-  friend class weak_intrusive_ptr<TTarget, NullType>;
 
   void retain_() {
     if (target_ != NullType::singleton()) {
@@ -188,24 +158,17 @@ class intrusive_ptr final {
 
   void reset_() noexcept {
     if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
-      // See comment above about weakcount. As long as refcount>0,
-      // weakcount is one larger than the actual number of weak references.
-      // So we need to decrement it here.
-      auto weak_count = --target_->weakcount_;
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
       const_cast<c10::guts::remove_const_t<TTarget>*>(target_)->release_resources();
-      if (weak_count == 0) {
-        delete target_;
-      }
+      delete target_;
     }
     target_ = NullType::singleton();
   }
 
   // This constructor will not increase the ref counter for you.
   // This is not public because we shouldn't make intrusive_ptr out of raw
-  // pointers except from inside the make_intrusive() and
-  // weak_intrusive_ptr::lock() implementations
+  // pointers except from inside the make_intrusive() implementation
   explicit intrusive_ptr(TTarget* target) noexcept : target_(target) {}
 
  public:
@@ -311,13 +274,6 @@ class intrusive_ptr final {
     return target_->refcount_.load();
   }
 
-  size_t weak_use_count() const noexcept {
-    if (target_ == NullType::singleton()) {
-      return 0;
-    }
-    return target_->weakcount_.load();
-  }
-
   bool unique() const noexcept {
     return use_count() == 1;
   }
@@ -356,7 +312,6 @@ class intrusive_ptr final {
     // and because we allow raising these values from 0, which retain_()
     // has an assertion against.
     ++result.target_->refcount_;
-    ++result.target_->weakcount_;
 
     return result;
   }
@@ -414,263 +369,6 @@ inline bool operator!=(
   return !operator==(lhs, rhs);
 }
 
-template <
-    typename TTarget,
-    class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class weak_intrusive_ptr final {
- private:
-  static_assert(
-      std::is_base_of<intrusive_ptr_target, TTarget>::value,
-      "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
-#ifndef _WIN32
-  // This static_assert triggers on MSVC
-  //  error C2131: expression did not evaluate to a constant
-  static_assert(
-      NullType::singleton() == NullType::singleton(),
-      "NullType must have a constexpr singleton() method");
-#endif
-  static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
-      "NullType::singleton() must return a element_type* pointer");
-
-  TTarget* target_;
-
-  template <class TTarget2, class NullType2>
-  friend class weak_intrusive_ptr;
-
-  void retain_() {
-    if (target_ != NullType::singleton()) {
-      size_t new_weakcount = ++target_->weakcount_;
-      AT_ASSERTM(
-          new_weakcount != 1,
-          "weak_intrusive_ptr: Cannot increase weakcount after it reached zero.");
-    }
-  }
-
-  void reset_() noexcept {
-    if (target_ != NullType::singleton() && --target_->weakcount_ == 0) {
-      delete target_;
-    }
-    target_ = NullType::singleton();
-  }
-
-  constexpr explicit weak_intrusive_ptr(TTarget* target) : target_(target) {}
-
- public:
-  using element_type = TTarget;
-
-  explicit weak_intrusive_ptr(const intrusive_ptr<TTarget, NullType>& ptr)
-      : weak_intrusive_ptr(ptr.get()) {
-    retain_();
-  }
-
-  weak_intrusive_ptr(weak_intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
-    rhs.target_ = NullType::singleton();
-  }
-
-  template <class From, class FromNullType>
-  /* implicit */ weak_intrusive_ptr(
-      weak_intrusive_ptr<From, FromNullType>&& rhs) noexcept
-      : target_(detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
-    static_assert(
-        std::is_convertible<From*, TTarget*>::value,
-        "Type mismatch. weak_intrusive_ptr move constructor got pointer of wrong type.");
-    rhs.target_ = FromNullType::singleton();
-  }
-
-  weak_intrusive_ptr(const weak_intrusive_ptr& rhs)
-      : target_(rhs.target_) {
-    retain_();
-  }
-
-  template <class From, class FromNullType>
-  /* implicit */ weak_intrusive_ptr(
-      const weak_intrusive_ptr<From, FromNullType>& rhs)
-      : target_(detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
-    static_assert(
-        std::is_convertible<From*, TTarget*>::value,
-        "Type mismatch. weak_intrusive_ptr copy constructor got pointer of wrong type.");
-    retain_();
-  }
-
-  ~weak_intrusive_ptr() noexcept {
-    reset_();
-  }
-
-  weak_intrusive_ptr& operator=(weak_intrusive_ptr&& rhs) & noexcept {
-    return operator=<TTarget, NullType>(std::move(rhs));
-  }
-
-  template <class From, class FromNullType>
-      weak_intrusive_ptr& operator=(
-          weak_intrusive_ptr<From, FromNullType>&& rhs) &
-      noexcept {
-    static_assert(
-        std::is_convertible<From*, TTarget*>::value,
-        "Type mismatch. weak_intrusive_ptr move assignment got pointer of wrong type.");
-    weak_intrusive_ptr tmp = std::move(rhs);
-    swap(tmp);
-    return *this;
-  }
-
-  weak_intrusive_ptr& operator=(const weak_intrusive_ptr& rhs) & noexcept {
-    return operator=<TTarget, NullType>(rhs);
-  }
-
-  template <class From, class FromNullType>
-      weak_intrusive_ptr& operator=(
-          const weak_intrusive_ptr<From, NullType>& rhs) & {
-    static_assert(
-        std::is_convertible<From*, TTarget*>::value,
-        "Type mismatch. weak_intrusive_ptr copy assignment got pointer of wrong type.");
-    weak_intrusive_ptr tmp = rhs;
-    swap(tmp);
-    return *this;
-  }
-
-  void reset() noexcept {
-    reset_();
-  }
-
-  void swap(weak_intrusive_ptr& rhs) noexcept {
-    TTarget* tmp = target_;
-    target_ = rhs.target_;
-    rhs.target_ = tmp;
-  }
-
-  // NB: This should ONLY be used by the std::hash implementation
-  // for weak_intrusive_ptr.  Another way you could do this is
-  // friend std::hash<weak_intrusive_ptr>, but this triggers two
-  // bugs:
-  //
-  //  (1) It triggers an nvcc bug, where std::hash in a friend class
-  //      declaration gets preprocessed into hash, which then cannot
-  //      actually be found.  The error in this case looks like:
-  //
-  //        error: no template named 'hash'; did you mean 'std::hash'?
-  //
-  //  (2) On OS X, std::hash is declared as a struct, not a class.
-  //      This twings:
-  //
-  //        error: class 'hash' was previously declared as a struct
-  //        [-Werror,-Wmismatched-tags]
-  //
-  // Both of these are work-aroundable, but on the whole, I decided
-  // it would be simpler and easier to make work if we just expose
-  // an unsafe getter for target_
-  //
-  TTarget* _unsafe_get_target() const noexcept {
-    return target_;
-  }
-
-  size_t use_count() const noexcept {
-    if (target_ == NullType::singleton()) {
-      return 0;
-    }
-    return target_->refcount_.load(); // refcount, not weakcount!
-  }
-
-  size_t weak_use_count() const noexcept {
-    if (target_ == NullType::singleton()) {
-      return 0;
-    }
-    return target_->weakcount_.load();
-  }
-
-  bool expired() const noexcept {
-    return use_count() == 0;
-  }
-
-  intrusive_ptr<TTarget, NullType> lock() const noexcept {
-    auto refcount = target_->refcount_.load();
-    do {
-      if (refcount == 0) {
-        // Object already destructed, no strong references left anymore.
-        // Return nullptr.
-        return intrusive_ptr<TTarget, NullType>(NullType::singleton());
-      }
-    } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
-    return intrusive_ptr<TTarget, NullType>(target_);
-  }
-
-  /**
-   * Returns an owning (but still only weakly referenced) pointer to the
-   * underlying object and makes the weak_intrusive_ptr instance invalid.
-   * That means the weakcount is not decreased.
-   * You *must* put the returned pointer back into a weak_intrusive_ptr using
-   * weak_intrusive_ptr::reclaim(ptr) to properly destruct it.
-   * This is helpful for C APIs.
-   */
-  TTarget* release() noexcept {
-    TTarget* result = target_;
-    target_ = NullType::singleton();
-    return result;
-  }
-
-  /**
-   * Takes an owning (but must be weakly referenced) pointer to TTarget* and
-   * creates a weak_intrusive_ptr that takes over ownership.
-   * Thas means the weakcount is not increased.
-   * This is the counter-part to weak_intrusive_ptr::release() and the pointer
-   * passed in *must* have been created using weak_intrusive_ptr::release().
-   */
-  static weak_intrusive_ptr reclaim(TTarget* owning_weak_ptr) {
-    // See Note [Stack allocated intrusive_ptr_target safety]
-    // if refcount > 0, weakcount must be >1 for weak references to exist.
-    // see weak counting explanation at top of this file.
-    // if refcount == 0, weakcount only must be >0.
-    AT_ASSERTM(
-        owning_weak_ptr == NullType::singleton() ||
-        owning_weak_ptr->weakcount_.load() > 1 ||
-            (owning_weak_ptr->refcount_.load() == 0 &&
-             owning_weak_ptr->weakcount_.load() > 0),
-        "weak_intrusive_ptr: Can only weak_intrusive_ptr::reclaim() owning pointers that were created using weak_intrusive_ptr::release().");
-    return weak_intrusive_ptr(owning_weak_ptr);
-  }
-
-  template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-  friend bool operator<(
-      const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-      const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept;
-  template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-  friend bool operator==(
-      const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-      const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept;
-};
-
-template <class TTarget, class NullType>
-inline void swap(
-    weak_intrusive_ptr<TTarget, NullType>& lhs,
-    weak_intrusive_ptr<TTarget, NullType>& rhs) noexcept {
-  lhs.swap(rhs);
-}
-
-// To allow weak_intrusive_ptr inside std::map or std::set, we need operator<
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator<(
-    const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-    const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs.target_ < rhs.target_;
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator==(
-    const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-    const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs.target_ == rhs.target_;
-}
-
-template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
-    const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
-    const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
-}
-
-// Alias for documentary purposes, to more easily distinguish
-// weak raw intrusive pointers from intrusive pointers.
-using weak_intrusive_ptr_target = intrusive_ptr_target;
-
 // This namespace provides some methods for working with
 // raw pointers that subclass intrusive_ptr_target.  They are not provided
 // as methods on intrusive_ptr_target, because ideally you would not need these
@@ -681,8 +379,7 @@ using weak_intrusive_ptr_target = intrusive_ptr_target;
 // An important usage note: some functions are only valid if you have a
 // strong raw pointer to the object, while others are only valid if you
 // have a weak raw pointer to the object.  ONLY call intrusive_ptr namespace
-// functions on strong pointers, and weak_intrusive_ptr namespace functions
-// on weak pointers.  If you mix it up, you may get an assert failure.
+// functions on strong pointers. If you mix it up, you may get an assert failure.
 namespace raw {
 
 namespace intrusive_ptr {
@@ -705,15 +402,6 @@ namespace intrusive_ptr {
     // If you want more safety, used the actual c10::intrusive_ptr class
   }
 
-  template <typename T>
-  inline T* make_weak(T* self) {
-    // NB: 'this' is a strong pointer, but we return a weak pointer
-    auto ptr = c10::intrusive_ptr<T>::reclaim(self);
-    c10::weak_intrusive_ptr<T> wptr(ptr);
-    ptr.release();
-    return wptr.release();
-  }
-
   inline uint32_t use_count(intrusive_ptr_target* self) {
     auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
     auto r = ptr.use_count();
@@ -723,54 +411,17 @@ namespace intrusive_ptr {
 
 } // namespace intrusive_ptr_target
 
-namespace weak_intrusive_ptr {
-
-  inline void incref(weak_intrusive_ptr_target* self) {
-    ++self->weakcount_;
-  }
-
-  inline void decref(weak_intrusive_ptr_target* self) {
-    // Let it die
-    c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
-    // NB: You still "have" the 'self' pointer, but it's now invalid.
-    // If you want more safety, used the actual c10::weak_intrusive_ptr class
-  }
-
-  template <typename T>
-  inline T* lock(T* self) {
-    auto wptr = c10::weak_intrusive_ptr<T>::reclaim(self);
-    auto ptr = wptr.lock();
-    wptr.release();
-    return ptr.release();
-  }
-
-  // This gives the STRONG refcount of a WEAK pointer
-  inline uint32_t use_count(weak_intrusive_ptr_target* self) {
-    auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
-    auto r = wptr.use_count();
-    wptr.release();
-    return r;
-  }
-
-} // namespace weak_intrusive_ptr_target
-
 } // namespace raw
 
 } // namespace c10
 
 namespace std {
-// To allow intrusive_ptr and weak_intrusive_ptr inside std::unordered_map or
+// To allow intrusive_ptr inside std::unordered_map or
 // std::unordered_set, we need std::hash
 template <class TTarget, class NullType>
 struct hash<c10::intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x.get());
-  }
-};
-template <class TTarget, class NullType>
-struct hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
-  size_t operator()(const c10::weak_intrusive_ptr<TTarget, NullType>& x) const {
-    return std::hash<TTarget*>()(x._unsafe_get_target());
   }
 };
 } // namespace std

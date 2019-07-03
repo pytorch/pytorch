@@ -64,24 +64,9 @@ struct TORCH_API TracingState
   Value* getOutput(const IValue& var);
   bool hasValue(const IValue& var) const;
 
-private:
-  using WeakIValue = at::WeakIValue;
-
-  struct WeakIValueHasher {
-    size_t operator()(const WeakIValue& t) const {
-      return t.hash();
-    }
-  };
-
-  struct WeakIValueEq {
-    bool operator()(const WeakIValue& t1, const WeakIValue& t2) const {
-      return t1.isSameIdentity(t2);
-    }
-  };
-
-  using Frame = std::unordered_map<WeakIValue, Value*, WeakIValueHasher, WeakIValueEq>;
+ private:
+  using Frame = std::unordered_map<int64_t, Value*>;
   std::vector<Frame> env_stack;
-
 };
 
 // This is meant to be used as a thread local place, where we can store extra

@@ -406,6 +406,11 @@ struct CAFFE2_API IValue final {
     return payload.as_intrusive_ptr;
   }
 
+  int64_t unique_id() const {
+    TORCH_INTERNAL_ASSERT(isPtrType(), "Can only get a unique ID from a ptr type");
+    return payload.as_intrusive_ptr->unique_id();
+  }
+
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more
@@ -447,103 +452,7 @@ private:
   Payload payload;
   Tag tag;
   bool is_intrusive_ptr;
-  friend struct WeakIValue;
-};
 
-struct CAFFE2_API WeakIValue final {
-  WeakIValue()
-  : payload{0}
-  , tag(IValue::Tag::None)
-  , is_intrusive_ptr(false) {}
-
-  WeakIValue(const WeakIValue& rhs)
-      : payload(rhs.payload),
-        tag(rhs.tag),
-        is_intrusive_ptr(rhs.is_intrusive_ptr) {
-    if (is_intrusive_ptr) {
-      c10::raw::weak_intrusive_ptr::incref(payload.as_intrusive_ptr);
-    }
-  }
-  WeakIValue(const IValue& rhs)
-      : payload(rhs.payload),
-        tag(rhs.tag),
-        is_intrusive_ptr(rhs.is_intrusive_ptr) {
-    if (is_intrusive_ptr) {
-      c10::raw::weak_intrusive_ptr::incref(payload.as_intrusive_ptr);
-    }
-  }
-  WeakIValue(WeakIValue&& rhs) noexcept : WeakIValue() {
-    swap(rhs);
-  }
-  ~WeakIValue() {
-    if (is_intrusive_ptr) {
-      c10::raw::weak_intrusive_ptr::decref(payload.as_intrusive_ptr);
-    }
-  }
-  WeakIValue & operator=(WeakIValue && rhs) & noexcept {
-    WeakIValue(std::move(rhs)).swap(*this); // this also sets rhs to None
-    return *this;
-  }
-  WeakIValue & operator=(WeakIValue const & rhs) & {
-    WeakIValue(rhs).swap(*this);
-    return *this;
-  }
-  void swap(WeakIValue & rhs) noexcept {
-    std::swap(payload, rhs.payload);
-    std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
-    std::swap(tag, rhs.tag);
-  }
-
-  bool isSameIdentity(const WeakIValue& rhs) const {
-    return payload.as_int == rhs.payload.as_int && tag == rhs.tag &&
-        is_intrusive_ptr == rhs.is_intrusive_ptr;
-  }
-
-  IValue lock() const {
-    if (!is_intrusive_ptr) {
-      return IValue(payload, tag, false);
-    }
-    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
-        payload.as_intrusive_ptr);
-    IValue::Payload pl;
-    pl.as_intrusive_ptr = temp.lock().release();
-    temp.release();
-    if (!pl.as_intrusive_ptr) {
-      return IValue();
-    } else {
-      return IValue(pl, tag, true);
-    }
-  }
-
-  size_t use_count() const noexcept {
-    if (!is_intrusive_ptr) {
-      return 1;
-    }
-    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
-        payload.as_intrusive_ptr);
-    size_t result = temp.use_count();
-    temp.release();
-    return result;
-  }
-
-  size_t weak_use_count() const noexcept {
-    if (!is_intrusive_ptr) {
-      return 1;
-    }
-    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
-        payload.as_intrusive_ptr);
-    size_t result = temp.weak_use_count();
-    temp.release();
-    return result;
-  }
-  size_t hash() const {
-    return payload.as_int;
-  }
-
-private:
-  IValue::Payload payload;
-  IValue::Tag tag;
-  bool is_intrusive_ptr;
 };
 
 }

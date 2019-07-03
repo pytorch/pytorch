@@ -447,55 +447,6 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 }
 #endif
 
-// Returns an object that holds a "weak" pointer to the THStorage.  This
-// pointer keeps the THStorage struct live, but does not retain the data
-// pointer.
-//
-// NB: This does NOT preserve object identity when you call it multiple times
-static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *args) {
-  HANDLE_TH_ERRORS
-  THStorage* storage = self->cdata;
-  return PyLong_FromVoidPtr(c10::raw::intrusive_ptr::make_weak(storage));
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THPStorage_(newWithWeakPtr)(PyObject *_unused, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg),
-      "_new_with_weak_ptr(): arg must be an 'int'");
-  THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  if (auto* storage = c10::raw::weak_intrusive_ptr::lock(weak_storage)) {
-    return THPStorage_(New)(storage);
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THPStorage_(freeWeakRef)(PyObject *_unused, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  if (arg == Py_None) {
-    Py_RETURN_NONE;
-  }
-  THPUtils_assert(THPUtils_checkLong(arg),
-      "_free_weak_ref(): arg must be an 'int'");
-  THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  c10::raw::weak_intrusive_ptr::decref(weak_storage);
-
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THPStorage_(expired)(PyObject *_unused, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "_expired(): arg must be an 'int'");
-  THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  return PyBool_FromLong(c10::raw::weak_intrusive_ptr::use_count(weak_storage) == 0);
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject * THPStorage_(sharedFd)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
@@ -525,7 +476,6 @@ PyObject * THPStorage_(isShared)(THPStorage *self)
 }
 
 static PyMethodDef THPStorage_(sharingMethods)[] = {
-  {"_new_with_weak_ptr", (PyCFunction)THPStorage_(newWithWeakPtr), METH_O | METH_CLASS, nullptr},
 #ifdef THC_GENERIC_FILE
   {"_share_cuda_", (PyCFunction)THPStorage_(shareCuda), METH_NOARGS, nullptr},
   {"_new_shared_cuda", (PyCFunction)THPStorage_(newSharedCuda), METH_VARARGS | METH_STATIC, nullptr},
@@ -538,9 +488,6 @@ static PyMethodDef THPStorage_(sharingMethods)[] = {
   {"_new_shared_filename", (PyCFunction)THPStorage_(newSharedFilename), METH_VARARGS | METH_STATIC, nullptr},
   {"_new_using_filename", (PyCFunction)THPStorage_(pyNewFilenameStorage), METH_VARARGS | METH_STATIC, nullptr},
 #endif
-  {"_weak_ref", (PyCFunction)THPStorage_(weakRef), METH_NOARGS, nullptr},
-  {"_free_weak_ref", (PyCFunction)THPStorage_(freeWeakRef), METH_O | METH_STATIC, nullptr},
-  {"_expired", (PyCFunction)THPStorage_(expired), METH_O | METH_STATIC, nullptr},
   {"_shared_decref", (PyCFunction)THPStorage_(sharedDecref), METH_NOARGS, nullptr},
   {"_shared_incref", (PyCFunction)THPStorage_(sharedIncref), METH_NOARGS, nullptr},
   {"_get_shared_fd", (PyCFunction)THPStorage_(sharedFd), METH_NOARGS, nullptr},
