@@ -187,7 +187,9 @@ def test_distributed(executable, test_module, test_directory, options):
         if backend == 'mpi' and not mpi_available:
             continue
         for init_method in ['file://', 'env://', 'mpi://']:
-            if backend == 'mpi' and init_method.startswith('mpi:'):
+            # The MPI backend only needs to be tested with a single
+            # initialization method (because it doesn't use initialization).
+            if backend == 'mpi' and init_method != 'env://':
                 continue
             tmp_dir = tempfile.mkdtemp()
             if options.verbose:

@@ -140,7 +140,7 @@ def skip_if_no_gpu(func):
 
 def skip_if_small_worldsize(func):
     # Short circuit if we're not spawning processes for every test
-    if BACKEND == 'mpi' or INIT_METHOD == 'mpi://':
+    if BACKEND == 'mpi' or INIT_METHOD.startswith('mpi://'):
         if int(os.environ["WORLD_SIZE"]) <= 2:
             return unittest.skip("worldsize is too small to run group tests")
         return lambda func: func
@@ -196,7 +196,7 @@ def require_num_gpus(n):
     """
 
     # Short circuit if we're not spawning processes for every test
-    if BACKEND == 'mpi' or INIT_METHOD == 'mpi://':
+    if BACKEND == 'mpi' or INIT_METHOD.startswith('mpi://'):
         if not torch.cuda.is_available():
             return unittest.skip("CUDA is not available")
         if torch.cuda.device_count() < n:
@@ -1573,7 +1573,7 @@ class _DistTestBase(object):
         self.assertEqual(process_group_sync, process_group)
 
 
-if (BACKEND == "gloo" or BACKEND == "nccl") and INIT_METHOD != "mpi://":
+if (BACKEND == "gloo" or BACKEND == "nccl") and not INIT_METHOD.startswith("mpi://"):
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
     class TestDistBackend(TestCase, _DistTestBase):
@@ -1697,7 +1697,7 @@ if (BACKEND == "gloo" or BACKEND == "nccl") and INIT_METHOD != "mpi://":
             self.assertEqual(first_process.exitcode, 0)
 
 
-elif BACKEND == "mpi" or INIT_METHOD == "mpi://":
+elif BACKEND == "mpi" or INIT_METHOD.startswith("mpi://"):
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
     # Force MPI initialization method to use a fixed port
