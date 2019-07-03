@@ -65,8 +65,7 @@ class TestThroughputBenchmark(TestCase):
             num_iters=1000,
         )
 
-        print("Avg latency (ms): {}".format(stats.latency_avg_ms))
-        print("Number of iterations: {}".format(stats.num_iters))
+        print(stats)
 
 
     def test_script_module(self):

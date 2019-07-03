@@ -32,8 +32,8 @@ py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)  {
 }
 
 ThroughputBenchmark::ThroughputBenchmark(
-    std::shared_ptr<jit::script::Module> script_module)
-    : script_module_(std::move(script_module)) {}
+    jit::script::Module script_module)
+    : script_module_(script_module) {}
 
 ThroughputBenchmark::ThroughputBenchmark(
     py::object module)
@@ -62,7 +62,7 @@ template <>
 void ScriptModuleBenchmark::runOnce(ScriptModuleInput&& input) const {
   CHECK(initialized_);
   // TODO: provide guarantees that compiler won't optimize this out
-  model_->get_method("forward").function()(std::move(input));
+  model_.get_method("forward").function()(std::move(input));
 }
 
 template <>
@@ -70,12 +70,12 @@ ScriptModuleOutput ScriptModuleBenchmark::runOnce(
     py::args&& args,
     py::kwargs&& kwargs) const {
   CHECK(initialized_);
-  auto& function = model_->get_method("forward").function();
+  auto& function = model_.get_method("forward").function();
   ScriptModuleInput stack = jit::createStackForSchema(
       function.getSchema(),
       std::move(args),
       std::move(kwargs),
-      model_->module_object());
+      model_.module_object());
   return function(std::move(stack));
 }
 
@@ -97,10 +97,10 @@ ModuleOutput ModuleBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)
 template <>
 void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
   jit::Stack stack = jit::createStackForSchema(
-      model_->get_method("forward").function().getSchema(),
+      model_.get_method("forward").function().getSchema(),
       std::move(args),
       std::move(kwargs),
-      model_->module_object());
+      model_.module_object());
   inputs_.emplace_back(std::move(stack));
 }
 
