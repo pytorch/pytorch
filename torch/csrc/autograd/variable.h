@@ -5,6 +5,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/grad_mode.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -376,7 +377,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   }
 
   bool requires_grad() const override {
-    return requires_grad_ || grad_fn_;
+    return (requires_grad_ || grad_fn_) && GradMode::is_enabled();
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
@@ -477,7 +478,7 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
   uint32_t attr_version;
 
   bool requires_grad() const override {
-    return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
+    return (requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad())) && GradMode::is_enabled();
   }
 
   DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge);
