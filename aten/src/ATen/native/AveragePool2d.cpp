@@ -106,9 +106,8 @@ void avg_pool2d_out_cpu_template(
   TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
     "non-empty 2D or 3D (batch mode) tensor expected for input");
 
-  if (divisor_override.has_value()) {
-    TORCH_CHECK(divisor_override.value() != 0, "divisor must be not zero");
-  }
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
+    "divisor must be not zero");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);

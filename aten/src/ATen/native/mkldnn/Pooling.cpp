@@ -170,7 +170,7 @@ Tensor mkldnn_avg_pool2d(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   AT_CHECK(!divisor_override.has_value(),
-           "Currently Mkldnn Avg Pooling operator does not support divisor");
+           "mkldnn_avg_pool2d operator does not support divisor");
   return _mkldnn_pool2d(
       input,
       kernel_size,

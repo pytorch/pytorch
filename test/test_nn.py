@@ -501,7 +501,7 @@ class TestAvgPool(TestCase):
         return torch.sum(windows, dim=1)
 
     def _sum_pool3d(self, x, kernel_size):
-        # Because unfold does not support 3D sliding window we will split tensor to multiple tensors and calculte sum
+        # Because unfold does not support 3D sliding window we will split tensor to multiple tensors and calculate sum
         h = kernel_size[0]
         splited_x = [t.sum(0) for t in x.split(h) if t.size(0) == h]
         # sum_pool2d assumes tensor in (1, 1, n, m) view, so unsqueeze two times
@@ -513,8 +513,7 @@ class TestAvgPool(TestCase):
         def avg_pool2d(x, kernel_size):
             size = reduce((lambda x, y: x * y), kernel_size)
             return self._sum_pool2d(x, kernel_size) / size
-        n = 5
-        m = 8
+        n, m = 5, 8
         input = torch.rand(1, 1, n, m)
         for i in range(1, n + 1):
             for j in range(1, m + 1):
@@ -528,8 +527,7 @@ class TestAvgPool(TestCase):
                                lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
 
     def test_doubletensor_sum_pool2d(self):
-        n = 3
-        m = 3
+        n, m = 3, 3
         input = torch.rand(1, 1, n, m)
         for i in range(1, n + 1):
             for j in range(1, m + 1):
@@ -543,9 +541,7 @@ class TestAvgPool(TestCase):
         def avg_pool3d(x, kernel_size):
             size = reduce((lambda x, y: x * y), kernel_size)
             return self._sum_pool3d(x, kernel_size) / size
-        h = 6
-        w = 5
-        d = 7
+        h, w, d = 5, 6, 7
         input = torch.rand(h, w, d)
         for i in range(1, h + 1):
             for j in range(1, w + 1):
@@ -556,9 +552,7 @@ class TestAvgPool(TestCase):
                     self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
 
     def test_doubletensor_sum_pool3d(self):
-        h = 6
-        w = 5
-        d = 7
+        h, w, d = 6, 5, 7
         input = torch.rand(h, w, d)
         for i in range(1, h + 1):
             for j in range(1, w + 1):
@@ -572,31 +566,6 @@ class TestAvgPool(TestCase):
     def test_avg_pool3d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
                                lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
-
-class TestLongTensor(TestCase):
-    def test_longtensor_avg_pool2d_same_as_doubletensor(self):
-        n = 7
-        m = 8
-        l_input = torch.randint(-1000, 1000, size=(1, n, m))
-        d_input = l_input.clone().double()
-        for i in range(n):
-            for j in range(m):
-                l_result = torch.nn.functional.avg_pool2d(l_input, (i + 1, j + 1), divisor_override=1)
-                d_result = torch.nn.functional.avg_pool2d(d_input, (i + 1, j + 1), divisor_override=1)
-                self.assertTrue(torch.allclose(l_result.double(), d_result, atol=1e-5))
-
-    def test_longtensor_avg_pool3d_same_as_doubletensor(self):
-        n = 7
-        m = 8
-        l = 6
-        l_input = torch.randint(-1000, 1000, size=(1, n, m, l))
-        d_input = l_input.clone().double()
-        for i in range(n):
-            for j in range(m):
-                for k in range(l):
-                    l_result = torch.nn.functional.avg_pool3d(l_input, (i + 1, j + 1, k + 1), divisor_override=1)
-                    d_result = torch.nn.functional.avg_pool3d(d_input, (i + 1, j + 1, k + 1), divisor_override=1)
-                    self.assertTrue(torch.allclose(l_result.double(), d_result, atol=1e-5))
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
