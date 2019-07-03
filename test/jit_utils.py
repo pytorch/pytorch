@@ -469,8 +469,10 @@ class JitTestCase(TestCase):
 @contextmanager
 def enable_profiling_mode():
     torch._C._jit_set_profiling_mode(True)
-    yield
-    torch._C._jit_set_profiling_mode(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_profiling_mode(False)
 
 _inline_everything = True
 @contextmanager
@@ -479,17 +481,21 @@ def disable_inline_everything_mode():
     old = _inline_everything
     _inline_everything = False
     torch._C._jit_set_inline_everything_mode(False)
-    yield
-    _inline_everything = old
-    torch._C._jit_set_inline_everything_mode(old)
+    try:
+        yield
+    finally:
+        _inline_everything = old
+        torch._C._jit_set_inline_everything_mode(old)
 
 
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
     torch._C._debug_set_autodiff_subgraph_inlining(not enabled)
-    yield
-    torch._C._debug_set_autodiff_subgraph_inlining(True)
+    try:
+        yield
+    finally:
+        torch._C._debug_set_autodiff_subgraph_inlining(True)
 
 
 # make it easy to quicky define/trace a function for these tests
