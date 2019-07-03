@@ -52,7 +52,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <torch/csrc/python_dimname.h>
 #endif
 #include <torch/csrc/tensor/python_tensor.h>
@@ -142,7 +142,7 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   inline at::Dimname dimname(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
 #endif
@@ -422,7 +422,7 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   return device(i);
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 inline at::Dimname PythonArgs::dimname(int i) {
   TORCH_INTERNAL_ASSERT(args[i] != nullptr);
   return THPDimname_parse(args[i]);
