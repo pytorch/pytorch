@@ -5864,7 +5864,7 @@ Example::
 
 add_docstr(torch.where,
            r"""
-where(condition, x, y) -> Tensor
+.. function:: where(condition, x, y) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -5899,6 +5899,14 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
+
+.. function:: where(condition) -> tuple of LongTensor
+
+``torch.where(condition)`` is identical to
+``torch.nonzero(condition, as_tuple=True)``.
+
+.. note::
+    See also :func:`torch.nonzero`.
 """)
 
 add_docstr(torch.logdet,
