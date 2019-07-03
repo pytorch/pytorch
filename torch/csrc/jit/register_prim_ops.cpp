@@ -77,8 +77,8 @@ template <typename dtype> // int64_t, bool, double
 Operation listConstruct(int64_t num_inputs) {
   return [=](Stack& stack) {
     auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    std::vector<dtype> vals =
-        fmap(inputs, [](const IValue& v) { return v.to<dtype>(); });
+    c10::List<dtype> vals =
+        c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
     drop(stack, num_inputs);
     push(stack, std::move(vals));
     return 0;
@@ -509,6 +509,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::is_mkldnn(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mkldnn());
+           return 0;
+         }),
+     Operator(
          "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor a;
@@ -591,7 +599,7 @@ RegisterOperators reg(
                    size, peek(stack, i, num_inputs).toIntListRef());
              }
              drop(stack, num_inputs);
-             push(stack, std::move(size));
+             push(stack, c10::impl::toList(std::move(size)));
              return 0;
            };
          }),
@@ -966,7 +974,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::List<IValue> vals;
+               c10::impl::GenericList vals;
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -1529,18 +1537,19 @@ int listAdd(Stack& stack) {
   pop(stack, a, b);
 
   c10::List<T> ret;
-  const auto total_size = a.size() + b.size();
-  ret.reserve(total_size);
-  for (T a_element : a) {
-    ret.push_back(std::move(a_element));
+
+  if (a.use_count() == 1) {
+    ret = std::move(a);
+  } else {
+    ret = a.copy();
   }
-  for (T b_element : b) {
-    ret.push_back(std::move(b_element));
-  }
+
+  ret.append(std::move(b));
 
   push(stack, std::move(ret));
   return 0;
 }
+
 template <class T>
 int listInplaceAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<List<T>>();
@@ -2397,7 +2406,6 @@ RegisterOperators reg2({
           push(stack, std::move(t));
           return 0;
         }),
-// TODO: deprecate prim::DictIndex in favor of aten::__getitem__
 #define CREATE_DICT_OPS(key_type)                                             \
   Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),          \
       Operator(                                                               \
@@ -2406,11 +2414,7 @@ RegisterOperators reg2({
       Operator(                                                               \
           "aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues),  \
       Operator(                                                               \
-          "aten::__getitem__(Dict(" key_type ", t) self, " key_type               \
-          " key) -> t(*)",                                                    \
-          dictIndex),                                                         \
-      Operator(                                                               \
-          "prim::DictIndex(Dict(" key_type ", t) self, " key_type             \
+          "aten::__getitem__(Dict(" key_type ", t) self, " key_type           \
           " key) -> t(*)",                                                    \
           dictIndex),                                                         \
       Operator(                                                               \
@@ -2842,16 +2846,16 @@ RegisterOperators reg3({
 at::Tensor leaky_relu(const at::Tensor& tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
-at::Tensor cat(const std::vector<at::Tensor>& tensors) {
-  return at::cat(tensors);
+at::Tensor cat(const c10::List<at::Tensor>& tensors) {
+  return at::cat(c10::impl::toVector(tensors));
 }
 
-std::string get_first(const std::vector<std::vector<std::string>>& strings) {
-  return strings[0][0];
+std::string get_first(const c10::List<c10::List<std::string>>& strings) {
+  return strings.get(0).get(0);
 }
 
 static auto reg4 =
-    torch::jit::RegisterOperators()
+    torch::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",
             &leaky_relu)
         .op("_test::cat(Tensor[] inputs) -> Tensor", &cat)

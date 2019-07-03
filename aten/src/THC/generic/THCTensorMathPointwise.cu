@@ -3,7 +3,7 @@
 #else
 
 #include <ATen/MemoryOverlap.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
@@ -175,10 +175,9 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
 
 #if !defined(THC_REAL_IS_BOOL)
 
-static void propagate_names(THCTensor* result, THCTensor* src) {
-#ifdef NAMEDTENSOR_ENABLED
-  const auto names = at::impl::internal_get_names(src);
-  at::impl::internal_set_names_inplace(result, names);
+static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor* src) {
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, src);
 #endif
 }
 
@@ -209,7 +208,7 @@ static void propagate_names(THCTensor* result, THCTensor* src) {
     }                                                                   \
                                                                         \
     THCudaCheck(cudaGetLastError());                                    \
-    propagate_names(self_, src);                                        \
+    propagate_names_if_named_tensor_enabled(self_, src);                \
   }
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC, REAL) \
@@ -322,6 +321,9 @@ void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 void THCTensor_(digamma)(THCState* state, THCTensor* self_, THCTensor* src) {
@@ -334,6 +336,9 @@ void THCTensor_(digamma)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTensor* src) {
@@ -357,6 +362,9 @@ void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTens
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 #endif

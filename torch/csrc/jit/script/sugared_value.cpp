@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
@@ -73,6 +74,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         "device",
         "shape",
         "is_cuda",
+        "is_mkldnn",
         "requires_grad",
     };
     if (fields.count(field)) {
@@ -274,18 +276,47 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-Value* SimpleValue::getitem(const SourceRange&loc, Function& m, Value* i) {
+int64_t getAdjTupleIndex(
+    const SourceRange& loc,
+    const TupleTypePtr& tuple_type,
+    int64_t input_index,
+    bool allow_out_of_bounds) {
+  // set index to be positive to simplify logic in runtime
+  int64_t adj_index = input_index;
+  int64_t tuple_len = tuple_type->elements().size();
+  if (input_index < 0) {
+    adj_index = tuple_len + input_index;
+  }
+  if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
+    throw ErrorReport(loc) << "Tuple index out of range. Tuple is length "
+                           << tuple_len << " and index is " << input_index;
+  }
+  return adj_index;
+}
+
+Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
   Value* cur_elem = nullptr;
+
+  // if it's a List/String/Dict, emit a regular __getitem__ op
   if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
-    cur_elem = g.insert(aten::__getitem__, {val, i}, {}, loc);
+    cur_elem = g.insert(aten::__getitem__, {val, idx}, {}, loc);
+  } else if (auto dict_type = val_type->cast<DictType>()) {
+    if (!idx->type()->isSubtypeOf(dict_type->getKeyType())) {
+      throw ErrorReport(loc)
+          << "Expected key type '" << idx->type()->python_str()
+          << "' to subtype the key type '"
+          << dict_type->getKeyType()->python_str() << "' of the dict '"
+          << dict_type->python_str() << "'";
+    }
+    cur_elem = g.insert(aten::__getitem__, {val, idx}, {}, loc);
   } else if (val_type->isSubtypeOf(TensorType::get())) {
-    cur_elem = g.insert(aten::select, {val, 0, i}, {}, loc);
+    cur_elem = g.insert(aten::select, {val, 0, idx}, {}, loc);
   } else {
-    throw ErrorReport(loc)
-      << "cannot get element of the value type " << val_type->python_str();
+    throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
+                           << " object is not subscriptable";
   }
   return cur_elem;
 }
@@ -324,12 +355,12 @@ Value* RangeValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-Value* RangeValue::getitem(const SourceRange&loc, Function& m, Value* i)  {
+Value* RangeValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   if (has_only_end_) {
-    return i;
+    return idx;
   } else {
     auto& g = *m.graph();
-    return g.insert(aten::__derive_index, {i, start_, step_}, {}, loc);
+    return g.insert(aten::__derive_index, {idx, start_, step_}, {}, loc);
   }
 }
 
@@ -365,10 +396,10 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
   return g.insert(prim::min, {list_node->output()}, {}, loc);
 }
 
-Value* IterableTree::getitem(const SourceRange&loc, Function& m, Value* i)  {
+Value* IterableTree::getitem(const SourceRange& loc, Function& m, Value* idx) {
   std::vector<Value*> child_items;
   for(const SugaredValuePtr& child: children_) {
-    child_items.emplace_back(child->getitem(loc, m, i));
+    child_items.emplace_back(child->getitem(loc, m, idx));
   }
   // If you call getitem() on a IterableTree sugared value, we will create Tuple
   // from the children items, and make the Tuple value as the element
