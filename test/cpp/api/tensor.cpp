@@ -312,14 +312,14 @@ TEST(TensorTest, Detach) {
     auto tensor = torch::randn({3, 4});
     auto tensor_detached = tensor.detach();
     ASSERT_THROWS_WITH(
-      tensor_detached.resize_({4, 5}),
+      tensor_detached.transpose_(0, 1),
       "is not allowed on Tensor created from .data or .detach()");
   }
   {
     auto tensor = torch::randn({3, 4});
     auto tensor_detached = tensor.detach(/*allow_tensor_metadata_change=*/true);
-    tensor_detached.resize_({4, 5});
-    ASSERT_EQ(tensor_detached.sizes(), std::vector<int64_t>({4, 5}));
+    tensor_detached.transpose_(0, 1);
+    ASSERT_EQ(tensor_detached.sizes(), std::vector<int64_t>({4, 3}));
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3, 4}));
   }
 }
