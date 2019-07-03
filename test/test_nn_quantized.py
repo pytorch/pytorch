@@ -8,15 +8,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.functional as F
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
-from torch.nn.quantized.modules.conv import _conv_output_shape
 from common_utils import TestCase, run_tests, tempfile
-from common_utils import _quantize
-
-import numpy as np
-
-from hypothesis import assume, given
-from hypothesis import strategies as st
-from hypothesis_utils import qtensors_conv
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -117,75 +109,62 @@ class ModuleAPITest(TestCase):
         self.assertEqual(rqr, rqr2)
 
 
-
-    @given(Q=qtensors_conv(min_batch=1, max_batch=3,
-                           min_in_channels=1, max_in_channels=5,
-                           min_out_channels=1, max_out_channels=5,
-                           H_range=(6, 12), W_range=(6, 12),
-                           kH_range=(3, 5), kW_range=(3, 5),
-                           dtypes=((torch.quint8, np.uint8, 0),),
-                           max_groups=4),
-           padH=st.integers(1, 3), padW=st.integers(1, 3),
-           dH=st.integers(1, 2), dW=st.integers(1, 2),
-           sH=st.integers(1, 3), sW=st.integers(1, 3))
-    def test_conv_api(self, Q, padH, padW, dH, dW, sH, sW):
+    def test_conv_api(self):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
         """
-        ref_op = qF.conv2d
 
-        # Random iunputs
-        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
-        (inputs, filters, bias, groups) = X
+        N, iC, H, W = 10, 10, 10, 3
+        oC, g, kH, kW = 16, 1, 3, 3
+        scale, zero_point = 1.0/255, 128
 
-        iC, oC = inputs.shape[1], filters.shape[0]
-        iH, iW = inputs.shape[2:]
-        kH, kW = filters.shape[2:]
-        assume(kH // 2 >= padH)
-        assume(kW // 2 >= padW)
-        oH = _conv_output_shape(iH, kH, padH, sH, dH)
-        assume(oH > 0)
-        oW = _conv_output_shape(iW, kW, padW, sW, dW)
-        assume(oW > 0)
-        inputs = torch.from_numpy(inputs).to(torch.float)
-        filters = torch.from_numpy(filters).to(torch.float)
-        bias = torch.from_numpy(bias).to(torch.float)
-        kernel_size = (kH, kW)
-        stride = (sH, sW)
-        i_padding = (padH, padW)
-        dilation = (dH, dW)
+        X = torch.randn(N, iC, H, W, dtype=torch.float32)
+        X = X.permute([0, 2, 3, 1]).contiguous()
+        qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
-        i_NHWC = inputs.permute([0, 2, 3, 1]).contiguous()
-        w_RSCK = filters.permute([0, 2, 3, 1]).contiguous()
-        q_inputs = torch.quantize_linear(i_NHWC, scale, zero_point, torch.quint8)
-        q_filters = torch.quantize_linear(w_RSCK, scale, zero_point, torch.qint8)
-        q_bias = torch.quantize_linear(bias, scale, zero_point, torch.qint32)
+        w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
+        w = w.permute([0, 2, 3, 1]).contiguous()
+        qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
-        # Results check
-        conv_2d = Conv2d(in_channels=iC, out_channels=oC, kernel_size=(kH, kW),
-                         stride=stride, padding=i_padding,
-                         dilation=dilation, groups=groups,
-                         padding_mode='zeros')
-        conv_2d.weight = q_filters
-        conv_2d.bias = q_bias
-        conv_2d.scale = scale
-        conv_2d.zero_point = zero_point
-        try:
-            ref_result = qF.conv2d(q_inputs, q_filters, bias=q_bias,
-                                   scale=scale, zero_point=zero_point,
-                                   stride=stride, padding=i_padding,
-                                   dilation=dilation, groups=groups,
-                                   prepacked=False, dtype=torch_type)
-        except RuntimeError as e:
-            # We should be throwing the same error.
-            e_msg = str(e).split("\n")[0].split("(")[0].strip()
-            np.testing.assert_raises_regex(type(e), e_msg,
-                                           conv_2d, q_inputs)
-        else:
-            q_result = conv_2d(q_inputs)
-            np.testing.assert_equal(ref_result.int_repr().numpy(),
-                                    q_result.int_repr().numpy())
+        b = torch.randn(oC, dtype=torch.float32)
+        qb = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32)
+
+        conv_under_test = Conv2d(in_channels=iC,
+                                 out_channels=oC,
+                                 kernel_size=(kH, kW),
+                                 stride=1,
+                                 padding=0,
+                                 dilation=1,
+                                 groups=g,
+                                 bias=True,
+                                 padding_mode='zeros')
+        conv_under_test.weight = qw
+        conv_under_test.bias = qb
+        conv_under_test.scale = scale
+        conv_under_test.zero_point = zero_point
+
+        # Test members
+        self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
+        self.assertTrue(hasattr(conv_under_test, '_scale'))
+        self.assertTrue(hasattr(conv_under_test, '_zero_point'))
+
+        # Test properties
+        # self.assertEqual(qw, conv_under_test.weight)
+        self.assertEqual(qb, conv_under_test.bias)
+        self.assertEqual(scale, conv_under_test.scale)
+        self.assertEqual(zero_point, conv_under_test.zero_point)
+
+        # Test forward
+        result_under_test = conv_under_test(qX)
+        result_reference = qF.conv2d(qX, qw, bias=qb,
+                                     scale=scale, zero_point=zero_point,
+                                     stride=1, padding=0,
+                                     dilation=1, groups=g,
+                                     prepacked=False, dtype=torch.quint8)
+
+        self.assertEqual(result_reference, result_under_test,
+                         message="Tensors are not equal.")
 
 if __name__ == '__main__':
     run_tests()

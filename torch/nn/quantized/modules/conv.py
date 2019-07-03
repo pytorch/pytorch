@@ -8,8 +8,6 @@ import numpy as np
 
 import torch
 from torch._jit_internal import weak_module, weak_script_method
-from torch._ops import ops
-from torch.nn.modules.module import Module
 from torch.nn.modules.utils import _pair
 from torch.nn.quantized import functional as qF
 
@@ -64,7 +62,7 @@ class Conv2d(_ConvNd):
 
     @property
     def weight(self):
-        return self.packed_weight
+        return self._packed_weight
         # return torch.ops.quantized.fbgemm_conv_unpack(self._packed_weight)
 
     @weight.setter
