@@ -9,15 +9,13 @@
 #define CUDA_R_16F CUBLAS_DATA_HALF
 #endif
 
-#define TORCH_CUDABLAS_CHECK(EXPR)        \
-  do {                                    \
-    cublasStatus_t __err = EXPR;          \
-    if (__err != CUBLAS_STATUS_SUCCESS) { \
-      AT_ERROR(                           \
-          "CUDA error: ",                 \
-          _cublasGetErrorEnum(__err),     \
-          " when calling `" #EXPR "`");   \
-    }                                     \
+#define TORCH_CUDABLAS_CHECK(EXPR)              \
+  do {                                          \
+    cublasStatus_t __err = EXPR;                \
+    TORCH_CHECK(__err == CUBLAS_STATUS_SUCCESS, \
+                "CUDA error: ",                 \
+                _cublasGetErrorEnum(__err),     \
+                " when calling `" #EXPR "`");   \
   } while (0)
 
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
@@ -224,7 +222,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       NULL));
 #else
 
-#if CUDA_VERSION >= 9000
+# if CUDA_VERSION >= 9000
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
@@ -250,7 +248,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUBLAS_GEMM_DFALT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
-#endif
+# endif
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
         handle,
         opa,
@@ -269,9 +267,9 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         c,
         CUDA_R_16F,
         ldc));
-#if CUDA_VERSION >= 9000
+# if CUDA_VERSION >= 9000
   }
-#endif
+# endif
 #endif
 }
 

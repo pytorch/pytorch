@@ -46,6 +46,10 @@ extern "C" void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *w
 // orgqr
 extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
+
+// syev
+extern "C" void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
+extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
 #endif
 
 namespace at {
@@ -91,6 +95,11 @@ void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *wo
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info) {
   AT_ERROR("orgqr only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info) {
+  AT_ERROR("symeig only takes float or double Tensors");
 }
 
 #ifdef USE_LAPACK
@@ -156,6 +165,14 @@ template<> void lapackOrgqr<double>(int m, int n, int k, double *a, int lda, dou
 
 template<> void lapackOrgqr<float>(int m, int n, int k, float *a, int lda, float *tau, float *work, int lwork, int *info) {
   sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
+}
+
+template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, int *info) {
+  dsyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
+}
+
+template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, int *info) {
+  ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 #endif
 
@@ -831,6 +848,89 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
   Q.resize_as_(Q_tmp).copy_(Q_tmp);
   R.resize_as_(R_tmp).copy_(R_tmp);
   return std::tuple<Tensor&, Tensor&>(Q, R);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("symeig: LAPACK library not found in compilation");
+#else
+  auto self_data = self.data<scalar_t>();
+  auto eigvals_data = eigvals.data<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto eigvals_stride = eigvals.size(-1);
+  auto batch_size = batchCount(self);
+  auto n = self.size(-1);
+
+  char uplo = upper ? 'U' : 'L';
+  char jobz = eigenvectors ? 'V' : 'N';
+
+  int info;
+  // Run once, first to get the optimum work size.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
+  int lwork = -1;
+  scalar_t wkopt;
+  lapackSymeig<scalar_t>(jobz, uplo, n, self_data, n, eigvals_data, &wkopt, lwork, &info);
+  lwork = static_cast<int>(wkopt);
+  Tensor work = at::empty({lwork}, self.options());
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    scalar_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
+
+    // now compute the eigenvalues and the eigenvectors (optionally)
+    lapackSymeig<scalar_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr, work.data<scalar_t>(), lwork, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvectors, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+
+  auto self_sizes = self.sizes().vec();
+  self_sizes.pop_back();
+  auto eigvals = at::empty(self_sizes, self.options());
+
+  if (self.numel() == 0) {
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self));
+  }
+
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "symeig_cpu", [&]{
+    apply_symeig<scalar_t>(self_working_copy, eigvals, eigenvectors, upper, infos);
+  });
+
+  if (!eigenvectors) {
+    self_working_copy.zero_();
+  }
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "symeig_cpu");
+  } else {
+    singleCheckErrors(infos[0], "symeig_cpu");
+  }
+  return std::tuple<Tensor, Tensor>(eigvals, self_working_copy);
+}
+
+std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool upper) {
+  squareCheckInputs(self);
+  return at::_symeig_helper(self, eigenvectors, upper);
+}
+
+std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor& self, bool eigenvectors, bool upper) {
+  squareCheckInputs(self);
+  Tensor vals_tmp, vecs_tmp;
+  std::tie(vals_tmp, vecs_tmp) = at::_symeig_helper(self, eigenvectors, upper);
+  vals.resize_as_(vals_tmp).copy_(vals_tmp);
+  vecs.resize_as_(vecs_tmp).copy_(vecs_tmp);
+  return std::tuple<Tensor&, Tensor&>(vals, vecs);
 }
 
 }}  // namespace at::native

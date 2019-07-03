@@ -10,12 +10,6 @@ namespace c10 {
 struct IValue;
 template<class Key, class Value> class Dict;
 
-/**
- * Creates an empty dict.
- */
-template<class Key, class Value>
-Dict<Key, Value> make_dict();
-
 namespace impl {
 bool shallowEquals(const IValue& lhs, const IValue& rhs);
 
@@ -156,12 +150,11 @@ template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Va
 
 /**
  * An object of this class stores a map from Key to Value.
- * You can create instances using the make_dict<Key, Value>() function.
  *
  * This is a pointer type. After a copy, both Dicts
  * will share the same storage:
  *
- * > Dict<int, string> a = make_dict<int, string>();
+ * > Dict<int, string> a;
  * > Dict<int, string> b = a;
  * > b.insert(3, "three");
  * > ASSERT("three" == a.at(3));
@@ -201,10 +194,7 @@ public:
   /**
    * Creates an empty dict.
    */
-  friend Dict make_dict<Key, Value>();
-
-  // please use make_dict instead
-  Dict() = delete;
+  Dict();
 
   ~Dict() = default;
 
@@ -347,10 +337,6 @@ namespace impl {
 // public API. Kernels should use Dicts with concrete Key, Value types instead
 // (maybe except for some internal prim ops).
 using GenericDict = Dict<IValue, IValue>;
-
-inline GenericDict make_generic_dict() {
-  return make_dict<IValue, IValue>();
-}
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {

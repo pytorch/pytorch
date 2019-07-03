@@ -46,8 +46,8 @@ inline intrusive_ptr<DictImpl> DictImpl::copy() const {
 }
 
 template<class Key, class Value>
-Dict<Key, Value> make_dict() {
-  return Dict<Key, Value>(make_intrusive<detail::DictImpl>());
+Dict<Key, Value>::Dict()
+  :Dict(make_intrusive<detail::DictImpl>()) {
 }
 
 template<class Key, class Value>

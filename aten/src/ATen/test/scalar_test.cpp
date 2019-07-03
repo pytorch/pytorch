@@ -20,7 +20,7 @@ struct Foo {
   static void apply(Tensor a, Tensor b) {
     scalar_type s = 1;
     std::stringstream ss;
-    ss << "hello, dispatch: " << a.dispatch_type().toString() << s << "\n";
+    ss << "hello, dispatch: " << a.type().toString() << s << "\n";
     auto data = (scalar_type*)a.data_ptr();
     (void)data;
   }
@@ -110,7 +110,7 @@ TEST(TestScalar, TestScalar) {
       scalar_t s = 1;
       std::stringstream ss;
       ASSERT_NO_THROW(
-          ss << "hello, dispatch" << x.dispatch_type().toString() << s << "\n");
+          ss << "hello, dispatch" << x.type().toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });

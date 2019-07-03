@@ -423,7 +423,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
@@ -440,6 +439,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
@@ -769,7 +769,6 @@ ENDIF()
     DESTINATION share/cmake/Torch)
 
   if (USE_DISTRIBUTED)
-    add_subdirectory(${TORCH_SRC_DIR}/lib/THD lib_THD)
     if (NOT MSVC AND NOT APPLE)
       add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
     endif()
@@ -884,6 +883,11 @@ elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE_TBB")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
 else()
   message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
+endif()
+set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
+  "Experimental option to use a single thread pool for inter- and intra-op parallelism")
+if ("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
+  target_compile_definitions(torch PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
 endif()
 
 if (MSVC AND NOT BUILD_SHARED_LIBS)

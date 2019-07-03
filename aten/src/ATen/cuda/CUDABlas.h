@@ -1,10 +1,14 @@
 #pragma once
 /*
   Provides a subset of CUDA BLAS functions as templates:
-     gemm<Dtype>(stream, transa, transb, m, n, k, alpha, a, lda, b, ldb, beta,
-  c, ldc) gemv<Dtype>(stream, transa, m, n, alpha, a, lda, x, incx, beta, y,
-  incy) where Dtype is double, float, or at::Half. The functions are available
-  in at::cuda::blas namespace.
+
+    gemm<Dtype>(stream, transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c,
+  ldc)
+
+    gemv<Dtype>(stream, transa, m, n, alpha, a, lda, x, incx, beta, y, incy)
+
+  where Dtype is double, float, or at::Half. The functions are
+  available in at::cuda::blas namespace.
  */
 
 #include <ATen/cuda/CUDAContext.h>
