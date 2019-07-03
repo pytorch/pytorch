@@ -46,7 +46,7 @@ Tensor& bitwise_not_(Tensor& self) {
 }
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
-  checkBackend("bitwise_not", {result}, self.type().backend());
+  checkBackend("bitwise_not", result, self.type().backend());
   assert_no_internal_overlap(result, "bitwise_not");
   auto iter = TensorIterator::unary_op(result, self);
   bitwise_not_stub(iter->device_type(), *iter);
@@ -175,7 +175,7 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return at::op##_out(self, self);                            \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, {result}, Backend::CPU);                  \
+    checkBackend(#op, result, Backend::CPU);                    \
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
