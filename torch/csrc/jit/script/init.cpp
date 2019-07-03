@@ -784,12 +784,11 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_import_functions",
-      [](CompilationUnit& cu,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& src,
          const std::vector<at::Tensor>& constant_table) {
         import_functions(
             c10::nullopt,
-            *CompilationUnit::_get_python_cu_const(),
             cu,
             std::make_shared<Source>(src),
             constant_table,

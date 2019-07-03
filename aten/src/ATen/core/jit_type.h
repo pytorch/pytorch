@@ -1356,7 +1356,8 @@ struct CAFFE2_API ClassType : public NamedType {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
-      std::shared_ptr<CompilationUnit> cu, bool is_module = false);
+      std::weak_ptr<CompilationUnit> cu,
+      bool is_module = false);
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
@@ -1409,8 +1410,8 @@ struct CAFFE2_API ClassType : public NamedType {
   Function* getMethod(const std::string& name) const;
   const std::vector<Function*>& methods() const;
 
-  std::shared_ptr<CompilationUnit> compilation_unit();
-  std::shared_ptr<const CompilationUnit> compilation_unit() const;
+  std::weak_ptr<CompilationUnit> compilation_unit();
+  std::weak_ptr<const CompilationUnit> compilation_unit() const;
 
   size_t numAttributes() const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
@@ -1474,7 +1475,10 @@ struct CAFFE2_API ClassType : public NamedType {
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(c10::optional<QualifiedName> name, std::shared_ptr<CompilationUnit> cu, bool is_module);
+  ClassType(
+      c10::optional<QualifiedName> name,
+      std::weak_ptr<CompilationUnit> cu,
+      bool is_module);
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
@@ -1485,7 +1489,7 @@ struct CAFFE2_API ClassType : public NamedType {
   std::vector<std::string> attributeNames_;
   std::vector<TypePtr> attributeTypes_;
   // Holds method attributes
-  std::shared_ptr<CompilationUnit> compilation_unit_;
+  std::weak_ptr<CompilationUnit> compilation_unit_;
 
 
   // if present, this class inherits from torch.nn.Module
