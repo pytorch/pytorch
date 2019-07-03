@@ -61,10 +61,6 @@ List<T> toTypedList(impl::GenericList list) {
   static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
   if (list.impl_->elementType.has_value()) {
     TORCH_INTERNAL_ASSERT(*getTypePtr<T>() == **list.impl_->elementType, "Tried to cast a List<", toString(*list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
-  } else {
-    // The list wasn't created with type info, but we're just about to convert it to a concrete type.
-    // Store that type info to the list so that future conversions are checked against it.
-    list.impl_->elementType = getTypePtr<T>();
   }
   return List<T>(std::move(list.impl_));
 }
