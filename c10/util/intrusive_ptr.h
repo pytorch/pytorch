@@ -32,7 +32,7 @@ class intrusive_ptr_target;
 
 class C10_API intrusive_ptr_target {
   mutable std::atomic<size_t> refcount_;
-  static std::atomic_int64_t unique_id_counter_;
+  static std::atomic<int64_t> unique_id_counter_;
   int64_t unique_id_;
 
   template <typename T, typename NullType>
