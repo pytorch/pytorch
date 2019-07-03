@@ -1750,17 +1750,17 @@ class TestAutograd(TestCase):
         self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
     def test_detach_allow_tensor_metadata_change(self):
-        x = torch.randn(10, 10, requires_grad=True)
+        x = torch.randn(3, 4, requires_grad=True)
         y = x.detach()
         with self.assertRaisesRegex(RuntimeError, 'is not allowed on Tensor created from .data or .detach()'):
-            y.resize_(5, 5)
+            y.transpose_(0, 1)
 
-        x = torch.randn(10, 10, requires_grad=True)
+        x = torch.randn(3, 4, requires_grad=True)
         y = x.detach(allow_tensor_metadata_change=True)
         y_saved_version = y._version
-        y.resize_(5, 5)
-        self.assertEqual(y.shape, (5, 5))
-        self.assertEqual(x.shape, (10, 10))
+        y.transpose_(0, 1)
+        self.assertEqual(y.shape, (4, 3))
+        self.assertEqual(x.shape, (3, 4))
         self.assertGreater(y._version, y_saved_version)
 
     def test_detach_base(self):
