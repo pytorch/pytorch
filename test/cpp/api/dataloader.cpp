@@ -98,26 +98,27 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
   DummyChunkDataReader data_reader;
   samplers::SequentialSampler sampler(0);
 
-  auto initialization_function =
-      [&](size_t preloader_count,
-          size_t batch_size,
-          size_t cache_size) {
-        datasets::SharedBatchDataset<datasets::ChunkDataset<
+  auto initialization_function = [&](size_t preloader_count,
+                                     size_t batch_size,
+                                     size_t cache_size,
+                                     size_t cross_chunk_shuffle_count = 1) {
+    datasets::SharedBatchDataset<datasets::ChunkDataset<
+        DummyChunkDataReader,
+        samplers::SequentialSampler,
+        samplers::SequentialSampler>>
+        dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
             DummyChunkDataReader,
             samplers::SequentialSampler,
-            samplers::SequentialSampler>>
-            dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
-                DummyChunkDataReader,
-                samplers::SequentialSampler,
-                samplers::SequentialSampler>>(
-                data_reader,
-                sampler,
-                sampler,
-                datasets::ChunkDatasetOptions(
-                    preloader_count,
-                    batch_size,
-                    cache_size));
-      };
+            samplers::SequentialSampler>>(
+            data_reader,
+            sampler,
+            sampler,
+            datasets::ChunkDatasetOptions(
+                preloader_count,
+                batch_size,
+                cache_size,
+                cross_chunk_shuffle_count));
+  };
 
   ASSERT_THROWS_WITH(
       initialization_function(0, 1, 1),
@@ -135,6 +136,9 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
       initialization_function(1, 10, 5),
       "Cache size is less than batch size. Cache needs to be large enough to "
       "hold at least one batch.");
+  ASSERT_THROWS_WITH(
+      initialization_function(1, 10, 20, 0),
+      "cross_chunk_shuffle_count needs to be greater than 0.");
 }
 
 struct InfiniteStreamDataset
@@ -2092,4 +2096,132 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   torch::load(new_sampler, tempfile.name);
 
   ASSERT_EQ(new_sampler.index(), skipped_chunk);
+}
+
+TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
+  const size_t chunk_size = 5;
+  const size_t batch_size = 5;
+
+  class S : public samplers::Sampler<> {
+   public:
+    explicit S(size_t size) : size_(size), index_(0){};
+
+    void reset(torch::optional<size_t> new_size = torch::nullopt) override {
+      if (new_size.has_value()) {
+        size_ = *new_size;
+      }
+      indices_.resize(size_);
+      size_t index = 0;
+
+      // Repeatly sample every 5 indices.
+      for (size_t i = 0; i < batch_size; ++i) {
+        for (size_t j = 0; j < size_ / batch_size; ++j) {
+          indices_[index++] = i + batch_size * j;
+        }
+      }
+      index_ = 0;
+    }
+
+    // Returns the next batch of indices.
+    torch::optional<std::vector<size_t>> next(size_t batch_size) override {
+      const auto remaining_indices = size_ - index_;
+      if (remaining_indices == 0) {
+        return torch::nullopt;
+      }
+      auto return_size = std::min(batch_size, remaining_indices);
+      std::vector<size_t> index_batch(
+          indices_.begin() + index_, indices_.begin() + index_ + return_size);
+      index_ += return_size;
+
+      return index_batch;
+    }
+
+    void save(torch::serialize::OutputArchive& archive) const override {}
+    void load(torch::serialize::InputArchive& archive) override {}
+
+   private:
+    size_t size_;
+    std::vector<size_t> indices_;
+    size_t index_{0};
+  };
+
+  struct D : public datasets::ChunkDataReader<int> {
+   public:
+    using BatchType = datasets::ChunkDataReader<int>::ChunkType;
+    D(size_t chunk_count) : chunk_count_(chunk_count) {}
+
+    BatchType read_chunk(size_t chunk_index) override {
+      BatchType batch_data(chunk_size, chunk_index);
+      return batch_data;
+    }
+
+    size_t chunk_count() override {
+      return chunk_count_;
+    };
+
+    void reset() override{};
+    size_t chunk_count_;
+  };
+
+  const size_t prefetch_count = 1;
+  const size_t cache_size = 10;
+  const size_t cross_chunk_shuffle_counts[] = {2, 3};
+  const size_t chunk_counts[] = {3, 4, 5};
+
+  samplers::SequentialSampler chunk_sampler(0);
+  S example_sampler(0);
+
+  for (auto chunk_count : chunk_counts) {
+    for (auto cross_chunk_shuffle_count : cross_chunk_shuffle_counts) {
+      D data_reader(chunk_count);
+
+      datasets::SharedBatchDataset<
+          datasets::ChunkDataset<D, samplers::SequentialSampler, S>>
+          dataset = datasets::make_shared_dataset<
+              datasets::ChunkDataset<D, samplers::SequentialSampler, S>>(
+              data_reader,
+              chunk_sampler,
+              example_sampler,
+              datasets::ChunkDatasetOptions(
+                  prefetch_count,
+                  batch_size,
+                  cache_size,
+                  cross_chunk_shuffle_count));
+
+      auto data_loader = torch::data::make_data_loader(
+          dataset, DataLoaderOptions(batch_size).workers(0));
+
+      std::vector<int> result;
+      for (auto iterator = data_loader->begin(); iterator != data_loader->end();
+           ++iterator) {
+        auto batch_result = *iterator;
+        std::copy(
+            batch_result.begin(),
+            batch_result.end(),
+            std::back_inserter(result));
+      }
+
+      std::vector<int> expected_result;
+      {
+        // construct expected result
+        int offset = 0;
+
+        for (int i = 0; i < (chunk_count + cross_chunk_shuffle_count - 1) /
+                 cross_chunk_shuffle_count;
+             i++) {
+          for (int j = 0; j < chunk_size; ++j) {
+            for (int k = 0; k < cross_chunk_shuffle_count; ++k) {
+              if (i * cross_chunk_shuffle_count + k < chunk_count) {
+                expected_result.push_back(i * cross_chunk_shuffle_count + k);
+              }
+            }
+          }
+        }
+      }
+
+      ASSERT_EQ(result.size(), expected_result.size());
+      ASSERT_TRUE(
+          std::equal(result.begin(), result.end(), expected_result.begin()));
+    }
+  }
 }
