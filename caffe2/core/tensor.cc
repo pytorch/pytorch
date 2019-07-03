@@ -203,7 +203,7 @@ void Tensor::enforce_invariants() {
   }
   CAFFE_ENFORCE(
       !impl_->is_variable() || (impl_->is_variable() && !impl_->requires_grad()),
-      "Caffe2 tensor wrapper doesn't support variables that requires grad");
+      "Caffe2 tensor wrapper doesn't support autograd variables that require grad");
   CAFFE_ENFORCE_EQ(
       impl_->layout(),
       at::kStrided,
