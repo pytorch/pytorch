@@ -4189,6 +4189,10 @@
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
 
+- func: normal(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
+- func: normal(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
   dispatch:
