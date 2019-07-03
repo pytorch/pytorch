@@ -17,8 +17,8 @@ class SingleLayerLinearModel(torch.nn.Module):
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super(TwoLayerLinearModel, self).__init__()
-        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
-        self.fc2 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -47,6 +47,18 @@ class NestedModel(torch.nn.Module):
         x = self.sub2(x)
         x = self.fc3(x)
         return x
+
+class ManualQuantModel(torch.nn.Module):
+    def __init__(self):
+        super(ManualQuantModel, self).__init__()
+        self.quant = QuantStub(default_qconfig)
+        self.dequant = DeQuantStub()
+        self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc(x)
+        return self.dequant(x)
 
 calib_data = [torch.rand(20, 5, dtype=torch.float) for _ in range(20)]
 
@@ -160,7 +172,7 @@ class ModelQuantizeAPITest(TestCase):
         myModel = NestedModel()
         qconfig_dict = {
             'fc3': default_qconfig,
-            'sub2.fc2': default_qconfig
+            'sub2.fc1': default_qconfig
         }
         myModel = tq.prepare(myModel, qconfig_dict)
         # self.checkNoPrepModules(myModel)
@@ -172,6 +184,7 @@ class ModelQuantizeAPITest(TestCase):
         # self.checkHasPrepModules(myModel.sub2.fc2, True)
         # self.checkHasPrepModules(myModel.fc3, True)
 
+        print(myModel)
         default_eval_fn(myModel, calib_data)
 
         tq.convert_to_quantized(myModel)
@@ -243,30 +256,40 @@ class ModelQuantizeAPITest(TestCase):
         default_eval_fn(myModel, calib_data)
 
     # TODO: Add the support in a separate PR
-    # def test_nested3(self):
-    #     """
-    #     More complicated nested test case with fallbacks
-    #     this does not work with current implementation
-    #     """
-    #     myModel = NestedModel()
-    #     custome_options1 = {
-    #       'dtype': torch.quint8,
-    #       'qscheme': torch.per_tensor_affine
-    #     }
-    #     custom_qconfig = QConfig(weight=observer(WeightObserver, default_options),
-    #                              activation=observer(Observer, custome_options1))
-    #     qconfig_dict = {
-    #         'fc3': default_qconfig,
-    #         'sub2': default_qconfig,
-    #         'sub2.fc1': custom_qconfig
-    #     }
-    #     calib_data = torch.rand(20, 5, dtype=torch.float)
-    #     myModel = tq.prepare(myModel, qconfig_dict)
-    #
-    #     default_eval_fn(myModel, calib_data)
-    #     tq.convert_to_quantized(myModel)
-    #     myModel(calib_data)
+    def test_nested3(self):
+        """
+        More complicated nested test case with fallbacks
+        this does not work with current implementation
+        """
+        myModel = NestedModel()
+        custum_options1 = {
+          'dtype': torch.quint8,
+          'qscheme': torch.per_tensor_affine
+        }
+        custom_qconfig = QConfig(weight=default_weight_observer(),
+                                 activation=default_observer(**custum_options1))
+        qconfig_dict = {
+            'fc3': default_qconfig,
+            'sub2': default_qconfig,
+            'sub2.fc1': custom_qconfig
+        }
+        myModel = tq.prepare(myModel, qconfig_dict)
 
+        default_eval_fn(myModel, calib_data)
+        tq.convert_to_quantized(myModel)
+        default_eval_fn(myModel, calib_data)
+
+    def test_manual(self):
+        model = ManualQuantModel()
+        qconfig_dict = {
+            'fc': default_qconfig
+        }
+        tq.propogate_qconfig(model, qconfig_dict)
+        tq.add_observer(model)
+        # clibration
+        default_eval_fn(model, calib_data)
+        tq.convert_to_quantized(model)
+        default_eval_fn(model, calib_data)
 
 
 if __name__ == '__main__':

@@ -2,16 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from collections import namedtuple
 from .observer import *
 
-default_weight_qoptions = {
-    'dtype': torch.qint8,
-    'qscheme': torch.per_tensor_affine
-}
-
-default_activation_qoptions = {
-    'dtype': torch.quint8,
-    'qscheme': torch.per_tensor_affine
-}
-
 QConfig = namedtuple('QConfig',
                      ['weight', 'activation'])
 

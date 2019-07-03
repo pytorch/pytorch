@@ -16,15 +16,15 @@ class Observer(nn.Module):
     that computes the quantization parameters given the collected statistics.
     TODO: Maybe add an abstract Observer class that enforces these rules?
     """
-    def __init__(self, **kwargs):
+    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, avg_constant=0.9):
         super(Observer, self).__init__()
-        self.dtype = kwargs.get('dtype', torch.quint8)
-        self.qscheme = kwargs.get('qscheme', torch.per_tensor_affine)
+        self.dtype = dtype
+        self.qscheme = qscheme
         assert self.qscheme == torch.per_tensor_affine, \
             'Default Observer only works for per_tensor_affine quantization scheme'
         # Symmetric range for initialization
         self.stats = torch.tensor([-6, 6], dtype=torch.float)
-        self.avg_constant = kwargs.get('avg_constant', 0.9)
+        self.avg_constant = avg_constant
 
     def forward(self, x):
         self.stats = (1 - self.avg_constant) * self.stats + \
@@ -52,10 +52,8 @@ class WeightObserver(Observer):
     used to calculate quantization parameters.
     """
 
-    def __init__(self, **kwargs):
-        kwargs.setdefault('dtype', torch.qint8)
-        kwargs.setdefault('qscheme', torch.per_tensor_affine)
-        super(WeightObserver, self).__init__(**kwargs)
+    def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine):
+        super(WeightObserver, self).__init__(dtype, qscheme)
         self.stats = torch.tensor([-6, 6], dtype=torch.float)
 
     def forward(self, x):

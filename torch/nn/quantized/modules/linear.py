@@ -37,7 +37,7 @@ class Quantize(Module):
 
     @staticmethod
     def from_float(mod):
-        assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+        assert hasattr(mod, 'observer')
         qparams = mod.observer.calculate_qparams()
         return Quantize(qparams[0].item(), qparams[1].item(), mod.observer.dtype)
 
@@ -143,32 +143,23 @@ class Linear(NNLinear):
                                       missing_keys, unexpected_keys, error_msgs)
         return
 
+    # TODO: support initializing from quantization parameters when Quantizer is
+    # exposed in python
     @staticmethod
-    def from_float(mod, qparams_dict=None):
+    def from_float(mod):
         r"""Create a quantized module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
-            Args: `qprams_dict` if `mod` is created directly by user, we will
-            need the dictionary to have entries of quantization parameters for
-            `activation` and `weight`, only torch.per_tensor_affine is supported
-            right now
         """
         assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
-        if qparams_dict:
-            assert('activation' in qparams_dict)
-            assert('weight' in qparams_dict)
-            act_qparams = qparams_dict['activation']
-            wt_qparams = qparams_dict['weight']
-        else:
-            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-            activation_observer = mod.observer
-            act_qparams = activation_observer.calculate_qparams()
-            weight_observer = mod.qconfig.weight()
-            weight_observer(mod.weight)
-            wt_qparams = weight_observer.calculate_qparams()
-        bias_qparams = torch.zeros(2)
+        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+        assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+        activation_observer = mod.observer
+        act_qparams = activation_observer.calculate_qparams()
+        weight_observer = mod.qconfig.weight()
+        weight_observer(mod.weight)
+        wt_qparams = weight_observer.calculate_qparams()
         bias_scale = (wt_qparams[0] * act_qparams[0]).float()
         qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long(), torch.qint8)
         qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
