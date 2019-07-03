@@ -53,6 +53,20 @@ class _ConvNd(Module):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
 
+    def _compute_padding_same(self, input, dim):
+        # When calculating convolutions, we can examine each dimension independently
+        input_size = input.size(dim + 2)
+        filter_size = self.weight.size(dim + 2)
+        # Here we calculate the equivalent filter size factoring in dilation
+        effective_filter_size = (filter_size - 1) * self.dilation[dim] + 1
+        out_size = math.ceil(input_size / self.stride[dim])
+        # We calculate the starting position of the last filter
+        last_start = (out_size - 1) * self.stride[dim]
+        # The final necessary input size is equal to the starting position of the last filter +
+        # the effective filter size. Padding is equal to the difference
+        total_padding = max(0, last_start + effective_filter_size - input_size)
+        return total_padding
+
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
              ', stride={stride}')
@@ -186,7 +200,7 @@ class Conv1d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        padding = _single(padding)
+        padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -199,8 +213,15 @@ class Conv1d(_ConvNd):
             return F.conv1d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
-        return F.conv1d(input, self.weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+        elif padding == 'same':
+            padding_rows = self._compute_padding_same(dim=0)
+            if padding_rows % 2:
+                input = F.pad(input, [0, padding_rows % 2])
+            return F.conv1d(input, self.weight, self.bias, self.stride,
+                            (padding_rows // 2), self.dilation, self.groups)
+        else:
+            return F.conv1d(input, self.weight, self.bias, self.stride,
+                            self.padding, self.dilation, self.groups)
 
 
 @weak_module
@@ -327,7 +348,7 @@ class Conv2d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
-        padding = _pair(padding)
+        padding = padding if isinstance(padding, str) else _pair(padding)
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -341,8 +362,16 @@ class Conv2d(_ConvNd):
             return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
-        return F.conv2d(input, self.weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+        elif self.padding == 'same':
+            padding_rows = self._compute_padding_same(input, dim=0)
+            padding_cols = self._compute_padding_same(input, dim=1)
+            if padding_rows % 2 or padding_cols % 2:
+                input = F.pad(input, [0, padding_cols % 2, 0, padding_rows % 2])
+            return F.conv2d(input, self.weight, self.bias, self.stride,
+                            (padding_rows // 2, padding_cols // 2), self.dilation, self.groups)
+        else:
+            return F.conv2d(input, self.weight, self.bias, self.stride,
+                            self.padding, self.dilation, self.groups)
 
 
 @weak_module
@@ -464,7 +493,7 @@ class Conv3d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
-        padding = _triple(padding)
+        padding = padding if isinstance(padding, str) else _triple(padding)
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -479,8 +508,18 @@ class Conv3d(_ConvNd):
             return F.conv3d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride, _triple(0),
                             self.dilation, self.groups)
-        return F.conv3d(input, self.weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+        elif self.padding == 'same':
+            padding = [self._compute_padding_same(input, dim=0),
+                       self._compute_padding_same(input, dim=1),
+                       self._compute_padding_same(input, dim=2)]
+
+            if padding[0] % 2 or padding[1] % 2 or padding[2] % 2:
+                input = F.pad(input, [0, padding[0] % 2, 0, padding[1] % 2, 0, padding[2] % 2])
+            return F.conv3d(input, self.weight, self.bias, self.stride,
+                            (padding[0] // 2, padding[1] // 2, padding[2] // 2), self.dilation, self.groups)
+        else:
+            return F.conv3d(input, self.weight, self.bias, self.stride,
+                            self.padding, self.dilation, self.groups)
 
 
 @weak_module
