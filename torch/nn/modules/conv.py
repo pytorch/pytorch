@@ -111,6 +111,8 @@ class Conv1d(_ConvNd):
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both sides
       for :attr:`padding` number of points.
+      If `padding` == `same`, padding will be inserted such that
+      `output shape = ceil(input shape/stride)` for each dimension.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
@@ -154,7 +156,7 @@ class Conv1d(_ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of
+        padding (int, string, or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
         padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
         dilation (int or tuple, optional): Spacing between kernel
@@ -213,7 +215,7 @@ class Conv1d(_ConvNd):
             return F.conv1d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
-        elif padding == 'same':
+        elif self.padding == 'same':
             padding_rows = self._compute_padding_same(dim=0)
             if padding_rows % 2:
                 input = F.pad(input, [0, padding_rows % 2])
@@ -248,6 +250,8 @@ class Conv2d(_ConvNd):
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension.
+      If `padding` == `same`, padding will be inserted such that
+      `output shape = ceil(input shape/stride)` for each dimension.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
@@ -296,7 +300,7 @@ class Conv2d(_ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
+        padding (int, string, or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
@@ -392,6 +396,8 @@ class Conv3d(_ConvNd):
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension.
+      If `padding` == `same`, padding will be inserted such that
+      `output shape = ceil(input shape/stride)` for each dimension.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -439,7 +445,7 @@ class Conv3d(_ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
+        padding (int, string, or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
         padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
