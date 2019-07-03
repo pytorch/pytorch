@@ -15,7 +15,7 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
       return !a;
     });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_cuda", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_not_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
         return ~a;
       });
