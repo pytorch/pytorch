@@ -192,7 +192,7 @@ struct GraphTask {
     return exec_info_.empty();
   }
 
-  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth = 0)
+  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth)
     : has_error_(false)
     , outstanding_tasks_(0)
     , keep_graph_(keep_graph)
