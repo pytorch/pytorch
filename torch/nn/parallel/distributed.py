@@ -328,9 +328,34 @@ class DistributedDataParallel(Module):
         self.modules_params = [list(m.parameters()) for m in self._module_copies]
         self.modules_buffers = [list(m.buffers()) for m in self._module_copies]
 
-        param_list = [
-            list(filter(lambda p: p.requires_grad, module.parameters()))
-            for module in self._module_copies]
+        # Build tuple of (module, parameter) for all parameters that require grads.
+        modules_and_parameters = [
+            [
+                (module, parameter)
+                for module in replica.modules()
+                for parameter in filter(
+                    lambda parameter: parameter.requires_grad,
+                    module.parameters(recurse=False))
+            ] for replica in self._module_copies]
+
+        # Build list of parameters.
+        parameters = [
+            list(parameter for _, parameter in replica)
+            for replica in modules_and_parameters]
+
+        # Checks if a module will produce a sparse gradient.
+        def produces_sparse_gradient(module):
+            if isinstance(module, torch.nn.Embedding):
+                return module.sparse
+            if isinstance(module, torch.nn.EmbeddingBag):
+                return module.sparse
+            return False
+
+        # Build list of booleans indicating whether or not to expect sparse
+        # gradients for the corresponding parameters.
+        expect_sparse_gradient = [
+            list(produces_sparse_gradient(module) for module, _ in replica)
+            for replica in modules_and_parameters]
 
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
@@ -338,16 +363,18 @@ class DistributedDataParallel(Module):
         # a much larger bucket, adding unnecessary latency after gradient
         # computation finishes. Experiments showed 1MB is a reasonable value.
         bucket_indices = dist._compute_bucket_assignment_by_size(
-            param_list[0],
-            [1024 * 1024, self.bucket_bytes_cap])
+            parameters[0],
+            [1024 * 1024, self.bucket_bytes_cap],
+            expect_sparse_gradient[0])
 
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
         # are used in the forward pass in the order they are defined.
         self.reducer = dist.Reducer(
-            param_list,
+            parameters,
             list(reversed(bucket_indices)),
-            self.process_group)
+            self.process_group,
+            expect_sparse_gradient)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
@@ -363,6 +390,8 @@ class DistributedDataParallel(Module):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
+        self.__dict__.setdefault('require_forward_param_sync', True)
+        self.__dict__.setdefault('require_backward_grad_sync', True)
         self._ddp_init_helper()
 
     def _check_default_group(self):
@@ -398,8 +427,10 @@ class DistributedDataParallel(Module):
         """
         old_require_backward_grad_sync = self.require_backward_grad_sync
         self.require_backward_grad_sync = False
-        yield
-        self.require_backward_grad_sync = old_require_backward_grad_sync
+        try:
+            yield
+        finally:
+            self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
         if self.require_forward_param_sync:

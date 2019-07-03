@@ -448,7 +448,7 @@ class TestOptim(TestCase):
             ignore_multidevice=True
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.LBFGS([weight, bias], line_search_fn="strong_Wolfe"),
+            lambda weight, bias: optim.LBFGS([weight, bias], line_search_fn="strong_wolfe"),
             ignore_multidevice=True
         )
 

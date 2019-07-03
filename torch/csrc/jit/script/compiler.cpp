@@ -1314,12 +1314,15 @@ struct to_ir {
         Value* cur_elem = iter_val->getelem(range, method, trip_count);
         SugaredValuePtr sv = std::make_shared<SimpleValue>(cur_elem);
         List<Expr> target_exprs = targets.value();
-        size_t n_binders = target_exprs.size();
+        validateAssignLhsExpr(target_exprs, range);
 
-        bool starred_unpack = calcNumStarredUnpack(target_exprs, range);
-        if (starred_unpack)
-          n_binders--;
-        emitExprsAssign(target_exprs, {sv}, range, n_binders);
+        // if target exprs are more than 1, it means iteration unpacking on LHS
+        // we create Tuple literal to wrap those target exprs for assignments
+        if (target_exprs.size() > 1) {
+          Expr tl = TupleLiteral::create(range, target_exprs);
+          target_exprs = List<Expr>::create(range, {tl});
+        }
+        emitExprsAssign(target_exprs, {sv}, range, /*n_binders=*/1);
       }
 
       emitStatements(body);
@@ -1336,17 +1339,12 @@ struct to_ir {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
-    if (targets.size() != 1) {
-      throw ErrorReport(stmt)
-          << "Iteration variable unpacking is not supported";
-    }
-
-    // Emit loop information for builtinFunction values like range(), zip(), 
+    // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
-    auto sv = emitSugaredExpr(itrs[0], 1);
+    SugaredValuePtr sv = emitSugaredExpr(itrs[0], 1);
 
     // We will get IterableTree for builtinFunctions zip() and enumerate(),
-    // RangeValue for range(), and SimpleValue for types like List, Tensor, Dict.
+    // RangeValue for range(), and SimpleValue for types like List/Tensor/Dict/String.
     auto range_val = std::dynamic_pointer_cast<RangeValue>(sv);
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
     auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(sv);
@@ -1354,7 +1352,12 @@ struct to_ir {
     // For SimpleValue(except Tuple) or RanveValue/IterableTree, emit common loop
     if ((siv && !siv->getValue()->type()->cast<TupleType>())
         || range_val || iterable_tree) {
-      emitLoopCommon(stmt.range(), body, sv, targets, {}); 
+      // looping over a dict defaults to looping over the keys in python
+      if (siv && siv->getValue()->type()->cast<DictType>()) {
+        sv = std::make_shared<SimpleValue>(
+          graph->insert(aten::keys, {siv->getValue()}, {}, stmt.range()));
+      }
+      emitLoopCommon(stmt.range(), body, sv, targets, {});
       return;
     }
 
@@ -1425,7 +1428,7 @@ struct to_ir {
   // 3) A Starred node can only appear when there is another non-Starred lhs
   //    Expr. Concretely this means that `*abc = func()` is illegal. Unpacking
   //    all outputs into a tuple is covered by `abc = func()`.
-  bool calcNumStarredUnpack(const List<Expr>& lhs, const SourceRange& r) {
+  bool validateAssignLhsExpr(const List<Expr>& lhs, const SourceRange& r) {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
@@ -1457,7 +1460,14 @@ struct to_ir {
   // Get the appropriate builtin op for this augmented assignment
   // If the RHS is a tensor, return the corresponding ATen in-place op
   // If it's a list of scalars, then return the corresponding list augment op
-  Symbol getAugOp(const AugAssign& stmt, bool isTensor) {
+  Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
+    if (type->cast<ListType>()) { // Lists also have in-place ops.
+      switch (stmt.aug_op()) {
+        case '+':
+          return aten::add_;
+      }
+    }
+    bool isTensor = type->isSubtypeOf(TensorType::get());
     switch (stmt.aug_op()) {
       case '+':
         return isTensor ? aten::add_ : aten::add;
@@ -1521,7 +1531,7 @@ struct to_ir {
       emitBuiltinCall(
           stmt.range(),
           *method.graph(),
-          getAugOp(stmt, /*isTensor=*/true),
+          getAugOp(stmt, lhsValue->type()),
           self,
           {rhs},
           {},
@@ -1538,14 +1548,15 @@ struct to_ir {
     const auto lhs = Var(stmt.lhs());
     const auto lhsValue = environment_stack->getSugaredVar(lhs.name())
                               ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
+    auto lhsType = lhsValue->type();
+    if (lhsType->isSubtypeOf(TensorType::get()) || lhsType->cast<c10::ListType>()) {
       // for tensors, emit the corresponding in-place op
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
       const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
       const auto output = emitBuiltinCall(
           stmt.range(),
           *method.graph(),
-          getAugOp(stmt, /*isTensor=*/true),
+          getAugOp(stmt, lhsValue->type()),
           self,
           {rhs},
           {},
@@ -1586,7 +1597,7 @@ struct to_ir {
         emitBuiltinCall(
             stmt.range(),
             *method.graph(),
-            getAugOp(stmt, /*isTensor=*/true),
+            getAugOp(stmt, sliceable->type()),
             slicedArg,
             {rhs},
             {},
@@ -1603,7 +1614,7 @@ struct to_ir {
         const auto augmented = emitBuiltinCall(
             stmt.range(),
             *method.graph(),
-            getAugOp(stmt, /*isTensor=*/true),
+            getAugOp(stmt, sliceable->type()),
             indexed,
             {rhs},
             {},
@@ -1621,8 +1632,7 @@ struct to_ir {
       const auto listType = sliceable->type()->cast<ListType>();
       AT_ASSERT(listType != nullptr);
 
-      bool isTensorList =
-          listType->getElementType()->isSubtypeOf(TensorType::get());
+      auto elementType = listType->getElementType();
 
       // Get the idx to augment
       const auto subscriptExprs = lhs.subscript_exprs();
@@ -1642,7 +1652,7 @@ struct to_ir {
       const auto getItem =
           graph->insert(aten::select, {listArg, idxArg}, {}, stmt.range());
       const auto augmentedItem = graph->insert(
-          getAugOp(stmt, isTensorList), {getItem, valueArg}, {}, stmt.range());
+          getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
       graph->insert(
           aten::_set_item, {listArg, idxArg, augmentedItem}, {}, stmt.range());
     }
@@ -1715,7 +1725,7 @@ struct to_ir {
 
   void emitTupleAssign(const TupleLiteral& tl, const Expr& rhs) {
     size_t n_binders = tl.inputs().size();
-    bool starred_unpack = calcNumStarredUnpack(tl.inputs(), tl.range());
+    bool starred_unpack = validateAssignLhsExpr(tl.inputs(), tl.range());
     if (starred_unpack)
       n_binders--;
     auto output = emitSugaredExpr(rhs, n_binders);
@@ -1780,7 +1790,7 @@ struct to_ir {
           // recursively emit tuple assignments on tuple literal input
           TupleLiteral sub_tl = TupleLiteral(assignee);
           size_t sub_n_binders = sub_tl.inputs().size();
-          bool sub_starred_unpack = calcNumStarredUnpack(sub_tl.inputs(), sub_tl.range());
+          bool sub_starred_unpack = validateAssignLhsExpr(sub_tl.inputs(), sub_tl.range());
           if (sub_starred_unpack)
             sub_n_binders--;
           emitTupleAssign(sub_tl, outputs.at(i), rhs_loc, sub_n_binders, sub_starred_unpack);
@@ -2257,7 +2267,7 @@ struct to_ir {
         if (input_size == 2) {
           start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
         }
-        
+
         if (input_size > 2) {
           throw ErrorReport(loc)
             << "enumerate expected at most 2 arguments, got " << input_size;
@@ -2802,7 +2812,15 @@ struct to_ir {
       Value* dict_val,
       Value* key_val) {
     auto dict_type = dict_val->type()->cast<DictType>();
-    AT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
+
+    if (!key_val->type()->isSubtypeOf(dict_type->getKeyType())) {
+      throw ErrorReport(loc)
+          << "Expected key type '" << key_val->type()->python_str()
+          << "' to subtype the key type '"
+          << dict_type->getKeyType()->python_str() << "' of the dict '"
+          << dict_type->python_str() << "'";
+    }
+
     return graph->insertNode(graph->createDictIndex(dict_val, key_val))
         ->output();
   }

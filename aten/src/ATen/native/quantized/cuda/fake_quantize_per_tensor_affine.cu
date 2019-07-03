@@ -30,34 +30,14 @@ at::Tensor fake_quantize_per_tensor_affine_cuda(
       double scale,
       int64_t zero_point,
       int64_t quant_min,
-      int64_t quant_max,
-      int64_t quant_delay,
-      int64_t iter
+      int64_t quant_max
     ) {
-    // Sanity checks.
     TORCH_CHECK(self.is_cuda());
     TORCH_CHECK(self.scalar_type() == ScalarType::Float);
-    if (quant_min > quant_max) {
-      throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
-    }
-    if (zero_point < 0) {
-      throw std::invalid_argument("`zero_point` must be a positive integer.");
-    }
-    if (quant_delay < 0) {
-      throw std::invalid_argument("`quant_delay` must be a positive integer.");
-    }
-
-    if (quant_delay != 0 && iter < 0) {
-      throw std::invalid_argument(
-        "`iter` must be >=0 for non-zero `quant_delay`");
-    }
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= 0, "`zero_point` must be a positive integer.");
 
     auto Y = at::empty_like(self);
-
-    if (quant_delay > 0 && iter <= quant_delay) {
-      Y.copy_(self);  // We might want to just return the input here.
-      return Y;
-    }
 
     float inv_scale = 1.0f / scale;
     at::cuda::CUDA_tensor_apply2<float, float>(
@@ -97,38 +77,19 @@ at::Tensor fake_quantize_per_tensor_affine_backward_cuda(
       double scale,
       int64_t zero_point,
       int64_t quant_min,
-      int64_t quant_max,
-      int64_t quant_delay,
-      int64_t iter) {
-    // Sanity checks.
+      int64_t quant_max) {
+    TORCH_CHECK(dY.is_cuda());
+    TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
     TORCH_CHECK(X.is_cuda());
     TORCH_CHECK(X.scalar_type() == ScalarType::Float);
-    if (quant_min > quant_max) {
-      throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
-    }
-    if (zero_point < 0) {
-      throw std::invalid_argument("`zero_point` must be a positive integer.");
-    }
-    if (quant_delay < 0) {
-      throw std::invalid_argument("`quant_delay` must be a positive integer.");
-    }
+    TORCH_CHECK(X.numel() == dY.numel(), "`X` and `dY` are not the same size");
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= 0, "`zero_point` must be a positive integer.");
     if (X.numel() <= 0) {
       return X;
     }
-    if (X.numel() != dY.numel()) {
-      throw std::invalid_argument("`X` and `dY` are not the same size");
-    }
-
-    if (quant_delay != 0 && iter < 0) {
-      throw std::invalid_argument(
-        "`iter` must be >=0 for non-zero `quant_delay`");
-    }
 
     auto dX = at::zeros_like(dY);
-    if (quant_delay > 0 && iter <= quant_delay) {
-      dX.copy_(dY);
-      return dX;
-    }
 
     float inv_scale = 1.0f / scale;
     auto mask = at::empty_like(dY);

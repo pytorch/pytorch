@@ -27,9 +27,12 @@ class FakeQuantize(Module):
         self.zero_point = None
 
     def forward(self, X):
-        self.observer(X)
-        self.scale, self.zero_point = self.observer.calculate_qparams()
-        X = torch.fake_quantize_per_tensor_affine(X, self.scale.double(), self.zero_point.long(), self.quant_min,
-            self.quant_max, self.quant_delay, self.iter)
-        self.iter = self.iter + 1
+        if self.training:
+            self.observer(X)
+            if self.iter >= self.quant_delay:
+                self.scale, self.zero_point = self.observer.calculate_qparams()
+                X = torch.fake_quantize_per_tensor_affine(
+                    X, self.scale.double(), self.zero_point.long(), self.quant_min,
+                    self.quant_max)
+            self.iter = self.iter + 1
         return X

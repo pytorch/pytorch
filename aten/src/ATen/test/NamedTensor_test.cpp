@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/memory.h>
 
 using at::Dimname;
+using at::DimnameList;
 using at::NamedTensorMeta;
 using at::Symbol;
 using torch::make_unique;
@@ -138,6 +139,41 @@ TEST(NamedTensorTest, dimnameToPosition) {
 
   tensor = at::empty({1, 1}, std::vector<Dimname>({ Cin, N }));
   ASSERT_EQ(dimname_to_position(tensor, C), 0);
+}
+
+static void check_unify(
+    DimnameList names,
+    DimnameList other_names,
+    DimnameList expected) {
+  const auto result = at::unify_from_right(names, other_names);
+  ASSERT_TRUE(dimnames_equal(result.value(), expected));
+}
+
+static void check_unify_error(DimnameList names, DimnameList other_names) {
+  ASSERT_THROW(at::unify_from_right(names, other_names), c10::Error);
+}
+
+TEST(NamedTensorTest, unifyFromRight) {
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  auto H = dimnameFromString("H");
+  auto W = dimnameFromString("W");
+  auto None = dimnameFromString("*");
+  
+  std::vector<Dimname> names = { N, C };
+  ASSERT_TRUE(dimnames_equal(*at::unify_from_right(at::nullopt, names), names));
+  ASSERT_TRUE(dimnames_equal(*at::unify_from_right(names, at::nullopt), names));
+  ASSERT_FALSE(at::unify_from_right(at::nullopt, at::nullopt).has_value());
+
+  check_unify({ N, C, H, W }, { N, C, H, W }, { N, C, H, W });
+  check_unify({ W }, { C, H, W }, { C, H, W });
+  check_unify({ None, W }, { C, H, W }, { C, H, W });
+  check_unify({ None, None, H, None }, { C, None, W }, { None, C, H, W });
+
+  check_unify_error({ W, H }, { W, C });
+  check_unify_error({ W, H }, { C, H });
+  check_unify_error({ None, H }, { H, None });
+  check_unify_error({ H, None, C }, { H });
 }
 
 #endif

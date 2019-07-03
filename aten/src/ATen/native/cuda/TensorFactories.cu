@@ -43,7 +43,7 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
+Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
@@ -64,6 +64,9 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
+
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
 

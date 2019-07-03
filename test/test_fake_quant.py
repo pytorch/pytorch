@@ -8,10 +8,8 @@ import unittest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 from common_utils import run_tests
-from torch.quantization.QConfig import QConfig
-from torch.quantization.fake_quantize import FakeQuantize
-from torch.quantization.observer import *
-
+from torch.quantization import FakeQuantize
+from torch.quantization import default_qconfig
 
 
 # Reference method for quantizing a tensor.
@@ -33,20 +31,21 @@ NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
 class TestFakeQuantizePerTensorAffine(unittest.TestCase):
+    def to_tensor(self, X, device):
+        return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
+
     """Tests the forward path of the FakeQuantizePerTensorAffine op."""
     @given(device = st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_forward(self, device):
         np.random.seed(NP_RANDOM_SEED)
 
-        def to_tensor(X):
-            return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
         scale = 3
         zero_point = 2
         quant_min, quant_max = 0, 255
-        X = to_tensor(np.random.rand(20, 20) * 125)
+        X = self.to_tensor(np.random.rand(20, 20) * 125, device)
         Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
         Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max, 0, 0)
+            X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime, rtol=tolerance, atol=tolerance)
 
     """Tests the backward method. Note that this runs the reference quantization
@@ -55,16 +54,14 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
     def test_backward(self, device):
         np.random.seed(NP_RANDOM_SEED)
 
-        def to_tensor(X):
-            return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
         scale = 3
         zero_point = 2
         quant_min, quant_max = 0, 255
-        X = to_tensor(np.random.rand(20, 20) * 125)
+        X = self.to_tensor(np.random.rand(20, 20) * 125, device)
         X.requires_grad_(True)
         Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
         Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max, 0, 0)
+            X, scale, zero_point, quant_min, quant_max)
         dY = X  # Fake gradient
         dX = _fake_quantize_per_tensor_affine_grad_reference(
             dY, X, scale, zero_point, quant_min, quant_max)
@@ -78,37 +75,23 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         '''
         np.random.seed(NP_RANDOM_SEED)
 
-        def to_tensor(X):
-            return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
         scale = 3
         zero_point = 2
         quant_min, quant_max = 0, 255
-        X = to_tensor(np.random.rand(20, 20) * 125)
+        X = self.to_tensor(np.random.rand(20, 20) * 125, device)
         Y = torch.dequantize(torch.quantize_linear(X, scale, zero_point, torch.qint8))
         Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min,
-            quant_max, 0, 0)
+            X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime, rtol=tolerance, atol=tolerance)
 
     @given(device = st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_fq_module(self, device):
         np.random.seed(NP_RANDOM_SEED)
 
-        def to_tensor(X):
-            return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
-
         quant_min, quant_max = 0, 255
-        X = to_tensor(np.random.rand(20, 20) * 125)
+        X = self.to_tensor(np.random.rand(20, 20) * 125, device)
         X.requires_grad_(True)
-        qoptions = {
-            'qscheme': torch.per_tensor_affine,
-            'dtype': torch.qint8,
-        }
-        fq_config = QConfig(
-            activation=observer(Observer, qoptions),
-            weight=observer(Observer, qoptions)
-        )
-        fq_module = FakeQuantize(fq_config, quant_min, quant_max)
+        fq_module = FakeQuantize(default_qconfig, quant_min, quant_max)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None

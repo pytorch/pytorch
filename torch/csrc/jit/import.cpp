@@ -42,11 +42,16 @@ namespace {
 // model, and it is serialized as json.
 class ScriptModuleDeserializer final {
  public:
-  ScriptModuleDeserializer(const std::string& filename);
-  ScriptModuleDeserializer(std::istream* is);
-  explicit ScriptModuleDeserializer(std::unique_ptr<ReadAdapterInterface> rai);
+  ScriptModuleDeserializer(
+      const std::string& filename,
+      script::ModuleLookup module_lookup);
+  ScriptModuleDeserializer(
+      std::istream* is,
+      script::ModuleLookup module_lookup);
+  explicit ScriptModuleDeserializer(
+      std::unique_ptr<ReadAdapterInterface> rai,
+      script::ModuleLookup module_lookup);
   void deserialize(
-      script::ModuleLookup module_lookup,
       c10::optional<at::Device> device,
       script::ExtraFilesMap& extra_files);
 
@@ -60,9 +65,7 @@ class ScriptModuleDeserializer final {
   void loadTensorTable(torch::ModelDef* model_def);
   std::vector<IValue> loadPickleArchive(const std::string& name);
   void importCallback(const std::string& qualifier);
-  void moduleSetState(
-      const std::shared_ptr<script::Module>& module,
-      IValue state);
+  void moduleSetState(const script::Module& module, IValue state);
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
@@ -76,23 +79,33 @@ class ScriptModuleDeserializer final {
 
   std::unordered_set<std::string> imported_libs_;
 
-  std::shared_ptr<script::Module> main_module_;
+  script::Module main_module_;
 };
 
-ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
-    : reader_(filename.c_str()) {
+ScriptModuleDeserializer::ScriptModuleDeserializer(
+    const std::string& filename,
+    script::ModuleLookup module_lookup)
+    : reader_(filename.c_str()),
+      moduleLookup_(std::move(module_lookup)),
+      main_module_(moduleLookup_({})) {
   // TODO appropriate support for mmap, right now still use stream reader
 }
 
-ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
-    : reader_(is) {}
+ScriptModuleDeserializer::ScriptModuleDeserializer(
+    std::istream* is,
+    script::ModuleLookup module_lookup)
+    : reader_(is),
+      moduleLookup_(std::move(module_lookup)),
+      main_module_(moduleLookup_({})) {}
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(
-    std::unique_ptr<ReadAdapterInterface> rai)
-    : reader_(std::move(rai)) {}
+    std::unique_ptr<ReadAdapterInterface> rai,
+    script::ModuleLookup module_lookup)
+    : reader_(std::move(rai)),
+      moduleLookup_(std::move(module_lookup)),
+      main_module_(moduleLookup_({})) {}
 
 void ScriptModuleDeserializer::deserialize(
-    script::ModuleLookup module_lookup,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   C10_LOG_API_USAGE_ONCE("torch.script.load");
@@ -126,9 +139,7 @@ void ScriptModuleDeserializer::deserialize(
   AT_ASSERTM(
       model_def.ParseFromString(binary_string),
       "JSON transcoder produced invalid protobuf output.");
-  moduleLookup_ = module_lookup;
   device_ = device;
-  main_module_ = module_lookup({});
 
   const auto& module_def = model_def.main_module();
 
@@ -256,7 +267,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      *main_module_->class_compilation_unit(),
+      *main_module_.class_compilation_unit(),
       qualifier,
       src,
       tensor_table_,
@@ -264,9 +275,10 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
 }
 
 void ScriptModuleDeserializer::moduleSetState(
-    const std::shared_ptr<script::Module>& module,
+    const script::Module& module,
     IValue state) {
-  auto setstate = module->class_compilation_unit()->find_function("__setstate__");
+  auto setstate =
+      module.class_compilation_unit()->find_function("__setstate__");
 
   TORCH_CHECK(
       setstate != nullptr,
@@ -275,13 +287,13 @@ void ScriptModuleDeserializer::moduleSetState(
 
   // TODO: once modules are first class in the interpreter and methods are not
   // lowered, change this to `module->run_method("__setstate__", {state});`
-  setstate->run({module->module_object(), state});
+  setstate->run({module.module_object(), state});
 }
 
 void ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
-  std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
-  module->set_optimized(module_def.optimize());
+  script::Module module = moduleLookup_(moduleStack_);
+  module.set_optimized(module_def.optimize());
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     moduleStack_.emplace_back(sub_def.name());
@@ -292,15 +304,15 @@ void ScriptModuleDeserializer::convertModule(
     const torch::ParameterDef& param_def = module_def.parameters(i);
     at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
     if (param_def.is_buffer()) {
-      module->register_buffer(param_def.name(), tensor);
+      module.register_buffer(param_def.name(), tensor);
     } else {
-      module->register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
+      module.register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
   script::ScriptTypeParser typeParser;
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
-    if (module->find_buffer(attr_def.name())) {
+    if (module.find_buffer(attr_def.name())) {
       // TODO: handle this above so this can be removed
       continue;
     }
@@ -313,7 +325,7 @@ void ScriptModuleDeserializer::convertModule(
       ivalue = pickled_ivalues_.at(attr_def.id());
     }
 
-    module->register_attribute(
+    module.register_attribute(
         attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
   }
   if (module_def.has_torchscript_arena()) {
@@ -330,7 +342,7 @@ void ScriptModuleDeserializer::convertModule(
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
-        *main_module_->class_compilation_unit(),
+        *main_module_.class_compilation_unit(),
         module,
         src,
         tensor_table_,
@@ -342,7 +354,7 @@ void ScriptModuleDeserializer::convertModule(
         module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
 
-  for (const auto& slot : module->get_attributes()) {
+  for (const auto& slot : module.get_attributes()) {
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
     if (slot.type()->kind() != TypeKind::OptionalType) {
@@ -365,8 +377,8 @@ void import_ir_module(
     std::istream& in,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
-  ScriptModuleDeserializer deserializer(&in);
-  deserializer.deserialize(module_lookup, device, extra_files);
+  ScriptModuleDeserializer deserializer(&in, module_lookup);
+  deserializer.deserialize(device, extra_files);
 }
 
 void import_ir_module(
@@ -374,8 +386,8 @@ void import_ir_module(
     const std::string& filename,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
-  ScriptModuleDeserializer deserializer(filename);
-  deserializer.deserialize(module_lookup, device, extra_files);
+  ScriptModuleDeserializer deserializer(filename, module_lookup);
+  deserializer.deserialize(device, extra_files);
 }
 
 void import_ir_module(
@@ -383,11 +395,11 @@ void import_ir_module(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
-  ScriptModuleDeserializer deserializer(std::move(rai));
-  deserializer.deserialize(module_lookup, device, extra_files);
+  ScriptModuleDeserializer deserializer(std::move(rai), module_lookup);
+  deserializer.deserialize(device, extra_files);
 }
 
-std::shared_ptr<script::Module> load(
+script::Module load(
     std::istream& in,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
@@ -397,7 +409,7 @@ std::shared_ptr<script::Module> load(
   return module;
 }
 
-std::shared_ptr<script::Module> load(
+script::Module load(
     const std::string& filename,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
@@ -406,25 +418,25 @@ std::shared_ptr<script::Module> load(
   return module;
 }
 
-std::shared_ptr<script::Module> load(
+script::Module load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
-  auto module = std::make_shared<script::Module>("TODO");
+  script::Module module("__main__");
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
-    std::shared_ptr<script::Module> curr = module;
+    script::Module curr = module;
     for (const auto& name : qualified_name) {
-      if (curr->find_module(name) == nullptr) {
-        curr->register_module(name, std::make_shared<script::Module>());
+      if (!curr.find_module(name)) {
+        curr.register_module(name, script::Module("__main__"));
       }
-      curr = curr->get_module(name);
+      curr = curr.get_module(name);
     }
     return curr;
   };
 
-  ScriptModuleDeserializer deserializer(std::move(rai));
-  deserializer.deserialize(module_lookup, device, extra_files);
+  ScriptModuleDeserializer deserializer(std::move(rai), module_lookup);
+  deserializer.deserialize(device, extra_files);
 
   return module;
 }

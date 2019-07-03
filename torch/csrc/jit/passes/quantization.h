@@ -29,7 +29,7 @@ TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
  * will be cloned into all the places where we need to add instrumentation.
  */
 TORCH_API void InsertObserverNodes(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& methodName,
     Node* observer_node);
 
@@ -59,7 +59,7 @@ TORCH_API void InsertObserverNodes(
  *
  */
 TORCH_API void InsertQuantDequantNodes(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& methodName,
     const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
         qparam_dict);
@@ -97,7 +97,7 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
  */
 template <typename Fn>
 TORCH_API void InsertQuantDequantNodesForParam(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
     const Fn& getQParamFunc,

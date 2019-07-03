@@ -442,13 +442,12 @@ void testEvalModeForLoadedModule() {
   if (isSandcastle())
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
-  std::shared_ptr<torch::jit::script::Module> module =
-      torch::jit::load(module_path);
-  AT_ASSERT(module->get_module("dropout")->is_training());
-  module->eval();
-  AT_ASSERT(!module->get_module("dropout")->is_training());
-  module->train();
-  AT_ASSERT(module->get_module("dropout")->is_training());
+  torch::jit::script::Module module = torch::jit::load(module_path);
+  AT_ASSERT(module.get_module("dropout").is_training());
+  module.eval();
+  AT_ASSERT(!module.get_module("dropout").is_training());
+  module.train();
+  AT_ASSERT(module.get_module("dropout").is_training());
 }
 
 // test a few features that are not directly used in schemas yet
@@ -840,36 +839,36 @@ void testNoneSchemaMatch() {
 }
 
 void testModuleDefine() {
-  auto m = std::make_shared<script::Module>();
-  m->register_parameter("foo", torch::ones({}), false);
-  m->define(R"(
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
     def add_it(self, x, b : int = 4):
       return self.foo + x + b
   )");
-  auto result = m->run_method("add_it", torch::ones({}));
+  auto result = m.run_method("add_it", torch::ones({}));
   AT_ASSERT(result.toTensor().item<float>() == 6)
 }
 
 void testModuleConversion() {
-  auto m = std::make_shared<script::Module>();
+  script::Module m("test");
   {
     // test cuda to cpu for params and buffers
-    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
-    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+    m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m.register_buffer("bar", torch::ones({}, at::kCUDA));
 
-    m->to(at::kCUDA);
-    m->to(at::kCPU);
-    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
-    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
+    m.to(at::kCUDA);
+    m.to(at::kCPU);
+    AT_ASSERT(m.get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m.get_buffer("bar").device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
-    m->register_parameter("foo", torch::ones({}), false);
-    m->register_buffer("bar", torch::ones({}));
+    m.register_parameter("foo", torch::ones({}), false);
+    m.register_buffer("bar", torch::ones({}));
 
-    m->to(at::kCUDA);
-    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
-    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
+    m.to(at::kCUDA);
+    AT_ASSERT(m.get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m.get_buffer("bar").device().is_cuda());
   }
 }
 
