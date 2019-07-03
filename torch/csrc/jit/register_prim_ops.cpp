@@ -813,7 +813,8 @@ RegisterOperators reg(
            int64_t end_ind = node->i(attr::end);
            return [=](Stack& stack) {
              auto tuple = pop(stack).toTuple();
-             std::vector<IValue> output_elems;
+             auto output_elems = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+             output_elems.reserve(end_ind-begin_ind);
              for (int64_t i = beg_ind; i < end_ind; ++i) {
                output_elems.emplace_back(tuple->elements()[i]);
              }
