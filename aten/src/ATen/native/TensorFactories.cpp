@@ -17,7 +17,7 @@
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
@@ -117,7 +117,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
   return tensor;
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
@@ -205,11 +205,17 @@ Tensor empty_like(
   }
 
   if (self.is_quantized()) {
+    // We could check if dtype is still quantized?  But then should we shift/scale
+    // the q_zero_point / q_scale or not?
+    TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
+                "It is currently not supported to specify a dtype that doesn't match "
+                "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
+                " Input tensor's dtype: ", self.dtype());
     // TODO: uncomment when qscheme diff is landed
     // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
     //                       "empty_like for quantized Tensor only works for
     //                        PerTensorAffine scheme right now");
-    return at::_empty_affine_quantized(self.sizes(), self.options(),
+    return at::_empty_affine_quantized(self.sizes(), options,
                                        self.q_scale(),
                                        self.q_zero_point(),
                                        use_memory_format);
@@ -456,6 +462,18 @@ Tensor& randn_out(Tensor& result, IntArrayRef size) {
 Tensor& randn_out(Tensor& result, IntArrayRef size, Generator* generator) {
   result.resize_(size);
   return result.normal_(0, 1, generator);
+}
+
+Tensor normal(double mean, double std, IntArrayRef size,
+              Generator* generator, const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  return result.normal_(mean, std, generator);
+}
+
+Tensor& normal_out(Tensor& result, double mean, double std,
+                   IntArrayRef size, Generator* generator) {
+  result.resize_(size);
+  return result.normal_(mean, std, generator);
 }
 
 Tensor randn_like(const Tensor& self) {
