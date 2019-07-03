@@ -275,24 +275,6 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-int64_t getAdjTupleIndex(
-    const SourceRange& loc,
-    const TupleTypePtr& tuple_type,
-    int64_t input_index,
-    bool allow_out_of_bounds) {
-  // set index to be positive to simplify logic in runtime
-  int64_t adj_index = input_index;
-  int64_t tuple_len = tuple_type->elements().size();
-  if (input_index < 0) {
-    adj_index = tuple_len + input_index;
-  }
-  if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
-    throw ErrorReport(loc) << "Tuple index out of range. Tuple is length "
-                           << tuple_len << " and index is " << input_index;
-  }
-  return adj_index;
-}
-
 Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   Value* val = getValue();
   TypePtr val_type = val->type();
