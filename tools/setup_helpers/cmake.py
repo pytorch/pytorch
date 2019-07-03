@@ -20,9 +20,6 @@ from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
                    NCCL_SYSTEM_LIB, USE_NCCL)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
-from .rocm import USE_ROCM
-from .nnpack import USE_NNPACK
-from .qnnpack import USE_QNNPACK
 
 
 def _which(thefile):
@@ -280,12 +277,9 @@ class CMake:
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
                                check_negative_env_flag('USE_FBGEMM')),
-            'USE_NNPACK': USE_NNPACK,
-            'USE_QNNPACK': USE_QNNPACK,
             'USE_NCCL': USE_NCCL,
             'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
             'USE_NUMPY': USE_NUMPY,
-            'USE_ROCM': USE_ROCM,
             'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
 
@@ -296,13 +290,10 @@ class CMake:
                       TORCH_BUILD_VERSION=version,
                       CMAKE_BUILD_TYPE=self._build_type,
                       INSTALL_TEST=build_test,
-                      NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or
-                                           check_negative_env_flag('NO_NAMEDTENSOR')),
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
                       NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
                       NCCL_ROOT_DIR=NCCL_ROOT_DIR,
                       NCCL_SYSTEM_LIB=NCCL_SYSTEM_LIB,
-                      NCCL_EXTERNAL=USE_NCCL,
                       CMAKE_INSTALL_PREFIX=install_dir,
                       CMAKE_C_FLAGS=cflags,
                       CMAKE_CXX_FLAGS=cflags,
