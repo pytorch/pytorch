@@ -115,5 +115,28 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
   return self;
 }
 
+Tensor quantized_clone(const Tensor& self) {
+  TORCH_CHECK(
+      isQIntType(self.scalar_type()),
+      "Input tensor must have a quantized ScalarType");
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+
+  TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
+  auto scale = static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale();
+  auto zero_point =
+      static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point();
+
+  Tensor dst = at::_empty_affine_quantized(
+      self.sizes(),
+      self.options().dtype(toQIntType(self.scalar_type())),
+      scale,
+      zero_point);
+
+  at::native::copy_(dst, self, false);
+
+  return dst;
+
+}
+
 } // namespace native
 } // namespace at
