@@ -360,6 +360,10 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
 
   // When current_depth is 0 this worker thread is done and we need to notify
   // the parent thread waiting on the graph_task
+  // NOTE: An edge case for this is when reentrant calls are repeatedly made in
+  // a thread which is at its maximum stack depth and they keep exiting right
+  // after. We will always switch to a new thread for each call, so, we'll keep
+  // oscillating between the two threads.
   if (graph_task && current_depth == 0) {
     graph_task->not_done_.notify_all();
   }
