@@ -2146,7 +2146,6 @@ class TestAutograd(TestCase):
                     ctx.x = Variable(x.data, requires_grad=True)
                     ctx.y = Variable(y_data, requires_grad=True)
                     ctx.output_var = ctx.x * ctx.y
-                    print(ctx.output_var)
                 return ctx.output_var.detach()
 
             @staticmethod
