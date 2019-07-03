@@ -6,7 +6,6 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
-#include <caffe2/core/common.h>
 
 #include <c10/util/Optional.h>
 

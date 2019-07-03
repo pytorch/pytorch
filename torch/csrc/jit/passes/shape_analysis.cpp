@@ -1184,7 +1184,7 @@ class ShapePropagator {
             "aten::min_values(Tensor self, int[] dim, bool keepdim) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
+          if (auto dim = node->get<torch::List<int64_t>>(attr::dim)) {
             return multidim_reduce_with_postprocess(
                 node,
                 /*num_reduced_dim=*/dim->size(),
@@ -1206,7 +1206,7 @@ class ShapePropagator {
             "aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
+          if (auto dim = node->get<torch::List<int64_t>>(attr::dim)) {
             // TODO: can dim contain duplicates?
             return multidim_reduce_with_postprocess(
                 node, /*num_reduced_dim=*/dim->size(), /*upcast_integer=*/true);
