@@ -12,5 +12,12 @@ def default_eval_fn(model, calib_data):
         model(data)
 
 _all__ = [
-
+    'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
+    # Top level API for quantizing a float model
+    'quantize',
+    # Sub functions called by quantize
+    'prepare', 'convert',
+    # Sub functions for `prepare` and `swap_module`
+    'propagate_qconfig', 'add_quant_dequant', 'add_observer', 'swap_module',
+    'default_eval_fn'
 ]

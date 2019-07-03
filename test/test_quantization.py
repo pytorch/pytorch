@@ -51,7 +51,8 @@ class NestedModel(torch.nn.Module):
 class ManualQuantModel(torch.nn.Module):
     def __init__(self):
         super(ManualQuantModel, self).__init__()
-        self.quant = QuantStub(default_qconfig)
+        self.qconfig = default_qconfig
+        self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
 
@@ -64,23 +65,37 @@ calib_data = [torch.rand(20, 5, dtype=torch.float) for _ in range(20)]
 
 class ModelQuantizeAPITest(TestCase):
 
-    def checkNoPrepModules(self, module, has_observer=False):
+    def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
             modules for quantization prepration, e.g.
             quant, dequant and observer
         """
         self.assertFalse(hasattr(module, 'quant'))
         self.assertFalse(hasattr(module, 'dequant'))
-        self.assertEqual(hasattr(module, 'observer'), has_observer)
 
-    def checkHasPrepModules(self, module, has_observer=False):
+    def checkHasPrepModules(self, module):
         r"""Checks the module contains child
             modules for quantization prepration, e.g.
             quant, dequant and observer
         """
+        self.assertTrue(hasattr(module, 'module'))
         self.assertTrue(hasattr(module, 'quant'))
         self.assertTrue(hasattr(module, 'dequant'))
-        self.assertEqual(hasattr(module, 'observer'), has_observer)
+
+    def checkObservers(self, module):
+        if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
+            self.assertTrue(hasattr(module, 'observer'))
+        for child in module.children():
+            self.checkObservers(child)
+
+    def checkQuantizedLinear(self, mod):
+        self.assertEqual(type(mod.module), nnq.Linear)
+        self.assertEqual(type(mod.quant), nnq.Quantize)
+        self.assertEqual(type(mod.dequant), nnq.DeQuantize)
+        self.assertEqual(mod.module.bias.dtype, torch.qint32)
+
+    def checkLinear(self, mod):
+        self.assertEqual(type(mod), torch.nn.Linear)
 
 
     def test_quantize_single_layer(self):
@@ -94,12 +109,9 @@ class ModelQuantizeAPITest(TestCase):
             '': default_qconfig
         }
         model = tq.quantize(model, qconfig_dict, default_eval_fn, [calib_data])
-        # self.checkHasPrepModules(model)
-        # self.checkNoPrepModules(model.module.fc1)
-        # self.assertEqual(type(model.fc1), nnq.Linear)
-        # self.assertEqual(type(model.quant), nnq.Quantize)
-        # self.assertEqual(type(model.dequant), nnq.DeQuantize)
-        # self.assertEqual(model.fc1.bias.dtype, torch.qint32)
+        self.checkNoPrepModules(model)
+        self.checkHasPrepModules(model.fc1)
+        self.checkQuantizedLinear(model.fc1)
         print(model)
         default_eval_fn(model, calib_data)
 
@@ -114,13 +126,11 @@ class ModelQuantizeAPITest(TestCase):
             'fc2': default_qconfig
         }
         myModel = tq.quantize(myModel, qconfig_dict, default_eval_fn, [calib_data])
-        # self.checkNoPrepModules(myModel)
-        # self.checkHasPrepModules(myModel.fc2)
-        # self.assertEqual(type(myModel.fc1), torch.nn.Linear)
+        self.checkNoPrepModules(myModel)
+        self.checkHasPrepModules(myModel.fc2)
         # check only fc2 is quantized
-        # self.assertEqual(type(myModel.fc2), nnq.Linear)
-        # self.assertEqual(type(myModel.fc2.quant), nnq.Quantize)
-        # self.assertEqual(type(myModel.fc2.dequant), nnq.DeQuantize)
+        self.assertEqual(type(myModel.fc1), torch.nn.Linear)
+        self.checkQuantizedLinear(myModel.fc2)
         print(myModel)
         default_eval_fn(myModel, calib_data)
 
@@ -132,19 +142,16 @@ class ModelQuantizeAPITest(TestCase):
         }
         myModel = tq.prepare(myModel, qconfig_dict)
         # Check if observers and quant/dequant nodes are inserted
-        # self.checkHasPrepModules(myModel)
-        # self.assertTrue(hasattr(myModel.fc1, 'observer'))
+        self.checkNoPrepModules(myModel)
+        self.checkHasPrepModules(myModel.fc1)
+        print(myModel)
+        self.checkObservers(myModel)
         default_eval_fn(myModel, calib_data)
 
-        tq.convert_to_quantized(myModel)
-        # self.checkHasPrepModules(myModel)
-        # self.checkNoPrepModules(myModel.fc1)
-        # # Check if modules are swapped correctly
-        # self.assertEqual(type(myModel.fc1), nnq.Linear)
-        # self.assertEqual(type(myModel.quant), nnq.Quantize)
-        # self.assertEqual(type(myModel.dequant), nnq.DeQuantize)
-        # self.assertEqual(myModel.fc1.bias.dtype, torch.qint32)
-
+        tq.convert(myModel)
+        self.checkNoPrepModules(myModel)
+        self.checkHasPrepModules(myModel.fc1)
+        self.checkQuantizedLinear(myModel.fc1)
         default_eval_fn(myModel, calib_data)
 
     def test_steps_two_layers(self):
@@ -153,19 +160,18 @@ class ModelQuantizeAPITest(TestCase):
             'fc2': default_qconfig
         }
         myModel = tq.prepare(myModel, qconfig_dict)
-        # self.checkNoPrepModules(myModel)
-        # self.checkNoPrepModules(myModel.fc1)
-        # self.checkHasPrepModules(myModel.fc2, True)
+        self.checkNoPrepModules(myModel)
+        self.checkObservers(myModel)
+        self.checkNoPrepModules(myModel.fc1)
+        self.checkHasPrepModules(myModel.fc2)
         default_eval_fn(myModel, calib_data)
 
-        tq.convert_to_quantized(myModel)
-        # self.checkNoPrepModules(myModel)
-        # self.checkNoPrepModules(myModel.fc1)
-        # self.checkHasPrepModules(myModel.fc2, False)
-        # self.assertEqual(type(myModel.fc1), torch.nn.Linear)
-        # self.assertEqual(type(myModel.fc2), nnq.Linear)
-        # self.assertEqual(type(myModel.fc2.quant), nnq.Quantize)
-        # self.assertEqual(type(myModel.fc2.dequant), nnq.DeQuantize)
+        tq.convert(myModel)
+        self.checkNoPrepModules(myModel)
+        self.checkNoPrepModules(myModel.fc1)
+        self.checkHasPrepModules(myModel.fc2)
+        self.assertEqual(type(myModel.fc1), torch.nn.Linear)
+        self.checkQuantizedLinear(myModel.fc2)
         default_eval_fn(myModel, calib_data)
 
     def test_nested1(self):
@@ -174,38 +180,32 @@ class ModelQuantizeAPITest(TestCase):
             'fc3': default_qconfig,
             'sub2.fc1': default_qconfig
         }
+
+        def prepModuleCheck(model, before_convert=False):
+            self.checkNoPrepModules(myModel)
+            if before_convert:
+                self.checkObservers(myModel)
+            self.checkNoPrepModules(myModel.sub1)
+            self.checkNoPrepModules(myModel.sub1.fc)
+            self.checkNoPrepModules(myModel.sub1.relu)
+            self.checkNoPrepModules(myModel.sub2)
+            self.checkHasPrepModules(myModel.sub2.fc1)
+            self.checkNoPrepModules(myModel.sub2.fc2)
+            self.checkHasPrepModules(myModel.fc3)
+
         myModel = tq.prepare(myModel, qconfig_dict)
-        # self.checkNoPrepModules(myModel)
-        # self.checkNoPrepModules(myModel.sub1)
-        # self.checkNoPrepModules(myModel.sub1.fc)
-        # self.checkNoPrepModules(myModel.sub1.relu)
-        # self.checkNoPrepModules(myModel.sub2)
-        # self.checkNoPrepModules(myModel.sub2.fc1)
-        # self.checkHasPrepModules(myModel.sub2.fc2, True)
-        # self.checkHasPrepModules(myModel.fc3, True)
+        prepModuleCheck(myModel, True)
 
         print(myModel)
         default_eval_fn(myModel, calib_data)
 
-        tq.convert_to_quantized(myModel)
+        tq.convert(myModel)
         print(myModel)
-        # self.checkNoPrepModules(myModel)
-        # self.checkNoPrepModules(myModel.sub1)
-        # self.checkNoPrepModules(myModel.sub1.fc)
-        # self.checkNoPrepModules(myModel.sub1.relu)
-        # self.checkNoPrepModules(myModel.sub2)
-        # self.checkNoPrepModules(myModel.sub2.fc1)
-        # self.checkHasPrepModules(myModel.sub2.fc2)
-        # self.checkHasPrepModules(myModel.fc3)
-
-        # self.assertEqual(type(myModel.sub1.fc), torch.nn.Linear)
-        # self.assertEqual(type(myModel.sub2.fc1), torch.nn.Linear)
-        # self.assertEqual(type(myModel.sub2.fc2), nnq.Linear)
-        # self.assertEqual(type(myModel.sub2.fc2.quant), nnq.Quantize)
-        # self.assertEqual(type(myModel.sub2.fc2.dequant), nnq.DeQuantize)
-        # self.assertEqual(type(myModel.fc3), nnq.Linear)
-        # self.assertEqual(type(myModel.fc3.quant), nnq.Quantize)
-        # self.assertEqual(type(myModel.fc3.dequant), nnq.DeQuantize)
+        prepModuleCheck(myModel)
+        self.checkLinear(myModel.sub1.fc)
+        self.checkQuantizedLinear(myModel.fc3)
+        self.checkQuantizedLinear(myModel.sub2.fc1)
+        self.checkLinear(myModel.sub2.fc2)
         default_eval_fn(myModel, calib_data)
 
     def test_nested2(self):
@@ -234,7 +234,7 @@ class ModelQuantizeAPITest(TestCase):
         # self.checkHasPrepModules(myModel.fc3, True)
         default_eval_fn(myModel, calib_data)
 
-        tq.convert_to_quantized(myModel)
+        tq.convert(myModel)
         print('nested:', myModel)
         # self.checkNoPrepModules(myModel)
         # self.checkNoPrepModules(myModel.sub1)
@@ -262,12 +262,12 @@ class ModelQuantizeAPITest(TestCase):
         this does not work with current implementation
         """
         myModel = NestedModel()
-        custum_options1 = {
+        custum_options = {
           'dtype': torch.quint8,
           'qscheme': torch.per_tensor_affine
         }
         custom_qconfig = QConfig(weight=default_weight_observer(),
-                                 activation=default_observer(**custum_options1))
+                                 activation=default_observer(**custum_options))
         qconfig_dict = {
             'fc3': default_qconfig,
             'sub2': default_qconfig,
@@ -276,19 +276,17 @@ class ModelQuantizeAPITest(TestCase):
         myModel = tq.prepare(myModel, qconfig_dict)
 
         default_eval_fn(myModel, calib_data)
-        tq.convert_to_quantized(myModel)
+        tq.convert(myModel)
         default_eval_fn(myModel, calib_data)
 
     def test_manual(self):
         model = ManualQuantModel()
-        qconfig_dict = {
-            'fc': default_qconfig
-        }
-        tq.propogate_qconfig(model, qconfig_dict)
+        # propagate the qconfig of parents to children
+        tq.propagate_qconfig(model)
         tq.add_observer(model)
         # clibration
         default_eval_fn(model, calib_data)
-        tq.convert_to_quantized(model)
+        tq.convert(model)
         default_eval_fn(model, calib_data)
 
 
