@@ -75,9 +75,10 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
 
   template <typename SomeFunction,
       typename... Args,
-      typename std::enable_if<(sizeof...(Args) > function_traits<SomeFunction>::number_of_parameters - 1)>::type* = nullptr>
+      typename std::enable_if<(sizeof...(Args) >= function_traits<SomeFunction>::number_of_parameters)>::type* = nullptr>
   Function bind(SomeFunction f, Args... args) {
     static_assert(!std::is_same<SomeFunction, SomeFunction>::value, "Number of arguments is more then function can accept");
+    return nullptr;
   }
 
   template <typename SomeFunction,
