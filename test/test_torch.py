@@ -9322,8 +9322,9 @@ class _TestTorchMixin(object):
                     if TEST_NUMPY:
                         tup1 = torch.nonzero(tensor, as_tuple=True)
                         tup2 = tensor.nonzero(as_tuple=True)
+                        tup3 = torch.where(tensor)
                         np1 = tensor.cpu().numpy().nonzero()
-                        for t in (tup1, tup2):
+                        for t in (tup1, tup2, tup3):
                             self.assertEqual(len(t), len(np1))
                             for i in range(len(t)):
                                 self.assertEqual(t[i].cpu().numpy(), np1[i])
