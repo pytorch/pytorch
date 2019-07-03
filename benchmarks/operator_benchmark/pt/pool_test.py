@@ -43,8 +43,7 @@ class Pool1dBenchmark(op_bench.TorchBenchmarkBase):
         self.kernel = kernel
         self.stride = stride
 
-    def set_op(self, op_name, op):
-        self.set_module_name(op_name)
+    def set_op(self, op):
         self.op = op(self.kernel, stride=self.stride)
 
     def forward(self):
@@ -88,8 +87,7 @@ class Pool2dBenchmark(op_bench.TorchBenchmarkBase):
         self.kernel = kernel
         self.stride = stride
 
-    def set_op(self, op_name, op):
-        self.set_module_name(op_name)
+    def set_op(self, op):
         self.op = op(self.kernel, stride=self.stride)
 
     def forward(self):
@@ -133,8 +131,7 @@ class Pool3dBenchmark(op_bench.TorchBenchmarkBase):
         self.kernel = kernel
         self.stride = stride
 
-    def set_op(self, op_name, op):
-        self.set_module_name(op_name)
+    def set_op(self, op):
         self.op = op(self.kernel, stride=self.stride)
 
     def forward(self):
