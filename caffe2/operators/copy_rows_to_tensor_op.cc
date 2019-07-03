@@ -2,7 +2,11 @@
 
 namespace caffe2 {
 namespace {
+
 REGISTER_CPU_OPERATOR(CopyRowsToTensor, CopyRowsToTensorOp<CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    CopyRowsToTensorGradient,
+    CopyRowsToTensorGradientOp<CPUContext>);
 
 OPERATOR_SCHEMA(CopyRowsToTensor)
     .NumInputs(3)
@@ -29,6 +33,37 @@ OPERATOR_SCHEMA(CopyRowsToTensor)
       out[0] = in[0];
       return out;
     });
+
+GRADIENT_OPERATOR_SCHEMA(CopyRowsToTensorGradient)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}});
+
+class GetCopyRowsToTensorGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    if (g_output_[0].IsDense()) {
+      return SingleGradientDef(
+          "CopyRowsToTensorGradient",
+          "",
+          vector<string>{GO(0)},
+          vector<string>{GI(0)});
+    } else {
+      return vector<OperatorDef>{CreateOperatorDef(
+                                     "CopyRowsToTensorGradient",
+                                     "",
+                                     std::vector<string>{GO_I(0)},
+                                     std::vector<string>{GI_I(0)}),
+                                 CreateOperatorDef(
+                                     "CopyRowsToTensorGradient",
+                                     "",
+                                     std::vector<string>{GO_V(0)},
+                                     std::vector<string>{GI_V(0)})};
+    }
+  }
+};
+
+REGISTER_GRADIENT(CopyRowsToTensor, GetCopyRowsToTensorGradient);
 
 } // namespace
 } // namespace caffe2
