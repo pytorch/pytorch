@@ -82,17 +82,12 @@ inline Dict<IValue, IValue>::Dict()
 }
 
 template<class Key, class Value>
-template<class _Key, class _Value>
-Dict<Key, Value>::Dict(
-  // enable_if: Only allow for Dict<IValue, IValue>
-  guts::enable_if_t<
-      std::is_same<_Key, Key>::value && std::is_same<_Key, IValue>::value &&
-      std::is_same<_Value, Value>::value && std::is_same<_Value, IValue>::value,
-  TypePtr> keyType,
-  TypePtr valueType)
+Dict<Key, Value>::Dict(TypePtr keyType, TypePtr valueType)
 : Dict(make_intrusive<detail::DictImpl>(
     detail::DictImpl::dict_map_type(),
     detail::DictImpl::DictElementTypes {std::move(keyType), std::move(valueType)})) {
+  static_assert(std::is_same<Key, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
+  static_assert(std::is_same<Value, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
 }
 
 template<class Key, class Value>

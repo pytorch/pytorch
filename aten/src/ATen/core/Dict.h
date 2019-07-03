@@ -210,21 +210,14 @@ public:
   /**
    * Creates an empty dict.
    */
-  Dict();
+  explicit Dict();
 
   /**
    * Create a generic dict with runtime type information.
    * This only works for c10::impl::GenericDict and is not part of the public API
    * but only supposed to be used internally by PyTorch.
    */
-  template<class _Key = Key, class _Value = Value>
-  explicit Dict(
-    // enable_if: Only allow for Dict<IValue, IValue>
-    guts::enable_if_t<
-        std::is_same<_Key, Key>::value && std::is_same<_Key, IValue>::value &&
-        std::is_same<_Value, Value>::value && std::is_same<_Value, IValue>::value,
-    TypePtr> keyType,
-    TypePtr valueType);
+  explicit Dict(TypePtr keyType, TypePtr valueType);
 
   ~Dict() = default;
 
