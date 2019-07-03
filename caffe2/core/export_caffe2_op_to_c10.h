@@ -3,8 +3,9 @@
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <torch/csrc/jit/script/function_schema_parser.h>
 #include <torch/csrc/api/include/torch/grad_mode.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 #include <vector>
 
 namespace caffe2 {
