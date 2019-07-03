@@ -24,14 +24,19 @@ class Caffe2BenchmarkBase(object):
         self.args = {}
         self.user_provided_name = None
 
-    # TODO: Add other dtype support
-    def tensor(self, *shapes):
-        """ A wapper function to create tensor (blob in caffe2) filled with random
-            value. The name/label of the tensor is returned and it is available 
+    def tensor(self, shapes, dtype='float32'):
+        """ A wapper function to create C2 tensor filled with random data.
+            The name/label of the tensor is returned and it is available 
             throughout the benchmark execution phase. 
+            Args: 
+                shapes: int or a sequence of ints to defining the shapes of the tensor
+                dtype: use the dtypes from numpy 
+                    (https://docs.scipy.org/doc/numpy/user/basics.types.html)
+            Return: 
+                C2 tensor of dtype 
         """
         blob_name = 'blob_' + str(Caffe2BenchmarkBase.tensor_index)
-        workspace.FeedBlob(blob_name, benchmark_utils.numpy_random_fp32(*shapes))
+        workspace.FeedBlob(blob_name, benchmark_utils.numpy_random(dtype, *shapes))
         Caffe2BenchmarkBase.tensor_index += 1
         return blob_name
 
