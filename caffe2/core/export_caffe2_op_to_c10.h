@@ -4,6 +4,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
+#include <torch/csrc/api/include/torch/utils.h>
 #include <vector>
 
 namespace caffe2 {
@@ -44,6 +45,7 @@ inline void _call_caffe2_op_from_c10(
   // (if not ivalue::None) contains a preallocated output tensor for each
   // operator output.
 
+  torch::NoGradGuard guard;
   AT_ASSERT(
       schema.arguments().size() != 0 &&
       schema.arguments().back().type()->isSubtypeOf(
