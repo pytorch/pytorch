@@ -87,6 +87,7 @@ class ScriptModuleOp final : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
+    torch::NoGradGuard guard;
     const auto& module = OperatorBase::Input<Module>(0);
     Method method = module.get_method(method_name_);
     // Assume all inputs are tensor for now
