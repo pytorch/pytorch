@@ -33,6 +33,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
           Value* r = block->owningGraph()->insertConstant(
               scalar_to_tensor(s), nullptr, c10::nullopt, it->scope());
           it->output()->replaceAllUsesWith(r);
+          it.destroyCurrent();
         }
       } break;
       case prim::Bool:
@@ -41,7 +42,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case prim::ImplicitTensorToNum:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
-        // Let DCE cleanup
+        it.destroyCurrent();
       } break;
       default: {
         for (auto o : it->outputs()) {
@@ -54,7 +55,6 @@ static void EraseNumberTypesOnBlock(Block* block) {
       } break;
     }
   }
-  EliminateDeadCode(block);
 }
 
 void EraseNumberTypes(const std::shared_ptr<Graph>& graph) {
