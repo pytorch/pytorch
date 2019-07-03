@@ -203,7 +203,7 @@ void Tensor::enforce_invariants() {
   }
   // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
   CAFFE_ENFORCE(
-      !impl_->is_variable() || (impl_->is_variable() && !(impl_->requires_grad() && torch::autograd::GradMode::is_enabled()));
+      !impl_->is_variable() || (impl_->is_variable() && !(impl_->requires_grad() && torch::autograd::GradMode::is_enabled())),
       "Caffe2 tensor wrapper doesn't support autograd variables that require grad");
   CAFFE_ENFORCE_EQ(
       impl_->layout(),
