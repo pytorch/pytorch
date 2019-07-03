@@ -3198,6 +3198,7 @@ for shape in [(1,), ()]:
         self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
     def test_deep_reentrant(self):
+
         class DeepReentrant(Function):
             @staticmethod
             def forward(ctx, x):
