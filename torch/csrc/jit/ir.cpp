@@ -251,14 +251,13 @@ std::ostream& Node::print(
   }
 
   // In debug print, append file:line:col as a comment after each node
-  if (print_source_locations && source_range_ &&
-      source_range_->source()->filename()) {
-    const auto& range = sourceRange();
-    const auto& source = range.source();
-    auto lineno = source->lineno_for_offset(range.start());
-    auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);
-    out << " # " << source->filename().value() << ":"
-        << source->lineno_to_source_lineno(lineno) << ":" << col_offset;
+  if (print_source_locations) {
+    if (auto file_line_col = sourceRange().file_line_col()) {
+      std::string filename;
+      size_t line, col;
+      std::tie(filename, line, col) = *file_line_col;
+      out << " # " << filename << ":" << line << ":" << col;
+    }
   }
 
   out << "\n";
