@@ -2231,6 +2231,9 @@
 - func: where(Tensor condition, Tensor self, Tensor other) -> Tensor
   variants: function, method
 
+- func: where(Tensor condition) -> Tensor[]
+  variants: function
+
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   variants: function
   dispatch:
