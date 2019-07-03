@@ -155,7 +155,7 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return at::op##_out(self, self);                            \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, {result}, Backend::CPU);                  \
+    checkBackend(#op, result, Backend::CPU);                    \
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
