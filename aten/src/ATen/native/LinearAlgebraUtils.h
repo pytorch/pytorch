@@ -251,7 +251,7 @@ static inline std::tuple<std::vector<int64_t>,
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
-// Function to generate empty tensors of required size, strides and dtype
+// Function to generate empty tensors of required size, strides and dtype for the SVD operation
 static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv) {
   auto sizes = input.sizes().vec();
   int64_t m = input.size(-2), n = input.size(-1);
@@ -291,6 +291,16 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     S_empty = at::empty(sizes, at::TensorOptions(at::kCPU).dtype(input.dtype()).pinned_memory(true));
   }
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);  
+}
+
+// Function used instead of .to so that the original strides are retained
+// .to doesn't retain strides and make the output tensor contiguous
+static inline Tensor same_stride_to(const Tensor& original_tensor, const at::TensorOptions& options) {
+  auto strided_to = at::empty_strided(original_tensor.sizes(),
+                                      original_tensor.strides(),
+                                      options);
+  strided_to.copy_(original_tensor);
+  return strided_to;
 }
 
 }}  // namespace at::native

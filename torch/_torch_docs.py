@@ -4842,7 +4842,6 @@ of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some
 
 .. note:: Irrespective of the original strides, the returned matrix `U`
           will be transposed, i.e. with strides :code:`U.contiguous().transpose(-2, -1).strides()`
-          for CPU tensors.
 
 .. note:: Extra care needs to be taken when backward through `U` and `V`
           outputs. Such operation is really only stable when :attr:`input` is
