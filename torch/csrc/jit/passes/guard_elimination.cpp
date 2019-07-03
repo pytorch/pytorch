@@ -9,7 +9,7 @@ namespace jit {
 struct GuardElimination {
   GuardElimination(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)),
-        aliasDb_(caffe2::make_unique<AliasDb>(graph_)) {}
+        aliasDb_(c10::guts::make_unique<AliasDb>(graph_)) {}
 
   void run() {
     moveGuardsToDefs(graph_->block());
