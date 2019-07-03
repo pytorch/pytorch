@@ -234,7 +234,7 @@ public:
   /**
    * Constructs an empty list.
    */
-  List();
+  explicit List();
 
   /**
    * Constructs a list with some initial values.
@@ -249,12 +249,7 @@ public:
    * This only works for c10::impl::GenericList and is not part of the public API
    * but only supposed to be used internally by PyTorch.
    */
-  template<class _T = T>
-  explicit List(
-    // enable_if: Only allow for List<IValue>
-    guts::enable_if_t<
-        std::is_same<_T, T>::value && std::is_same<_T, IValue>::value,
-    TypePtr> elementType);
+  explicit List(TypePtr elementType);
 
   List(const List&) = default;
   List& operator=(const List&) = default;

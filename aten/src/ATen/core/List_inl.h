@@ -48,14 +48,11 @@ List<T>::List(std::initializer_list<T> initial_values)
 }
 
 template<class T>
-template<class _T>
-List<T>::List(
-  // enable_if: Only allow for List<IValue>
-  guts::enable_if_t<std::is_same<_T, T>::value && std::is_same<_T, IValue>::value,
-  TypePtr> elementType)
+List<T>::List(TypePtr elementType)
 : List(make_intrusive<detail::ListImpl<IValue>>(
     typename detail::ListImpl<IValue>::list_type(),
     std::move(elementType))) {
+  static_assert(std::is_same<T, IValue>::value, "This constructor is only valid for c10::impl::GenericList.");
 }
 
 namespace impl {
