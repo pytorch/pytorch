@@ -7,7 +7,7 @@ import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
-    string_classes, builtins
+    string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -930,49 +930,9 @@ def _try_get_overloaded_fn(mod, field):
     return mod._overloads.get(field, None) if isinstance(mod, ScriptModule) else None
 
 
-def _try_compile_weak_script(fn):
-    entry = _jit_internal.compiled_weak_fns.get(fn)
-    if entry is None:
-        return None
-    if entry["status"] == _jit_internal.COMPILATION_PENDING:
-        compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
-        del entry["rcb"]
-        _jit_internal.compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
-        entry["status"] = _jit_internal.COMPILED
-        return compiled_fn
-        # TODO: use fn.__closure__
-        raise RuntimeError("Cannot make resolutionCallback in Python 2")
-    else:
-        return entry["compiled_fn"]
-
-
 class ScriptWarning(Warning):
     pass
 
-
-def createResolutionCallbackFromClosure(fn):
-    """
-    Create a resolutionCallback by introspecting the function instead of
-    looking up the stack for the enclosing scope
-    """
-    var_names = fn.__code__.co_freevars
-
-    # map of captured name -> value
-    free_vars = {}
-
-    for index, name in enumerate(var_names):
-        free_vars[name] = fn.__closure__[index].cell_contents
-    f_globals = fn.__globals__
-
-    def env(key):
-        if key in free_vars:
-            return free_vars[key]
-        elif hasattr(builtins, key):
-            return getattr(builtins, key)
-        else:
-            return f_globals.get(key)
-
-    return env
 
 def _create_constant_iterable_module(module):
     modules = OrderedDict()
@@ -1012,20 +972,20 @@ def _try_compile_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
 
-    if not inspect.isfunction(fn) and not inspect.ismethod(fn):
-        raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
-                           "Python functions or methods currently.\n"
-                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn))
-
     if isinstance(fn, torch.nn.Module):
         # Since modules are callable pybind recognizes them as functions, but
         # don't do anything for them
         return None
 
+    if not inspect.isfunction(fn) and not inspect.ismethod(fn):
+        raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
+                           "Python functions or methods currently.\n"
+                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn, fn))
+
     # We don't have the actual scope where the function was defined, but we can
     # extract the necessary info from the closed over variables on the function
     # object
-    rcb = createResolutionCallbackFromClosure(fn)
+    rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
 
 
@@ -1040,7 +1000,9 @@ def _disable_emit_hooks():
 def _create_method_from_fn(module, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
-    stub = script_method(fn, createResolutionCallbackFromClosure(fn))
+    if not inspect.ismethod(fn):
+        return None
+    stub = script_method(fn, _jit_internal.createResolutionCallbackFromClosure(fn))
     with _disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
@@ -1101,6 +1063,15 @@ def _qualified_name(obj):
     return module_name + "." + name
 
 
+def _is_recursive_script_enabled(value):
+    # TODO: [enable recursive script]
+    # when recursive script is made the default, remove this method
+    enabled = torch._C._jit_recursive_script()
+    module = inspect.getmodule(value)
+    if module is not None and 'torch.nn' in module.__name__:
+        enabled = True
+    return enabled
+
 @contextlib.contextmanager
 def _enable_recursive_script():
     torch._C._jit_recursive_script(True)
@@ -1114,8 +1085,8 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
 
-    if torch._C._jit_recursive_script():
-        if isinstance(obj, torch.nn.Module):
+    if isinstance(obj, torch.nn.Module):
+        if _is_recursive_script_enabled(obj):
             return _convert_to_script_module(obj)
 
     if inspect.isclass(obj):
@@ -1157,21 +1128,6 @@ def script_method(fn, _rcb=None):
     ast = get_jit_def(fn, self_name="ScriptModule")
     return ScriptMethodStub(_rcb, ast, fn)
 
-
-def _try_get_weak_module(mod):
-    """
-    Get the WeakScriptModuleProxy corresponding to mod if it exists
-    """
-    if not isinstance(mod, Module):
-        return None
-    return _jit_internal.weak_modules.get(mod)
-
-
-def _is_weak_type(cls):
-    """
-    Check if a type has been annotated with `weak_module`
-    """
-    return cls in _jit_internal.weak_types
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -1569,9 +1525,9 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if isinstance(value, Module) and _is_weak_type(type(value)):
+                if isinstance(value, Module) and _is_recursive_script_enabled(value):
                     # Compile weak script module
-                    value = _make_strong(value)
+                    value = _convert_to_script_module(value)
                 if attr == 'training':
                     if self._c._has_attribute('training'):
                         self.__dict__['training'] = value
@@ -1684,7 +1640,7 @@ if _enabled:
                     if isinstance(item, (ModuleList, Sequential)):
                         # These are in __constants__, so ignore them here
 
-                        if not torch._C._jit_recursive_script():
+                        if not _is_recursive_script_enabled(item):
                             # For recursive script, these are constantified after
                             # they are used, so they don't need to be in constants.
                             # The `continue` here should be deleted along with
@@ -1774,34 +1730,28 @@ else:
             super(ScriptModule, self).__init__()
 
 
-def _get_weak_stubs(cls):
-    """
-    Calls script_method for each method that has been annotated with @weak_script
-    on the type of the object passed in and returns the generated ScriptMethodStubs.
-    """
-    stubs = []
-    for name in dir(cls):
-        func = get_function_from_type(cls, name)
-        if func in _jit_internal.weak_script_methods:
-            entry = _jit_internal.weak_script_methods[func]
-            stub = script_method(entry["original_method"], entry["rcb"])
-            stubs.append(stub)
-    return stubs
-
-
-def _convert_to_script_module(mod, methods=None):
+def _convert_to_script_module(mod):
     """
     Makes a ScriptModule from an nn.Module. If `_methods` is provided,
     these methods are treated as @script_methods. If not, it defaults to
     `('forward',)`. Methods accessed in forward are scripted on demand if
     `_enable_recursive_script()` is used.
     """
+    if isinstance(mod, ScriptModule):
+        return mod
+
     if isinstance(mod, (ModuleList, Sequential)):
         # Create constant versions for the iterable modules
         return _create_constant_iterable_module(mod)
 
-    if methods is None:
-        methods = ('forward',)
+    methods = ()
+    if hasattr(mod, 'forward'):
+        if mod.forward.__func__ == torch.nn.Module.forward:
+            # TODO: [enable recursive script]
+            # forward was not overrided
+            raise RuntimeError("No forward method was defined on {}".format(mod))
+        if not _jit_internal.is_ignored_fn(mod.forward):
+            methods = ('forward',)
     exported = []
     for name in dir(mod):
         item = getattr(mod, name)
@@ -1812,34 +1762,10 @@ def _convert_to_script_module(mod, methods=None):
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)
-        return script_method(func, createResolutionCallbackFromClosure(func))
+        return script_method(func, _jit_internal.createResolutionCallbackFromClosure(func))
 
     stubs = list(map(make_stub, methods))
     return WeakScriptModuleProxy(mod, stubs)
-
-
-def _make_strong(mod):
-    """
-    Converts a weak module into a subclass of ScriptModule. If `_methods` is
-    provided, only these methods are treated as @script_methods.
-    """
-    if mod in _jit_internal.weak_modules:
-        return _jit_internal.weak_modules[mod]
-
-    cls = type(mod)
-    # Explicitly annotated weak script
-    stubs = _jit_internal.weak_types.get(cls)["method_stubs"]
-    if stubs is None:
-        # Generate stubs and and store on weak_types in case this type is
-        # used again
-        stubs = _get_weak_stubs(cls)
-        _jit_internal.weak_types[cls]["method_stubs"] = stubs
-
-    proxy = WeakScriptModuleProxy(mod, stubs)
-
-    _jit_internal.weak_modules[mod] = proxy
-
-    return proxy
 
 
 def _get_methods(cls):
@@ -1937,13 +1863,13 @@ class _ConstModuleList(ScriptModule):
 
         if isinstance(modules, OrderedDict):
             for key, module in modules.items():
-                if _is_weak_type(type(module)):
-                    module = _make_strong(module)
+                if isinstance(module, torch.nn.Module) and _is_recursive_script_enabled(module):
+                    module = _convert_to_script_module(module)
                 self.add_module(key, module)
         else:
             for i, module in enumerate(modules):
-                if _is_weak_type(type(module)):
-                    module = _make_strong(module)
+                if isinstance(module, torch.nn.Module) and _is_recursive_script_enabled(module):
+                    module = _convert_to_script_module(module)
                 self.add_module(str(i), module)
 
     def __getitem__(self, idx):

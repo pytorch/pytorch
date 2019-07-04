@@ -244,6 +244,11 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
                          << err.str();
 }
 
+bool should_recurse(py::object obj) {
+  return py::cast<bool>(py::module::import("torch.jit")
+                            .attr("_is_recursive_script_enabled")(obj));
+}
+
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
@@ -307,7 +312,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // If recursive script mode is on, create a ScriptModule and register it as
   // as submodule or register a python method as a script::Method
-  if (getRecursiveScriptMode()) {
+  if (should_recurse(attr)) {
     if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
       // If the module is a submodule of the py_module, convert it to a
       // ScriptModule and add it as a submodule to the script::Module. This
@@ -471,11 +476,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  auto weak_obj =
-      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
-  if (!weak_obj.is_none()) {
-    obj = weak_obj;
-  }
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee);
   } else if (py::isinstance<py::module>(obj)) {
@@ -504,12 +504,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           << "which is currently not supported in Torchscript."
           << "Please open a feature request to add it.";
     }
-
-    auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
-    if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<FunctionValue>(callee);
-    }
   }
 
   py::object dispatched_fn =
@@ -528,7 +522,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  if (getRecursiveScriptMode() && py::isinstance<py::function>(obj)) {
+  if (should_recurse(obj) && py::isinstance<py::function>(obj)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {

@@ -791,7 +791,7 @@ graph(%x : Tensor,
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%x, %y, %2)
   %4 : int = aten::add(%2, %20)
-  %5 : bool = prim::Bool(%4)
+  %5 : bool = aten::Bool(%4)
   %z : int = prim::If(%5)
     # CHECK: block
     block0():
@@ -6554,6 +6554,73 @@ a")
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
 
+    def _dtype_to_expect(self, dtype, dim=0):
+        param = ', '.join(['*'] * dim)
+        param = '(' + param + ')'
+        if(dtype == torch.float32):
+            return "Float" + param
+        if(dtype == torch.float64):
+            return "Double" + param
+        if(dtype == torch.int64):
+            return "Long" + param
+        if(dtype == torch.int32):
+            return "Int" + param
+
+    def _test_dtype_op_shape(self, ops, args, input_dims=1):
+        if input_dims < 1:
+            raise 'input dims must be at least 1'
+        dtypes = [torch.float32, torch.float64, torch.int64, torch.int32]
+        str_args = ', '.join([str(arg) for arg in args]) + (', ' if len(args) else '')
+        tensor_data = ('[' * input_dims) + '1, 2, 3' + (input_dims * ']')
+        template = dedent('''
+        def func():
+            return {return_line}
+        ''')
+
+        for op in ops:
+            for dtype in (dtypes + [None]):
+                for tensor_type in dtypes:
+                    # a couple of ops aren't implemented for non-floating types
+                    if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
+                        if op in ['mean', 'softmax', 'log_softmax']:
+                            continue
+                    return_line = "torch.tensor({}, dtype={}).{}({}dtype={})".format(tensor_data, tensor_type, op, str_args, dtype)
+                    # uncomment for debugging a failed test:
+                    # print("testing {}".format(return_line))
+                    code = template.format(return_line=return_line)
+                    scope = {}
+                    exec(code, globals(), scope)
+                    cu = torch.jit.CompilationUnit(code)
+                    graph = cu.func.graph
+                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
+                    input_array = [1, 2, 3]
+                    for _ in range(1, input_dims):
+                        input_array = [input_array]
+                    t = torch.tensor(input_array, dtype=tensor_type)
+                    attr = getattr(t, op)
+                    kwargs = {'dtype': dtype}
+                    result = attr(*args, **kwargs)
+                    expect = self._dtype_to_expect(result.dtype, result.dim())
+                    FileCheck().check("aten::tensor").check(expect).run(graph)
+
+    def test_dtype_op_shape(self):
+        ops = ['sum', 'mean', 'prod']
+        self._test_dtype_op_shape(ops, args=[])
+        self._test_dtype_op_shape(ops, args=[0, False])
+
+        ops = ['sum', 'mean']
+        self._test_dtype_op_shape(ops, args=[[0, 1], False], input_dims=4)
+
+        ops = ['prod']
+        self._test_dtype_op_shape(ops, args=[0, False])
+        self._test_dtype_op_shape(ops, args=[0, True])
+
+    def test_dtype_op_shape2(self):
+        ops = ['cumprod', 'cumsum', 'softmax', 'log_softmax']
+        self._test_dtype_op_shape(ops, args=[0])
+
+        self._test_dtype_op_shape(ops, args=[1], input_dims=4)
+
     def test_filecheck_parse(self):
         def test_check():
             file = """
@@ -6979,7 +7046,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
 
-    def test_script_module_list_sequential_error(self):
+    def test_script_module_list_sequential(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, mod_list):
                 super(M, self).__init__(False)
@@ -6991,25 +7058,21 @@ a")
                     v = m(v)
                 return v
 
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.ModuleList([nn.ReLU()]))
+        m = M(nn.Sequential(nn.ReLU()))
+        self.assertExportImportModule(m, (torch.randn(2, 2),))
 
-    def test_attr_module_constants_error(self):
+    def test_attr_module_constants(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self, mod_list):
                 super(M2, self).__init__(False)
                 self.mods = mod_list
 
             @torch.jit.script_method
-            def forward(self, v):
+            def forward(self, x):
                 return self.mods.forward(x)
 
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            M2(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            M2(nn.ModuleList([nn.ReLU()]))
+        m = M2(nn.Sequential(nn.ReLU()))
+        self.assertExportImportModule(m, (torch.randn(2, 2),))
 
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
@@ -11007,6 +11070,7 @@ a")
         with self.assertRaisesRegex(torch.jit.Error, "Exception"):
             foo(torch.tensor(0))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_script_function(self):
         outer_var = 10
         outer_var2 = 11
@@ -11086,6 +11150,7 @@ a")
         eg = torch.zeros(3, dtype=torch.uint8)
         self.assertEqual(foo_traced(eg), foo(eg))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module(self):
 
         @torch._jit_internal.weak_module
@@ -11161,6 +11226,7 @@ a")
         self.assertEqual(script_result, expected_result)
         self.assertEqual(script_result, script_result2)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_parameters_and_buffers(self):
         weights = torch.randn(10, 10)
         bias = torch.randn(10)
@@ -11219,6 +11285,7 @@ a")
         self.assertEqual(strong_mod(inp), expected_result)
         self.assertExportImportModule(strong_mod, (inp,))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_nested(self):
         @torch._jit_internal.weak_module
         class OtherWeak(torch.nn.Module):
@@ -11280,6 +11347,7 @@ a")
             + F.linear(inp, 2 * torch.ones(10, 10), 2 * torch.ones(10))
         self.assertEqual(result, expected_result)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_submodule(self):
         @torch._jit_internal.weak_module
         class Weak(torch.nn.Module):
@@ -11319,6 +11387,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
             strong_mod = Strong()
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_copying(self):
         class Submodule(torch.nn.Module):
             def __init__(self):
@@ -11385,6 +11454,7 @@ a")
 
         m = M()
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_attributes(self):
         tester = self
 
@@ -11948,6 +12018,7 @@ a")
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_overloading(self):
         @torch._jit_internal.weak_module
         class W(torch.nn.Module):
@@ -13623,6 +13694,9 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
     'test_nn_AdaptiveMaxPool3d_tuple_none',
+
+    # Uses Module._backend, so this is not supported
+    'test_nn_CrossMapLRN2d',
 }
 
 
@@ -14551,10 +14625,6 @@ def add_nn_module_test(*args, **kwargs):
     no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
 
     module_name = name.split("_")[0]
-
-    module = getattr(torch.nn, module_name, None)
-    if module is None or torch._jit_internal.weak_types.get(module) is None:
-        return
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests
