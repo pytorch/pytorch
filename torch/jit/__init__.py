@@ -950,30 +950,6 @@ class ScriptWarning(Warning):
     pass
 
 
-def createResolutionCallbackFromClosure(fn):
-    """
-    Create a resolutionCallback by introspecting the function instead of
-    looking up the stack for the enclosing scope
-    """
-    var_names = fn.__code__.co_freevars
-
-    # map of captured name -> value
-    free_vars = {}
-
-    for index, name in enumerate(var_names):
-        free_vars[name] = fn.__closure__[index].cell_contents
-    f_globals = fn.__globals__
-
-    def env(key):
-        if key in free_vars:
-            return free_vars[key]
-        elif hasattr(builtins, key):
-            return getattr(builtins, key)
-        else:
-            return f_globals.get(key)
-
-    return env
-
 def _create_constant_iterable_module(module):
     modules = OrderedDict()
 
@@ -1025,7 +1001,7 @@ def _try_compile_fn(fn):
     # We don't have the actual scope where the function was defined, but we can
     # extract the necessary info from the closed over variables on the function
     # object
-    rcb = createResolutionCallbackFromClosure(fn)
+    rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
 
 
@@ -1040,7 +1016,7 @@ def _disable_emit_hooks():
 def _create_method_from_fn(module, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
-    stub = script_method(fn, createResolutionCallbackFromClosure(fn))
+    stub = script_method(fn, _jit_internal.createResolutionCallbackFromClosure(fn))
     with _disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
@@ -1816,7 +1792,7 @@ def _convert_to_script_module(mod, methods=None):
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)
-        return script_method(func, createResolutionCallbackFromClosure(func))
+        return script_method(func, _jit_internal.createResolutionCallbackFromClosure(func))
 
     stubs = list(map(make_stub, methods))
     return WeakScriptModuleProxy(mod, stubs)

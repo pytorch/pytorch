@@ -6,6 +6,7 @@ circular dependency problems
 
 import weakref
 import inspect
+import collections
 from torch._six import builtins
 
 # Tracks standalone weak script functions
@@ -77,6 +78,36 @@ def createResolutionCallback(frames_up=0):
     return env
 
 
+def get_closure(fn):
+    """
+    Get a dictionary of closed over variables from a function
+    """
+    captures = {}
+
+    for index, captured_name in enumerate(fn.__code__.co_freevars):
+        captures[captured_name] = fn.__closure__[index].cell_contents
+
+    captures.update(fn.__globals__)
+    return captures
+
+
+def createResolutionCallbackFromClosure(fn):
+    """
+    Create a resolutionCallback by introspecting the function instead of
+    looking up the stack for the enclosing scope
+    """
+    closure = get_closure(fn)
+
+    def env(key):
+        if key in closure:
+            return closure[key]
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
+        return None
+
+    return env
+
+
 def createResolutionCallbackForClassMethods(obj):
     """
     This looks at all the methods defined in a class and pulls their closed-over
@@ -88,8 +119,7 @@ def createResolutionCallbackForClassMethods(obj):
     captures = {}
 
     for fn in fns:
-        for index, captured_name in enumerate(fn.__code__.co_freevars):
-            captures[captured_name] = fn.__closure__[index].cell_contents
+        captures.update(get_closure(fn))
 
     return lambda key: captures.get(key, None)
 
