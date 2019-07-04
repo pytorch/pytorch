@@ -77,6 +77,22 @@ def createResolutionCallback(frames_up=0):
     return env
 
 
+def createResolutionCallbackForClassMethods(obj):
+    """
+    This looks at all the methods defined in a class and pulls their closed-over
+    variables into a dictionary and uses that to resolve variables.
+    """
+    # obj is a type here, so `ismethod` is false since the methods on the type
+    # aren't bound to anything, so Python treats them as regular functions
+    fns = [getattr(obj, name) for name in obj.__dict__ if inspect.isroutine(getattr(obj, name))]
+    captures = {}
+
+    for fn in fns:
+        for index, captured_name in enumerate(fn.__code__.co_freevars):
+            captures[captured_name] = fn.__closure__[index].cell_contents
+
+    return lambda key: captures.get(key, None)
+
 def weak_script(fn, _frames_up=0):
     """
     Marks a function as a weak script function. When used in a script function
