@@ -4,10 +4,8 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 from .. import init
-from ..._jit_internal import weak_module, weak_script_method
 
 
-@weak_module
 class LocalResponseNorm(Module):
     r"""Applies local response normalization over an input signal composed
     of several input planes, where channels occupy the second dimension.
@@ -45,7 +43,6 @@ class LocalResponseNorm(Module):
         self.beta = beta
         self.k = k
 
-    @weak_script_method
     def forward(self, input):
         return F.local_response_norm(input, self.size, self.alpha, self.beta,
                                      self.k)
@@ -71,7 +68,6 @@ class CrossMapLRN2d(Module):
         return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
 
 
-@weak_module
 class LayerNorm(Module):
     r"""Applies Layer Normalization over a mini-batch of inputs as described in
     the paper `Layer Normalization`_ .
@@ -151,7 +147,6 @@ class LayerNorm(Module):
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
-    @weak_script_method
     def forward(self, input):
         return F.layer_norm(
             input, self.normalized_shape, self.weight, self.bias, self.eps)
@@ -161,7 +156,6 @@ class LayerNorm(Module):
             'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
 
-@weak_module
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs as described in
     the paper `Group Normalization`_ .
@@ -226,7 +220,6 @@ class GroupNorm(Module):
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
-    @weak_script_method
     def forward(self, input):
         return F.group_norm(
             input, self.num_groups, self.weight, self.bias, self.eps)
