@@ -28,21 +28,13 @@ namespace native {
 // In case the aten Tensor is a mkldnn tensor,
 //   1. reshape first if input dim is greater than 2 and the reshape will cost a memory copy.
 //   2. directly return the ideep tensor if the input dim is 2.
-// In case the aten Tensor is a dense tensor, make sure:
-//   1. the aten tensor is 2d, so that 3d*2d Linear is viewed as 2d*2d.
-//   2. the aten tensor is contiguous.
 inline ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor) {
-  if (tensor.is_mkldnn()) {
-    if (tensor.dim() > 2) {
-      // use reshape for mkldnn tensor
-      auto x = tensor.reshape({-1, tensor.size(tensor.dim() - 1)});
-      return itensor_from_mkldnn(x);
-    }
-    return itensor_from_mkldnn(tensor);
-  } else {
-    auto x = tensor.contiguous().view({-1, tensor.size(tensor.dim() - 1)});
-    return itensor_view_from_dense(x);
+  if (tensor.dim() > 2) {
+    // use reshape for mkldnn tensor
+    auto x = tensor.reshape({-1, tensor.size(tensor.dim() - 1)});
+    return itensor_from_mkldnn(x);
   }
+  return itensor_from_mkldnn(tensor);
 }
 
 Tensor mkldnn_linear(
@@ -51,6 +43,10 @@ Tensor mkldnn_linear(
     const Tensor& bias) {
   TORCH_CHECK(self.dim() >= 2,
       "mkldnn_linear: input needs to has dim at least 2, input dim ", self.dim());
+  TORCH_CHECK(self.is_mkldnn(),
+      "mkldnn_linear: input needs to be mkldnn layout");
+  TORCH_CHECK(weight.is_mkldnn() && bias.is_mkldnn(),
+      "mkldnn_linear: weight and bias need to be mkldnn layout");
 
   const ideep::tensor x = get_mkldnn_tensor(self);
   const ideep::tensor w = itensor_from_mkldnn(weight);
@@ -68,15 +64,10 @@ Tensor mkldnn_linear(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight.size(0));
 
-  if (self.is_mkldnn()) {
-    if (self.dim() > 2) {
-      return new_with_itensor_mkldnn(std::move(y), self.options()).reshape(output_size);
-    }
-    return new_with_itensor_mkldnn(std::move(y), self.options());
-  } else {
-    return mkldnn_to_dense(
-        new_with_itensor_mkldnn(std::move(y), self.options())).view(output_size);
+  if (self.dim() > 2) {
+    return new_with_itensor_mkldnn(std::move(y), self.options()).reshape(output_size);
   }
+  return new_with_itensor_mkldnn(std::move(y), self.options());
 }
 
 } // namespace native
