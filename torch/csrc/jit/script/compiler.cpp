@@ -348,19 +348,19 @@ struct Environment {
           {"float",
            makeMagic(
                "__float__",
-               std::make_shared<CastValue>(FloatType::get(), prim::Float))},
+               std::make_shared<CastValue>(FloatType::get(), aten::Float))},
           {"int",
            makeMagic(
                "__int__",
-               std::make_shared<CastValue>(IntType::get(), prim::Int))},
+               std::make_shared<CastValue>(IntType::get(), aten::Int))},
           {"bool",
            makeMagic(
                "__bool__",
-               std::make_shared<CastValue>(BoolType::get(), prim::Bool))},
+               std::make_shared<CastValue>(BoolType::get(), aten::Bool))},
           {"str",
            makeMagic(
                "__str__",
-               std::make_shared<CastValue>(StringType::get(), prim::str))},
+               std::make_shared<CastValue>(StringType::get(), aten::str))},
           {"getattr", std::make_shared<GetAttrValue>()},
           {"isinstance", std::make_shared<IsInstanceValue>()},
           // todo(zach): remove when we can correctly export torch.full via ONNX
@@ -388,7 +388,8 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
-          {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
+          {"divmod",
+           std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
