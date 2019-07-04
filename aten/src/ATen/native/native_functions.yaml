@@ -1454,9 +1454,14 @@
   dispatch:
     CUDA: batch_norm_elemt_cuda
 
+# for backward compatibility
 - func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_gather_stats_cuda
+
+- func: batch_norm_gather_stats_with_counts(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int[] counts) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_gather_stats_with_counts_cuda
 
 - func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
