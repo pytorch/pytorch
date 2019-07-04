@@ -31,7 +31,6 @@ from caffe2.python.layers.layers import (
     is_request_only_scalar,
     get_key,
 )
-
 import logging
 logger = logging.getLogger(__name__)
 
@@ -230,6 +229,46 @@ class TestLayers(LayersTestCase):
         )
 
         train_init_net, train_net = self.get_training_nets()
+
+    def testSparseLookupSumPoolingWithEviction(self):
+        # Create test embedding table of 1 row
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('sparse_feature_0', schema.ListWithEvicted(
+                    schema.Scalar(np.int64,
+                                  metadata=schema.Metadata(categorical_limit=1)),)),)),
+        ))
+        embedding_dim = 8
+        lengths_blob = record.sparse.sparse_feature_0.lengths.get()
+        values_blob = record.sparse.sparse_feature_0.items.get()
+        evicted_values_blob = record.sparse.sparse_feature_0._evicted_values.get()
+        lengths = np.array([1]).astype(np.int32)
+        values = np.array([0]).astype(np.int64)
+        # Need to reset row 0
+        evicted_values = np.array([0]).astype(np.int64)
+        workspace.FeedBlob(lengths_blob, lengths)
+        workspace.FeedBlob(values_blob, values)
+        workspace.FeedBlob(evicted_values_blob, evicted_values)
+
+        embedding_after_pooling = self.model.SparseLookup(
+            record.sparse.sparse_feature_0, [embedding_dim], 'Sum', weight_init=("ConstantFill", {"value": 1.0}))
+
+        self.model.output_schema = schema.Struct()
+        self.assertEqual(
+            schema.Scalar((np.float32, (embedding_dim, ))),
+            embedding_after_pooling
+        )
+        train_init_net, train_net = self.get_training_nets()
+        workspace.RunNetOnce(train_init_net)
+        embedding_after_init = workspace.FetchBlob("sparse_lookup/w")
+        # Change row 0's value before reset
+        new_values = np.array([[2, 2, 2, 2, 2, 2, 2, 2]]).astype(np.float32)
+        workspace.FeedBlob("sparse_lookup/w", new_values)
+        workspace.RunNetOnce(train_net.Proto())
+        embedding_after_training = workspace.FetchBlob("sparse_lookup/w")
+        # Verify row 0's value does not change after reset
+        self.assertEquals(embedding_after_training.all(), embedding_after_init.all())
+
 
 
     def testSparseLookupSumPooling(self):
