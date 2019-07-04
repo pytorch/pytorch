@@ -18,7 +18,6 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCuDNN() const override;
   int64_t current_device() const override;
   Allocator* getPinnedMemoryAllocator() const override;
-  void registerCUDATypes(Context*) const override;
   bool compiledWithCuDNN() const override;
   bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
