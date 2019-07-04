@@ -23,6 +23,7 @@ get_worker_info = _utils.worker.get_worker_info
 # aspect.
 default_collate = _utils.collate.default_collate
 
+
 class _DatasetKind(object):
     Map = 0
     Iterable = 1
@@ -39,6 +40,7 @@ class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
     """
+
     def __init__(self):
         super(_InfiniteConstantSampler, self).__init__(None)
 
@@ -100,6 +102,9 @@ class DataLoader(object):
                  cannot be an unpicklable object, e.g., a lambda function. See
                  :ref:`multiprocessing-best-practices` on more details related
                  to multiprocessing in PyTorch.
+
+    .. note:: By default, ``DataLoader`` consumes a RNG state to determine ``base_seed`` 
+              for data-loading threads. 
 
     .. note:: ``len(dataloader)`` heuristic based on the length of the sampler used.
               When :attr:`dataset` is a subclass of :class:`~torch.utils.data.IterableDataset`,
