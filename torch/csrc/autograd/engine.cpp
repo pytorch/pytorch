@@ -91,7 +91,7 @@ struct CompareFunctionTaskTime {
     } else {
       return t1.getReentrantDepth() < t2.getReentrantDepth();
     }
-   }
+  }
 };
 
 struct ReadyQueue {
