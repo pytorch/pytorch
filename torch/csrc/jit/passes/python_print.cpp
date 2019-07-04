@@ -1002,16 +1002,16 @@ struct PythonPrintPass {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;
-      case prim::Int: {
+      case aten::Int: {
         printValueList(stmt, node->inputs(), "int(", ")");
       } break;
-      case prim::Float: {
+      case aten::Float: {
         printValueList(stmt, node->inputs(), "float(", ")");
       } break;
-      case prim::Bool: {
+      case aten::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
-      case prim::str: {
+      case aten::str: {
         printValueList(stmt, node->inputs(), "str(", ")");
       } break;
       case prim::Print: {
