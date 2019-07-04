@@ -61,7 +61,8 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard import _caffe2_graph as tb
-    from caffe2.python import brew, cnn, core, model_helper, workspace
+    from caffe2.python import brew, cnn, core, model_helper
+
     class TestTensorBoardPyTorchNumpy(BaseTestCase):
         def test_pytorch_np(self):
             tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
