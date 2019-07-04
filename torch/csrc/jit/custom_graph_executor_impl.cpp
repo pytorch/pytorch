@@ -46,8 +46,9 @@ RegisterGraphExecutorImpl::RegisterGraphExecutorImpl(
   auto& executors = getGraphExecutorImpls();
   TORCH_CHECK(
       executors.emplace(name, creator).second,
-      "Cannot register GraphExecutorImpl for ",
-      name.toDisplayString());
+      "GraphExecutorImpl for ",
+      name.toDisplayString(),
+      " has already been registered");
 }
 
 GraphExecutorImplCreator getGraphExecutorImpl() {
