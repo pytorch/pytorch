@@ -378,7 +378,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     return out_tensor
 
 
-def pack_sequence(sequences, enforce_sorted=True):
+def pack_sequence(sequences, batch_first=False, enforce_sorted=True):
     r"""Packs a list of variable length Tensors
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
@@ -409,7 +409,8 @@ def pack_sequence(sequences, enforce_sorted=True):
         a :class:`PackedSequence` object
     """
     lengths = [v.size(0) for v in sequences]
-    return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)
+    return pack_padded_sequence(
+        pad_sequence(sequences, batch_first=batch_first), lengths, enforce_sorted=enforce_sorted)
 
 
 def get_packed_sequence(data, batch_sizes, sorted_indices, unsorted_indices):
