@@ -4,7 +4,6 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/api/include/torch/grad_mode.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #include <vector>
 
@@ -63,11 +62,9 @@ inline void _call_caffe2_op_from_c10(
   c10::List<at::Tensor> outputs;
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
-    // they haven't been passed in. Pass a list of uninitialized Variables to
+    // they haven't been passed in. Pass a list of uninitialized tensors to
     // the caffe2 operator as preallocated outputs.
-    for (size_t i = 0; i < num_outputs; i++) {
-      outputs.push_back(torch::autograd::Variable());
-    }
+    outputs.resize(num_outputs);
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
     outputs = std::move(preallocated_outputs).toTensorList();
