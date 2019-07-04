@@ -149,7 +149,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if (
-        node->kind() == prim::Float || node->kind() == prim::Int ||
+        node->kind() == aten::Float || node->kind() == aten::Int ||
         node->kind() == prim::ImplicitTensorToNum) {
       Node* input_node = node->input()->node();
       if (input_node->kind() == prim::NumToTensor) {
