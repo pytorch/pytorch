@@ -33,11 +33,8 @@ def generate_test(configs, bench_op, OperatorTestCase, run_backward):
         op = bench_op()
         op.init(**test_attrs)
         test_name = op.test_name(**test_attrs)
-        use_jit = False
-        if hasattr(op, "jit_forward") and callable(op.jit_forward):
-            use_jit = True
         input_config = str(test_attrs)[1:-1].replace('\'', '')
-        test_config = TestConfig(test_name, input_config, tags, use_jit, run_backward)
+        test_config = TestConfig(test_name, input_config, tags, run_backward)
         if op is not None:
             OperatorTestCase(
                 op,
