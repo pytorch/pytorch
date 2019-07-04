@@ -567,6 +567,8 @@ class MultiScaleSSIMLoss(_Loss):
         k2 (float, optional): Coefficient related to c2 in the above equation. Default: 0.03
         sigma (float, optional): Standard deviation for Gaussian kernel. Default: 1.5
         kernel (Tensor, optional): The kernel used in sliding gaussian window. Default: ``None``
+        weights (list, optional): The list that weight the relative importance between different scales.
+            Deafault: ``[0.0448, 0.2856, 0.3001, 0.2363, 0.1333]``
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -606,9 +608,9 @@ class MultiScaleSSIMLoss(_Loss):
         self.kernel = F._fspecial_gaussian(filter_size, channel, sigma)
 
     @weak_script_method
-    def forward(self, input, target, max_val=1.):
-        return F.ms_ssim_loss(input, target, max_val=max_val, k1=self.k1, k2=self.k2,
-                              sigma=self.sigma, filter_size=self.filter_size, reduction=self.reduction, kernel=self.kernel)
+    def forward(self, input, target, weights=[0.0448, 0.2856, 0.3001, 0.2363, 0.1333], max_val=1.):
+        return F.ms_ssim_loss(input, target, max_val=max_val, k1=self.k1, k2=self.k2, sigma=self.sigma, kernel=self.kernel,
+                              weights=weights, filter_size=self.filter_size, reduction=self.reduction)
 
 
 @weak_module

@@ -2333,8 +2333,8 @@ def ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
     return ret
 
 def ms_ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
-                 sigma=1.5, kernel=None, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, float, int, float, float, float, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+                 sigma=1.5, kernel=None, weights=None, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, float, int, float, float, float, Tensor, list, Optional[bool], Optional[bool], str) -> Tensor
     r"""ms_ssim_loss(input, target, max_val, filter_size, k1, k2,
                      sigma, kernel=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
@@ -2366,7 +2366,9 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
         kernel = _fspecial_gaussian(filter_size, channel, sigma)
     kernel = kernel.to(device=input.device)
 
-    weights = torch.tensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333], device=input.device)
+    if weights is None:
+        weights = [0.0448, 0.2856, 0.3001, 0.2363, 0.1333] 
+    weights = torch.tensor(weights, device=input.device)
     weights = weights.unsqueeze(-1).unsqueeze(-1)
     levels = weights.size(0)
     mssim = []
