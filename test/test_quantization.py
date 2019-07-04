@@ -48,7 +48,29 @@ class NestedModel(torch.nn.Module):
         x = self.fc3(x)
         return x
 
+class InnerModule(torch.nn.Module):
+    def __init__(self):
+        super(InnerModule, self).__init__()
+        self.qconfig = default_qconfig
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.relu = torch.nn.ReLU()
+        self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        return self.relu(self.fc2(self.relu(self.fc1(x))))
+
+class WrappedModel(torch.nn.Module):
+    def __init__(self):
+        super(WrappedModel, self).__init__()
+        self.sub = QuantWrapper(InnerModule())
+        self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        return self.fc(self.sub(x))
+
 class ManualQuantModel(torch.nn.Module):
+    r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
+    """
     def __init__(self):
         super(ManualQuantModel, self).__init__()
         self.qconfig = default_qconfig
@@ -88,11 +110,14 @@ class ModelQuantizeAPITest(TestCase):
         for child in module.children():
             self.checkObservers(child)
 
-    def checkQuantizedLinear(self, mod):
-        self.assertEqual(type(mod.module), nnq.Linear)
+    def checkQuantized(self, mod):
         self.assertEqual(type(mod.quant), nnq.Quantize)
         self.assertEqual(type(mod.dequant), nnq.DeQuantize)
+
+    def checkQuantizedLinear(self, mod):
+        self.assertEqual(type(mod.module), nnq.Linear)
         self.assertEqual(mod.module.bias.dtype, torch.qint32)
+        self.checkQuantized(mod)
 
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
@@ -214,15 +239,6 @@ class ModelQuantizeAPITest(TestCase):
         default_eval_fn(myModel, calib_data)
 
     def test_nested2(self):
-        r"""If we add quant dequant for the whole module then we can eliminate
-        extra quant dequant between modules. This is what current implementation
-        supports.
-        However, a more complete support would make test_nested3 work as well,
-        but still keep the current behavior. That is to say, when user provides
-        configurations for finer grained modules, we operate on that level, e.g.
-        if user have a key 'sub2.fc2', then we don't treat 'sub2' as a terminal
-        module, instead we'll operate on the same level as 'sub2.fc2'.
-        """
         myModel = NestedModel()
         qconfig_dict = {
             'fc3': default_qconfig,
@@ -259,7 +275,6 @@ class ModelQuantizeAPITest(TestCase):
     def test_nested3(self):
         """
         More complicated nested test case with fallbacks
-        this does not work with current implementation
         """
         myModel = NestedModel()
         custum_options = {
@@ -298,6 +313,25 @@ class ModelQuantizeAPITest(TestCase):
         self.checkQuantizedLinear(myModel.fc3)
 
         default_eval_fn(myModel, calib_data)
+
+    def test_quant_wrapper(self):
+        model = WrappedModel()
+
+        tq.propagate_qconfig(model)
+        tq.add_observer(model)
+        self.checkObservers(model)
+
+        default_eval_fn(model, calib_data)
+        tq.convert(model)
+
+        self.checkLinear(model.fc)
+        self.checkQuantized(model.sub)
+        self.assertEqual(type(model.sub.module.fc1), nnq.Linear)
+        self.assertEqual(type(model.sub.module.fc2), nnq.Linear)
+        self.assertEqual(type(model.sub.module.relu), nnq.ReLU)
+
+        default_eval_fn(model, calib_data)
+
 
     def test_manual(self):
         model = ManualQuantModel()

@@ -24,6 +24,7 @@ import inspect
 import io
 import math
 import os
+import pickle
 import tempfile
 import textwrap
 
@@ -120,6 +121,8 @@ class JitTestCase(TestCase):
                 self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
                 main_module = archive.open('archive/code/archive.py')
                 main_module_code = "".join([line.decode() for line in main_module])
+                main_module_debug_file = archive.open('archive/debug/archive.pkl')
+                main_module_debug = pickle.load(main_module_debug_file)
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -138,8 +141,11 @@ class JitTestCase(TestCase):
             archive2 = zipfile.ZipFile(saved_module_buffer_2)
             main_module_2 = archive2.open('archive/code/archive.py')
             main_module_2_code = "".join([line.decode() for line in main_module_2])
+            main_module_2_debug_file = archive.open('archive/debug/archive.pkl')
+            main_module_2_debug = pickle.load(main_module_2_debug_file)
 
             self.assertMultiLineEqual(main_module_code, main_module_2_code)
+            self.assertEqual(main_module_debug, main_module_2_debug)
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         if isinstance(m, torch._C.Function):

@@ -150,10 +150,10 @@ Tensor q_maxpool_2d(Tensor qx,                  // Input Tensor (Quantized)
 class QMaxPool2D_arr_args final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qx,
-                    std::vector<int64_t> kernel_size,
-                    std::vector<int64_t> stride,
-                    std::vector<int64_t> dilation,
-                    std::vector<int64_t> padding) {
+                    torch::List<int64_t> kernel_size,
+                    torch::List<int64_t> stride,
+                    torch::List<int64_t> dilation,
+                    torch::List<int64_t> padding) {
     Tensor qy;
     AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d", [&]() {
       qy = q_maxpool_2d<scalar_t>(qx,

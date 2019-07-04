@@ -19,5 +19,10 @@ _all__ = [
     'prepare', 'convert',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig', 'add_quant_dequant', 'add_observer', 'swap_module',
-    'default_eval_fn'
+    'default_eval_fn',
+    # Observers
+    'Observer', 'WeightObserver', 'observer', 'default_observer',
+    'default_weight_observer',
+    # QConfig
+    'QConfig', 'default_qconfig'
 ]

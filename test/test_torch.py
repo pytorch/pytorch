@@ -9322,8 +9322,9 @@ class _TestTorchMixin(object):
                     if TEST_NUMPY:
                         tup1 = torch.nonzero(tensor, as_tuple=True)
                         tup2 = tensor.nonzero(as_tuple=True)
+                        tup3 = torch.where(tensor)
                         np1 = tensor.cpu().numpy().nonzero()
-                        for t in (tup1, tup2):
+                        for t in (tup1, tup2, tup3):
                             self.assertEqual(len(t), len(np1))
                             for i in range(len(t)):
                                 self.assertEqual(t[i].cpu().numpy(), np1[i])
@@ -9564,6 +9565,10 @@ class _TestTorchMixin(object):
         self.assertEqual(r[50:].mean(), 1, 0.2)
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+        r = torch.normal(2, 3, (100, 100))
+        self.assertEqual(r.mean(), 2, 0.2)
+        self.assertEqual(r.std(), 3, 0.2)
 
     def test_generator_cpu(self):
         # test default generators are equal
@@ -10524,6 +10529,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x = torch.tensor(0.00002)
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor(2.0000e-05)''')
+
+        # test print boolean tensor
+        x = torch.tensor([True])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([True])''')
+
+        x = torch.tensor(True)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor(True)''')
 
         # [Numpy] test print float in sci_mode when min < 0.0001.
         x = torch.tensor([0.00002])

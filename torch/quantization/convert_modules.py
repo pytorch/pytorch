@@ -7,7 +7,7 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
     r"""This is a helper function for `propagate_qconfig`
 
     Args:
-        module: instance of the module we want to transform
+        module: input module
         qconfig_dict: dictionary that maps from name of submodule to quantization
                      configuration
         qconfig_parent: quantization config of parent module, we will fallback to
@@ -15,6 +15,9 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
                        module
         prefix: corresponding prefix of the current module, used as key in
                 qconfig_dict
+
+    Return:
+        None, module is modified inplace with qconfig attached
     """
     if not hasattr(module, 'qconfig'):
         module.qconfig = None
@@ -37,6 +40,9 @@ def propagate_qconfig(module, qconfig_dict=None):
             configuration, qconfig applies to all submodules of a given
             module unless qconfig for the submodules are specified(when the
             submodule already has qconfig attribute)
+
+    Return:
+        None, module is modified inplace with qconfig attached
     """
     propagate_qconfig_helper(module, qconfig_dict)
 
@@ -54,6 +60,10 @@ def add_observer(module):
     Args:
         module: input module with qconfig attributes for all the leaf modules
         that we want to quantize
+
+    Return:
+        None, module is modified inplace with added observer modules and
+            forward_hooks
     """
     for child in module.children():
         add_observer(child)
@@ -97,6 +107,12 @@ def add_quant_dequant(module):
     Args:
         module: input module with qconfig attributes for all the leaf modules
         that we want to quantize
+
+    Return:
+        Either the inplace modified module with submodules wrapped in
+        `QuantWrapper` based on qconfig or a new `QuantWrapper` module which
+        wraps the input module, the latter case only happens when the input
+        module is a leaf module and we want to quantize it.
     """
     if len(module._modules) == 0 and hasattr(module, 'qconfig') and module.qconfig:
         return QuantWrapper(module)
@@ -114,6 +130,10 @@ def prepare(module, qconfig_dict):
         mod: input module
         qconfig_dict: dictionary that maps from name of submodule to quantization
                       configuration
+    Return:
+        A module with qconfig propogated, observer and quant dequant or fake
+        quant modules attached, a module that is ready for calibration or
+        training
     """
     propagate_qconfig(module, qconfig_dict)
     module = add_quant_dequant(module)
@@ -153,6 +173,19 @@ def quantize(module, qconfig_dict, eval_fn, eval_args):
     `eval_fn` which will run the calibration step or training step,
     after that we will call `convert` which will convert the module to a
     quantized module.
+
+    Args:
+        module: input module
+        qconfig_dict: dictionary that maps from name of submodule to quantization
+            configuration, qconfig applies to all submodules of a given
+            module unless qconfig for the submodules are specified(when the
+            submodule already has qconfig attribute)
+        eval_fn: a function for evaluating the prepared module, can be a
+            function that simply runs the prepared module or a training loop
+        eval_args: positional arguments for `eval_fn`
+
+    Return:
+        A quantized module
     """
     module = prepare(module, qconfig_dict)
     eval_fn(module, *eval_args)
@@ -169,6 +202,12 @@ DEFAULT_MODULE_MAPPING = {
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
     parameters) to a quantized module.
+    Args:
+        module: calibrated module with observers
+        mapping: a dictionary that maps from float module type to quantized
+           module type, can be overwrritten to allow swapping user defined Modules
+    Return:
+        A quantized module
     """
     module_swapped = swap_module(module, mapping)
 
@@ -186,6 +225,13 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
 def swap_module(mod, mapping):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
+
+    Args:
+        mod: input module
+        mapping: a dictionary that maps from nn module to nnq module
+
+    Return:
+        The corresponding quantized module of `mod`
     """
     new_mod = mod
     if hasattr(mod, 'observer'):
