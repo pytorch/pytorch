@@ -4,9 +4,6 @@ import torch
 def set_binary_method(cls, tfunc, pbf, func, inplace):
     def _gen_func(pbf):
         def _func(self: cls, other: cls):
-            assert isinstance(self, cls)
-            assert isinstance(other, cls)
-
             def _t_func(output: torch.Tensor,
                         input1: torch.Tensor,
                         input2: torch.Tensor):

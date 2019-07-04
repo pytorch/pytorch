@@ -20,7 +20,8 @@ def f(func, output, input1, input2):
 def f1(func, output, input1, input2):
     assert len(output) == len(input1)
     assert len(input1) == len(input2)
-    output = output.to(torch.uint8)
+    for i in range(len(output)):
+        output.tensors[i] = output.tensors[i].to(torch.uint8)
     for i in range(len(output)):
         # NOTE: We are disabling broadcasting for now
         assert output.tensors[i].size() == input1.tensors[i].size()
