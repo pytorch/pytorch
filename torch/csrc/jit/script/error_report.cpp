@@ -1,28 +1,36 @@
 #include <torch/csrc/jit/script/error_report.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
 namespace script {
 
-thread_local std::vector<SourceRange> call_stack;
-thread_local std::vector<std::string> fn_stack;
 
-void ErrorReport::CallStack::push_call(const SourceRange& range) {
-  call_stack.push_back(range);
-}
+struct Call {
+  std::string fn_name;
+  std::unique_ptr<SourceRange> caller_range;
+};
 
-void ErrorReport::CallStack::pop_call() {
-  call_stack.pop_back();
+thread_local std::unique_ptr<SourceRange> pending_range;
+thread_local std::vector<Call> calls;
+
+void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
+  pending_range = torch::make_unique<SourceRange>(range);
 }
 
 void ErrorReport::CallStack::push_function(const std::string& name) {
-  fn_stack.push_back(name);
+  if (pending_range != nullptr) {
+    calls.push_back({name, std::move(pending_range)});
+    pending_range = nullptr;
+  } else {
+    calls.push_back({name, nullptr});
+  }
 }
 
 void ErrorReport::CallStack::pop_function() {
-  fn_stack.pop_back();
+  calls.pop_back();
 }
 
 C10_EXPORT const char* ErrorReport::what() const noexcept {
@@ -35,18 +43,16 @@ C10_EXPORT const char* ErrorReport::what() const noexcept {
     msg << ".\n";
   }
 
-  if (call_stack.size() > 0) {
-    // Print the calling stack to show why this function was being compiled,
-    // skip the first entry in the list since it's the current function
-    auto range_it = call_stack.rbegin() + 1;
-    auto names_it = fn_stack.rbegin();
-    for (; range_it != call_stack.rend() && names_it != fn_stack.rend();
-         ++range_it, ++names_it) {
-      msg << "\n";
-      msg << "'" << *names_it
-          << "' is being compiled since it was called from '" << *(names_it + 1)
-          << "'\n";
-      range_it->highlight(msg);
+  if (calls.size() > 0) {
+    for (auto it = calls.rbegin(); it != calls.rend() - 1; ++it) {
+      msg << "'" << it->fn_name
+          << "' is being compiled since it was called from '"
+          << (it + 1)->fn_name << "'\n";
+      if (it->caller_range == nullptr) {
+        msg << "<no range>\n";
+      } else {
+        it->caller_range->highlight(msg);
+      }
     }
   }
 

@@ -837,6 +837,7 @@ struct to_ir {
       List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
+      ErrorReport::CallStack::update_pending_range(stmt.range());
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -2161,6 +2162,9 @@ struct to_ir {
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
+    // Push the source range of a call in case compiling this function
+    // triggers an error
+    ErrorReport::CallStack::update_pending_range(tree.range());
     return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
   }
 
@@ -2198,14 +2202,8 @@ struct to_ir {
         return sv->attr(select.range(), method, select.selector().name());
       }
       case TK_APPLY: {
-        // Push the source range of a call in case compiling this function
-        // triggers an error
-        ErrorReport::CallStack::push_call(tree.range());
         auto apply = Apply(tree);
-        auto sv = emitApplyExpr(apply, n_binders);
-        // Compilation was successful, so remove the function call from the stack
-        ErrorReport::CallStack::pop_call();
-        return sv;
+        return emitApplyExpr(apply, n_binders);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));

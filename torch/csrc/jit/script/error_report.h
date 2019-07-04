@@ -23,8 +23,7 @@ struct CAFFE2_API ErrorReport : public std::exception {
     // These functions are used to report why a function was being compiled (i.e.
     // what was the call stack of user functions at compilation time that led to
     // this error)
-    static void push_call(const SourceRange& range);
-    static void pop_call();
+    static void update_pending_range(const SourceRange& range);
     static void push_function(const std::string& name);
     static void pop_function();
   };
