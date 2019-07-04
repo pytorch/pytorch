@@ -53,4 +53,30 @@ class CopyRowsToTensorOp : public Operator<Context> {
  protected:
   INPUT_TAGS(INPUT_TENSOR, INDICES, ROW);
 };
+
+template <class Context>
+class CopyRowsToTensorGradientOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CopyRowsToTensorGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<
+        TensorTypes<at::Half, float, double, int32_t, int64_t>>::
+        call(this, Input(0));
+  }
+  template <typename T>
+  bool DoRunWithType() {
+    auto* output = Output(0);
+    output->ResizeLike(Input(0));
+    auto* output_data = output->template mutable_data<T>();
+    auto& input = Input(0);
+    const auto* input_data = input.template data<T>();
+    std::memcpy(output_data, input_data, input.size(0) * sizeof(T));
+
+    return true;
+  }
+};
+
 } // namespace caffe2
