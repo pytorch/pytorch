@@ -198,24 +198,15 @@ class TestQuantizedTensor(TestCase):
         val = 100
         numel = 10
 
-        scale_1 = 3.2
-        zero_point_1 = 5
-        scale_2 = 0.5
-        zero_point_2 = 10
+        scale = 0.5
+        zero_point = 10
 
-        q = torch._empty_affine_quantized([numel], scale=scale_1, zero_point=zero_point_1, dtype=torch.quint8)
-        q2 = torch._empty_affine_quantized([numel], scale=scale_2, zero_point=zero_point_2, dtype=torch.quint8)
-
-        # Check whether original scale and zero_points are set correctly.
-        self.assertEqual(q.q_scale(), scale_1)
-        self.assertEqual(q.q_zero_point(), zero_point_1)
+        q2 = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
 
         q = q2.clone()
 
         # Check to make sure the scale and zero_point has been copied.
         self.assertEqual(q, q2)
-        self.assertEqual(q.q_scale(), q2.q_scale())
-        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
 
 if __name__ == "__main__":
     run_tests()

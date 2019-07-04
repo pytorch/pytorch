@@ -117,14 +117,11 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
 
 Tensor quantized_clone(const Tensor& self) {
 
-  auto scale = self.q_scale();
-  auto zero_point = self.q_zero_point();
-
   Tensor dst = at::_empty_affine_quantized(
       self.sizes(),
       self.options().dtype(self.scalar_type()),
-      scale,
-      zero_point);
+      self.q_scale(),
+      self.q_zero_point());
 
   at::native::copy_(dst, self, false);
 
