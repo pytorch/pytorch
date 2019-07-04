@@ -193,10 +193,10 @@ void LowerAllTuples(std::shared_ptr<Graph>& graph) {
 
 void LowerSimpleTuples(Block* block) {
   for (auto n : block->nodes()) {
-    removeTupleNodes(n, /*must_remove_tuples*/ false);
     for (auto b : n->blocks()) {
       LowerSimpleTuples(b);
     }
+    removeTupleNodes(n, /*must_remove_tuples*/ false);
   }
 }
 
