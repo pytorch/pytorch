@@ -62,7 +62,6 @@ class JitTestCase(TestCase):
         # the callback gets destucted
         self.clearHooks()
         torch._C._jit_clear_class_registry()
-        torch._jit_internal._clear_weak_cache()
 
     def _isHookExceptionOk(self, e):
         se = str(e)

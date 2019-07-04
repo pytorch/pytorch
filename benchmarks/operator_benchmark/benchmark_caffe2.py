@@ -18,19 +18,25 @@ class Caffe2BenchmarkBase(object):
     """ This is a base class used to create Caffe2 operator benchmark
     """
     tensor_index = 0
+    test_index = 0
 
     def __init__(self):
         self.args = {}
         self.user_provided_name = None
 
-    # TODO: Add other dtype support
-    def tensor(self, *shapes):
-        """ A wapper function to create tensor (blob in caffe2) filled with random
-            value. The name/label of the tensor is returned and it is available 
+    def tensor(self, shapes, dtype='float32'):
+        """ A wapper function to create C2 tensor filled with random data.
+            The name/label of the tensor is returned and it is available 
             throughout the benchmark execution phase. 
+            Args: 
+                shapes: int or a sequence of ints to defining the shapes of the tensor
+                dtype: use the dtypes from numpy 
+                    (https://docs.scipy.org/doc/numpy/user/basics.types.html)
+            Return: 
+                C2 tensor of dtype 
         """
         blob_name = 'blob_' + str(Caffe2BenchmarkBase.tensor_index)
-        workspace.FeedBlob(blob_name, benchmark_utils.numpy_random_fp32(*shapes))
+        workspace.FeedBlob(blob_name, benchmark_utils.numpy_random(dtype, *shapes))
         Caffe2BenchmarkBase.tensor_index += 1
         return blob_name
 
@@ -52,17 +58,22 @@ class Caffe2BenchmarkBase(object):
             ret = int(value)
         return str(ret)
 
-    def test_name(self, **kargs):
+    def test_name(self, name_type, **kargs):
         """ this is a globally unique name which can be used to
             label a specific test
         """
-        test_name_str = []
-        for key in kargs:
-            value = kargs[key]
-            test_name_str.append(
-                key + self._value_to_str(value))
-        name = (self.module_name() + '_' +
-                '_'.join(test_name_str)).replace(" ", "")
+        if name_type == "long": 
+            test_name_str = []
+            for key in kargs:
+                value = kargs[key]
+                test_name_str.append(
+                    key + self._value_to_str(value))
+            name = (self.module_name() + '_' +
+                    '_'.join(test_name_str)).replace(" ", "")
+        elif name_type == "short":
+            # this is used to generate test name based on unique index
+            name = '_'.join([self.module_name(), 'test', str(Caffe2BenchmarkBase.test_index)])
+            Caffe2BenchmarkBase.test_index += 1
         return name
 
 
