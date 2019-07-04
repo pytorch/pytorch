@@ -51,7 +51,6 @@ class NestedModel(torch.nn.Module):
 class InnerModule(torch.nn.Module):
     def __init__(self):
         super(InnerModule, self).__init__()
-        self.qconfig = default_qconfig
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.relu = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
@@ -62,8 +61,11 @@ class InnerModule(torch.nn.Module):
 class WrappedModel(torch.nn.Module):
     def __init__(self):
         super(WrappedModel, self).__init__()
+        self.qconfig = default_qconfig
         self.sub = QuantWrapper(InnerModule())
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+        # don't quantize this fc
+        self.fc.qconfig = None
 
     def forward(self, x):
         return self.fc(self.sub(x))
@@ -281,7 +283,7 @@ class ModelQuantizeAPITest(TestCase):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_qconfig = QConfig(weight=default_weight_observer(),
+        custom_qconfig = QConfig(weight=default_observer(),
                                  activation=default_observer(**custum_options))
         qconfig_dict = {
             'fc3': default_qconfig,

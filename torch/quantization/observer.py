@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch.nn as nn
 import torch
 from functools import partial
+import numpy as np
 
 class Observer(nn.Module):
     r"""Default Observer Module
@@ -23,42 +24,30 @@ class Observer(nn.Module):
         assert self.qscheme == torch.per_tensor_affine, \
             'Default Observer only works for per_tensor_affine quantization scheme'
         # Symmetric range for initialization
-        self.stats = torch.tensor([-6, 6], dtype=torch.float)
+        # min array and max array
+        self.min_history = []
+        self.max_history = []
         self.avg_constant = avg_constant
 
     def forward(self, x):
-        self.stats = (1 - self.avg_constant) * self.stats + \
-            self.avg_constant * torch.tensor([torch.min(x), torch.max(x)], dtype=torch.float)
+        self.min_history.append(torch.min(x).float())
+        self.max_history.append(torch.max(x).float())
 
     def calculate_qparams(self):
-        qparams = torch.zeros(2).float()
-        nLevels = 255.0
+        n_levels = 255.0
+        min_val = np.percentile(self.min_history, 5)
+        max_val = np.percentile(self.max_history, 95)
+        scale = (max_val - min_val) / n_levels
         if self.dtype == torch.qint8:
-            qparams[0] = 2 * torch.max(self.stats[1], -self.stats[0]) / nLevels
-            qparams[1] = 0
+            qmin, qmax = -128, 127
         else:
-            qparams = torch.zeros(2).float()
-            nLevels = 255.0
-            qparams[0] = 2 * torch.max(self.stats[1], -self.stats[0]) / nLevels
-            qparams[1] = 128
+            qmin, qmax = 0, 255
+        zero_point = qmin - min_val / scale
+        zero_point = max(qmin, zero_point)
+        zero_point = min(qmax, zero_point)
+        print(zero_point, qmin, qmax)
 
-        return qparams
-
-class WeightObserver(Observer):
-    r"""Default Observer Modulle for Weight, only works for per_tensor_affine
-    quantization scheme.
-
-    The module will compute the min and max for the weight and these will be
-    used to calculate quantization parameters.
-    """
-
-    def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine):
-        super(WeightObserver, self).__init__(dtype, qscheme)
-        self.stats = None
-
-    def forward(self, x):
-        self.stats = torch.tensor([torch.min(x), torch.max(x)], dtype=torch.float)
-        return x
+        return torch.tensor([scale, zero_point])
 
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
@@ -67,4 +56,5 @@ def default_observer(**kwargs):
     return observer(Observer, **kwargs)
 
 def default_weight_observer(**kwargs):
-    return observer(WeightObserver, **kwargs)
+    kwargs.setdefault('dtype', torch.qint8)
+    return observer(Observer, **kwargs)

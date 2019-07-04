@@ -51,6 +51,7 @@ def _observer_forward_hook(self, input, output):
     """
     self.observer(output)
 
+# TODO(jerryzh): remove_observer?
 def add_observer(module):
     r"""Add observer for the leaf child of the module.
 
@@ -88,9 +89,8 @@ class QuantWrapper(nn.Module):
     """
     def __init__(self, module):
         super(QuantWrapper, self).__init__()
-        assert hasattr(module, 'qconfig'), 'Please add qconfig to module before \
-        wrapping with QuantWrapper'
-        self.quant = QuantStub(module.qconfig)
+        qconfig = module.qconfig if hasattr(module, 'qconfig') else None
+        self.quant = QuantStub(qconfig)
         self.dequant = DeQuantStub()
         self.module = module
 
