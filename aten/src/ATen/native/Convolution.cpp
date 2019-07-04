@@ -7,11 +7,11 @@
 #include "nnpack.h"
 #endif
 
-#include <ATen/cuda/CUDAConfig.h>
+//#include <ATen/cuda/CUDAConfig.h>
 
-#if AT_CUDNN_ENABLED()
-#include <ATen/cuda/CUDAContext.h>
-#endif
+//#if AT_CUDNN_ENABLED()
+//#include <ATen/cuda/CUDAContext.h>
+//#endif
 
 static const int MIOPEN_DIM_MAX = 4;
 
@@ -308,12 +308,13 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
-  #if AT_CUDNN_ENABLED()
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+//  #if AT_CUDNN_ENABLED()
+    //cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
                          use_cudnn(input) &&
-                         prop->major >= 7 &&  // Volta/Tensor cores
+                         //prop->major >= 7 &&  // Volta/Tensor cores
                          input.scalar_type() == kHalf && // only for FP16
                          weight.scalar_type() == kHalf &&
                          is_depthwise(input, weight) &&
@@ -328,9 +329,12 @@ auto ConvParams::use_cudnn_depthwise(
     } else {
       return false;
     }
-  #else
+  } else {
     return false;
-  #endif
+  }
+//  #else
+//    return false;
+//  #endif
 }
 
 static void check_shape_forward(const at::Tensor& input,

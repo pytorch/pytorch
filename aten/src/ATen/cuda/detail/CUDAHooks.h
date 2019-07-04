@@ -22,6 +22,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool compiledWithCuDNN() const override;
   bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
+  bool supportsDepthwiseConvolutionWithCuDNN() const override;
   long versionCuDNN() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
