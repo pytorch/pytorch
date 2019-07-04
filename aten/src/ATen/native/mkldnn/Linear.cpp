@@ -24,19 +24,6 @@ Tensor mkldnn_linear(
 namespace at {
 namespace native {
 
-// Helper function for getting an ideep tensor out of an aten Tensor.
-// In case the aten Tensor is a mkldnn tensor,
-//   1. reshape first if input dim is greater than 2 and the reshape will cost a memory copy.
-//   2. directly return the ideep tensor if the input dim is 2.
-inline ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor) {
-  if (tensor.dim() > 2) {
-    // use reshape for mkldnn tensor
-    auto x = tensor.reshape({-1, tensor.size(tensor.dim() - 1)});
-    return itensor_from_mkldnn(x);
-  }
-  return itensor_from_mkldnn(tensor);
-}
-
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight,
@@ -48,7 +35,9 @@ Tensor mkldnn_linear(
   TORCH_CHECK(weight.is_mkldnn() && bias.is_mkldnn(),
       "mkldnn_linear: weight and bias need to be mkldnn layout");
 
-  const ideep::tensor x = get_mkldnn_tensor(self);
+  // reshape first if input dim is greater than 2 and the reshape will cost a memory copy.
+  auto self_reshaped = self.dim() > 2 ? self.reshape({-1, self.size(self.dim() - 1)}) : self;
+  const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
   const ideep::tensor w = itensor_from_mkldnn(weight);
 
   ideep::tensor y;
@@ -60,7 +49,6 @@ Tensor mkldnn_linear(
   }
 
   auto input_size = self.sizes();
-  auto weight_size = weight.sizes();
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight.size(0));
 
