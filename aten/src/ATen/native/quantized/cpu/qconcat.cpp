@@ -9,10 +9,16 @@
 namespace at { namespace native {
 namespace {
 
-/* Quantized concatenation.
+bool is_valid_quantization_type(Tensor t) {
+  const auto qtype = t.qscheme();
+  return (qtype == kPerTensorAffine) ||
+         (qtype == kPerTensorSymmetric);
+}
 
-Note: This function uses a dequantization
-*/
+/* Quantized concatenation.
+ *
+ * Note: This function uses a dequantization.
+ */
 template <bool ReLUFused>
 Tensor quantized_cat(const std::vector<Tensor>& qxs, int64_t axis,
                      double scale, int64_t zero_point) {
@@ -20,8 +26,9 @@ Tensor quantized_cat(const std::vector<Tensor>& qxs, int64_t axis,
   std::vector<Tensor> xs;
   xs.reserve(qxs.size());
   for (const auto& qx: qxs) {
-    TORCH_CHECK(x_dtype == qx.scalar_type(),
-                 "All dtypes must be the same.");
+    TORCH_CHECK(x_dtype == qx.scalar_type(), "All dtypes must be the same.");
+    TORCH_CHECK(is_valid_quantization_type(qx),
+                "Only per-tensor quantization is supported in 'cat'!")
     xs.push_back(qx.dequantize());
   }
   const Tensor y = at::cat(xs, axis);
@@ -44,11 +51,13 @@ class QCat final : public torch::OperatorKernel {
   Tensor operator()(const std::vector<Tensor>& qxs, int64_t axis,
                     c10::optional<double> scale,
                     c10::optional<int64_t> zero_point) {
-    double _scale = scale ? *scale : qxs[0].q_scale();
-    int64_t _zero_point = zero_point ? *zero_point : qxs[0].q_zero_point();
+    double _scale = scale.has_value() ? scale.value() : qxs[0].q_scale();
+    int64_t _zero_point = zero_point.has_value() ? zero_point.value()
+                                                 : qxs[0].q_zero_point();
     return quantized_cat<ReLUFused>(qxs, axis, _scale, _zero_point);
   }
 };
+
 
 
 template <bool ReLUFused = false>
