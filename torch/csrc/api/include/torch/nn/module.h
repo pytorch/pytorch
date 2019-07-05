@@ -231,7 +231,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   std::vector<std::shared_ptr<Module>> modules(bool include_self = true) const;
 
   /// Returns an `OrderedDict` of the submodules of this `Module` (the entire
-  /// submodule hierarchy) and thei keys, and if `include_self` is true, also
+  /// submodule hierarchy) and their keys, and if `include_self` is true, also
   /// inserts a `shared_ptr` to this module in the first position. If
   /// `name_prefix` is given, it is prepended to every key as
   /// `<name_prefix>.<key>` (and just `name_prefix` for the module itself).
