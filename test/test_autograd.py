@@ -230,6 +230,7 @@ class TestAutograd(TestCase):
             torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
             True)
 
+    @skipIfNoLapack
     def test_slogdet_sign(self):
         a = torch.randn(3, 3, requires_grad=True)
         s, logdet = a.slogdet()
