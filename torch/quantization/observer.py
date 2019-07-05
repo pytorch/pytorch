@@ -23,6 +23,8 @@ class Observer(nn.Module):
         assert self.qscheme in (torch.per_tensor_affine, torch.per_tensor_symmetric), \
             'Default Observer only works for per_tensor_affine and \
                 per_tensor_symmetric quantization scheme'
+        assert self.dtype in (torch.qint8, torch.quint8), \
+            'Default Observer only works for qint8 and quint data type'
         self.min_val = None
         self.max_val = None
 
@@ -39,17 +41,18 @@ class Observer(nn.Module):
             qmin, qmax = -128, 127
         else:
             qmin, qmax = 0, 255
-        if self.qscheme == torch.per_tensor_symmetric:
-            max_val = torch.max(-self.min_val, self.max_val)
-            min_val = -max_val * (128.0 / 127.0)
-        else:
-            max_val = self.max_val
-            min_val = self.min_val
         n_levels = 255.0
-        scale = (max_val - min_val) / n_levels
-        zero_point = qmin - torch.round(min_val / scale)
-        zero_point = max(qmin, zero_point)
-        zero_point = min(qmax, zero_point)
+        max_val, min_val = self.max_val.item(), self.min_val.item()
+        if self.qscheme == torch.per_tensor_symmetric:
+            max_val = max(-min_val, max_val)
+            min_val = -max_val * (128.0 / 127.0)
+            scale = (max_val - min_val) / n_levels
+            zero_point = 0 if self.dtype == torch.qint8 else 128
+        else:
+            scale = (max_val - min_val) / n_levels
+            zero_point = qmin - round(min_val / scale)
+            zero_point = max(qmin, zero_point)
+            zero_point = min(qmax, zero_point)
 
         return torch.tensor([scale, zero_point])
 
