@@ -175,11 +175,31 @@ void GeluBackwardKernelImpl(const Tensor& dY, const Tensor& X, Tensor* dX) {
   }
 }
 
+void hardshrink_cpu_kernel(TensorIterator& iter, Scalar lambd) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
+    auto lambd_val = lambd.to<scalar_t>();
+    cpu_kernel(iter, [=](scalar_t self_val) {
+      return (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : self_val;
+    });
+  });
+}
+
+void hardshrink_backward_cpu_kernel(TensorIterator& iter, Scalar lambd) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
+    auto lambd_val = lambd.to<scalar_t>();
+    cpu_kernel(iter, [=](scalar_t self_val, scalar_t grad_val) {
+      return (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : grad_val;
+    });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
 REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
+REGISTER_DISPATCH(hardshrink_cpu_stub, &hardshrink_cpu_kernel);
+REGISTER_DISPATCH(hardshrink_backward_cpu_stub, &hardshrink_backward_cpu_kernel);
 
 } // namespace native
 } // namespace at

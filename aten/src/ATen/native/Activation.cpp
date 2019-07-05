@@ -15,6 +15,8 @@ static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(threshold_stub);
+DEFINE_DISPATCH(hardshrink_cpu_stub);
+DEFINE_DISPATCH(hardshrink_backward_cpu_stub);
 
 Tensor relu(const Tensor & self) {
   return at::threshold(self, 0, 0);
@@ -339,34 +341,17 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // hardshrink
 // -----------------------------------
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_cpu", [&] {
-    auto lambd_val = lambd.to<scalar_t>();
-    auto builder = at::TensorIterator::Builder();
-    builder.add_output(out_tensor);
-    builder.add_input(self);
-    auto iter = builder.build();
-    at::native::cpu_kernel(*iter, [=](scalar_t self_val) {
-      return (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : self_val;
-    });
-  });
-  return out_tensor;
+  Tensor result = at::empty_like(self);
+  auto iter = TensorIterator::unary_op(result, self);
+  hardshrink_cpu_stub(iter->device_type(), *iter, lambd);
+  return iter->output();
 }
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_backward_cpu", [&] {
-    auto lambd_val = lambd.to<scalar_t>();
-    auto builder = at::TensorIterator::Builder();
-    builder.add_output(out_tensor);
-    builder.add_input(self);
-    builder.add_input(grad);
-    auto iter = builder.build();
-    at::native::cpu_kernel(*iter, [=](scalar_t self_val, scalar_t grad_val) {
-      return (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : grad_val;
-    });
-  });
-  return out_tensor;
+  Tensor result = at::empty_like(self);
+  auto iter = TensorIterator::binary_op(result, grad, self);
+  hardshrink_backward_cpu_stub(iter->device_type(), *iter, lambd);
+  return iter->output();
 }
 
 
