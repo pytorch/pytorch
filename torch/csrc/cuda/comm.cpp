@@ -152,7 +152,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
         for (auto & t : utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
-          Variable var = as_variable_ref(t).detach();
+          Variable var = as_variable_ref(t).variable_data();
           var.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
           device_outputs.push_back(var);
         }
@@ -166,7 +166,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
         for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
-          Variable var = as_variable_ref(t).detach();
+          Variable var = as_variable_ref(t).variable_data();
           var.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
           device_outputs.push_back(var);
         }
