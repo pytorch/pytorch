@@ -1618,8 +1618,7 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
-//    version counter (word 0)
-//    version counter (word 1)
+//    version counter pointer
 //    PyObject pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
