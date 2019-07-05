@@ -599,6 +599,7 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream buf;
             Module module("__main__");
             addFunctionToModule(module, self);
+            module.save(buf, _extra_files);
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
