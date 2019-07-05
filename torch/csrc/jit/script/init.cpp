@@ -379,13 +379,9 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            std::vector<QualifiedName> names;
-            for (const auto& def : defs) {
-              auto method_name = QualifiedName(m.name(), def.name().name());
-              names.emplace_back(std::move(method_name));
-            }
+            const auto prefix = QualifiedName(m.name());
             m.class_compilation_unit()->define(
-                names, defs, resolvers, moduleSelf(m, py_m));
+                prefix, defs, resolvers, moduleSelf(m, py_m));
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
@@ -726,14 +722,13 @@ void initJitScriptBindings(PyObject* module) {
         cu->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
-        std::vector<c10::QualifiedName> names;
         for (const auto& def : classDef.defs()) {
-          names.push_back(QualifiedName(classname, def.name().name()));
           methodDefs.push_back(def);
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
-        cu->define(names, methodDefs, rcbs, simpleSelf(classType));
+        cu->define(
+            QualifiedName(classname), methodDefs, rcbs, simpleSelf(classType));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {

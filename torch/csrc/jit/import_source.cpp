@@ -196,12 +196,9 @@ struct SourceImporter {
 
         std::vector<Def> definitions;
         std::vector<ResolverPtr> resolvers;
-        std::vector<c10::QualifiedName> names;
         for (const auto& method_def : class_def.defs()) {
           definitions.emplace_back(method_def);
           resolvers.emplace_back(resolver_);
-          names.emplace_back(
-              QualifiedName(qualified_classname, method_def.name().name()));
         }
 
         auto class_type =
@@ -211,7 +208,7 @@ struct SourceImporter {
           v->setType(class_type);
           return std::make_shared<SimpleValue>(v);
         };
-        cu->define(names, definitions, resolvers, self);
+        cu->define(qualified_classname, definitions, resolvers, self);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
         auto named_tuple_def = NamedTupleDef(parsed_treeref);
 
@@ -258,16 +255,12 @@ struct SourceImporter {
 
     std::vector<Def> definitions;
     std::vector<ResolverPtr> resolvers;
-    std::vector<c10::QualifiedName> names;
     while (p_.lexer().cur().kind != TK_EOF) {
       auto def = Def(p_.parseFunction(/*is_method=*/bool(self)));
       definitions.emplace_back(def);
       resolvers.emplace_back(resolver_);
-      auto name = prefix ? QualifiedName(*prefix, def.name().name())
-                         : QualifiedName(def.name().name());
-      names.push_back(std::move(name));
     }
-    cu.define(names, definitions, resolvers, self);
+    cu.define(prefix, definitions, resolvers, self);
   }
 
   size_t parseVersionNumber() {

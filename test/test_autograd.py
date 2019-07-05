@@ -12,13 +12,14 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul
 from functools import reduce
+from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent, emit_nvtx
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
-                          suppress_warnings, skipIfRocm,
+                          suppress_warnings, skipIfRocm, slowTest,
                           load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
@@ -3194,6 +3195,99 @@ for shape in [(1,), ()]:
 """
         s = TestCase.runWithPytorchAPIUsageStderr(code)
         self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
+
+    def test_deep_reentrant(self):
+
+        class DeepReentrant(Function):
+            @staticmethod
+            def forward(ctx, x):
+                with torch.enable_grad():
+                    ctx.x = Variable(x.data, requires_grad=True)
+                    ctx.x = ctx.x - 1
+                return ctx.x.detach()
+
+            @staticmethod
+            def backward(ctx, x):
+                if ctx.x < 0:
+                    return x
+                with torch.enable_grad():
+                    DeepReentrant.apply(ctx.x).sum().backward()
+                return x
+
+        v = torch.tensor(2000.0, requires_grad=True)
+        # This will cause stack overflow if reentrant calls are handled
+        # in the same thread recursively
+        DeepReentrant.apply(v).sum().backward()
+
+    def test_reentrant_priority(self):
+        order = []
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                order.append("MyFunction")
+                return x
+
+        class Reentrant(Function):
+            @staticmethod
+            def forward(ctx, x):
+                with torch.enable_grad():
+                    ctx.x = Variable(x.data, requires_grad=True)
+                    ctx.x = ctx.x - 1
+                return ctx.x.detach()
+
+            @staticmethod
+            def backward(ctx, x):
+                order.append("Reentrant")
+                if ctx.x < 0:
+                    return x
+                with torch.enable_grad():
+                    Reentrant.apply(ctx.x).backward()
+                return x
+
+        a = MyFunction.apply(torch.tensor(6.0, requires_grad=True))
+        b = Reentrant.apply(torch.tensor(9.0, requires_grad=True))
+        v = a * b
+        v.backward()
+        # The tasks for the Reentrant and MyFunction backward() will be added
+        # to the queue in the autograd engine at the same time. The backward
+        # for Reentrant will be executed first, which will then add other
+        # backward tasks to the queue. We want to ensure all the reentrant tasks
+        # are prioritized over the MyFunction backward task regardless of their
+        # sequence numbers
+        self.assertEqual(len(order), 11)
+        self.assertEqual(order.count("Reentrant"), 10)
+        self.assertEqual(order[-1], "MyFunction")
+
+    @slowTest
+    def test_checkpointing(self):
+        num_inp = 2000
+        nz_inp = 10
+        nz_out = 10
+        nz_bottleneck = 1000
+
+        # small proxy network for some complex reasoning we want to do per input
+        module = nn.Sequential(
+            nn.Linear(nz_inp, nz_bottleneck),
+            nn.ReLU(),
+            nn.Linear(nz_bottleneck, nz_inp)
+        )
+
+        feat_combined = []
+        for r in range(num_inp):
+            data_r = torch.Tensor(1, nz_inp)
+            data_r.uniform_()
+            data_r.requires_grad = True
+            feat_r = checkpoint(module, data_r)
+            feat_combined.append(feat_r)
+
+        # compute mean as a proxy for some joint reasoning
+        mean_combined = torch.stack(feat_combined).mean()
+        mean_combined.backward()
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
