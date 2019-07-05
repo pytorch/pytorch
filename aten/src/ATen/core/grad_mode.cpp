@@ -28,3 +28,5 @@ void GradMode::set_enabled(bool enabled) {
 }
 
 #endif
+
+} // namespace at
