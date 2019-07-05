@@ -1,6 +1,6 @@
-#include <torch/csrc/autograd/grad_mode.h>
+#include <ATen/core/grad_mode.h>
 
-namespace torch { namespace autograd {
+namespace at {
 
 thread_local bool GradMode_enabled = true;
 
@@ -11,4 +11,4 @@ bool GradMode::is_enabled() {
 void GradMode::set_enabled(bool enabled) {
   GradMode_enabled = enabled;
 }
-}}
+}
