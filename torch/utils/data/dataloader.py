@@ -103,9 +103,6 @@ class DataLoader(object):
                  :ref:`multiprocessing-best-practices` on more details related
                  to multiprocessing in PyTorch.
 
-    .. note:: By default, ``DataLoader`` consumes a RNG state to determine ``base_seed`` 
-              for data-loading threads. 
-
     .. note:: ``len(dataloader)`` heuristic based on the length of the sampler used.
               When :attr:`dataset` is a subclass of :class:`~torch.utils.data.IterableDataset`,
               an infinite sampler is used, whose :meth:`__len__` is not
