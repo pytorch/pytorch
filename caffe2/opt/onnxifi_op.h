@@ -64,6 +64,8 @@ class OnnxifiOp final : public Operator<Context> {
       input_desc_.push_back(onnxTensorDescriptorV1());
       input_desc_.back().name = input.c_str();
     }
+    all_offsets_.reserve(ws->Blobs().size());
+    all_scales_.reserve(ws->Blobs().size());
     input_shapes_.resize(input_names_.size());
     output_shapes_.resize(output_names_.size());
     output_reshape_info_.begins.reserve(output_names_.size());
@@ -304,7 +306,7 @@ class OnnxifiOp final : public Operator<Context> {
       std::vector<std::string>* weight_names,
       std::vector<std::vector<uint64_t>>* weight_shapes,
       std::vector<std::vector<float>>* all_scales,
-      std::vector<std::vector<float>>* all_offsets) const;
+      std::vector<std::vector<int32_t>>* all_offsets) const;
 
   // pointer to loaded onnxifi library
   onnxifi_library* lib_{nullptr};
@@ -371,7 +373,7 @@ class OnnxifiOp final : public Operator<Context> {
 
   // This is for multi group quantization info
   std::vector<std::vector<float>> all_scales_;
-  std::vector<std::vector<float>> all_offsets_;
+  std::vector<std::vector<int32_t>> all_offsets_;
 
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;

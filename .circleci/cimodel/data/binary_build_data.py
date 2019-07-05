@@ -42,7 +42,7 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
         "3.6m",
         "3.7m",
     ],
-    conda=dimensions.STANDARD_PYTHON_VERSIONS,
+    conda=dimensions.CONDA_PYTHON_VERSIONS,
     libtorch=[
         "2.7m",
     ],
@@ -52,7 +52,7 @@ CONFIG_TREE_DATA = OrderedDict(
     linux=(dimensions.CUDA_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.CONDA_PYTHON_VERSIONS,
         libtorch=[
             "2.7",
         ],
@@ -85,7 +85,13 @@ class OSConfigNode(ConfigNode):
         self.props["cuda_versions"] = cuda_versions
 
     def get_children(self):
-        return [PackageFormatConfigNode(self, k, v) for k, v in self.py_tree.items()]
+        packaging_variants = [PackageFormatConfigNode(self, k, v) for k, v in self.py_tree.items()]
+
+        if self.find_prop("smoke"):
+            filtered_packaging_variants = list(filter(lambda x: x.get_label() != "libtorch", packaging_variants))
+            return filtered_packaging_variants
+        else:
+            return packaging_variants
 
 
 class PackageFormatConfigNode(ConfigNode):

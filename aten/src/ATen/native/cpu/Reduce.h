@@ -10,6 +10,11 @@ namespace at { namespace native { namespace {
 
 using namespace vec256;
 
+#define VEC_LOOP_HEADER(func_t, data) \
+  using scalar_t = typename function_traits<func_t>::result_type; \
+  using Vec = Vec256<scalar_t>; \
+  char* out_ptr = data[0];
+
 // reduction that is contiguous over the input in dim 0
 template <typename traits>
 static inline bool is_contiguous_reduction(const int64_t* strides) {
@@ -23,6 +28,83 @@ static inline bool is_outer_reduction(const int64_t* strides) {
   return strides[0] == 0 &&
          strides[2] == sizeof(typename traits::result_type) &&
          strides[3] == sizeof(typename traits::arg2_t);
+}
+
+template <typename func_t, typename vec_func_t>
+static inline void reduction128(char** data, int64_t n, int64_t stride, func_t op, vec_func_t vop, bool reduce) {
+  VEC_LOOP_HEADER(func_t, data)
+  const char* in1_ptr = data[1];
+  Vec acc[4];
+  for  (int j = 0; j < 4; j++) {
+    acc[j] = Vec::loadu(in1_ptr + j * Vec::size() * sizeof(scalar_t));
+  }
+  for (int64_t i = 1; i < n; i++) {
+    const char* ptr = in1_ptr + stride * i;
+    acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
+    acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
+    acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size() * sizeof(scalar_t))));
+    acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size() * sizeof(scalar_t))));
+  }
+  if (reduce) {
+    scalar_t buffer[Vec::size()];
+    acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
+    acc[0].store(buffer);
+    for (int j = 1; j < Vec::size(); j++) {
+      buffer[0] = op(buffer[0], buffer[j]);
+    }
+    auto dst = (scalar_t*)out_ptr;
+    *dst = op(*dst, buffer[0]);
+  } else {
+    for (int j = 0; j < 4; j++) {
+      auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
+      acc[j] = vop(acc[j], Vec::loadu(dst));
+      acc[j].store(dst);
+    }
+  }
+}
+
+template <typename F>
+static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
+  for (int j = 0; j < n; j++) {
+    f();
+    data[0] += strides[0];
+    data[1] += strides[1];
+  }
+}
+
+// computes the reduction out = op(out, in)
+template <typename func_t, typename vec_func_t>
+static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_func_t vop) {
+  VEC_LOOP_HEADER(func_t, data)
+  int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
+  int64_t count = n / (4 * Vec::size());
+  if (count > 0) {
+    reduction128(data, count, vector_stride, op, vop, /*reduce=*/true);
+  }
+  char* ptrs[3] = { data[0], data[0], data[1] };
+  int64_t strides[] = { 0, 0, sizeof(scalar_t) };
+  basic_loop(ptrs, strides, count * 4 * Vec::size(), n, op);
+}
+
+// computes the reduction out = op(out, in)
+template <typename func_t, typename vec_func_t>
+static inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_t size0, int64_t size1, func_t op, vec_func_t vop) {
+  VEC_LOOP_HEADER(func_t, data)
+
+  // reduce down each column of 4 * Vec::size() elements (128 bytes)
+  int64_t outer_stride[2] = { 128, 128 };
+  UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size()), [&] {
+    reduction128(data, size0, inner_stride, op, vop, /*reduce=*/false);
+  });
+
+  // reduce down the remaining columns
+  int64_t step[] = { sizeof(scalar_t), sizeof(scalar_t) };
+  int64_t remaining = size1 % (4 * Vec::size());
+  UNARY_OUTER_LOOP(data, step, remaining, [&] {
+    char* ptrs[3] = { data[0], data[0], data[1] };
+    int64_t strides[] = { 0, 0, inner_stride };
+    basic_loop(ptrs, strides, 0, size0, op);
+  });
 }
 
 template<typename traits, typename res_t>
@@ -120,7 +202,8 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
   const int num_outputs = iter.noutputs();
   iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIterator &sub_iter) {
     auto reduction_body = [&ops, &sub_iter, num_outputs](acc_t acc, int64_t begin, int64_t end) -> acc_t {
-      sub_iter.serial_for_each([&acc, &ops, num_outputs](int ntensors, char** data, const int64_t* strides, int64_t size) {
+      int ntensors = sub_iter.ntensors();
+      sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors](char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
@@ -169,7 +252,7 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
     "all types must match");
 
   iter.output().fill_(ident);
-  iter.parallel_reduce([&](int ntensor, char** data, const int64_t* strides, int64_t size0, int64_t size1) {
+  iter.parallel_reduce([&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
     int64_t outer_strides[] = { strides[2], strides[3] };
     if (is_contiguous_reduction<traits>(strides)) {
       // input is contiguous in dim 0, output is reduced in dim 0
@@ -184,7 +267,7 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
       UNARY_OUTER_LOOP(data, outer_strides, size1, [&] {
         char* ptrs[3] = { data[0], data[0], data[1] };
         int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
-        binary_loop(ptrs, inner_strides, 0, size0, op);
+        basic_loop(ptrs, inner_strides, 0, size0, op);
       });
     }
   });

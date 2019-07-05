@@ -48,7 +48,16 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
       }
       return;
     }
-    n->output()->replaceAllUsesWith(construct->inputs().at(*maybe_int));
+    auto int_idx = *maybe_int;
+    auto len = construct->output()->type()->containedTypes().size();
+    if (int_idx < 0) {
+      int_idx += len;
+    }
+    // currently, we allow non-constant tuple index if the tuple is of one type.
+    // so we need to check bounds here
+    if (int_idx >= 0 && static_cast<size_t>(int_idx) < len) {
+      n->output()->replaceAllUsesWith(construct->inputs().at(int_idx));
+    }
   } else if (n->kind() == prim::TupleSlice) {
     std::vector<Value*> values;
     int64_t beg = n->i(attr::beg);

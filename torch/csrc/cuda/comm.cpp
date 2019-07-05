@@ -16,18 +16,6 @@
 #include <cstddef>
 #include <vector>
 
-
-// The following code is used to ensure torch is linked against caffe2_gpu.
-#ifdef _MSC_VER
-namespace {
-#pragma optimize("", off)
-  int warp_size() {
-    return at::cuda::warp_size();
-  }
-#pragma optimize("", on)
-}
-#endif
-
 namespace torch { namespace cuda {
 using namespace at;
 using namespace torch::autograd;

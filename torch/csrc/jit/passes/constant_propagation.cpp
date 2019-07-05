@@ -18,8 +18,10 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
+    prim::Function,
     prim::Constant,
     prim::AutogradZero,
+    prim::Uninitialized,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.

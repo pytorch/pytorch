@@ -244,8 +244,9 @@ bool ConcatOp<Context>::RunOnDevice() {
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (int i = 1; i < InputSize(); ++i) {
-    CAFFE_ENFORCE(
-        Input(i).dtype() == input_zero.dtype(),
+    CAFFE_ENFORCE_EQ(
+        Input(i).dtype(),
+        input_zero.dtype(),
         "All inputs must have the same type, expected: ",
         input_zero.dtype().name(),
         " but got: ",
@@ -269,8 +270,9 @@ bool ConcatOp<Context>::RunOnDevice() {
     // check the input dims are compatible.
     for (int j = 1; j < InputSize(); ++j) {
       int dim_j = Input(j).dim32(i);
-      CAFFE_ENFORCE(
-          dim == dim_j,
+      CAFFE_ENFORCE_EQ(
+          dim,
+          dim_j,
           "Expect dimension = ",
           dim,
           " got ",

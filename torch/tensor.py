@@ -43,8 +43,8 @@ class Tensor(torch._C._TensorBase):
                     self.storage_offset(),
                     tuple(self.size()),
                     self.stride(),
-                    self.q_scale().item(),
-                    self.q_zero_point().item(),
+                    self.q_scale(),
+                    self.q_zero_point(),
                     self.requires_grad,
                     OrderedDict())  # TODO: self.qscheme()
             return (torch._utils._rebuild_qtensor, args)
@@ -424,18 +424,6 @@ class Tensor(torch._C._TensorBase):
     __gt__ = _C._TensorBase.gt
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
-
-    def __std_mean__(self, dim=None, unbiased=True, keepdim=False):
-        if dim is None:
-            return _C._VariableFunctions.std_mean(self, unbiased)
-        else:
-            return _C._VariableFunctions.std_mean(self, dim, unbiased, keepdim)
-
-    def __var_mean__(self, dim=None, unbiased=True, keepdim=False):
-        if dim is None:
-            return _C._VariableFunctions.var_mean(self, unbiased)
-        else:
-            return _C._VariableFunctions.var_mean(self, dim, unbiased, keepdim)
 
     def __len__(self):
         if self.dim() == 0:

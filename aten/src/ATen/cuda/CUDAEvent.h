@@ -25,12 +25,10 @@ namespace at { namespace cuda {
 * Later streams that record the event must match this device.
 */
 struct AT_CUDA_API CUDAEvent {
-  // Constants
-  static constexpr unsigned int DEFAULT_FLAGS = cudaEventDisableTiming;
-
   // Constructors
-  CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
-  : flags_{flags} { }
+  // Default value for `flags` is specified below - it's cudaEventDisableTiming
+  CUDAEvent() {}
+  CUDAEvent(unsigned int flags) : flags_{flags} {}
 
   CUDAEvent(
       DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
@@ -161,7 +159,7 @@ struct AT_CUDA_API CUDAEvent {
   }
 
 private:
-  unsigned int flags_ = DEFAULT_FLAGS;
+  unsigned int flags_ = cudaEventDisableTiming;
   bool is_created_ = false;
   bool was_recorded_ = false;
   DeviceIndex device_index_ = -1;

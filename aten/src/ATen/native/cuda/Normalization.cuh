@@ -7,6 +7,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
+#include <ATen/native/cuda/LaunchUtils.h>
 
 namespace at { namespace native {
 
@@ -36,15 +37,6 @@ static int getNumThreads(int nElem) {
     }
   }
   return MAX_BLOCK_SIZE;
-}
-
-static int lastPow2(unsigned int n) {
-    n |= (n >>  1);
-    n |= (n >>  2);
-    n |= (n >>  4);
-    n |= (n >>  8);
-    n |= (n >> 16);
-    return n - (n >> 1);
 }
 
 // Returns the index of the most significant 1 bit in `val`.
@@ -402,7 +394,7 @@ __global__ void batch_norm_reduce_statistics_kernel(
     PackedTensorAccessor<scalar_t, 1, RestrictPtrTraits, index_t> running_var,
     const accscalar_t epsilon,
     const accscalar_t momentum,
-    const index_t count) {
+    const PackedTensorAccessor<scalar_t, 1, RestrictPtrTraits, index_t> counts) {
 
   int feature_size = vec_mean.size(1);
   int world_size = vec_mean.size(0);
@@ -416,6 +408,7 @@ __global__ void batch_norm_reduce_statistics_kernel(
     accscalar_t var_n = 0;
     index_t n = 0;
     for (int j = 0; j < world_size; j++) {
+      scalar_t count = counts[j];
       accscalar_t m = vec_mean[j][i];
       accscalar_t v = accscalar_t(1.0) / (vec_invstd[j][i]);
       v = (v * v - epsilon) * count;
@@ -723,7 +716,7 @@ Tensor batch_norm_elemt_cuda_template(const Tensor& input_, const Tensor& weight
 template<typename scalar_t, typename accscalar_t, typename index_t>
 std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& mean_, const Tensor& invstd_,
                                                                  const Tensor& running_mean_, const Tensor& running_var_,
-                                                                 double momentum, double epsilon, index_t count) {
+                                                                 double momentum, double epsilon, const Tensor& counts_) {
 
   Tensor save_mean_;
   Tensor save_invstd_;
@@ -740,6 +733,8 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   auto invstd = packed_accessor_or_dummy<accscalar_t, 2, RestrictPtrTraits, index_t>(invstd_);
   auto running_mean = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits, index_t>(running_mean_);
   auto running_var = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits, index_t>(running_var_);
+  auto counts = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits, index_t>(counts_);
+
   auto save_mean = save_mean_.packed_accessor<accscalar_t, 1, RestrictPtrTraits, index_t>();
   auto save_invstd = save_invstd_.packed_accessor<accscalar_t, 1, RestrictPtrTraits, index_t>();
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -747,7 +742,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   int block = getNumThreads(features);
   int grid = std::max<int>(1, features/block);
   batch_norm_reduce_statistics_kernel<scalar_t, accscalar_t, index_t> <<<grid, block, 0, stream>>>
-      (mean, invstd, save_mean, save_invstd, running_mean, running_var, epsilon, momentum, count);
+      (mean, invstd, save_mean, save_invstd, running_mean, running_var, epsilon, momentum, counts);
   THCudaCheck(cudaGetLastError());
   return std::make_tuple(save_mean_, save_invstd_);
 }

@@ -6,7 +6,12 @@
 #include <stdexcept>
 
 namespace c10 {
-
+class intrusive_ptr_target;
+namespace raw {
+  namespace weak_intrusive_ptr {
+    inline void incref(intrusive_ptr_target* self);
+  }
+}
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
  * performance because it does the refcounting intrusively
@@ -62,6 +67,7 @@ class C10_API intrusive_ptr_target {
   friend class intrusive_ptr;
   template <typename T, typename NullType>
   friend class weak_intrusive_ptr;
+  friend inline void raw::weak_intrusive_ptr::incref(intrusive_ptr_target* self);
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -72,7 +78,7 @@ class C10_API intrusive_ptr_target {
 // We also have to disable -Wunknown-warning-option and -Wpragmas, because
 // some other compilers don't know about -Wterminate or -Wexceptions and
 // will show a warning about unknown warning options otherwise.
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(push)
 #  pragma warning(disable: 4297) // function assumed not to throw an exception but does
 #else
@@ -88,7 +94,7 @@ class C10_API intrusive_ptr_target {
     AT_ASSERTM(
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(pop)
 #else
 #  pragma GCC diagnostic pop
@@ -720,10 +726,7 @@ namespace intrusive_ptr {
 namespace weak_intrusive_ptr {
 
   inline void incref(weak_intrusive_ptr_target* self) {
-    auto wptr = c10::weak_intrusive_ptr<weak_intrusive_ptr_target>::reclaim(self);
-    auto wptr_copy = wptr;
-    wptr_copy.release();
-    wptr.release();
+    ++self->weakcount_;
   }
 
   inline void decref(weak_intrusive_ptr_target* self) {

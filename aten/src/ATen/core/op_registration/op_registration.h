@@ -158,7 +158,7 @@ public:
      * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators()
+     * >     .op("my_op", c10::RegisterOperators::options()
      * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
      */
     template<class FuncType, FuncType* kernel_func>
@@ -179,7 +179,7 @@ public:
      * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators()
+     * >     .op("my_op", c10::RegisterOperators::options()
      * >         .catchAllKernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
      */
     template<class FuncType, FuncType* kernel_func>
@@ -385,12 +385,23 @@ public:
     *
     * > static auto registry = c10::RegisterOperators()
     * >     .op("my_op", c10::RegisterOperators::options()
-    * >         .kernel([] (Tensor a, Tensor b) {...}));
+    * >         .catchAllKernel([] (Tensor a, Tensor b) {...}));
     *
     */
     template<class FuncType>
-    // enable_if: only enable it if FuncType is actually a functor
-    guts::enable_if_t<guts::is_functor<FuncType>::value, RegisterOperators&&>
+    // enable_if: only enable it if FuncType is actually a stateless lambda
+    guts::enable_if_t<guts::is_functor<FuncType>::value && guts::is_stateless_lambda<guts::decay_t<FuncType>>::value, RegisterOperators&&>
+    op(const std::string& schemaOrName, FuncType&& func, Options&& options = RegisterOperators::options()) && {
+      static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
+
+      constexpr bool AllowLegacyTypes = true;
+      return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
+    }
+
+    template<class FuncType>
+    C10_DEPRECATED_MESSAGE("Registering operator kernels with stateful lambdas (i.e. lambdas with a capture) has non-obvious behavior. This is deprecated. Please use a lambda without a capture or a functor class instead.")
+    // enable_if: only enable it if FuncType is actually a functor but not a stateless lambda
+    guts::enable_if_t<guts::is_functor<FuncType>::value && !guts::is_stateless_lambda<guts::decay_t<FuncType>>::value, RegisterOperators&&>
     op(const std::string& schemaOrName, FuncType&& func, Options&& options = RegisterOperators::options()) && {
       static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
 
@@ -417,4 +428,8 @@ private:
   static_assert(std::is_nothrow_move_assignable<std::vector<OperatorRegistrar>>::value, "");
 };
 
+}
+
+namespace torch {
+  using RegisterOperators = c10::RegisterOperators;
 }

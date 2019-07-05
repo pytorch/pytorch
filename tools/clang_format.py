@@ -21,6 +21,9 @@ import re
 CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
 
 CPP_FILE_REGEX = re.compile("^.*\\.(h|cpp|cc|c|hpp)$")
+CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
+# @@ -start,count +start,count @@
+CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
 
 
 def parse_args():
@@ -80,25 +83,45 @@ def get_changed_files(rev):
     return set(changed_files)
 
 
-def get_diffs(files):
+def get_changed_lines(filename, revision):
     """
-    Run clang-format on all `files` and report if it changed anything.
-    Returns a mapping of filename => diff generator
+    Given a filename and revision diff, return all the changed lines noted in the diff
+    Returns a list of (start_line, end_line) tuples.
     """
-    name_to_diffs = {}
-    for f in files:
-        formatted_text = subprocess.check_output(["clang-format", f]).decode()
-        with open(f) as orig:
-            orig_text = orig.read()
-            if formatted_text != orig_text:
-                orig_lines = orig_text.split("\n")
-                formatted_lines = formatted_text.split("\n")
-                diff = difflib.unified_diff(
-                    orig_lines, formatted_lines, "original", "formatted"
-                )
-                name_to_diffs[f] = diff
+    command = ["git", "diff-index", "--unified=0", revision, filename]
+    output = subprocess.check_output(command).decode()
+    changed_lines = []
+    for chunk in re.finditer(CHUNK_PATTERN, output, re.MULTILINE):
+        start = int(chunk.group(1))
+        count = int(chunk.group(2) or 1)
+        changed_lines.append((start, start + count))
 
-    return name_to_diffs
+    return changed_lines
+
+
+def run_clang_format(filename, lines, in_place):
+    args = ["clang-format", filename]
+    line_args = ["-lines={}:{}".format(i[0], i[1]) for i in lines]
+    args.extend(line_args)
+    if in_place:
+        args.append("-i")
+
+    return subprocess.check_output(args).decode()
+
+
+def get_clang_format_diff(filename, lines):
+    """
+    Return a diff of the changes that running clang-format would make (or None).
+    """
+    formatted_text = run_clang_format(filename, lines, in_place=False)
+    with open(filename) as orig:
+        orig_text = orig.read()
+        if formatted_text != orig_text:
+            orig_lines = orig_text.split("\n")
+            formatted_lines = formatted_text.split("\n")
+            return difflib.unified_diff(
+                orig_lines, formatted_lines, "original", "formatted"
+            )
 
 
 def main():
@@ -117,27 +140,39 @@ def main():
         for f in files_to_check:
             print(f)
 
-    name_to_diffs = get_diffs(files_to_check)
+    name_to_lines = {}
+    for f in files_to_check:
+        changed_lines = get_changed_lines(f, args.diff)
+        if len(changed_lines) != 0:
+            name_to_lines[f] = changed_lines
 
-    if len(name_to_diffs) == 0:
+    if len(name_to_lines) == 0:
         return
+
+    name_to_diff = {}
+    for filename, lines in name_to_lines.items():
+        diff = get_clang_format_diff(filename, lines)
+        if diff is not None:
+            name_to_diff[filename] = diff
 
     if args.accept_changes:
         # run clang-format on the necessary files
-        args = ["clang-format", "-i"]
-        args.extend(name_to_diffs.keys())
-        subprocess.check_output(args)
+        for name, lines in name_to_lines.items():
+            run_clang_format(name, lines, in_place=True)
 
         # add the changes so they will be committed
         args = ["git", "add"]
-        args.extend(name_to_diffs.keys())
+        args.extend(name_to_lines.keys())
         subprocess.check_output(args)
     else:
+        if len(name_to_diff) == 0:
+            return
+
         print("ERROR: Running clang-format created changes: ")
-        for name, diff in name_to_diffs.items():
-            print("In ", name)
-            for line in diff:
-                print(line)
+        for name, diff in name_to_diff.items():
+            print("In " + name)
+            for l in diff:
+                print(l)
             print("\n")
 
 

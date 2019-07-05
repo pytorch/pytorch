@@ -74,17 +74,17 @@ void testClassImport() {
 }
 
 void testScriptObject() {
-  Module m1;
-  Module m2;
+  Module m1("m1");
+  Module m2("m2");
   std::vector<at::Tensor> constantTable;
   import_libs(
-      m1.class_compilation_unit(),
+      *m1.class_compilation_unit(),
       "__torch__",
       std::make_shared<Source>(classSrcs1),
       constantTable,
       nullptr);
   import_libs(
-      m2.class_compilation_unit(),
+      *m2.class_compilation_unit(),
       "__torch__",
       std::make_shared<Source>(classSrcs2),
       constantTable,

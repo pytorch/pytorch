@@ -683,8 +683,7 @@ add_docstr_all('dense_dim',
 dense_dim() -> int
 
 If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
-this returns a the number of dense dimensions. Otherwise, this throws an
-error.
+this returns the number of dense dimensions. Otherwise, this throws an error.
 
 See also :meth:`Tensor.sparse_dim`.
 """)
@@ -705,7 +704,7 @@ See :func:`torch.diag_embed`
 
 add_docstr_all('diagflat',
                r"""
-diagflat(diagonal=0) -> Tensor
+diagflat(offset=0) -> Tensor
 
 See :func:`torch.diagflat`
 """)
@@ -1782,6 +1781,13 @@ qr(some=True) -> (Tensor, Tensor)
 See :func:`torch.qr`
 """)
 
+add_docstr_all('qscheme',
+               r"""
+qscheme() -> torch.qscheme
+
+Returns the quantization scheme of a given QTensor.
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -2266,8 +2272,7 @@ add_docstr_all('sparse_dim',
 sparse_dim() -> int
 
 If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
-this returns a the number of sparse dimensions. Otherwise, this throws an
-error.
+this returns the number of sparse dimensions. Otherwise, this throws an error.
 
 See also :meth:`Tensor.dense_dim`.
 """)
@@ -2953,9 +2958,9 @@ sum_to_size(*size) -> Tensor
 
 Sum ``this`` tensor to :attr:`size`.
 :attr:`size` must be broadcastable to ``this`` tensor size.
+
 Args:
-    other (:class:`torch.Tensor`): The result tensor has the same size
-        as :attr:`other`.
+    size (int...): a sequence of integers defining the shape of the output tensor.
 """)
 
 
@@ -3186,4 +3191,12 @@ Is the :class:`torch.device` where this Tensor is.
 add_docstr_all('ndim',
                r"""
 Alias for :meth:`~Tensor.dim()`
+""")
+
+add_docstr_all('T',
+               r"""
+Is this Tensor with its dimensions reversed.
+
+If ``n`` is the number of dimensions in ``x``,
+``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)

@@ -119,7 +119,7 @@ void BlobToTensorDescriptor(
     onnxTensorDescriptorV1* desc,
     std::vector<std::vector<uint64_t>>* shapes,
     std::vector<std::vector<float>>* all_scales,
-    std::vector<std::vector<float>>* all_offsets) {
+    std::vector<std::vector<int32_t>>* all_offsets) {
   const Blob* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob ", name, " doesn't exist");
   const bool is_int8tensor =
@@ -183,7 +183,7 @@ OnnxifiOp<CPUContext>::buildInitializationList(
     std::vector<std::string>* weight_names,
     std::vector<std::vector<uint64_t>>* weight_shapes,
     std::vector<std::vector<float>>* all_scales,
-    std::vector<std::vector<float>>* all_offsets) const {
+    std::vector<std::vector<int32_t>>* all_offsets) const {
   std::unordered_set<std::string> initialization_list(
       initializers.begin(), initializers.end());
   const std::vector<string>& ws_blobs = ws->Blobs();

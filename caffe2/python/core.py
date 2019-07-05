@@ -1496,6 +1496,12 @@ class Net(object):
         if device_option is not None:
             ops = [copy.deepcopy(op) for op in ops]
             map(lambda x: x.device_option.CopyFrom(device_option), ops)
+            for op in ops:
+                if op.type == "RecurrentNetwork":
+                    for arg in op.arg:
+                        if arg.name.endswith('step_net'):
+                            for step_op in arg.n.op:
+                                step_op.device_option.CopyFrom(device_option)
 
         self._ExtendOps(ops)
         return self

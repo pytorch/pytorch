@@ -20,6 +20,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
 
   int64_t batch_size = input.size(1);
   int64_t * lengths = lengths_t.data<int64_t>();
+  TORCH_CHECK(input.numel() > 0, "Cannot pack empty tensors.");
   TORCH_CHECK(lengths_t.size(0) == batch_size,
            "Expected `len(lengths)` to be equal to batch_size, but got ", lengths_t.size(0),
            " (batch_size=", batch_size, ")");

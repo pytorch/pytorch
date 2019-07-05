@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import sys
 import argparse
 
 from caffe2.python import workspace
@@ -19,8 +18,6 @@ It also registers existing benchmark tests via Python module imports.
 
 
 def main():
-    print("Python version " + str(sys.version_info[0]))
-
     parser = argparse.ArgumentParser(
         description="Run microbenchmarks.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -45,6 +42,11 @@ def main():
 
     parser.add_argument(
         '--list_ops',
+        help='List operators without running them',
+        action='store_true')
+
+    parser.add_argument(
+        '--list_tests',
         help='List all test cases without running them',
         action='store_true')
 
@@ -69,10 +71,30 @@ def main():
     )
 
     parser.add_argument(
+        "--omp_num_threads",
+        help="Number of OpenMP threads used in PyTorch/Caffe2 runtime",
+        default=None,
+        type=int
+    )
+
+    parser.add_argument(
+        "--mkl_num_threads",
+        help="Number of MKL threads used in PyTorch/Caffe2 runtime",
+        default=None,
+        type=int
+    )
+
+    parser.add_argument(
         "--ai_pep_format",
         help="Print result when running on AI-PEP",
         default=False,
         type=bool
+    )
+
+    parser.add_argument(
+        "--use_jit",
+        help="Run operators with PyTorch JIT mode",
+        action='store_true'
     )
 
     parser.add_argument(
@@ -91,6 +113,10 @@ def main():
     if benchmark_utils.is_caffe2_enabled(args.framework):
         workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
         workspace.ClearGlobalNetObserver()
+    if args.omp_num_threads:
+        benchmark_utils.set_omp_threads(args.omp_num_threads)
+    if args.mkl_num_threads:
+        benchmark_utils.set_mkl_threads(args.mkl_num_threads)
 
     benchmark_core.BenchmarkRunner(args).run()
 

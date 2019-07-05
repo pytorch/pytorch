@@ -19,7 +19,7 @@ This module contains core functionalities for performance microbenchmark tests.
 """
 This is used to store configs of tests 
 An example input is: 
-TestConfig(test_name='M_8_N_2_K_1', input_config='M: 8, N: 2, K: 1', 
+TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
     tag='long', run_backward=False)
 """
 TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
@@ -34,9 +34,9 @@ def _register_test(test_case):
     are the values for the members in test_case:
     op.module_name: add
     framework: PyTorch
-    test_config: TestConfig(test_name='M_8_N_2_K_1', input_config='M: 8, N: 2, K: 1', 
+    test_config: TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
         tag='long', run_backward=False)
-    func_name: addPyTorchTestConfig(test_name='M8_N2_K1', input_config='M: 8, N: 2, K: 1',
+    func_name: addPyTorchTestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
                                     tag='long', run_backward=False)
     """
     test_config = test_case.test_config
@@ -65,9 +65,14 @@ class BenchmarkRunner(object):
         self.multiplier = 2
         self.predefined_minimum_secs = 4
         self.max_iters = 1e6
+        self.use_jit = args.use_jit
         if self.args.iterations:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
+        # when a specific test is selected by a user, we don't need 
+        # to match the tag anymore 
+        if self.args.test_name is not None: 
+            self.args.tag_filter = None
 
     def _print_header(self):
         DASH_LINE = '-' * 40
@@ -75,7 +80,11 @@ class BenchmarkRunner(object):
               "# PyTorch/Caffe2 Operator Micro-benchmarks\n"
               "# {}\n"
               "# Tag : {}\n".format(DASH_LINE, DASH_LINE, self.args.tag_filter))
-        if self.args.list_ops:
+        if self.args.list_tests:
+            print("# List of tests:")
+            for _, test_case in BENCHMARK_TESTER.items():
+                print("# {}".format(test_case.test_config.test_name))
+        elif self.args.list_ops:
             print("# List of Operators to run:")
             if self.args.operator is None:
                 ops = set(test_case.op_bench.module_name()
@@ -85,13 +94,14 @@ class BenchmarkRunner(object):
             else:
                 print("# {}".format(self.args.operator))
 
-    def _print_perf_result(self, full_test_id, reported_run_time_us, test_case):
+    def _print_perf_result(self, reported_run_time_us, test_case):
         if self.args.ai_pep_format:
             # Output for AI-PEP
+            test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
             print("Caffe2Observer " + json.dumps(
                 {
-                    "type": "NET",
-                    "metric": full_test_id,
+                    "type": test_name,
+                    "metric": "latency",
                     "unit": "us",
                     "value": str(reported_run_time_us),
                 }
@@ -102,8 +112,8 @@ class BenchmarkRunner(object):
                      "# Input: {}\n" \
                      "{} Execution Time (us) : {:.3f}\n"
             if test_case.framework == "PyTorch":
-                # FIXME: add JIT 
-                output = "# Mode: Eager\n" + output
+                output = "# Mode: {}\n". \
+                    format("JIT" if self.use_jit else "Eager") + output
             print(output.format(
                 test_case.test_config.test_name,
                 test_case.test_config.input_config,
@@ -126,22 +136,19 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
-        if test_case.framework == "PyTorch":
-            test_case.op_bench.generate_jit_forward_graph(iters)
-
-        forward_time = timeit.timeit(functools.partial(test_case.run_forward, iters), number=1)
+        func = test_case.run_forward
+        if self.use_jit:
+            func = test_case.run_jit_forward
+        forward_time = timeit.timeit(functools.partial(func, iters), number=1)
         return forward_time
 
     def _launch_backward(self, test_case, iters):
         """ This function runs forward path of an op to get an output. Then the backward path is executed 
         and the execution time is reported
         """
+        test_case.run_forward(num_runs=1)
         if test_case.framework == "PyTorch":
-            # We only need to get the output for backward path, so there is no need to use JIT here 
-            test_case.run_forward_eager()
-            test_case.loss_func()
-        else:
-            test_case.run_forward(1)
+            test_case._output_mean()
         backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters), number=1)
         return backward_time
 
@@ -190,8 +197,8 @@ class BenchmarkRunner(object):
         if (self._check_keep(op_test_config.test_name, self.args.test_name) and
             self._check_keep(op_test_config.tag, self.args.tag_filter) and
             self._check_keep(test_case.op_bench.module_name(), self.args.operator) and
-            self._check_keep_list(test_case.framework, frameworks) and 
-                (op_test_config.run_backward == self.args.forward_only)):
+            self._check_keep_list(test_case.framework, frameworks) and
+                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only)):
             return True
 
         return False
@@ -199,7 +206,7 @@ class BenchmarkRunner(object):
     def run(self):
         self._print_header()
 
-        if self.args.list_ops:
+        if self.args.list_ops or self.args.list_tests:
             return
 
         for full_test_id, test_case in BENCHMARK_TESTER.items():
@@ -230,4 +237,4 @@ class BenchmarkRunner(object):
                 # Actual Execution
                 reported_time = self._measure_time(self._launch_forward, test_case, self.iters)
 
-            self._print_perf_result(full_test_id, reported_time, test_case)
+            self._print_perf_result(reported_time, test_case)
