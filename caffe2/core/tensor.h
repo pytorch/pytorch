@@ -192,7 +192,11 @@ class CAFFE2_API Tensor final {
    */
   void CopyFrom(const Tensor& src, bool async = false) {
     // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
+#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
     AT_ASSERT(!impl_->is_variable() || (impl_->is_variable() && !(impl_->requires_grad() && torch::autograd::GradMode::is_enabled())));
+#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+    AT_ASSERT(!impl_->is_variable() || (impl_->is_variable() && !impl_->requires_grad()));
+#endif
     AT_ASSERTM(
         src.impl_->is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
