@@ -12887,9 +12887,9 @@ class TestRecursiveScript(JitTestCase):
         def b(x):
             return c(x)
 
-        class N(torch.nn.Module):
+        class Submodule(torch.nn.Module):
             def __init__(self):
-                super(N, self).__init__()
+                super(Submodule, self).__init__()
 
             def forward(self, x):
                 return b(x)
@@ -12897,7 +12897,7 @@ class TestRecursiveScript(JitTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.submodule = N()
+                self.submodule = Submodule()
 
             def some_method(self, y):
                 return y + self.submodule(y)

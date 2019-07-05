@@ -1531,9 +1531,6 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if isinstance(value, Module) and _is_recursive_script_enabled(value):
-                    # Compile weak script module
-                    value = _convert_to_script_module(value)
                 if attr == 'training':
                     if self._c._has_attribute('training'):
                         self.__dict__['training'] = value
