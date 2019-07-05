@@ -45,7 +45,7 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 template <class T>
 struct Vec256 {
 private:
-  T values[32 / sizeof(T)] = {0};
+  T values[32 / sizeof(T)] = {};
 public:
   using value_type = T;
   // Note [constexpr static function to avoid odr-usage compiler bug]
