@@ -249,6 +249,21 @@ RegisterOperators reg(
            };
          }),
      Operator(
+         "prim::BailoutTemplate() -> int",
+         [](const Node* /* node */) {
+           return [](Stack& stack) {
+             // TODO: today, we put a single bailout template at the front to
+             // carry the un-optimized graph for bailout nodes to use. Ideally
+             // this should never run, but we haven't written the code to remove
+             // it yet.
+             // TORCH_INTERNAL_ASSERT(false);
+
+             // Returns an int so that we have an easy way to do graph traversal
+             push(stack, 1);
+             return 0;
+           };
+         }),
+     Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;
@@ -259,46 +274,6 @@ RegisterOperators reg(
              elems.push_back(i);
            }
            push(stack, std::move(elems));
-           return 0;
-         }),
-     Operator(
-         "prim::Bool(Tensor a) -> bool",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_nonzero());
-           return 0;
-         }),
-     Operator(
-         "prim::Bool(int a) -> bool",
-         [](Stack& stack) {
-           int64_t i;
-           pop(stack, i);
-           push(stack, (bool)i);
-           return 0;
-         }),
-     Operator(
-         "prim::Bool(float a) -> bool",
-         [](Stack& stack) {
-           double d;
-           pop(stack, d);
-           push(stack, (bool)d);
-           return 0;
-         }),
-     Operator(
-         "prim::Int(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<int64_t>());
-           return 0;
-         }),
-     Operator(
-         "prim::Float(Tensor a) -> float",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<double>());
            return 0;
          }),
      Operator(
@@ -341,43 +316,39 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Float(Scalar a) -> float",
+         "aten::Bool(Tensor a) -> bool",
          [](Stack& stack) {
-           IValue scalar;
-           pop(stack, scalar);
-           if (scalar.isDouble()) {
-             push(stack, std::move(scalar));
-           } else {
-             push(stack, static_cast<double>(scalar.toInt()));
-           }
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_nonzero());
            return 0;
          }),
      Operator(
-         "prim::Float(int a) -> float",
+         "aten::Bool(int a) -> bool",
          [](Stack& stack) {
            int64_t i;
            pop(stack, i);
-           push(stack, (float)i);
+           push(stack, (bool)i);
            return 0;
          }),
      Operator(
-         "prim::Int(float a) -> int",
+         "aten::Bool(float a) -> bool",
          [](Stack& stack) {
            double d;
            pop(stack, d);
-           push(stack, (int64_t)d);
+           push(stack, (bool)d);
            return 0;
          }),
      Operator(
-         "prim::Float(bool a) -> float",
+         "aten::Int(Tensor a) -> int",
          [](Stack& stack) {
-           bool b;
-           pop(stack, b);
-           push(stack, (float)b);
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<int64_t>());
            return 0;
          }),
      Operator(
-         "prim::Int(bool a) -> int",
+         "aten::Int(bool a) -> int",
          [](Stack& stack) {
            bool b;
            pop(stack, b);
@@ -385,7 +356,15 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> int",
+         "aten::Int(float a) -> int",
+         [](Stack& stack) {
+           double d;
+           pop(stack, d);
+           push(stack, (int64_t)d);
+           return 0;
+         }),
+     Operator(
+         "aten::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -397,7 +376,43 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Float(str a) -> float",
+         "aten::Float(Tensor a) -> float",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<double>());
+           return 0;
+         }),
+     Operator(
+         "aten::Float(Scalar a) -> float",
+         [](Stack& stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isDouble()) {
+             push(stack, std::move(scalar));
+           } else {
+             push(stack, static_cast<double>(scalar.toInt()));
+           }
+           return 0;
+         }),
+     Operator(
+         "aten::Float(int a) -> float",
+         [](Stack& stack) {
+           int64_t i;
+           pop(stack, i);
+           push(stack, (float)i);
+           return 0;
+         }),
+     Operator(
+         "aten::Float(bool a) -> float",
+         [](Stack& stack) {
+           bool b;
+           pop(stack, b);
+           push(stack, (float)b);
+           return 0;
+         }),
+     Operator(
+         "aten::Float(str a) -> float",
          [](Stack& stack) {
            auto s = pop(stack).toString();
            if (s->string() == "inf")
@@ -409,6 +424,14 @@ RegisterOperators reg(
                  "Only 'inf' or '-inf' can be cast to a float, but got '",
                  s->string(),
                  "'");
+           return 0;
+         }),
+     Operator(
+         "aten::str(t elem) -> str",
+         [](Stack& stack) {
+           std::stringstream ss;
+           ss << pop(stack);
+           push(stack, ss.str());
            return 0;
          }),
      Operator(
@@ -1061,7 +1084,8 @@ RegisterOperators reg(
            const auto type = node->output()->type()->expect<ClassType>();
            const size_t numAttrs = type->numAttributes();
            return [type, numAttrs](Stack& stack) {
-             auto userObj = c10::ivalue::Object::create(type, numAttrs);
+             auto userObj = c10::ivalue::Object::create(
+                 c10::StrongTypePtr(type->compilation_unit(), type), numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };
@@ -1562,8 +1586,8 @@ int listMulIntLeft(Stack& stack) {
 
 template <class T>
 int listMulIntRight(Stack& stack) {
-  int64_t n = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
+  int64_t n = pop(stack).to<int64_t>();
 
   c10::List<T> ret = make_result_list<T>();
   const auto size = list.size() * n;
@@ -1640,7 +1664,6 @@ int listSetItem(Stack& stack) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
-  pop(stack, list, idx, value);
   setItem(list, idx, std::move(value));
 
   push(stack, std::move(list));
@@ -2088,14 +2111,6 @@ RegisterOperators reg2({
           auto string = pop(stack).toStringRef();
           char c = string.at(index);
           push(stack, std::string(&c, 1));
-          return 0;
-        }),
-    Operator(
-        "prim::str(t elem) -> str",
-        [](Stack& stack) {
-          std::stringstream ss;
-          ss << pop(stack);
-          push(stack, ss.str());
           return 0;
         }),
     Operator(

@@ -409,7 +409,7 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
-  std::vector<std::shared_ptr<Function>> function_table_;
+  std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
   int register_size_ = 0;
   size_t n_outputs;
@@ -438,6 +438,7 @@ struct CodeImpl {
 
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
+  std::vector<std::unique_ptr<Function>> bailout_functions_;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
@@ -602,7 +603,7 @@ struct CodeImpl {
   }
 
   void emitCall(
-      std::shared_ptr<Function> func,
+      Function* func,
       at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
@@ -641,12 +642,7 @@ struct CodeImpl {
 
   void emitBailOut(Node* node) {
     auto jf_index = emitGuard(node);
-    auto unoptimized_graph = node->inputs()
-                                 .at(0)
-                                 ->type()
-                                 ->expect<FunctionType>()
-                                 ->function()
-                                 ->graph();
+    auto unoptimized_graph = node->inputs().at(0)->node()->g(attr::Subgraph);
     // note, guaded input is already loaded onto the stack
     // for GUARD instruction
     emitLoadInputs(node->inputs().slice(2));
@@ -661,9 +657,10 @@ struct CodeImpl {
     };
 
     auto empty_graph = std::make_shared<Graph>();
-    auto func = std::make_shared<Function>(
+    auto func = torch::make_unique<Function>(
         "bailout", /*optimize=*/true, empty_graph, build_bailout_graph);
-    function_table_.emplace_back(func);
+    function_table_.emplace_back(func.get());
+    bailout_functions_.emplace_back(std::move(func));
     createBailoutBlock(jf_index);
   }
 
@@ -808,7 +805,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Instruction* instructions;
     IValue* constants;
     Operation* operators;
-    std::shared_ptr<Function>* functions;
+    Function** functions;
     TypePtr* types;
 
     ActiveFrame(const Frame& frame)

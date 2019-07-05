@@ -351,7 +351,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
 
     if do_constant_folding and _export_onnx_opset_version == 9:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict)
-        torch._C._jit_pass_dce(graph)
+        torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if verbose:
         print(graph)
@@ -699,7 +699,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                               "Have you registered your symbolic function with "
                               "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
                               .format(ns, op_name, opset_version, op_name))
-            symbolic_fn = sym_registry.get_registered_op(symbolic_name, ns, opset_version)
+            symbolic_fn = sym_registry.get_registered_op(op_name, ns, opset_version)
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
 

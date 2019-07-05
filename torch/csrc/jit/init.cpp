@@ -155,7 +155,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Function>& function_var,
+          [](const StrongFunctionPtr& function_var,
              py::function pyObserverFunction) {
             // Overloaded jit pass for pure functions instead of modules.
             // Create a new node that would be used in the insert observer pass:
@@ -163,7 +163,7 @@ void initJITBindings(PyObject* module) {
             Graph g;
             Node* new_node = g.createPythonOp(
                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(function_var, new_node);
+            InsertObserverNodes(function_var.function_, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })
