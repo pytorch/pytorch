@@ -9,7 +9,9 @@
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
 
+#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
 #include <torch/csrc/autograd/grad_mode.h>
+#endif
 
 namespace caffe2 {
 
@@ -192,9 +194,9 @@ class CAFFE2_API Tensor final {
    */
   void CopyFrom(const Tensor& src, bool async = false) {
     // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
-#ifndef C10_MOBILE
+#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
     AT_ASSERT(!impl_->is_variable() || (impl_->is_variable() && !(impl_->requires_grad() && torch::autograd::GradMode::is_enabled())));
-#else // defined(C10_MOBILE)
+#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
     AT_ASSERT(!impl_->is_variable() || (impl_->is_variable() && !impl_->requires_grad()));
 #endif
     AT_ASSERTM(

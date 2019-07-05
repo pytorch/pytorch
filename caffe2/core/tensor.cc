@@ -202,14 +202,11 @@ void Tensor::enforce_invariants() {
     throw std::runtime_error("TensorImpl with nullptr is not supported");
   }
   // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
-#ifndef C10_MOBILE
+#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
     CAFFE_ENFORCE(
       !impl_->is_variable() || (impl_->is_variable() && !(impl_->requires_grad() && torch::autograd::GradMode::is_enabled())),
       "Caffe2 tensor wrapper doesn't support autograd variables that require grad");
-#else // defined(C10_MOBILE)
-    // NOTE: Thread-local guard `torch::autograd::GradMode` is not supported on mobile.
-    // As a result, we have to enforce stronger constraints on mobile, which is that
-    // all tensors passed into Caffe2 mobile must not require grad.
+#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
     CAFFE_ENFORCE(
       !impl_->is_variable() || (impl_->is_variable() && !(impl_->requires_grad())),
       "Caffe2 tensor wrapper doesn't support autograd variables that require grad");
