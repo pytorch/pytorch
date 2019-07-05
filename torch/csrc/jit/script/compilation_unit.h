@@ -162,17 +162,17 @@ struct TORCH_API CompilationUnit {
    * Right now there is a single compilation unit that owns all ScriptClasses
    * defined in Python. Below are accessors methods for it.
    */
-  static const CompilationUnit& _get_python_cu_const() {
+  static std::shared_ptr<CompilationUnit> _get_python_cu_const() {
     return _get_python_cu();
   }
-  static CompilationUnit& _get_python_cu() {
-    static CompilationUnit pyCu;
+  static std::shared_ptr<CompilationUnit> _get_python_cu() {
+    static auto pyCu = std::make_shared<CompilationUnit>();
     return pyCu;
   }
   // For testing: clear all Python-defined classes to ensure that unit tests
   // have isolation.
   static void _clear_python_cu() {
-    _get_python_cu().classes_.clear();
+    _get_python_cu()->classes_.clear();
   }
 
  private:
