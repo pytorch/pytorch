@@ -163,8 +163,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(ModulePtr owner, std::shared_ptr<Function> function)
-    : owner_(std::move(owner)), function_(std::move(function)) {}
+Method::Method(ModulePtr owner, Function* function)
+    : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);

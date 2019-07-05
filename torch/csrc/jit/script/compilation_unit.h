@@ -44,11 +44,16 @@ struct TORCH_API CompilationUnit {
   explicit CompilationUnit(const std::string& source);
   CompilationUnit() = default;
 
-  std::shared_ptr<Function> find_function(const std::string& name) const {
+  CompilationUnit& operator=(CompilationUnit&&) = default;
+  CompilationUnit(CompilationUnit&&) = default;
+  CompilationUnit& operator=(const CompilationUnit&) = delete;
+  CompilationUnit(const CompilationUnit&) = delete;
+
+  Function* find_function(const std::string& name) const {
     auto it = dict_.find(name);
     if (it == dict_.end())
       return nullptr;
-    return functions_[it->second];
+    return functions_[it->second].get();
   }
 
   Function& get_function(const std::string& name) const {
@@ -80,17 +85,18 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self& self);
 
-  std::shared_ptr<Function> create_function(
-      std::string name,
-      std::shared_ptr<Graph> graph) {
-    auto fn = std::make_shared<Function>(
+  Function* create_function(std::string name, std::shared_ptr<Graph> graph) {
+    auto fn = torch::make_unique<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
-    register_function(fn);
-    return fn;
+    auto ret = fn.get();
+    register_function(std::move(fn));
+    return ret;
   }
 
-  const std::vector<std::shared_ptr<Function>>& get_functions() const {
-    return functions_;
+  std::vector<Function*> get_functions() const {
+    return fmap(functions_, [](const std::unique_ptr<Function>& fn) {
+      return fn.get();
+    });
   }
 
   /// Run a method from this compilation.
@@ -170,14 +176,14 @@ struct TORCH_API CompilationUnit {
   }
 
  private:
-  std::shared_ptr<Function> define(
+  std::unique_ptr<Function> define(
       const Def& def,
       const ResolverPtr& resolver,
       const Self& self,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      const std::unordered_map<std::string, Function*>&
           function_table) const;
 
-  Function& register_function(std::shared_ptr<Function> fn) {
+  Function& register_function(std::unique_ptr<Function> fn) {
     TORCH_CHECK(
         0 == dict_.count(fn->name()),
         "method '",
@@ -187,7 +193,7 @@ struct TORCH_API CompilationUnit {
     dict_[functions_.back()->name()] = functions_.size() - 1;
     return *functions_.back();
   }
-  std::vector<std::shared_ptr<Function>> functions_;
+  std::vector<std::unique_ptr<Function>> functions_;
   // for fast lookup
   std::unordered_map<std::string, size_t> dict_;
   bool optimized_ = true;
@@ -201,5 +207,20 @@ struct TORCH_API CompilationUnit {
 };
 
 } // namespace script
+
+// An owning pointer to a Function. Just a pair of a raw Function ptr and it's
+// owning CU. We need this because pybind requires a ref-counted way to refer to
+// Functions.
+struct StrongFunctionPtr {
+  StrongFunctionPtr(
+      std::shared_ptr<script::CompilationUnit> cu,
+      Function* function)
+      : cu_(std::move(cu)), function_(function) {
+    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(function_);
+  }
+  std::shared_ptr<script::CompilationUnit> cu_;
+  Function* function_;
+};
 } // namespace jit
 } // namespace torch
