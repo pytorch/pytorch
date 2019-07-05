@@ -306,6 +306,10 @@ def saved_variables(formula, args):
             'suffix': '_geometry',
             'type': 'TensorGeometry',
         }),
+        (r'{}.scalar_type\(\)', {
+            'suffix': '_scalar_type',
+            'type': 'ScalarType',
+        }),
     ]
 
     for arg in args:
