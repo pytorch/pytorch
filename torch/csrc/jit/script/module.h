@@ -106,9 +106,6 @@ struct TORCH_API Method {
   // first-class function in class_compilation_unit()
   Function* function_;
 };
-static void clearMethods(c10::ivalue::Object* self) {
-  self->type()->compilation_unit()->drop_all_functions();
-}
 
 struct TORCH_API Module {
   Module(std::string class_name)
@@ -306,11 +303,6 @@ struct TORCH_API Module {
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       std::vector<std::string> names = {}) const;
 
-  void clone_method(
-      const Module& orig,
-      const std::string& name,
-      const std::unordered_map<TypePtr, TypePtr>& type_remap);
-
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
@@ -334,11 +326,8 @@ struct TORCH_API Module {
   ClassTypePtr type() const {
     return module_object()->type();
   }
-  std::shared_ptr<CompilationUnit> class_compilation_unit() {
-    return module_object()->type()->compilation_unit();
-  }
-  std::shared_ptr<const CompilationUnit> class_compilation_unit() const {
-    return module_object()->type()->compilation_unit();
+  std::shared_ptr<CompilationUnit> class_compilation_unit() const {
+    return module_object()->compilation_unit();
   }
 
   // so that C++ users can easily add methods
@@ -362,6 +351,10 @@ struct TORCH_API Module {
   }
 
  private:
+  void clone_method(
+      const Module& orig,
+      const std::string& name,
+      const std::unordered_map<TypePtr, TypePtr>& type_remap);
   static const char* toString(EntityType t) {
     switch (t) {
       case EntityType::MODULE:
@@ -428,14 +421,15 @@ struct TORCH_API Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
+  static void clearMethods(c10::ivalue::Object* self) {
+    self->compilation_unit()->drop_all_functions();
+  }
   static ModulePtr create_module_object(std::string class_name) {
+    auto cu = std::make_shared<CompilationUnit>();
+    auto cls = ClassType::create(
+        QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
     return c10::ivalue::Object::create(
-        ClassType::create(
-            QualifiedName(std::move(class_name)),
-            std::make_shared<CompilationUnit>(),
-            /*is_module=*/true),
-        0,
-        clearMethods);
+        c10::StrongTypePtr(std::move(cu), std::move(cls)), 0, clearMethods);
   }
   // mutable be we lazily initialize in module_object.
   mutable ModulePtr module_value_;

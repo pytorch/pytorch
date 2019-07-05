@@ -14,6 +14,9 @@
 namespace torch {
 namespace jit {
 struct Function;
+namespace script {
+struct CompilationUnit;
+}
 } // namespace jit
 } // namespace torch
 namespace c10 {
@@ -268,16 +271,20 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   // temporary way to break cyclic dependencies in modules by forcing the deletion
   // of functions when the module object is destructed
   typedef void (*OnDelete)(ivalue::Object*);
-  Object(std::shared_ptr<ClassType> type, size_t numSlots, OnDelete on_delete)
+  Object(
+      StrongTypePtr type,
+      size_t numSlots,
+      OnDelete on_delete)
       : type_(std::move(type)), on_delete_(on_delete) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
-      std::shared_ptr<ClassType> type,
+      StrongTypePtr type,
       size_t numSlots,
       OnDelete on_delete = nullptr) {
-    return c10::make_intrusive<Object>(std::move(type), numSlots, on_delete);
+    return c10::make_intrusive<Object>(
+        std::move(type), numSlots, on_delete);
   }
 
   /**
@@ -321,14 +328,19 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_;
   }
   std::shared_ptr<ClassType> type() const {
-    return type_;
+    return type_.type_;
+  }
+
+  std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
+    return type_.cu_;
   }
   // temporarily defined in class_type.cpp to
   // ensure Modules do not leak memory
   ~Object();
+
  private:
   void resizeObject(size_t slot);
-  std::shared_ptr<ClassType> type_;
+  StrongTypePtr type_;
   std::vector<IValue> slots_;
   OnDelete on_delete_;
 };
