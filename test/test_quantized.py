@@ -420,6 +420,7 @@ class TestQuantizedConv(unittest.TestCase):
         pad_h=st.integers(0, 2),
         pad_w=st.integers(0, 2),
         dilation=st.integers(1, 1),
+        use_bias=st.booleans(),
     )
     def test_qconv(
             self,
@@ -435,7 +436,8 @@ class TestQuantizedConv(unittest.TestCase):
             stride_w,
             pad_h,
             pad_w,
-            dilation
+            dilation,
+            use_bias
     ):
 
         qconv = torch.ops.quantized.fbgemm_conv2d
@@ -484,7 +486,7 @@ class TestQuantizedConv(unittest.TestCase):
         )
         conv_op.bias = torch.nn.Parameter(
             b_init.to(dtype=torch.float), requires_grad=False
-        )
+        ) if use_bias else None
 
         X_value_min = 0
         X_value_max = 4
@@ -513,7 +515,7 @@ class TestQuantizedConv(unittest.TestCase):
 
         X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
         W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
 
         W_prepack = qconv_prepack(W_q, groups)
         Y_scale = 7.3
