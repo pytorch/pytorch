@@ -1800,37 +1800,36 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
 // Invertible case is derived from Jacobi's formula, and also can be found at:
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
-  auto det_val = det.item<double>();
-  if (det_val != 0 /* invertible */) {
-    return grad * det * self.inverse().t();
-  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+  auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     auto gsigma = prod_backward(grad, sigma, det);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
-  }
+  };
+
+  return at::where(det != 0,
+                   grad * det * self.inverse().transpose(-2, -1), // invertible case
+                   singular_case_backward(grad, self, det)); // non-invertible case, uses SVD
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
-  auto logdet_val = logdet.item<double>();
-  if (logdet_val != -INFINITY /* det != 0, invertible */) {
-    return grad * self.inverse().t();
-  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+  auto singular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
-    // backward det = \sum log(sigma)
+    // logdet = \sum log(sigma)
     auto gsigma = grad.div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
-  }
+  };
+
+  return at::where(logdet != -INFINITY,
+                   grad * self.inverse().transpose(-2, -1), // invertible case
+                   singular_case_backward(grad, self));  // non-invertible case using SVD
 }
 
 Tensor slogdet_backward(const Tensor& grad_logabsdet,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
-  auto signdet_val = signdet.item<double>();
-  if (signdet_val != 0 /* det != 0, invertible */) {
-    return grad_logabsdet * self.inverse().t();
-  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+  auto singular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     // sigma has all non-negative entries (also with at least one zero entry)
@@ -1838,7 +1837,11 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
     // but det = 0, so backward logabsdet = \sum log(sigma)
     auto gsigma = grad_logabsdet.div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
-  }
+  };
+
+  return at::where(signdet != 0,
+                   grad_logabsdet * self.inverse().transpose(-2, -1),
+                   singular_case_backward(grad_logabsdet, self));
 }
 
 // Reference:
