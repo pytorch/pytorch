@@ -791,7 +791,7 @@ graph(%x : Tensor,
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%x, %y, %2)
   %4 : int = aten::add(%2, %20)
-  %5 : bool = prim::Bool(%4)
+  %5 : bool = aten::Bool(%4)
   %z : int = prim::If(%5)
     # CHECK: block
     block0():
@@ -1686,7 +1686,9 @@ graph(%Ra, %Rb):
 
         ge = self.checkTrace(fn, [torch.randn(2, 2)] * 2)
         inputs = set(ge.graph.inputs())
-        self.assertTrue(len(inputs) == 2)
+        # three instead of 2 because the export/import in checkTrace adds a
+        # `self` module argument
+        self.assertTrue(len(inputs) == 3)
 
     def test_repeated_output(self):
         def fn(a, b):
@@ -3322,6 +3324,82 @@ def foo(xyz):
         fc = FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
+
+    def test_serialized_source_ranges(self):
+
+        class FooTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest()
+        loaded = self.getExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_jit.py:{}'.format(lineno + 3)):
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_serialized_source_ranges2(self):
+
+        class FooTest2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                raise RuntimeError('foo')
+
+        _, lineno = inspect.getsourcelines(FooTest2)
+
+        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+            ft = FooTest2()
+            loaded = self.getExportImportCopy(ft)
+            loaded()
+
+    def test_serialized_source_ranges_dont_jitter(self):
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, lim):
+                first = 1
+                second = 1
+                i = 1
+                somenum = 5
+                dontmutateme = 3
+                third = 0
+                while bool(i < lim):
+                    third = first + second
+                    first = second
+                    second = third
+                    j = 0
+                    while j < 10:
+                        somenum = somenum * 2
+                        j = j + 1
+                    i = i + j
+                    i = i + dontmutateme
+
+                st = second + third
+                fs = first + second
+                return third, st, fs
+
+        ft3 = FooTest3()
+
+        def debug_records_from_mod(mod):
+            buffer = io.BytesIO()
+            torch.jit.save(ft3, buffer)
+            buffer.seek(0)
+            archive = zipfile.ZipFile(buffer)
+            debug_file = archive.open('archive/debug/archive.pkl')
+            return pickle.load(debug_file), buffer
+
+        records1, buffer = debug_records_from_mod(ft3)
+
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        records2, buffer = debug_records_from_mod(loaded)
+
+        buffer.seek(0)
+        loaded2 = torch.jit.load(buffer)
+        records3, _ = debug_records_from_mod(loaded2)
+
+        self.assertEqual(records1, records2)
+        self.assertEqual(records2, records3)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -6970,7 +7048,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
 
-    def test_script_module_list_sequential_error(self):
+    def test_script_module_list_sequential(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, mod_list):
                 super(M, self).__init__(False)
@@ -6982,25 +7060,21 @@ a")
                     v = m(v)
                 return v
 
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.ModuleList([nn.ReLU()]))
+        m = M(nn.Sequential(nn.ReLU()))
+        self.assertExportImportModule(m, (torch.randn(2, 2),))
 
-    def test_attr_module_constants_error(self):
+    def test_attr_module_constants(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self, mod_list):
                 super(M2, self).__init__(False)
                 self.mods = mod_list
 
             @torch.jit.script_method
-            def forward(self, v):
+            def forward(self, x):
                 return self.mods.forward(x)
 
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            M2(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            M2(nn.ModuleList([nn.ReLU()]))
+        m = M2(nn.Sequential(nn.ReLU()))
+        self.assertExportImportModule(m, (torch.randn(2, 2),))
 
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
@@ -10998,6 +11072,7 @@ a")
         with self.assertRaisesRegex(torch.jit.Error, "Exception"):
             foo(torch.tensor(0))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_script_function(self):
         outer_var = 10
         outer_var2 = 11
@@ -11077,6 +11152,7 @@ a")
         eg = torch.zeros(3, dtype=torch.uint8)
         self.assertEqual(foo_traced(eg), foo(eg))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module(self):
 
         @torch._jit_internal.weak_module
@@ -11152,6 +11228,7 @@ a")
         self.assertEqual(script_result, expected_result)
         self.assertEqual(script_result, script_result2)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_parameters_and_buffers(self):
         weights = torch.randn(10, 10)
         bias = torch.randn(10)
@@ -11210,6 +11287,7 @@ a")
         self.assertEqual(strong_mod(inp), expected_result)
         self.assertExportImportModule(strong_mod, (inp,))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_nested(self):
         @torch._jit_internal.weak_module
         class OtherWeak(torch.nn.Module):
@@ -11271,6 +11349,7 @@ a")
             + F.linear(inp, 2 * torch.ones(10, 10), 2 * torch.ones(10))
         self.assertEqual(result, expected_result)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_submodule(self):
         @torch._jit_internal.weak_module
         class Weak(torch.nn.Module):
@@ -11310,6 +11389,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
             strong_mod = Strong()
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_copying(self):
         class Submodule(torch.nn.Module):
             def __init__(self):
@@ -11376,6 +11456,7 @@ a")
 
         m = M()
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_attributes(self):
         tester = self
 
@@ -11939,6 +12020,7 @@ a")
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_overloading(self):
         @torch._jit_internal.weak_module
         class W(torch.nn.Module):
@@ -12132,8 +12214,6 @@ a")
                                                                   None, None, None, 0.0,
                                                                   model.mod.out_proj.weight,
                                                                   model.mod.out_proj.bias)[0]
-        # print(jit_out/py_out-1)
-        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
@@ -12691,6 +12771,13 @@ a")
             @torch.jit.script
             def fn():
                 return random.randint()
+
+    def test_dir(self):
+        class M(torch.jit.ScriptModule):
+            def forward(self, t):
+                return t
+
+        self.assertTrue('forward' in dir(M()))
 
     def test_inferred_error_msg(self):
         """
@@ -13674,6 +13761,9 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
     'test_nn_AdaptiveMaxPool3d_tuple_none',
+
+    # Uses Module._backend, so this is not supported
+    'test_nn_CrossMapLRN2d',
 }
 
 
@@ -14602,10 +14692,6 @@ def add_nn_module_test(*args, **kwargs):
     no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
 
     module_name = name.split("_")[0]
-
-    module = getattr(torch.nn, module_name, None)
-    if module is None or torch._jit_internal.weak_types.get(module) is None:
-        return
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests
@@ -15926,7 +16012,10 @@ class TestList(JitTestCase):
 
 class TestDict(JitTestCase):
     def dict(self):
-        return {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}
+
+    def dict2(self):
+        return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
 
     def test_keys(self):
         @torch.jit.script
@@ -15951,6 +16040,118 @@ class TestDict(JitTestCase):
             return len(x)
 
         self.checkScript(length, (self.dict(),))
+
+    def test_copy(self):
+        def func(x):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            return x.copy()
+
+        self.checkScript(func, (self.dict(),))
+
+    def test_items(self):
+        def func(x):
+            # type: (Dict[str, Tensor]) -> List[Tuple[str, Tensor]]
+            return x.items()
+
+        # The value returned by Python is in arbitrary order, so we can't use
+        # checkScript
+        scripted_func = torch.jit.script(func)
+
+        eager_out = (func(self.dict()))
+        script_out = (scripted_func(self.dict()))
+
+        self.assertEqual(len(eager_out), len(script_out))
+        for item in eager_out:
+            self.assertTrue(item in script_out)
+
+    def test_pop(self):
+        def pop(x, key):
+            # type: (Dict[str, Tensor], str) -> Tuple[Tensor, Dict[str, Tensor]]
+            return x.pop(key), x
+
+        # checkScript doesn't copy the inputs, so we can't use it since this mutates
+        # the dict
+        def tester(fn, *args):
+            eager_out = fn(self.dict(), *args)
+            script_out = torch.jit.script(fn)(self.dict(), *args)
+            self.assertEqual(eager_out, script_out)
+
+        tester(pop, 'a')
+
+        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+            torch.jit.script(pop)(self.dict(), 'x')
+
+
+        def default_pop(x, key, default):
+            # type: (Dict[str, Tensor], str, Tensor) -> Tuple[Tensor, Dict[str, Tensor]]
+            return x.pop(key, default), x
+
+        tester(default_pop, 'a', torch.randn(2, 2))
+        tester(default_pop, 'x', torch.randn(2, 2))
+
+    def test_setdefault(self):
+        def setdefault(x, key, default):
+            # type: (Dict[str, Tensor], str, Tensor) -> Dict[str, Tensor]
+            x.setdefault(key, default)
+            return x
+
+        self.checkScript(setdefault, (self.dict(), 'a', torch.randn(2, 2)))
+        self.checkScript(setdefault, (self.dict(), 'nonexistant', torch.randn(2, 2)))
+
+    def test_update(self):
+        def update(a, b):
+            # type: (Dict[str, Tensor], Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]
+            a.update(b)
+            return a, b
+
+        self.checkScript(update, (self.dict(), self.dict()))
+        self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_popitem(self):
+        @torch.jit.script
+        def popitem(x):
+            # type: (Dict[str, Tensor]) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]
+            item = x.popitem()
+            return item, x
+
+        # The value returned by Python is arbitrary, so we can't use checkScript
+        eager_in = self.dict()
+        eager_out = (eager_in.popitem(), eager_in)
+
+        script_out = popitem(self.dict())
+
+        # Check that an item was removed
+        self.assertEqual(len(eager_out[1]), len(script_out[1]))
+
+        # Check that the item is the correct types
+        if PY2:
+            self.assertTrue(isinstance(script_out[0][0], unicode))
+        else:
+            self.assertTrue(isinstance(script_out[0][0], str))
+        self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
+
+    def test_clear(self):
+        def clear(x):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            x.clear()
+            return x
+
+        self.checkScript(clear, (self.dict(),))
+
+    def test_get(self):
+        def get(x, key):
+            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+            return x.get(key)
+
+        self.checkScript(get, (self.dict(), 'a'))
+        self.checkScript(get, (self.dict(), "doesn't exist"))
+
+        def get_default(x, key):
+            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+            return x.get(key, torch.randn(2, 2))
+
+        self.checkScript(get, (self.dict(), 'a'))
+        self.checkScript(get, (self.dict(), "doesn't exist"))
 
     def test_basic(self):
         def simple(x):

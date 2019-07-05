@@ -348,19 +348,19 @@ struct Environment {
           {"float",
            makeMagic(
                "__float__",
-               std::make_shared<CastValue>(FloatType::get(), prim::Float))},
+               std::make_shared<CastValue>(FloatType::get(), aten::Float))},
           {"int",
            makeMagic(
                "__int__",
-               std::make_shared<CastValue>(IntType::get(), prim::Int))},
+               std::make_shared<CastValue>(IntType::get(), aten::Int))},
           {"bool",
            makeMagic(
                "__bool__",
-               std::make_shared<CastValue>(BoolType::get(), prim::Bool))},
+               std::make_shared<CastValue>(BoolType::get(), aten::Bool))},
           {"str",
            makeMagic(
                "__str__",
-               std::make_shared<CastValue>(StringType::get(), prim::str))},
+               std::make_shared<CastValue>(StringType::get(), aten::str))},
           {"getattr", std::make_shared<GetAttrValue>()},
           {"isinstance", std::make_shared<IsInstanceValue>()},
           // todo(zach): remove when we can correctly export torch.full via ONNX
@@ -388,7 +388,8 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
-          {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
+          {"divmod",
+           std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
@@ -1461,7 +1462,14 @@ struct to_ir {
   // Get the appropriate builtin op for this augmented assignment
   // If the RHS is a tensor, return the corresponding ATen in-place op
   // If it's a list of scalars, then return the corresponding list augment op
-  Symbol getAugOp(const AugAssign& stmt, bool isTensor) {
+  Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
+    if (type->cast<ListType>()) { // Lists also have in-place ops.
+      switch (stmt.aug_op()) {
+        case '+':
+          return aten::add_;
+      }
+    }
+    bool isTensor = type->isSubtypeOf(TensorType::get());
     switch (stmt.aug_op()) {
       case '+':
         return isTensor ? aten::add_ : aten::add;
@@ -1525,7 +1533,7 @@ struct to_ir {
       emitBuiltinCall(
           stmt.range(),
           *method.graph(),
-          getAugOp(stmt, /*isTensor=*/true),
+          getAugOp(stmt, lhsValue->type()),
           self,
           {rhs},
           {},
@@ -1542,14 +1550,15 @@ struct to_ir {
     const auto lhs = Var(stmt.lhs());
     const auto lhsValue = environment_stack->getSugaredVar(lhs.name())
                               ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
+    auto lhsType = lhsValue->type();
+    if (lhsType->isSubtypeOf(TensorType::get()) || lhsType->cast<c10::ListType>()) {
       // for tensors, emit the corresponding in-place op
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
       const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
       const auto output = emitBuiltinCall(
           stmt.range(),
           *method.graph(),
-          getAugOp(stmt, /*isTensor=*/true),
+          getAugOp(stmt, lhsValue->type()),
           self,
           {rhs},
           {},
@@ -1590,7 +1599,7 @@ struct to_ir {
         emitBuiltinCall(
             stmt.range(),
             *method.graph(),
-            getAugOp(stmt, /*isTensor=*/true),
+            getAugOp(stmt, sliceable->type()),
             slicedArg,
             {rhs},
             {},
@@ -1607,7 +1616,7 @@ struct to_ir {
         const auto augmented = emitBuiltinCall(
             stmt.range(),
             *method.graph(),
-            getAugOp(stmt, /*isTensor=*/true),
+            getAugOp(stmt, sliceable->type()),
             indexed,
             {rhs},
             {},
@@ -1625,8 +1634,7 @@ struct to_ir {
       const auto listType = sliceable->type()->cast<ListType>();
       AT_ASSERT(listType != nullptr);
 
-      bool isTensorList =
-          listType->getElementType()->isSubtypeOf(TensorType::get());
+      auto elementType = listType->getElementType();
 
       // Get the idx to augment
       const auto subscriptExprs = lhs.subscript_exprs();
@@ -1646,7 +1654,7 @@ struct to_ir {
       const auto getItem =
           graph->insert(aten::select, {listArg, idxArg}, {}, stmt.range());
       const auto augmentedItem = graph->insert(
-          getAugOp(stmt, isTensorList), {getItem, valueArg}, {}, stmt.range());
+          getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
       graph->insert(
           aten::_set_item, {listArg, idxArg, augmentedItem}, {}, stmt.range());
     }
@@ -2921,7 +2929,7 @@ struct to_ir {
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      const std::unordered_map<std::string, Function*>&
           functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
@@ -2942,20 +2950,21 @@ struct FunctionResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, std::shared_ptr<Function>>&
+  const std::unordered_map<std::string, Function*>&
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source) {
+CompilationUnit::CompilationUnit(const std::string& source)
+    : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
   define(source, nativeResolver(), nullptr);
 }
 
-std::shared_ptr<Function> CompilationUnit::define(
+std::unique_ptr<Function> CompilationUnit::define(
     const Def& def,
     const ResolverPtr& resolver,
     const Self& self,
-    const std::unordered_map<std::string, std::shared_ptr<Function>>&
+    const std::unordered_map<std::string, Function*>&
         function_table) const {
   const std::string& name = def.name().name();
   TORCH_INTERNAL_ASSERT(resolver);
@@ -2975,7 +2984,7 @@ std::shared_ptr<Function> CompilationUnit::define(
     // Compilation was successful, so remove the function def info
     ErrorReport::CallStack::pop_function();
   };
-  return std::make_shared<Function>(
+  return torch::make_unique<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);
 }
 
@@ -2996,13 +3005,13 @@ void CompilationUnit::define(
   }
 
   std::vector<Function*> methods;
-  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
+  std::unordered_map<std::string, Function*> function_table;
   if (init_idx.has_value()) {
     // if we have an init, do it first.
     auto fn = define(
         definitions[*init_idx], resolvers[*init_idx], self, function_table);
     const auto& name = fn->name();
-    function_table[name] = fn;
+    function_table[name] = fn.get();
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }
@@ -3015,7 +3024,7 @@ void CompilationUnit::define(
 
     auto fn = define(definitions[i], resolvers[i], self, function_table);
     const auto& name = fn->name();
-    function_table[name] = fn;
+    function_table[name] = fn.get();
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }
