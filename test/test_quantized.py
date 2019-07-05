@@ -229,6 +229,16 @@ class TestQuantizedOps(TestCase):
 
         np.testing.assert_equal(cat_ref.numpy(), cat_q.numpy())
 
+        # Test the cat on per-channel quantized tensor.
+        ch_axis = 1
+        scales = torch.from_numpy(np.array([1.0] * X.shape[ch_axis]))
+        zero_points = torch.from_numpy(np.array([0] * X.shape[ch_axis]))
+        tensors_q[0] = torch.quantize_linear_per_channel(
+            X, scales, zero_points, axis=[ch_axis], dtype=torch_type)
+        with self.assertRaisesRegex(RuntimeError, "supported.*cat"):
+            cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
+                             zero_point=zero_point)
+
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
     " Quantized Linear requires FBGEMM. FBGEMM does not play"

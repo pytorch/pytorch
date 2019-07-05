@@ -8,6 +8,13 @@
 
 namespace at { namespace native {
 namespace {
+
+bool is_valid_quantization_type(Tensor t) {
+  const auto qtype = t.qscheme();
+  return (qtype == kPerTensorAffine) ||
+         (qtype == kPerTensorSymmetric);
+}
+
 template <bool ReLUFused = false>
 class QCat final : public torch::OperatorKernel {
  public:
@@ -23,6 +30,8 @@ class QCat final : public torch::OperatorKernel {
     for (const auto& qx: qxs) {
       TORCH_CHECK(x_dtype == qx.scalar_type(),
                    "All dtypes must be the same.");
+      TORCH_CHECK(is_valid_quantization_type(qx),
+                  "Only per-tensor quantization is supported in 'cat'!")
       xs.push_back(qx.dequantize());
     }
     const Tensor y = at::cat(xs, axis);
