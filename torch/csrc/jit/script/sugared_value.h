@@ -246,8 +246,9 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
 };
 
 struct FunctionValue : public SugaredValue {
-  FunctionValue(std::shared_ptr<Function> callee)
-      : callee_(std::move(callee)) {}
+  FunctionValue(Function* callee) : callee_(std::move(callee)) {}
+  FunctionValue(const StrongFunctionPtr& p)
+      : callee_(p.function_), cu_(p.cu_) {}
 
   std::string kind() const override {
     return "function";
@@ -268,7 +269,9 @@ struct FunctionValue : public SugaredValue {
   }
 
  private:
-  std::shared_ptr<Function> callee_;
+  Function* callee_;
+  // TODO holding this thing is creepy
+  std::shared_ptr<CompilationUnit> cu_;
 };
 
 struct TORCH_API ClosureValue : public SugaredValue {
