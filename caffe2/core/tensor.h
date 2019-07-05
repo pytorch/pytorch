@@ -9,7 +9,9 @@
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
 
+#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
 #include <torch/csrc/autograd/grad_mode.h>
+#endif
 
 namespace caffe2 {
 
