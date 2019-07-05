@@ -195,7 +195,6 @@ class TestQuantizedTensor(TestCase):
 
     def test_qtensor_clone(self):
 
-        val = 100
         numel = 10
 
         scale = 0.5

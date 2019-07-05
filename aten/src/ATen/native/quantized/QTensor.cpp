@@ -119,7 +119,7 @@ Tensor quantized_clone(const Tensor& self) {
 
   Tensor dst = at::_empty_affine_quantized(
       self.sizes(),
-      self.options().dtype(self.scalar_type()),
+      self.options(),
       self.q_scale(),
       self.q_zero_point());
 
