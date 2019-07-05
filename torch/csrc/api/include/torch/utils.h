@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Parallel.h>
-#include <ATen/core/grad_mode.h>
+#include <torch/csrc/autograd/grad_mode.h>
 
 #include <cstdint>
 
