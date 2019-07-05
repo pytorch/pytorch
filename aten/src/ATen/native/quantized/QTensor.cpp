@@ -116,7 +116,6 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
 }
 
 Tensor quantized_clone(const Tensor& self) {
-
   Tensor dst = at::_empty_affine_quantized(
       self.sizes(),
       self.options(),
@@ -126,7 +125,6 @@ Tensor quantized_clone(const Tensor& self) {
   at::native::copy_(dst, self, false);
 
   return dst;
-
 }
 
 } // namespace native
