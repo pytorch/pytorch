@@ -1,8 +1,13 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 
 namespace c10 {
+
+template<class T> TypePtr getTypePtr();
+std::string toString(TypePtr typePtr);
+
 namespace impl {
 inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isNone()) {
@@ -18,6 +23,21 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
   } else {
     AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
   }
+}
+
+template<class Key, class Value>
+Dict<Key, Value> toTypedDict(GenericDict dict) {
+  if (dict.impl_->elementTypes.has_value()) {
+    TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes->keyType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes->keyType), ", ", toString(dict.impl_->elementTypes->valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Key types mismatch.");
+    TORCH_INTERNAL_ASSERT(*getTypePtr<Value>() == *dict.impl_->elementTypes->valueType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes->keyType), ", ", toString(dict.impl_->elementTypes->valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Value types mismatch.");
+  }
+
+  return Dict<Key, Value>(std::move(dict.impl_));
+}
+
+template<class Key, class Value>
+GenericDict toGenericDict(Dict<Key, Value> dict) {
+  return GenericDict(std::move(dict.impl_));
 }
 }
 
@@ -38,21 +58,37 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
 }
 
 inline intrusive_ptr<DictImpl> DictImpl::copy() const {
-  auto result = make_intrusive<DictImpl>();
-  result->dict = dict;
-  return result;
+  return make_intrusive<DictImpl>(dict, elementTypes);
 }
 
 }
 
 template<class Key, class Value>
 Dict<Key, Value>::Dict()
-  :Dict(make_intrusive<detail::DictImpl>()) {
+  :Dict(make_intrusive<detail::DictImpl>(
+      detail::DictImpl::dict_map_type(),
+      detail::DictImpl::DictElementTypes{getTypePtr<Key>(), getTypePtr<Value>()})) {
+}
+
+template<>
+inline Dict<IValue, IValue>::Dict()
+  :Dict(make_intrusive<detail::DictImpl>(
+    detail::DictImpl::dict_map_type(),
+    c10::nullopt)) {
+}
+
+template<class Key, class Value>
+Dict<Key, Value>::Dict(TypePtr keyType, TypePtr valueType)
+: Dict(make_intrusive<detail::DictImpl>(
+    detail::DictImpl::dict_map_type(),
+    detail::DictImpl::DictElementTypes {std::move(keyType), std::move(valueType)})) {
+  static_assert(std::is_same<Key, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
+  static_assert(std::is_same<Value, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
 }
 
 template<class Key, class Value>
 Dict<Key, Value>::Dict(Dict&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
-  rhs.impl_ = make_intrusive<detail::DictImpl>();
+  rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
 }
 
 template<class Key, class Value>
@@ -61,7 +97,7 @@ Dict<Key, Value>::Dict(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::
 template<class Key, class Value>
 Dict<Key, Value>& Dict<Key, Value>::operator=(Dict&& rhs) noexcept {
   impl_ = std::move(rhs.impl_);
-  rhs.impl_ = make_intrusive<detail::DictImpl>();
+  rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
   return *this;
 }
 
