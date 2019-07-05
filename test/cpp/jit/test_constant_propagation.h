@@ -68,10 +68,13 @@ graph():
             "prim::test_tuple() -> (float[])",
             [](const Node* node) {
               return [](Stack& stack) {
-                std::vector<double> list;
+                c10::List<double> list;
                 auto li = IValue(list);
                 std::vector<IValue> tup = {li};
-                push(stack, Tuple::create(tup));
+                push(
+                    stack,
+                    c10::ivalue::Tuple::create(
+                        tup, TupleType::create({ListType::ofFloats()})));
                 return 0;
               };
             }),
