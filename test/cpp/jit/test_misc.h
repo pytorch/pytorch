@@ -994,8 +994,7 @@ void testInsertBailOuts() {
   std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
 
   for (auto blo : bailouts) {
-    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
-    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::BailoutTemplate);
   }
 }
 
