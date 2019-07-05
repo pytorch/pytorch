@@ -11,6 +11,7 @@ namespace jit {
 namespace script {
 
 TORCH_API void InlineLoopCondition(std::shared_ptr<Graph>& graph);
+TORCH_API void inlineBlockBeforeNode(Node* before_node, Block* block);
 
 } // namespace script
 } // namespace jit

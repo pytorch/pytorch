@@ -9,12 +9,11 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // Transforms a Loop that has both a trip count specified and a loop
 // body condition so that the iter count is no longer specified
 // and it is recognizable as a python while loop.
-void canonicalizeModifiedLoops(Node* n) {
+void canonicalizeModifiedLoop(Node* n) {
   LoopView loop(n);
   if (loop.loopType() != LoopView::ModifiedLoop) {
     return;
@@ -52,17 +51,11 @@ void canonicalizeModifiedLoops(Node* n) {
 
 void canonicalizeModifiedLoops(Block* block) {
   for (Node* n : block->nodes()) {
-    switch (n->kind()) {
-      case prim::Function:
-      case prim::If: {
-        for (Block* b : n->blocks()) {
-          canonicalizeModifiedLoops(b);
-        }
-      } break;
-      case prim::Loop: {
-        canonicalizeModifiedLoops(n->blocks().at(0));
-        canonicalizeModifiedLoops(n);
-      } break;
+    for (Block* b : n->blocks()) {
+      canonicalizeModifiedLoops(b);
+    }
+    if (n->kind() == prim::Loop) {
+      canonicalizeModifiedLoop(n);
     }
   }
 }
@@ -73,6 +66,5 @@ TORCH_API void CanonicalizeModifiedLoops(std::shared_ptr<Graph>& graph) {
   canonicalizeModifiedLoops(graph->block());
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

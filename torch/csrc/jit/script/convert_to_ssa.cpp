@@ -47,16 +47,6 @@ struct ControlFlowLoadStores {
     exit_node->addInput(block_exit);
   }
 
-  static void addBlockOutput(
-      Block* exit_block,
-      const TypePtr& type,
-      const std::string& name) {
-    WithInsertPoint insert(exit_block);
-    auto g = exit_block->owningGraph();
-    auto block_exit = g->insertNode(g->createLoad(name, type))->output();
-    exit_block->registerOutput(block_exit);
-  }
-
   static void addNodeOutput(
       Node* n,
       const TypePtr& type,
@@ -194,29 +184,16 @@ struct ControlFlowLoadStores {
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
 
-void moveBlockBeforeNode(Node* before_node, Block* block) {
-  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
-    auto block_node = *it++;
-    block_node->moveBefore(before_node);
-  }
-}
-
 // Given a graph where outputs have been added to control flow nodes, and
 // loads and stores are represented in the graph, erases the Loads & Stores.
-struct EraseLoadsStores {
-  void eraseBlockLoadsStores(Block* block) {
+struct EraseLoadStores {
+  void eraseBlockLoadStores(Block* block) {
     pushFrame(block);
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       auto n = *it;
       it++;
+
       switch (n->kind()) {
-        case prim::If:
-        case prim::Loop:
-        case prim::Function: {
-          for (auto b : n->blocks()) {
-            eraseBlockLoadsStores(b);
-          }
-        } break;
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input());
           n->destroy();
@@ -228,6 +205,11 @@ struct EraseLoadsStores {
               var, "Typechecking should ensure the variable name is set");
           n->output()->replaceAllUsesWith(var);
           n->destroy();
+        } break;
+        default: {
+          for (auto b : n->blocks()) {
+            eraseBlockLoadStores(b);
+          }
         } break;
       }
     }
@@ -246,7 +228,7 @@ struct EraseLoadsStores {
   }
 
   void run(std::shared_ptr<Graph>& graph) {
-    eraseBlockLoadsStores(graph->block());
+    eraseBlockLoadStores(graph->block());
   }
 
   std::shared_ptr<ValueEnvironment> environment_stack = nullptr;
@@ -300,7 +282,7 @@ struct LoopExitContinuations {
           auto cur_loop = curr_loop_exit->owningBlock()->owningNode();
           auto pre_header = cur_loop->blocks().at(1);
           header_block->cloneFrom(pre_header, [](Value* v) { return v; });
-          moveBlockBeforeNode(n, header_block);
+          inlineBlockBeforeNode(n, header_block);
           loop_exit->addInput(header_block->outputs().at(0));
           loop_exit->eraseBlock(0);
           addLoopCarriedOutputs(loop_exit);
@@ -357,7 +339,7 @@ void ConvertToSSA(std::shared_ptr<Graph>& graph) {
   LoopExitContinuations exit_vars;
   exit_vars.run(graph);
   InlineLoopCondition(graph);
-  EraseLoadsStores erase_loads_stores;
+  EraseLoadStores erase_loads_stores;
   erase_loads_stores.run(graph);
   TransformExits(graph);
 }

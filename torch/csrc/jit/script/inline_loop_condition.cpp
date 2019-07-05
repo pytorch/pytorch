@@ -11,16 +11,12 @@ namespace torch {
 namespace jit {
 namespace script {
 
-namespace {
-
-void moveBlockBeforeNode(Node* before_node, Block* block) {
+void inlineBlockBeforeNode(Node* before_node, Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto block_node = *it++;
     block_node->moveBefore(before_node);
   }
 }
-
-} // namespace
 
 // The loop node is initially emitted as:
 // Loop(max_trip_count)
@@ -41,10 +37,10 @@ void inlineLoopCondition(Node* n) {
   Block* body_block = n->blocks().at(0);
 
   auto pre_header = n->blocks().at(1);
-  auto header_block = n->addBlock();
-  header_block->cloneFrom(pre_header, [](Value* v) { return v; });
-  moveBlockBeforeNode(n, header_block);
-  n->insertInput(/*start_condition_index*/ 1, header_block->outputs().at(0));
+  auto temp_block = n->addBlock();
+  temp_block->cloneFrom(pre_header, [](Value* v) { return v; });
+  inlineBlockBeforeNode(n, temp_block);
+  n->insertInput(/*start_condition_index*/ 1, temp_block->outputs().at(0));
   n->eraseBlock(2);
 
   Node* exit_n = nullptr;
@@ -55,7 +51,7 @@ void inlineLoopCondition(Node* n) {
     }
   }
   TORCH_INTERNAL_ASSERT(exit_n);
-  moveBlockBeforeNode(exit_n, pre_header);
+  inlineBlockBeforeNode(exit_n, pre_header);
   exit_n->insertInput(0, pre_header->outputs().at(0));
   n->eraseBlock(1);
 }

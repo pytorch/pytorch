@@ -50,6 +50,9 @@ struct LoopView {
   Block* bodyBlock() const {
     return node_->blocks().at(0);
   }
+  Value* cond() const {
+    return node_->input(0);
+  }
   Value* maxTripCount() const {
     return node_->input(0);
   }

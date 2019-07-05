@@ -28,6 +28,11 @@ Symbol owningNodeKind(Block* block) {
 
 enum ExitStatus { WILL, MIGHT, WONT };
 
+// hasExited() indicates whether or not an exit has been hit.
+// if hasExited() == true_val then we have exited, if == false_val we have not,
+// otherwise we might have exited.
+// exitValues() are the values that we are propagating to a destination block.
+// currently this is limited to block outputs of loops
 struct ExitPair : public std::pair<Value*, std::vector<Value*>> {
   using pair::pair;
 
@@ -70,6 +75,11 @@ struct ExitTransformer {
     false_val = graph->insertConstant(false);
   };
 
+  void run() {
+    transformExits(graph->block());
+  }
+
+ private:
   static void removeOutputs(Block* b) {
     while (b->outputs().size() > 0) {
       b->eraseOutput(0);
@@ -90,11 +100,11 @@ struct ExitTransformer {
     }
   }
 
-  ExitPair handleLoop(Node* node) {
+  ExitPair transformLoop(Node* node) {
     auto loop_block = node->blocks().at(0);
     auto exit_pair = transformExits(loop_block);
 
-    auto status = getStatus(exit_pair);
+    auto status = getExitStatus(exit_pair);
     // once we transform returns, this will no longer be true
     TORCH_INTERNAL_ASSERT(status == WILL);
     registerBlockOutputs(loop_block, exit_pair.exitValues());
@@ -115,14 +125,14 @@ struct ExitTransformer {
   // Recurses on the if node and returns its return status
   // If status != WONT_RETURN, sets the block_return_val and has returned val
   // of its parent block before exit
-  ExitPair handleIf(Node* node) {
+  ExitPair transformIf(Node* node) {
     auto true_block = node->blocks().at(0);
     auto false_block = node->blocks().at(1);
 
     auto true_pair = transformExits(true_block);
     auto false_pair = transformExits(false_block);
-    auto true_status = getStatus(true_pair);
-    auto false_status = getStatus(false_pair);
+    auto true_status = getExitStatus(true_pair);
+    auto false_status = getExitStatus(false_pair);
 
     if (true_status == WONT && false_status == WONT) {
       return ExitPair(false_val, std::vector<Value*>({}));
@@ -160,7 +170,7 @@ struct ExitTransformer {
     return ExitPair(has_exited, exit_vals);
   }
 
-  ExitStatus getStatus(ExitPair& exit_pair) {
+  ExitStatus getExitStatus(ExitPair& exit_pair) {
     Value* exit_v = exit_pair.hasExited();
     if (exit_v == true_val) {
       return WILL;
@@ -215,7 +225,7 @@ struct ExitTransformer {
 
     graph->create(prim::LoopExit, {exit_pair.exitValues()}, 0)
         ->insertBefore(exit_block->return_node());
-    return handleIf(new_if);
+    return transformIf(new_if);
   }
 
   // these nodes my have uses,
@@ -260,20 +270,21 @@ struct ExitTransformer {
           node->destroy();
         } break;
         case prim::If: {
-          exit_pair = handleIf(node);
+          exit_pair = transformIf(node);
         } break;
         case prim::Loop: {
           // for now, ignore loop return, once we handle returns no longer true
-          handleLoop(node);
+          transformLoop(node);
         } break;
         default:
           break;
       }
-      ExitStatus status = getStatus(exit_pair);
+      ExitStatus status = getExitStatus(exit_pair);
       if (status == WILL) {
         deleteAfterExitNodes(block, it);
         break;
-      } else if (status == MIGHT) {
+      }
+      if (status == MIGHT) {
         if (it != block->nodes().end()) {
           exit_pair = guardBlockNodes(block, exit_pair, it);
         }
@@ -281,10 +292,6 @@ struct ExitTransformer {
       }
     }
     return exit_pair;
-  }
-
-  void run() {
-    transformExits(graph->block());
   }
 
   Value* getUnitValue(const TypePtr& type) {
@@ -354,34 +361,69 @@ void removeIfNodeExits(Block* block) {
 // has been hit or not, and conditionalize further execution.
 // First we remove block exits of if nodes, then we replace Loop Block exits
 // with LoopExits. Then we remove LoopExits.
-//   block0(%i.2 : int, %i.12 : int):
-//     %i.11 : int = prim::If(%9)
+// Python example:
+// while i < 5:
+//   if i == 3:
+//     i += 1
+//     continue
+//   i += 2
+// continue_loop = i < 5
+// while continue_loop:
+//   if i == 3:
+//     i = i + 1
+//     continue_loop = false
+//     did_exit = True
+//   if did_exit:
+//     pass
+//   else:
+//     i = i + 2
+//     continue_loop = i < 3
+// IR as it enters pass:
+// %36 : bool = aten::lt(%i.1, %3)
+// %i : int = prim::Loop(%1, %36, %i.1)
+//   block0(%5 : int, %i.17 : int):
+//     %8 : bool = aten::eq(%i.17, %7)
+//     %i.16 : int = prim::If(%8)
 //       block0():
-//         %10 : int = aten::neg(%i.1)
-//          = prim::LoopExit(%25, %i.5)
-//          = prim::BlockExit(%i.5)
+//         %i.6 : int = aten::add(%i.17, %11)
+//         %33 : bool = aten::lt(%i.6, %3)
+//          = prim::LoopExit(%33, %i.6)
+//          = prim::BlockExit(%i.6)
 //         -> ()
 //       block1():
-//          = prim::BlockExit(%i.2)
+//          = prim::BlockExit(%i.17)
 //         -> ()
-//      = prim::BlockExit(%4, %i.11)
+//     %i.13 : int = aten::add(%i.16, %19)
+//     %4 : bool = aten::lt(%i.13, %3)
+//      = prim::BlockExit(%4, %i.13)
 //     -> ()
+// return (%i)
 //   -> becomes
-//   block0(%i.2 : int, %i.12 : int):
-//     %i.11 : int, %31 : bool, %32 : bool, %33 : int = prim::If(%9)
+// %38 : bool = prim::Constant[value=0]()
+// %37 : bool = prim::Constant[value=1]()
+// %40 : int = prim::Uninitialized()
+// %39 : bool = prim::Uninitialized()
+// %36 : bool = aten::lt(%i.1, %3)
+// %i : int = prim::Loop(%1, %36, %i.1)
+//   block0(%5 : int, %i.17 : int):
+//     %8 : bool = aten::eq(%i.17, %7)
+//     %did_exit : bool, %continue_loop : bool, %43 : int, %i.16 : int =
+//     prim::If(%8)
 //       block0():
-//         %10 : int = aten::neg(%i.1)
-//         %i.5 : int = prim::Constant[value=-1]()
-//         -> (%i.5, %27, %25, %i.5)
+//         %i.6 : int = aten::add(%i.17, %11)
+//         %33 : bool = aten::lt(%i.6, %3)
+//         -> (%37, %33, %i.6, %i.6)
 //       block1():
-//         -> (%i.2, %28, %29, %30)
-//     %34 : bool, %35 : int = prim::If(%31)
+//         -> (%38, %39, %40, %i.17)
+//     %44 : bool, %i : int = prim::If(%41)
 //       block0():
-//         -> (%32, %33)
+//         -> (%42, %43)
 //       block1():
-//         -> (%4, %i.11)
-//     -> (%34, %35)
-//
+//         %i.13 : int = aten::add(%i.16, %19)
+//         %4 : bool = aten::lt(%i.13, %3)
+//         -> (%4, %i.13)
+//     -> (%44, %i)
+
 void TransformExits(std::shared_ptr<Graph>& graph) {
   removeIfNodeExits(graph->block());
   convertLoopBlockExits(graph->block());

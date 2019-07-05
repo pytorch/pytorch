@@ -6783,7 +6783,8 @@ a")
 
     def test_nested_breaks(self):
         def no_bool_loop_outputs(g):
-            # did_continue/did_break not loop outputs
+            # testing that the "did exit" transform values are not loop block
+            # outputs (and thus not affecting one loop from another)
             loops = g.findAllNodes("prim::Loop")
             for loop in loops:
                 for out in loop.outputs():
@@ -6804,6 +6805,7 @@ a")
 
         self.checkScript(test, (1,))
         self.checkScript(test, (2,))
+        no_bool_loop_outputs(torch.jit.script(test).graph)
 
         def foo():
             y = torch.tensor(0)
@@ -6845,6 +6847,28 @@ a")
         no_bool_loop_outputs(torch.jit.script(test_nested_two).graph)
 
     def test_breaks_continues(self):
+        def foo_continue(cond):
+            # type: (int)
+            j = 1
+            for i in range(5):
+                if i == cond:
+                    continue
+                j += 1
+            return j
+
+        def foo_break(cond):
+            # type: (int)
+            j = 1
+            for i in range(5):
+                if i == cond:
+                    break
+                j += 1
+            return j
+
+        for i in range(1, 4):
+            self.checkScript(foo_continue, (i,))
+            self.checkScript(foo_break, (i,))
+
         def test_refine_outside_loop():
             if True:
                 x = None
@@ -6972,19 +6996,6 @@ a")
         self.checkScript(test_will_break_after_guard, (0,))
         self.checkScript(test_will_break_after_guard, (2,))
         self.checkScript(test_will_break_after_guard, (4,))
-
-        def foo(cond):
-            # type: (int)
-            j = 1
-            for i in range(5):
-                if i == cond:
-                    continue
-                j += 1
-            return j
-
-        self.checkScript(foo, (1,))
-        self.checkScript(foo, (2,))
-        self.checkScript(foo, (3,))
 
         def test_varexit(cond):
             # type: (int)
