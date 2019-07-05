@@ -341,17 +341,17 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // hardshrink
 // -----------------------------------
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
-  Tensor result = at::empty_like(self);
-  auto iter = TensorIterator::unary_op(result, self);
+  auto out_tensor = at::empty_like(self);
+  auto iter = TensorIterator::unary_op(out_tensor, self);
   hardshrink_cpu_stub(iter->device_type(), *iter, lambd);
-  return iter->output();
+  return out_tensor;
 }
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  Tensor result = at::empty_like(self);
-  auto iter = TensorIterator::binary_op(result, grad, self);
+  auto out_tensor = at::empty_like(self);
+  auto iter = TensorIterator::binary_op(out_tensor, grad, self);
   hardshrink_backward_cpu_stub(iter->device_type(), *iter, lambd);
-  return iter->output();
+  return out_tensor;
 }
 
 

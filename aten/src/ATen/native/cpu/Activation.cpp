@@ -187,7 +187,7 @@ void hardshrink_cpu_kernel(TensorIterator& iter, Scalar lambd) {
 void hardshrink_backward_cpu_kernel(TensorIterator& iter, Scalar lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
-    cpu_kernel(iter, [=](scalar_t self_val, scalar_t grad_val) {
+    cpu_kernel(iter, [=](scalar_t grad_val, scalar_t self_val) {
       return (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : grad_val;
     });
   });
