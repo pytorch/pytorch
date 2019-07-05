@@ -60,7 +60,7 @@ using module_list = slot_list_impl<Module>;
 using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(ModulePtr owner, std::shared_ptr<Function> function);
+  Method(ModulePtr owner, Function* function);
 
   // the module that contains this method.
   Module owner() const;
@@ -104,7 +104,7 @@ struct TORCH_API Method {
   // Underlying unbound function
   // This is the _lowered_ function and is different than the
   // first-class function in class_compilation_unit()
-  std::shared_ptr<Function> function_;
+  Function* function_;
 };
 static void clearMethods(c10::ivalue::Object* self) {
   self->type()->compilation_unit()->drop_all_functions();
@@ -201,7 +201,7 @@ struct TORCH_API Module {
   const std::vector<Method> get_methods() const {
     return fmap(
         class_compilation_unit()->get_functions(),
-        [&](const std::shared_ptr<Function>& func) {
+        [&](Function* func) {
           return Method(module_object(), func);
         });
   }
@@ -226,8 +226,7 @@ struct TORCH_API Module {
     return c10::nullopt;
   }
   c10::optional<Method> find_method(const std::string& name) const {
-    if (const std::shared_ptr<Function>& fn =
-            class_compilation_unit()->find_function(name)) {
+    if (const auto fn = class_compilation_unit()->find_function(name)) {
       return Method(module_object(), fn);
     }
     return c10::nullopt;
@@ -315,7 +314,7 @@ struct TORCH_API Module {
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    if (auto fn = class_compilation_unit()->find_function(name)) {
+    if (class_compilation_unit()->find_function(name)) {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {

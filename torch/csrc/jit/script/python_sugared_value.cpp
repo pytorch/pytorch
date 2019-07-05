@@ -19,11 +19,11 @@ std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-std::shared_ptr<Function> as_function(const py::object& obj) {
-  if (py::isinstance<Function>(obj)) {
-    return py::cast<std::shared_ptr<Function>>(obj);
+c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
+  if (py::isinstance<StrongFunctionPtr>(obj)) {
+    return py::cast<StrongFunctionPtr>(obj);
   }
-  return nullptr;
+  return c10::nullopt;
 }
 
 thread_local bool recurse_on_python_ops = false;
@@ -225,7 +225,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
 
   for (const std::string& method_name : method_names_) {
     auto cls = module_->type()->expect<ClassType>();
-    std::shared_ptr<Function> fn = cls->getMethod(method_name);
+    const auto fn = cls->getMethod(method_name);
     auto match = tryMatchSchema(
         fn->getSchema(),
         loc,
@@ -477,7 +477,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (auto callee = as_function(obj)) {
-    return std::make_shared<FunctionValue>(callee);
+    return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
@@ -526,7 +526,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<FunctionValue>(callee);
+      return std::make_shared<FunctionValue>(*callee);
     }
   }
 

@@ -60,7 +60,7 @@ struct PythonResolver : public Resolver {
 
   /**
    * While compiling classes, the class type we're compiling will not be
-   * available in Python, since we haven't finished defining the class yet. So
+   * available in Python, since we haven't fowner_ defining the class yet. So
    * in order to make the class type available to its own methods, we need to
    * explicitly resolve it.
    *
@@ -316,11 +316,9 @@ static std::shared_ptr<Graph> _assign_output_shapes(
   return retval;
 }
 
-void addFunctionToModule(
-    Module& module,
-    const std::shared_ptr<Function>& func) {
+void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
-  auto graph = func->graph()->copy();
+  auto graph = func.function_->graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
   module.module_object()->type()->compilation_unit()->create_function(
@@ -551,7 +549,12 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
       m, "CompilationUnit")
       .def(py::init<>())
-      .def("find_function", &CompilationUnit::find_function)
+      .def(
+          "find_function",
+          [](std::shared_ptr<CompilationUnit> self, const std::string& name) {
+            auto fn =  self->find_function(name);
+            return StrongFunctionPtr(std::move(self), fn);
+          })
       .def("set_optimized", &CompilationUnit::set_optimized)
       .def(
           "define",
@@ -561,13 +564,13 @@ void initJitScriptBindings(PyObject* module) {
             cu.define(src, pythonResolver(rcb), nullptr);
           });
 
-  py::class_<Function, std::shared_ptr<Function>>(
-      m, "Function", py::dynamic_attr())
+  py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
             // see: [pybind11 varargs]
-            Function& callee = py::cast<Function&>(args[0]);
+            auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
+            Function& callee = *strongPtr.function_;
             bool tracing = tracer::isTracing();
             if (tracing) {
               tracer::getTracingState()->graph->push_scope(callee.name());
@@ -581,7 +584,7 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "save",
-          [](std::shared_ptr<Function> self,
+          [](const StrongFunctionPtr& self,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             Module module("__main__");
@@ -592,7 +595,7 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def(
           "save_to_buffer",
-          [](std::shared_ptr<Function> self,
+          [](const StrongFunctionPtr& self,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
             Module module("__main__");
@@ -600,23 +603,39 @@ void initJitScriptBindings(PyObject* module) {
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
-      .def_property_readonly("graph", &Function::graph)
-      .def_property_readonly("schema", &Function::getSchema)
+      .def_property_readonly(
+          "graph",
+          [](const StrongFunctionPtr& self) { return self.function_->graph(); })
+      .def_property_readonly(
+          "schema",
+          [](const StrongFunctionPtr& self) {
+            return self.function_->getSchema();
+          })
       .def_property_readonly(
           "code",
-          [](Function& self) {
+          [](const StrongFunctionPtr& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> classes;
             SourceRangeRecords source_ranges;
             PythonPrint(
-                ss, source_ranges, self, false, tensors, classes, false);
+                ss,
+                source_ranges,
+                *self.function_,
+                false,
+                tensors,
+                classes,
+                false);
             return ss.str();
           })
       .def(
           "get_debug_state",
-          [](Function& self) { return self.get_executor().getDebugState(); })
-      .def_property_readonly("name", &Function::name);
+          [](const StrongFunctionPtr& self) {
+            return self.function_->get_executor().getDebugState();
+          })
+      .def_property_readonly("name", [](const StrongFunctionPtr& self) {
+        return self.function_->name();
+      });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
@@ -651,14 +670,15 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
-        CompilationUnit cu;
-
-        cu.define({def}, {pythonResolver(rcb)}, nullptr);
-        std::shared_ptr<Function> defined = cu.get_functions().at(0);
+        // TODO this should be the global python CU
+        auto cu = std::make_shared<CompilationUnit>();
+        cu->define({def}, {pythonResolver(std::move(rcb))}, nullptr);
+        auto defined = cu->get_functions().at(0);
         defined->setSchema(getSchemaWithNameAndDefaults(
             def.range(), defined->getSchema(), def.name().name(), defaults));
-        didFinishEmitFunction(defined);
-        return defined;
+        StrongFunctionPtr ret(std::move(cu), defined);
+        didFinishEmitFunction(ret);
+        return ret;
       });
 
   m.def(
@@ -671,10 +691,11 @@ void initJitScriptBindings(PyObject* module) {
         auto typed_inputs = toTypedStack(input_tuple);
         auto graph = tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, force_outplace);
-        CompilationUnit cu;
-        auto result = cu.create_function(std::move(name), std::move(graph));
-        didFinishEmitFunction(result);
-        return result;
+        auto cu = std::make_shared<CompilationUnit>();
+        auto result = cu->create_function(std::move(name), std::move(graph));
+        StrongFunctionPtr ret(std::move(cu), result);
+        didFinishEmitFunction(ret);
+        return ret;
       });
 
   m.def(
@@ -776,7 +797,8 @@ void initJitScriptBindings(PyObject* module) {
           classes,
           true);
     } else if (auto self = as_function(obj)) {
-      PythonPrint(ss, source_ranges, *self, false, constants, classes, true);
+      PythonPrint(
+          ss, source_ranges, *self->function_, false, constants, classes, true);
     } else {
       auto& m = py::cast<Method&>(obj);
       PythonPrint(
@@ -791,7 +813,9 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_create_function_from_graph",
       [](const std::string& name, std::shared_ptr<Graph> graph) {
-        return CompilationUnit().create_function(name, graph);
+        auto cu = std::make_shared<CompilationUnit>();
+        auto fn = cu->create_function(name, graph);
+        return StrongFunctionPtr(std::move(cu), fn);
       });
 
   py::class_<testing::FileCheck>(m, "FileCheck")
