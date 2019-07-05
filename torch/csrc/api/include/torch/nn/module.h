@@ -476,6 +476,31 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
       std::string name,
       ModuleHolder<ModuleType> module_holder);
 
+  /// Replaces a registered submodule with this `Module`.
+  ///
+  /// This takes care of the registration, you should assign the submodule
+  /// as well. It only works when a module of the name is already registered.
+  ///
+  /// This is useful for replacing a module after initialization, e.g.
+  /// for finetuning.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> replace_module(
+      const std::string& name,
+      std::shared_ptr<ModuleType> module);
+
+  /// Replaces a registered submodule with this `Module`.
+  /// This method deals with `ModuleHolder`s.
+  ///
+  /// This takes care of the registration, you should assign the submodule
+  /// as well. It only works when a module of the name is already registered.
+  ///
+  /// This is useful for replacing a module after initialization, e.g.
+  /// for finetuning.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> replace_module(
+      const std::string& name,
+      ModuleHolder<ModuleType> module_holder);
+
  private:
   // Friend classes.
 
@@ -589,6 +614,21 @@ std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     ModuleHolder<ModuleType> module_holder) {
   return register_module(std::move(name), module_holder.ptr());
+}
+
+template <typename ModuleType>
+std::shared_ptr<ModuleType> Module::replace_module(
+    const std::string& name,
+    std::shared_ptr<ModuleType> module) {
+  auto& base_module = (children_[name] = std::move(module));
+  return std::dynamic_pointer_cast<ModuleType>(base_module);
+}
+
+template <typename ModuleType>
+std::shared_ptr<ModuleType> Module::replace_module(
+    const std::string& name,
+    ModuleHolder<ModuleType> module_holder) {
+  return replace_module(name, module_holder.ptr());
 }
 
 template <typename... Ts>
