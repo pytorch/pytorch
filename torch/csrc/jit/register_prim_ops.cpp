@@ -240,6 +240,21 @@ RegisterOperators reg(
            };
          }),
      Operator(
+         "prim::BailoutTemplate() -> int",
+         [](const Node* /* node */) {
+           return [](Stack& stack) {
+             // TODO: today, we put a single bailout template at the front to
+             // carry the un-optimized graph for bailout nodes to use. Ideally
+             // this should never run, but we haven't written the code to remove
+             // it yet.
+             // TORCH_INTERNAL_ASSERT(false);
+
+             // Returns an int so that we have an easy way to do graph traversal
+             push(stack, 1);
+             return 0;
+           };
+         }),
+     Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;
@@ -1059,7 +1074,8 @@ RegisterOperators reg(
            const auto type = node->output()->type()->expect<ClassType>();
            const size_t numAttrs = type->numAttributes();
            return [type, numAttrs](Stack& stack) {
-             auto userObj = c10::ivalue::Object::create(type, numAttrs);
+             auto userObj = c10::ivalue::Object::create(
+                 c10::StrongTypePtr(type->compilation_unit(), type), numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };

@@ -967,7 +967,11 @@ def _make_strong_submodule(field, module, parent):
     return new_strong_submodule
 
 
+# TODO: we are leaking these things because they don't have a distinct owner
+# right now.
+_delete_me_recursive_compile_holder = []
 def _try_compile_fn(fn):
+    global _delete_me_recursive_compile_holder
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
@@ -986,7 +990,8 @@ def _try_compile_fn(fn):
     # extract the necessary info from the closed over variables on the function
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
-    return torch.jit.script(fn, _rcb=rcb)
+    _delete_me_recursive_compile_holder.append(torch.jit.script(fn, _rcb=rcb))
+    return _delete_me_recursive_compile_holder[-1]
 
 
 @contextlib.contextmanager
