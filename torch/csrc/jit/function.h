@@ -12,7 +12,7 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 // It contains schema information, and the executor that manages the
 // execution of the function. script::Method is a wrapper around a
 // underlying Function that also provides a `self` object.
-struct TORCH_API Function : public std::enable_shared_from_this<Function> {
+struct TORCH_API Function {
   Function(
       std::string name,
       bool optimize,
