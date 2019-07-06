@@ -121,7 +121,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(module, qconfig_dict):
+def prepare(module, qconfig_dict=None):
     r"""Prepares the module for calibration or training given a qconfig_dict.
     Note that the module will be modified inplace but in case the input module
     is a leaf module, a wrapped module will be returned.
@@ -135,8 +135,9 @@ def prepare(module, qconfig_dict):
         quant modules attached, a module that is ready for calibration or
         training
     """
+    if qconfig_dict is None:
+        qconfig_dict = {}
     propagate_qconfig(module, qconfig_dict)
-    module = add_quant_dequant(module)
     add_observer(module)
     return module
 
@@ -188,7 +189,7 @@ def quantize(module, qconfig_dict, eval_fn, eval_args):
         A quantized module
     """
     module = prepare(module, qconfig_dict)
-    eval_fn(module, *eval_args)
+    eval_fn(module, eval_args)
     convert(module)
     return module
 
