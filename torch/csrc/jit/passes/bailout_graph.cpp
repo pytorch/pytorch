@@ -154,11 +154,12 @@ struct BailOutInserter {
   // any given bailout point
   void addUnoptimizedFuncToBailouts() {
     auto unoptimized_graph = graph_->copy();
-    auto func = std::make_shared<Function>(
-        std::string{"bailout"}, false, unoptimized_graph, nullptr);
-    auto unopt_func = graph_->create(prim::Constant);
-    unopt_func->output()->setType(FunctionType::create(std::move(func)));
-    unopt_func->insertBefore(*graph_->block()->nodes().begin());
+    auto unopt_func = graph_->create(prim::BailoutTemplate)
+                          ->insertAfter(graph_->param_node());
+
+    // Returns an int so that we have an easy way to do graph traversal
+    unopt_func->output()->setType(IntType::get());
+    unopt_func->g_(attr::Subgraph, unoptimized_graph);
     for (auto bn : bailouts_) {
       bn->insertInput(0, unopt_func->output());
     }
