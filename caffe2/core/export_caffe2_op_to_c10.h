@@ -2,8 +2,8 @@
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <torch/csrc/api/include/torch/grad_mode.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #include <vector>
 
@@ -47,7 +47,7 @@ inline void _call_caffe2_op_from_c10(
 
   // As an invariant, we don't want any autograd gradients to be tracked in
   // Caffe2 operators.
-  torch::NoGradGuard guard;
+  at::NoGradGuard guard;
 
   AT_ASSERT(
       schema.arguments().size() != 0 &&
