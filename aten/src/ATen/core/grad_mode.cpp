@@ -1,11 +1,14 @@
 #include <ATen/core/grad_mode.h>
 
+#include <stdexcept>
+
 namespace at {
 
-/// thread_local is a feature that is not enabled by caffe2 mobile
+/// thread_local is a feature that is not enabled by Caffe2 mobile
 /// build (e.g. iOS). Therefore, we only provide `at::GradMode`
-/// when FEATURE_TORCH_MOBILE is on.
-#ifdef FEATURE_TORCH_MOBILE
+/// when we are not in mobile build or when FEATURE_TORCH_MOBILE
+/// is on.
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 
 thread_local bool GradMode_enabled = true;
 
@@ -17,7 +20,7 @@ void GradMode::set_enabled(bool enabled) {
   GradMode_enabled = enabled;
 }
 
-#else // defined(FEATURE_TORCH_MOBILE)
+#else
 
 bool GradMode::is_enabled() {
   throw std::runtime_error("GradMode is not supported on mobile");
