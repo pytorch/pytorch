@@ -627,11 +627,12 @@ class TestCppExtension(common.TestCase):
         # This'll fail if the message has been munged into a single line.
         # It's hard to write anything more specific as every compiler has it's own
         # error formatting.
-        pattern = r'.*[\n\r].*'
-        with self.assertRaisesRegex(RuntimeError, pattern):
+        with self.assertRaises(RuntimeError) as e:
             torch.utils.cpp_extension.load_inline(
                 name="test_compilation_error_formatting",
                 cpp_sources="int main() { return 0 }") 
+        pattern = r'.*(\\n|\\r).*'
+        self.assertNotRegex(str(e), pattern)
 
 
 class TestMSNPUTensor(common.TestCase):
