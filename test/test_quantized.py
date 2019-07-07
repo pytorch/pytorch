@@ -13,35 +13,7 @@ from hypothesis_utils import qtensor, array_shapes
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
 from common_utils import skipIfNotRegistered
-
-def canonical(graph):
-    return str(torch._C._jit_pass_canonicalize(graph))
-
-
-def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
-    """Quantizes a numpy array."""
-    if qmin is None:
-        qmin = np.iinfo(dtype).min
-    if qmax is None:
-        qmax = np.iinfo(dtype).max
-    qx = (np.round(x / scale + zero_point)).astype(np.int64)
-    qx = np.clip(qx, qmin, qmax)
-    qx = qx.astype(dtype)
-    return qx
-
-
-def _dequantize(qx, scale, zero_point):
-    """Dequantizes a numpy array."""
-    x = (qx.astype(np.float) - zero_point) * scale
-    return x
-
-
-def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
-    """Requantizes a numpy array, i.e., intermediate int32 or int16 values are
-    converted back to given type"""
-    qx = (x * multiplier).round() + zero_point
-    qx = np.clip(qx, qmin, qmax).astype(qtype)
-    return qx
+from common_utils import _quantize, _dequantize, _requantize
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -94,52 +66,6 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
 
 @skipIfNotRegistered("Relu_ENGINE_FBGEMM",
                      "fbgemm-based Caffe2 ops are not linked")
-class TestQuantized(TestCase):
-    def test_relu(self):
-        a = (torch.tensor([4, 6, 1, 10], dtype=torch.uint8), 0.01, 5)
-        r = torch.ops.c10.quantized_relu(a)
-        np.testing.assert_equal(
-            r[0].numpy(), torch.tensor([5, 6, 5, 10], dtype=torch.uint8).numpy()
-        )
-        np.testing.assert_almost_equal(0.01, r[1])
-        self.assertEqual(5, r[2])
-
-    def test_quantize(self):
-        a = (torch.tensor([4, 6, 1, 10], dtype=torch.uint8), 0.01, 5)
-        r = torch.ops.c10.dequantize(a)
-        np.testing.assert_almost_equal(r.numpy(), [-0.01, 0.01, -0.04, 0.05])
-        # default args
-        q_def = torch.ops.c10.quantize(r)
-        # specified
-        q = torch.ops.c10.quantize(r, scale=0.01, zero_point=5)
-        np.testing.assert_equal(q[0].numpy(), a[0].numpy())
-        np.testing.assert_almost_equal(q[1], a[1])
-        self.assertEqual(q[2], a[2])
-
-    def test_script(self):
-        @torch.jit.script
-        def foo(x):
-            # type: (Tuple[Tensor, float, int]) -> Tuple[Tensor, float, int]
-            return torch.ops.c10.quantized_relu(x)
-
-        self.assertExpectedInline(
-            canonical(foo.graph),
-            """\
-graph(%x : (Tensor, float, int)):
-  %1 : (Tensor, float, int) = c10::quantized_relu(%x)
-  return (%1)
-""",
-        )
-
-    def test_set_data_tensorimpl_type(self):
-        # Dense tensor has impl of type `TensorImpl`, while quantized tensor has impl
-        # of type `QTensorImpl`.
-        x = torch.randn(1, 2)
-        x_q = torch.ops.c10.quantize(torch.randn(1, 2))
-        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
-            x.data = x_q
-
-
 class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
     def _pool_output_shape(self, input_size, kernel_size, padding, stride,
@@ -494,6 +420,7 @@ class TestQuantizedConv(unittest.TestCase):
         pad_h=st.integers(0, 2),
         pad_w=st.integers(0, 2),
         dilation=st.integers(1, 1),
+        use_bias=st.booleans(),
     )
     def test_qconv(
             self,
@@ -509,7 +436,8 @@ class TestQuantizedConv(unittest.TestCase):
             stride_w,
             pad_h,
             pad_w,
-            dilation
+            dilation,
+            use_bias
     ):
 
         qconv = torch.ops.quantized.fbgemm_conv2d
@@ -558,7 +486,7 @@ class TestQuantizedConv(unittest.TestCase):
         )
         conv_op.bias = torch.nn.Parameter(
             b_init.to(dtype=torch.float), requires_grad=False
-        )
+        ) if use_bias else None
 
         X_value_min = 0
         X_value_max = 4
@@ -587,7 +515,7 @@ class TestQuantizedConv(unittest.TestCase):
 
         X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
         W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
 
         W_prepack = qconv_prepack(W_q, groups)
         Y_scale = 7.3
@@ -612,6 +540,29 @@ class TestQuantizedConv(unittest.TestCase):
 
         # Make sure the results match
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
+
+    """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
+    @given(Q=qtensor(shapes=array_shapes(4, 4,), dtypes=((torch.qint8, np.int8, 0),)))
+    def test_qconv_unpack(self, Q):
+        W, (W_scale, W_zp), (qmin, qmax), (torch_type, np_type) = Q
+        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
+        qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
+
+        # Orig tensor is assumed to be in K(C/G)RS format
+        W = torch.from_numpy(W)
+        # K(C/G)RS -> KRS(C/G)
+        W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
+        W_q = torch.quantize_linear(W_KRSC, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+
+        # Pack weights using weight packing operator
+        W_packed = qconv_prepack(W_q, 1)
+        # Unpack weights weight unpacking operator (Used for serialization)
+        W_unpacked = qconv_unpack(W_packed)
+
+        # Assert equal
+        np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
+        np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
+        np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
 
 if __name__ == "__main__":

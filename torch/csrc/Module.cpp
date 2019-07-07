@@ -44,6 +44,7 @@
 #include <torch/csrc/jit/init.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/onnx/init.h>
+#include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
 #ifdef USE_CUDNN
@@ -459,12 +460,11 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
+PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (torch::tensors::get_default_tensor_type().is_cuda()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  return THPUtils_packString(
+          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_tensor_type_id()),
+                              /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
 
@@ -501,7 +501,7 @@ static PyMethodDef TorchMethods[] = {
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  nullptr},
-  {"_is_default_type_cuda", (PyCFunction)THPModule_isDefaultTypeCuda, METH_NOARGS,  nullptr},
+  {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,  nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
@@ -645,6 +645,7 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);

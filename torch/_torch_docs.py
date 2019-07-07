@@ -1860,6 +1860,10 @@ The returned tensor and :attr:`ndarray` share the same memory. Modifications to
 the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
 tensor is not resizable.
 
+It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
+``numpy.float32``, ``numpy.float16``, ``numpy.int64``, ``numpy.int32``,
+``numpy.int16``, ``numpy.int8``, ``numpy.uint8``, and ``numpy.bool``.
+
 Example::
 
     >>> a = numpy.array([1, 2, 3])
@@ -3589,6 +3593,22 @@ Example::
 
     >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
+
+.. function:: normal(mean, std, size, *, out=None) -> Tensor
+
+Similar to the function above, but the means and standard deviations are shared
+among all drawn elements. The resulting tensor has size given by :attr:`size`.
+
+Args:
+    mean (float): the mean for all distributions
+    std (float): the standard deviation for all distributions
+    size (int...): a sequence of integers defining the shape of the output tensor.
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.normal(2, 3, size=(1, 4))
+    tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
 """)
 
 add_docstr(torch.numel,
@@ -3929,8 +3949,8 @@ between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
 .. note:
-    With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.int64`.
+    With the global dtype default (``torch.float32``), this function returns
+    a tensor with dtype ``torch.int64``.
 
 Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
@@ -3969,8 +3989,8 @@ random integers generated uniformly between :attr:`low` (inclusive) and
 :attr:`high` (exclusive).
 
 .. note:
-    With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.int64`.
+    With the global dtype default (``torch.float32``), this function returns
+    a tensor with dtype ``torch.int64``.
 
 Args:
     {input}
@@ -5844,7 +5864,7 @@ Example::
 
 add_docstr(torch.where,
            r"""
-where(condition, x, y) -> Tensor
+.. function:: where(condition, x, y) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -5879,6 +5899,14 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
+
+.. function:: where(condition) -> tuple of LongTensor
+
+``torch.where(condition)`` is identical to
+``torch.nonzero(condition, as_tuple=True)``.
+
+.. note::
+    See also :func:`torch.nonzero`.
 """)
 
 add_docstr(torch.logdet,

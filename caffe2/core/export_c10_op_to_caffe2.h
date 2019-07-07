@@ -143,7 +143,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   c10::List<at::Tensor> array_inputs_() {
-    c10::List<at::Tensor> result = c10::make_list<at::Tensor>();
+    c10::List<at::Tensor> result;
     result.reserve(InputSize());
     for (size_t i = 0; i < InputSize(); ++i) {
       result.emplace_back(Input(i));
@@ -152,7 +152,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   c10::List<at::Tensor> preallocated_outputs_() {
-    c10::List<at::Tensor> result = c10::make_list<at::Tensor>();
+    c10::List<at::Tensor> result;
     result.reserve(OutputSize());
     for (size_t i = 0; i < OutputSize(); ++i) {
       result.emplace_back(OperatorBase::OutputTensorOrUndefined(i));
