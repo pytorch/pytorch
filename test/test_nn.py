@@ -570,6 +570,19 @@ class TestNN(NNTestCase):
 
         return l, n, s
 
+    def test_requires_grad_(self):
+        m = self._create_basic_net()[-1]
+        assert len(list(m.buffers())) > 0, 'invalid test'
+        assert all(not b.requires_grad for b in m.buffers()) > 0, 'invalid test'
+        assert len(list(m.parameters())) > 0, 'invalid test'
+        assert all(p.requires_grad for p in m.parameters()) > 0, 'invalid test'
+        for requires_grad in (False, True):
+            self.assertIs(m.requires_grad_(requires_grad), m)
+            for p in m.parameters():
+                self.assertEqual(p.requires_grad, requires_grad)
+            for b in m.buffers():
+                self.assertFalse(b.requires_grad)
+
     def test_module_backcompat(self):
         from torch.serialization import SourceChangeWarning
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
