@@ -19,11 +19,11 @@ std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-std::shared_ptr<Function> as_function(const py::object& obj) {
-  if (py::isinstance<Function>(obj)) {
-    return py::cast<std::shared_ptr<Function>>(obj);
+c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
+  if (py::isinstance<StrongFunctionPtr>(obj)) {
+    return py::cast<StrongFunctionPtr>(obj);
   }
-  return nullptr;
+  return c10::nullopt;
 }
 
 thread_local bool recurse_on_python_ops = false;
@@ -225,7 +225,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
 
   for (const std::string& method_name : method_names_) {
     auto cls = module_->type()->expect<ClassType>();
-    std::shared_ptr<Function> fn = cls->getMethod(method_name);
+    const auto fn = cls->getMethod(method_name);
     auto match = tryMatchSchema(
         fn->getSchema(),
         loc,
@@ -242,6 +242,11 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
   }
   throw ErrorReport(loc) << "Could not find any matching overloads\n"
                          << err.str();
+}
+
+bool should_recurse(py::object obj) {
+  return py::cast<bool>(py::module::import("torch.jit")
+                            .attr("_is_recursive_script_enabled")(obj));
 }
 
 std::shared_ptr<SugaredValue> ModuleValue::attr(
@@ -307,7 +312,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // If recursive script mode is on, create a ScriptModule and register it as
   // as submodule or register a python method as a script::Method
-  if (getRecursiveScriptMode()) {
+  if (should_recurse(attr)) {
     if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
       // If the module is a submodule of the py_module, convert it to a
       // ScriptModule and add it as a submodule to the script::Module. This
@@ -471,13 +476,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  auto weak_obj =
-      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
-  if (!weak_obj.is_none()) {
-    obj = weak_obj;
-  }
   if (auto callee = as_function(obj)) {
-    return std::make_shared<FunctionValue>(callee);
+    return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
@@ -504,12 +504,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           << "which is currently not supported in Torchscript."
           << "Please open a feature request to add it.";
     }
-
-    auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
-    if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<FunctionValue>(callee);
-    }
   }
 
   py::object dispatched_fn =
@@ -522,17 +516,17 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
-    auto& pyCu = CompilationUnit::_get_python_cu();
-    if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
+    auto pyCu = CompilationUnit::_get_python_cu();
+    if (auto classType = pyCu->get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
     }
   }
 
-  if (getRecursiveScriptMode() && py::isinstance<py::function>(obj)) {
+  if (should_recurse(obj) && py::isinstance<py::function>(obj)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<FunctionValue>(callee);
+      return std::make_shared<FunctionValue>(*callee);
     }
   }
 
