@@ -115,12 +115,12 @@ RegisterOperators reg_str_ops({
 
 });
 
-auto reg_str_ops_2 = torch::jit::RegisterOperators()
+auto reg_str_ops_2 = torch::RegisterOperators()
   .op("aten::splitlines(str self, bool keepends=False) -> str[]",
         [](std::string string, bool keepends) {
           std::string delimiters =
               "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
-          std::vector<std::string> splits;
+          c10::List<std::string> splits;
 
           auto prev_pos = 0;
           auto pos = 0;
@@ -551,7 +551,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
         [](std::string string, std::string separator, int64_t max) {
           std::string::size_type prev_pos = 0;
           std::string::size_type pos = 0;
-          std::vector<std::string> splits;
+          c10::List<std::string> splits;
           auto count = 0;
           while ((pos = string.find(separator, pos)) != std::string::npos) {
             count++;
@@ -575,7 +575,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
 
           std::string::size_type prev_pos = 0;
           std::string::size_type pos = 0;
-          std::vector<std::string> splits;
+          c10::List<std::string> splits;
           auto count = 0;
           while ((pos = string.find(separator, pos)) != std::string::npos) {
             count++;
@@ -597,4 +597,3 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
 } // namespace
 } // namespace jit
 } // namespace torch
-

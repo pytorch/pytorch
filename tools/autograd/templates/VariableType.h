@@ -23,7 +23,7 @@ namespace torch { namespace autograd {
 struct Variable;
 using at::Context;
 using at::Device;
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
 #endif

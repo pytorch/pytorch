@@ -38,9 +38,9 @@ def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
 )SCRIPT");
 
 struct BuiltinFunctionRegistry {
-  const std::vector<std::shared_ptr<Function>>& getAllBuiltinFunctionsFor(
+  const std::vector<Function*>& getAllBuiltinFunctionsFor(
       Symbol name) {
-    const static std::vector<std::shared_ptr<Function>> empty;
+    const static std::vector<Function*> empty;
     // when initializing the builtin function library, we will re-enter
     // getAllBuiltinFunctionsFor since it is called in the compiler to
     // lookup builtins and initializing the builtin functions calls the
@@ -56,8 +56,8 @@ struct BuiltinFunctionRegistry {
       state = INITIALIZED;
     }
     AT_ASSERT(state == INITIALIZED);
-    auto it = builtins_by_name.find(name);
-    if (it == builtins_by_name.end())
+    auto it = builtins_by_name_.find(name);
+    if (it == builtins_by_name_.end())
       return empty;
     return it->second;
   }
@@ -68,7 +68,7 @@ struct BuiltinFunctionRegistry {
     modules.emplace_back(cu);
     cu->define(source, script::nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
-      builtins_by_name[Symbol::fromQualString("aten::" + method->name())]
+      builtins_by_name_[Symbol::fromQualString("aten::" + method->name())]
           .push_back(method);
     }
   }
@@ -99,11 +99,11 @@ struct BuiltinFunctionRegistry {
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
-  std::unordered_map<Symbol, std::vector<std::shared_ptr<Function>>>
-      builtins_by_name;
+  std::unordered_map<Symbol, std::vector<Function*>>
+      builtins_by_name_;
 };
 
-const std::vector<std::shared_ptr<Function>>& getAllBuiltinFunctionsFor(
+const std::vector<Function*>& getAllBuiltinFunctionsFor(
     Symbol name) {
   static BuiltinFunctionRegistry registry;
   return registry.getAllBuiltinFunctionsFor(name);
