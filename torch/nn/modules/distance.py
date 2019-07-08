@@ -1,9 +1,7 @@
 from .module import Module
 from .. import functional as F
-from ..._jit_internal import weak_module, weak_script_method
 
 
-@weak_module
 class PairwiseDistance(Module):
     r"""
     Computes the batchwise pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
@@ -35,12 +33,10 @@ class PairwiseDistance(Module):
         self.eps = eps
         self.keepdim = keepdim
 
-    @weak_script_method
     def forward(self, x1, x2):
         return F.pairwise_distance(x1, x2, self.norm, self.eps, self.keepdim)
 
 
-@weak_module
 class CosineSimilarity(Module):
     r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along dim.
 
@@ -68,6 +64,5 @@ class CosineSimilarity(Module):
         self.dim = dim
         self.eps = eps
 
-    @weak_script_method
     def forward(self, x1, x2):
         return F.cosine_similarity(x1, x2, self.dim, self.eps)

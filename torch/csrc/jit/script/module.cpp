@@ -163,8 +163,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(ModulePtr owner, std::shared_ptr<Function> function)
-    : owner_(std::move(owner)), function_(std::move(function)) {}
+Method::Method(ModulePtr owner, Function* function)
+    : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);
@@ -190,6 +190,10 @@ static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
 std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_graph() {
   auto result = lower_graph(owner().module_object(), *graph());
   return std::make_pair(result.first, loadTensors(result.second));
+}
+
+static void clearMethods(c10::ivalue::Object* self) {
+  self->compilation_unit()->drop_all_functions();
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
@@ -292,7 +296,8 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
   // Create a bare object with correct number of slots
   const size_t numAttrs = classType->numAttributes();
-  auto obj = c10::ivalue::Object::create(classType, numAttrs);
+  auto obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(class_compilation_unit(), classType), numAttrs);
 
   // Invoke the `__init__()` of the class with the arguments provided.
   Stack stackWithSelf = {obj};
