@@ -1,11 +1,8 @@
 import argparse
 import cProfile
 import pstats
-import subprocess
 import sys
 import os
-import re
-import contextlib
 
 import torch
 from torch.autograd import profiler

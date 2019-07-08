@@ -26,9 +26,8 @@ try:
 except ImportError:
     from yaml import Loader as YamlLoader
 
-
 GENERATED_COMMENT = CodeTemplate(
-    "@" + "generated from tools/autograd/templates/${filename}")
+    "@" + "generated from ${filename}")
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurence of a parameter in the derivative formula
@@ -56,7 +55,7 @@ def uninplace_api_name(api_name):
 
 
 def write(dirname, name, template, env):
-    env['generated_comment'] = GENERATED_COMMENT.substitute(filename=name)
+    env['generated_comment'] = GENERATED_COMMENT.substitute(filename=template.filename)
     path = os.path.join(dirname, name)
     # See Note [Unchanging results for ninja]
     try:

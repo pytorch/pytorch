@@ -19,8 +19,9 @@ class SpatialBNOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpatialBNOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, OpSchema::Arg_IsTest, is_test_, false),
         OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
         OP_SINGLE_ARG(float, "momentum", momentum_, 0.9f),
@@ -281,8 +282,9 @@ class SpatialBNGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpatialBNGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),

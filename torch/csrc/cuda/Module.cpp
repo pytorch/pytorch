@@ -7,18 +7,21 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/CUDAGenerator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
 #endif
 
 #include <torch/csrc/cuda/THCP.h>
-
+#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/Generator.h>
 
 using namespace torch;
 
@@ -57,12 +60,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
-  int ndevice;
-  if (cudaGetDeviceCount(&ndevice) != cudaSuccess) {
-    cudaGetLastError();
-    ndevice = 0;
-  }
-  return PyLong_FromLong(ndevice);
+  return PyLong_FromLong(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
@@ -135,72 +133,6 @@ PyObject * THCPModule_getCompiledVersion(PyObject *self)
   return PyLong_FromLong((long) CUDA_VERSION);
 }
 
-PyObject * THCPModule_getRNGState(PyObject *_unused)
-{
-  using namespace at;
-  using namespace torch::autograd;
-  HANDLE_TH_ERRORS
-  Variable var = torch::empty(0, at::device(at::kCPU).dtype(at::kByte));
-  THCRandom_getRNGState(state, (THByteTensor*)(var.data().unsafeGetTensorImpl()));
-  return THPVariable_Wrap(var);
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *obj)
-{
-  HANDLE_TH_ERRORS
-  auto& data_type = THPVariable_Unpack(obj).type();
-  if (!THPVariable_Check(obj) || at::globalContext().getNonVariableType(data_type.backend(), data_type.scalarType()).ID() != at::TypeID::CPUByte) {
-    throw TypeError("set_rng_state expects a torch.ByteTensor, but got %s",
-        Py_TYPE(obj)->tp_name);
-  }
-  auto& tensor = THPVariable_UnpackData(obj);
-  THCRandom_setRNGState(state, (THByteTensor*)tensor.unsafeGetTensorImpl());
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_manualSeed(PyObject *_unused, PyObject *seed)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
-          "but got %s", THPUtils_typename(seed));
-  THCRandom_manualSeed(state, THPUtils_unpackLong(seed));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_manualSeedAll(PyObject *_unused, PyObject *seed)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
-          "but got %s", THPUtils_typename(seed));
-  THCRandom_manualSeedAll(state, THPUtils_unpackLong(seed));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_seed(PyObject *_unused)
-{
-  HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(THCRandom_seed(state));
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_seedAll(PyObject *_unused)
-{
-  HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(THCRandom_seedAll(state));
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_initialSeed(PyObject *_unused)
-{
-  HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(THCRandom_initialSeed(state));
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
@@ -213,6 +145,14 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
   THCudaCheck(cudaDeviceSynchronize());
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaIPCCollect(PyObject *_unused /* unused */)
+{
+  HANDLE_TH_ERRORS
+  torch::CudaIPCCollect();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -377,11 +317,6 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   THCPByteStorage_postInit(m);
   THCPBoolStorage_postInit(m);
 
-  bool has_magma = at::hasMAGMA();
-  if (has_magma) {
-    THCMagma_init(state);
-  }
-
   bool has_half = true;
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
@@ -391,12 +326,22 @@ static PyObject * THCPModule_initExtension(PyObject *self)
     }
   };
 
-  set_module_attr("has_magma", has_magma ? Py_True : Py_False);
+  set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
   set_module_attr("has_half", has_half ? Py_True : Py_False);
 
   auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
   if (!_state_cdata) throw python_error();
   set_module_attr("_state_cdata", _state_cdata.get());
+
+  auto num_gpus = c10::cuda::device_count();
+  auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
+  for(int i = 0; i < num_gpus; i++) {
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
+    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
+    // This reference is meant to be given away, so no need to incref here.
+    PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
+  }
+  set_module_attr("default_generators", default_cuda_generators);
 
   bindCudaDeviceProperties(m);
 
@@ -437,8 +382,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, nullptr},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, nullptr},
   {"_cuda_getCompiledVersion", (PyCFunction)THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
-  {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  nullptr},
-  {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       nullptr},
   {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache,       METH_NOARGS,  nullptr},
   {"_cuda_memoryAllocated", (PyCFunction) THCPModule_memoryAllocated, METH_O,  nullptr},
   {"_cuda_maxMemoryAllocated", (PyCFunction) THCPModule_maxMemoryAllocated, METH_O,  nullptr},
@@ -446,13 +389,9 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_memoryCached", (PyCFunction) THCPModule_memoryCached, METH_O,  nullptr},
   {"_cuda_maxMemoryCached", (PyCFunction) THCPModule_maxMemoryCached, METH_O,  nullptr},
   {"_cuda_resetMaxMemoryCached", (PyCFunction) THCPModule_resetMaxMemoryCached, METH_O,  nullptr},
-  {"_cuda_manualSeed",  (PyCFunction)THCPModule_manualSeed,       METH_O,       nullptr},
-  {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll,  METH_O,       nullptr},
-  {"_cuda_seed",        (PyCFunction)THCPModule_seed,             METH_NOARGS,  nullptr},
-  {"_cuda_seedAll",     (PyCFunction)THCPModule_seedAll,          METH_NOARGS,  nullptr},
-  {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  nullptr},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
   {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
+  {"_cuda_ipc_collect", (PyCFunction)THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},

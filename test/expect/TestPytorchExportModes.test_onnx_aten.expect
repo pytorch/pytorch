@@ -12,5 +12,5 @@ ModelProto {
         Node {type: "ATen", inputs: [0,1], outputs: [2], attributes: [{ name: 'operator', type: string, value: 'fmod'}]}
       ]
     }
-  opset_import: [OperatorSetIdProto { domain: }],
+  opset_import: [OperatorSetIdProto { domain: }OperatorSetIdProto { domain: org.pytorch.aten}],
 }

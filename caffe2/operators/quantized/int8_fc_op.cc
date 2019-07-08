@@ -1,12 +1,19 @@
 #include "caffe2/operators/quantized/int8_fc_op.h"
 
+#include <functional>
+
+#include "caffe2/operators/fc_inference.h"
+
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(Int8FC, int8::Int8FCOp);
 
+using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FC)
     .NumInputs(3)
     .NumOutputs(1)
+    .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
+    .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false))
     .SetDoc(R"DOC(
 Computes the result of passing an input vector X into a fully
 connected layer with 2D weight matrix W and 1D bias vector b. That is,

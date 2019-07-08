@@ -11,8 +11,9 @@ template <class Context>
 class ChannelBackpropStatsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ChannelBackpropStatsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit ChannelBackpropStatsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~ChannelBackpropStatsOp() {}
 
   bool RunOnDevice() override {

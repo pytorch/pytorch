@@ -19,7 +19,7 @@
 /* GCC-compatible compiler, targeting ARM with WMMX */
 #include <mmintrin.h>
 #elif (defined(__GNUC__) || defined(__xlC__)) &&                               \
-	(defined(__VEC__) || defined(__ALTIVEC__))
+        (defined(__VEC__) || defined(__ALTIVEC__))
 /* XLC or GCC-compatible compiler, targeting PowerPC with VMX/VSX */
 #include <altivec.h>
 #elif defined(__GNUC__) && defined(__SPE__)

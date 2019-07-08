@@ -24,7 +24,7 @@ static caffe2::OperatorDef createOperator(
   return op;
 }
 
-void testNetDefConverter(std::ostream& out = std::cout) {
+void testNetDefConverter() {
   {
     // Check a simple net conversion back and forth.
 
@@ -194,20 +194,20 @@ void testNetDefConverter(std::ostream& out = std::cout) {
     std::unordered_map<std::string, Value*> vmap;
     convertNetDefToIR(net, &graph, &vmap);
     AT_ASSERT(graph.inputs().size() == 3);
-    AT_ASSERT(graph.inputs()[0]->uniqueName() == "a");
-    AT_ASSERT(graph.inputs()[1]->uniqueName() == "b");
-    AT_ASSERT(graph.inputs()[2]->uniqueName() == "c");
+    AT_ASSERT(graph.inputs()[0]->debugName() == "a");
+    AT_ASSERT(graph.inputs()[1]->debugName() == "b");
+    AT_ASSERT(graph.inputs()[2]->debugName() == "c");
 
     AT_ASSERT(graph.outputs().size() == 1);
-    AT_ASSERT(graph.outputs()[0]->uniqueName() == "x");
+    AT_ASSERT(graph.outputs()[0]->debugName() == "x");
 
     Node* quux = graph.outputs()[0]->node();
     Value* a0 = quux->inputs()[0];
     Value* x0 = quux->inputs()[1];
     Value* u = quux->inputs()[2];
-    AT_ASSERT(a0->uniqueName() != "a" && a0->uniqueNameBase() == "a");
-    AT_ASSERT(x0->uniqueName() != "x" && x0->uniqueNameBase() == "x");
-    AT_ASSERT(u->uniqueName() == "u");
+    AT_ASSERT(a0->debugName() != "a" && a0->debugNameBase() == "a");
+    AT_ASSERT(x0->debugName() != "x" && x0->debugNameBase() == "x");
+    AT_ASSERT(u->debugName() == "u");
 
     // Convert back to netdef and check if the names are preserved.
     // We still expect them to be in SSA form, but we should preserve names for
@@ -219,6 +219,41 @@ void testNetDefConverter(std::ostream& out = std::cout) {
     AT_ASSERT(net2.external_input().Get(2) == "c");
     AT_ASSERT(net2.external_output().Get(0) == "x");
   }
+
+  {
+    // Test that prefix is removed when converting from NetDef to IR and back.
+    caffe2::NetDef net;
+    *net.add_op() = createOperator("MatMul", {"a", "b"}, {"c"});
+    net.add_external_input("a");
+    net.add_external_input("b");
+    net.add_external_output("c");
+    Graph graph;
+    std::unordered_map<std::string, Value*> vmap;
+    convertNetDefToIR(net, &graph, &vmap, "caffe2::");
+    // Sanity check that value map is returned and it works.
+    AT_ASSERT(vmap["a"]->debugName() == "a");
+
+    caffe2::NetDef net2;
+    convertIRToNetDef(&net2, graph, "caffe2::");
+    // The conversion should remove the prefix if it maches.
+    AT_ASSERT(net2.op(0).type() == "MatMul");
+
+    caffe2::NetDef net3;
+    convertIRToNetDef(&net3, graph, "foo::");
+    // The conversion should still work if the prefix does not match.
+    AT_ASSERT(net3.op(0).type() == "caffe2::MatMul");
+
+    // Prefix shouldn't affect blob names.
+    AT_ASSERT(net2.op(0).input(0) == "a");
+    AT_ASSERT(net2.external_input(0) == "a");
+    AT_ASSERT(net2.external_output(0) == "c");
+    AT_ASSERT(net3.external_input(0) == "a");
+
+    Graph graph2;
+    // Test that conversion works without passing in a valueMap.
+    convertNetDefToIR(net, &graph2, nullptr, "caffe2::");
+  }
 }
+
 } // namespace jit
 } // namespace torch

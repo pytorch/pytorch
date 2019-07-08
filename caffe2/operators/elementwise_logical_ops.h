@@ -17,8 +17,9 @@ class WhereOp final : public Operator<Context> {
   USE_OPERATOR_FUNCTIONS(Context);
   USE_DISPATCH_HELPER;
 
-  WhereOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit WhereOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, "broadcast_on_rows", enable_broadcast_, 0) {}
 
   bool RunOnDevice() override {
@@ -111,8 +112,9 @@ class IsMemberOfOp final : public Operator<Context> {
  public:
   using TestableTypes = TensorTypes<int32_t, int64_t, bool, std::string>;
 
-  IsMemberOfOp(const OperatorDef& op, Workspace* ws)
-      : Operator<Context>(op, ws) {
+  template <class... Args>
+  explicit IsMemberOfOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     auto dtype =
         static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_UNDEFINED));

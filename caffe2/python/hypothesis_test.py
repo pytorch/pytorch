@@ -1526,10 +1526,7 @@ class TestOperators(hu.HypothesisTestCase):
            net_type=st.sampled_from(
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support else [])),
-           # This test is flaky on rocm caused by race condition in
-           # hcc HSAQueue, the fix will be coming in rocm 2.2 (see
-           # https://github.com/pytorch/pytorch/issues/16229
-           **hu.gcs_no_hip)
+           **hu.gcs)
     def test_dag_net_forking(self, net_type, num_workers, gc, dc):
         from caffe2.python.model_helper import ModelHelper
         from caffe2.python import brew

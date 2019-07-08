@@ -101,8 +101,8 @@ class AveragePoolDnnLowPOp final
     GetOutputQuantizationParams_();
 
     auto& X = InputTensorCPU_(0);
-    auto* Y = OutputTensorCPU_(0);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, X.dim32(1));
+    auto* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -239,9 +239,9 @@ class AveragePoolDnnLowPOp final
     GetOutputQuantizationParams_();
 
     auto& X = InputTensorCPU_(0);
-    auto* Y = OutputTensorCPU_(0);
     int channels = X.dim32(X.ndim() - 1);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, channels);
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, channels);
+    auto* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -260,42 +260,71 @@ class AveragePoolDnnLowPOp final
 
     switch (this->kernel_.size()) {
       case 2:
+        if (is_same<T, uint8_t>::value) {
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-        for (int n = 0; n < X.dim32(0); ++n) {
-          const T* Xdata_temp = Xdata + n * height * width * channels;
-          T* Ydata_temp = Ydata + n * pooled_height * pooled_width * channels;
-          for (int ph = 0; ph < pooled_height; ++ph) {
-            int hstart = ph * stride_h() - pad_t();
-            int hend = min(hstart + kernel_h(), height);
-            hstart = max(hstart, 0);
-            for (int pw = 0; pw < pooled_width; ++pw) {
-              int wstart = pw * stride_w() - pad_l();
-              int wend = min(wstart + kernel_w(), width);
-              wstart = max(wstart, 0);
-              int size = (hend - hstart) * (wend - wstart);
-              float multiplier =
-                  in_qparams_[0].scale / out_qparams_.scale / size;
+          for (int n = 0; n < X.dim32(0); ++n) {
+            average_pool_avx2(
+                reinterpret_cast<const uint8_t*>(Xdata),
+                n,
+                height,
+                width,
+                channels,
+                pooled_height,
+                pooled_width,
+                kernel_h(),
+                kernel_w(),
+                stride_h(),
+                stride_w(),
+                pad_t(),
+                pad_l(),
+                reinterpret_cast<uint8_t*>(Ydata),
+                in_qparams_[0].scale,
+                out_qparams_.scale,
+                in_qparams_[0].zero_point,
+                out_qparams_.zero_point,
+                minimum,
+                maximum);
+          }
+        } else {
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+          for (int n = 0; n < X.dim32(0); ++n) {
+            const T* Xdata_temp = Xdata + n * height * width * channels;
+            T* Ydata_temp = Ydata + n * pooled_height * pooled_width * channels;
+            for (int ph = 0; ph < pooled_height; ++ph) {
+              int hstart = ph * stride_h() - pad_t();
+              int hend = min(hstart + kernel_h(), height);
+              hstart = max(hstart, 0);
+              for (int pw = 0; pw < pooled_width; ++pw) {
+                int wstart = pw * stride_w() - pad_l();
+                int wend = min(wstart + kernel_w(), width);
+                wstart = max(wstart, 0);
+                int size = (hend - hstart) * (wend - wstart);
+                float multiplier =
+                    in_qparams_[0].scale / out_qparams_.scale / size;
 
-              for (int c = 0; c < channels; ++c) {
-                const int pool_idx = (ph * pooled_width + pw) * channels + c;
-                int32_t Yh = -in_qparams_[0].zero_point * size;
-                for (int h = hstart; h < hend; ++h) {
-                  for (int w = wstart; w < wend; ++w) {
-                    const int input_idx = (h * width + w) * channels + c;
-                    Yh += Xdata_temp[input_idx];
+                for (int c = 0; c < channels; ++c) {
+                  const int pool_idx = (ph * pooled_width + pw) * channels + c;
+                  int32_t Yh = -in_qparams_[0].zero_point * size;
+                  for (int h = hstart; h < hend; ++h) {
+                    for (int w = wstart; w < wend; ++w) {
+                      const int input_idx = (h * width + w) * channels + c;
+                      Yh += Xdata_temp[input_idx];
+                    }
                   }
-                }
-                Ydata_temp[pool_idx] = std::min<int32_t>(
-                    std::max<int32_t>(
-                        nearbyint(Yh * multiplier + out_qparams_.zero_point),
-                        minimum),
-                    maximum);
-              } // channel
-            } // width
-          } // height
-        } // for each image
+                  Ydata_temp[pool_idx] = std::min<int32_t>(
+                      std::max<int32_t>(
+                          nearbyint(Yh * multiplier + out_qparams_.zero_point),
+                          minimum),
+                      maximum);
+                } // channel
+              } // width
+            } // height
+          } // for each image
+        }
         break;
       case 3:
 #ifdef _OPENMP
@@ -398,8 +427,8 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
     const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     auto& X = InputTensorCPU_(0);
-    auto* Y = OutputTensorCPU_(0);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, X.dim32(1));
+    auto* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -544,9 +573,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
     const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     auto& X = InputTensorCPU_(0);
-    auto* Y = OutputTensorCPU_(0);
     int channels = X.dim32(X.ndim() - 1);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, channels);
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, channels);
+    auto* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
 
     T* Ydata = GetQuantizedOutputData_();
 

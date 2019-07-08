@@ -5,11 +5,7 @@
 
 #include "caffe2/core/common.h"
 
-#ifndef C10_MOBILE
-#error "mobile build state not defined"
-#endif
-
-#if C10_MOBILE
+#ifdef C10_MOBILE
 
 #include "caffe2/core/logging.h"
 #include "caffe2/operators/conv_op_shared.h"
@@ -550,6 +546,11 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     CAFFE_ENFORCE(
         bias.dim32(0) == C,
         "bias dimension must be equal to output channel number");
+  }
+
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    return true;
   }
 
   auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);

@@ -12,8 +12,9 @@ template <typename T, class Context>
 class LRNOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LRNOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LRNOpBase(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         size_(this->template GetSingleArgument<int>("size", 0)),
         alpha_(this->template GetSingleArgument<float>("alpha", 0)),
         beta_(this->template GetSingleArgument<float>("beta", 0)),
@@ -57,8 +58,9 @@ template <typename T, class Context>
 class LRNOp final : public LRNOpBase<T, Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LRNOp(const OperatorDef& operator_def, Workspace* ws)
-      : LRNOpBase<T, Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit LRNOp(Args&&... args)
+      : LRNOpBase<T, Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
@@ -74,8 +76,9 @@ template <typename T, class Context>
 class LRNGradientOp final : public LRNOpBase<T, Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LRNGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : LRNOpBase<T, Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit LRNGradientOp(Args&&... args)
+      : LRNOpBase<T, Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;

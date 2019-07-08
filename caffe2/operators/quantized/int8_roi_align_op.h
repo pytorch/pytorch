@@ -258,8 +258,9 @@ void ROIAlignForward(
 
 class Int8RoIAlignOp final : public Operator<CPUContext> {
  public:
-  Int8RoIAlignOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit Int8RoIAlignOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NHWC"))),
         spatial_scale_(

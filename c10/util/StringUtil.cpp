@@ -26,8 +26,8 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
 }
 
 size_t ReplaceAll(std::string& s, const char* from, const char* to) {
-  AT_CHECK(from && *from, "");
-  AT_CHECK(to, "");
+  TORCH_CHECK(from && *from, "");
+  TORCH_CHECK(to, "");
 
   size_t numReplaced = 0;
   std::string::size_type lenFrom = std::strlen(from);

@@ -13,24 +13,31 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
+#include <thrust/device_vector.h>
 
-const int WARP_SIZE = 32;
-const int MODE_SUM = 0;
-const int MODE_MEAN = 1;
-const int MODE_MAX = 2;
+#include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 
 namespace at {
 namespace native {
 
 namespace {
 
-// This kernel assumes that all input tensors except `weight` are contiguous.
+constexpr int MODE_SUM = 0;
+constexpr int MODE_MEAN = 1;
+constexpr int MODE_MAX = 2;
+
+constexpr int WARP_SIZE = 32;
+
+
+// This kernel assumes that all input tensors except `weight` and
+// per_sample_weights are contiguous.
 template <typename scalar_t>
 __global__ void EmbeddingBag_updateOutputKernel(
     int64_t *input, int64_t *offsets, scalar_t *weight, scalar_t *output,
     int64_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stide0, int64_t weight_stride1,
-    int mode, int64_t *bag_size, int64_t *max_indices) {
+    int mode, int64_t *bag_size, int64_t *max_indices,
+    scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -64,7 +71,13 @@ __global__ void EmbeddingBag_updateOutputKernel(
             maxWord = input[emb];
           }
         } else {
-          weightFeatSum += static_cast<accscalar_t>(weightValue);
+          if (per_sample_weights) {
+            accscalar_t scaleWeightBy = static_cast<accscalar_t>(
+                per_sample_weights[emb * per_sample_weights_stride]);
+            weightFeatSum += scaleWeightBy * static_cast<accscalar_t>(weightValue);
+          } else {
+            weightFeatSum += static_cast<accscalar_t>(weightValue);
+          }
         }
 
         bag_size_++;
@@ -96,81 +109,6 @@ __global__ void EmbeddingBag_updateOutputKernel(
   }
 }
 
-// FIXME: removed the accGradParametersKernelByFeature case present in
-// LookupTable. That kernel is faster at small sizes (<768 indices), which
-// does not need EmbeddingBag (LookupTable + Sum works fine), but would
-// still be nice to not be slow in that case.
-
-// This kernel assumes that all input tensors are contiguous.
-template <typename scalar_t>
-__global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
-    int64_t *input, int64_t *indices, scalar_t *gradOutput,
-    scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
-    int64_t stride, int mode, const int64_t *bag_size) {
-
-  using accscalar_t = acc_type<scalar_t, true>;
-  int idx = blockIdx.x * 4 + threadIdx.y;
-
-  // Each warp is responsible for an input into the LookupTable.
-  // If the preceding input has the same as this input, then the warp
-  // exits immediately. The warp also processes subsequent inputs with the
-  // same value.  //
-  // Input Warp
-  // 1     <warp 1>
-  // 1     <warp 1> (<warp 2> exits without doing any work)
-  // 5     <warp 3>
-  // 8     <warp 4>
-
-  // Number of values proceessed by each thread (grain size)
-  const int SZ = 4;
-
-  if (idx < numel && (idx == 0 || input[idx] != input[idx - 1])) {
-    do {
-      const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weightRow = ((int)input[idx]) * stride;
-
-      // Note: only this line changes from LookupTable_accgradParametersKernel
-      const int origRow = ((int)indices[idx]);
-      const int seq_number = offset2bag[origRow];
-      const int gradOutputRow = ((int)seq_number) * stride;
-
-      const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
-
-      accscalar_t gradient[SZ];
-      accscalar_t weight[SZ];
-
-#pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        int featureDim = startFeature + ii * WARP_SIZE;
-        if (featureDim < stride) {
-          gradient[ii] =
-              static_cast<accscalar_t>(gradOutput[gradOutputRow + featureDim]);
-          if (mode == MODE_MEAN) {
-            gradient[ii] /= bag_size[seq_number];
-          }
-          weight[ii] =
-              static_cast<accscalar_t>(gradWeight[weightRow + featureDim]);
-        }
-      }
-
-#pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        weight[ii] += gradient[ii] * scale;
-      }
-
-#pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        int featureDim = startFeature + ii * WARP_SIZE;
-        if (featureDim < stride) {
-          gradWeight[weightRow + featureDim] =
-              static_cast<scalar_t>(weight[ii]);
-        }
-      }
-
-      idx++;
-    } while (idx < numel && input[idx] == input[idx - 1]);
-  }
-}
 
 
 Tensor embedding_bag_backward_cuda_sum_avg(
@@ -179,7 +117,8 @@ Tensor embedding_bag_backward_cuda_sum_avg(
                                    const Tensor &offset2bag,
                                    const Tensor &bag_size,
                                    int64_t num_weights,
-                                   bool scale_grad_by_freq, int64_t mode) {
+                                   bool scale_grad_by_freq, int64_t mode,
+                                   const Tensor& per_sample_weights) {
 
   auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
@@ -189,7 +128,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   if (numel == 0) {
     // all empty bags
-    return grad_weight;
+    return at::zeros({num_weights, grad.size(1)}, grad.options());
   }
 
   int64_t stride = grad_weight.stride(0);
@@ -244,22 +183,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         thrust::make_reverse_iterator(count_data + numel),
         thrust::equal_to<int64_t>(), thrust::maximum<int64_t>());
   }
-
-  dim3 grid(THCCeilDiv(numel, (ptrdiff_t)4), THCCeilDiv(stride, (int64_t)128));
-  dim3 block(32, 4);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad.type(), "embedding_bag_backward_cuda_sum_avg_kernel", [&] {
-        EmbeddingBag_accGradParametersKernel_sum_avg<
-            scalar_t><<<grid, block, 0, stream>>>(
-            sorted_indices.data<int64_t>(), orig_indices.data<int64_t>(),
-            grad.data<scalar_t>(), grad_weight.data<scalar_t>(),
-            offset2bag.data<int64_t>(),
-            count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
-            mode, bag_size.data<int64_t>());
-      });
-
-  THCudaCheck(cudaGetLastError());
-  return grad_weight;
+  return embedding_backward_cuda_kernel(grad, orig_indices, sorted_indices,
+      count, num_weights, /* padding_idx= */ -1, scale_grad_by_freq,
+      mode == MODE_MEAN, offset2bag, bag_size, per_sample_weights);
 }
 
 template <typename scalar_t>
@@ -282,7 +208,8 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       int64_t word_idx = max_indices[bag * stride + featureDim];
       if (word_idx >= 0) {
         // If bag is empty, we have max_indices[idx] set to -1 in forward.
-        atomicAdd(&(gradWeight[word_idx * stride + featureDim]), gradOutput[bag * stride + featureDim]);
+        atomicAdd(&(gradWeight[word_idx * stride + featureDim]),
+                gradOutput[bag * stride + featureDim]);
       }
     }
   }
@@ -304,7 +231,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
   int grid = 1024;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad.type(), "embedding_bag_backward_cuda_max", [&] {
+      grad.scalar_type(), "embedding_bag_backward_cuda_max", [&] {
         EmbeddingBag_accGradParametersKernel_max<
             scalar_t><<<grid, block, 0, stream>>>(
             max_indices.data<int64_t>(), grad.data<scalar_t>(),
@@ -321,7 +248,8 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
-                   const int64_t mode, bool sparse) {
+                   const int64_t mode, bool sparse,
+                   const Tensor& per_sample_weights) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag_cuda", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
@@ -353,13 +281,15 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.type(), "embedding_bag_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.scalar_type(), "embedding_bag_cuda", [&] {
     EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream>>>(
         indices.data<int64_t>(), offsets.data<int64_t>(),
         weight.data<scalar_t>(), output.data<scalar_t>(),
         offset2bag.data<int64_t>(), numIndices, numBags, featureSize,
         weight.stride(0), weight.stride(1), mode, bag_size.data<int64_t>(),
-        mode == MODE_MAX ? max_indices.data<int64_t>() : NULL);
+        mode == MODE_MAX ? max_indices.data<int64_t>() : NULL,
+        per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
+        per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
   });
 
   THCudaCheck(cudaGetLastError());
@@ -372,7 +302,8 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    const Tensor &bag_size_,
                                    const Tensor &max_indices,
                                    int64_t num_weights,
-                                   bool scale_grad_by_freq, int64_t mode) {
+                                   bool scale_grad_by_freq, int64_t mode,
+                                   const Tensor& per_sample_weights) {
   // indices, offsets and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward in
   // EmbeddingBag.cpp.
@@ -386,18 +317,108 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   checkSameGPU("embedding_bag_cuda", grad_arg, offsets_arg);
   checkSameGPU("embedding_bag_cuda", grad_arg, indices_arg);
 
+
   switch (mode) {
     case MODE_SUM:
     case MODE_MEAN:
-      return embedding_bag_backward_cuda_sum_avg(grad, indices, offset2bag, bag_size_, num_weights, scale_grad_by_freq, mode);
+      if (mode == MODE_MEAN)
+        AT_ASSERT(!per_sample_weights.defined());
+      return embedding_bag_backward_cuda_sum_avg(grad, indices, offset2bag,
+              bag_size_, num_weights, scale_grad_by_freq, mode, per_sample_weights);
 
     case MODE_MAX:
+      AT_ASSERT(!per_sample_weights.defined());
       return embedding_bag_backward_cuda_max(grad, max_indices, num_weights);
 
     default:
       AT_ERROR(
           "Unknown mode for embedding_bag_backward_cuda ", mode);
   }
+}
+
+template <typename scalar_t>
+__inline__ __device__
+static scalar_t warpReduceSum(scalar_t val) {
+  for (int offset = WARP_SIZE/2; offset > 0; offset /= 2)
+    val += WARP_SHFL_DOWN(val, offset);
+  return val;
+}
+
+template <typename scalar_t>
+__global__ static void _embedding_bag_per_sample_weights_backward_kernel(
+    const scalar_t* grad, int64_t grad_stride0, int64_t grad_stride1,
+    const scalar_t* weight, int64_t weight_stride0, int64_t weight_stride1,
+    const int64_t* indices,  // contiguous
+    const int64_t* offset2bag,  // contiguous
+    int64_t num_samples,
+    int64_t embedding_features,
+    scalar_t* output) {
+  using accscalar_t = acc_type<scalar_t, true>;
+  const int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  const int warp = idx / WARP_SIZE;
+  const int thread_in_warp = idx % WARP_SIZE;
+  const int num_warps = blockDim.x * gridDim.x / WARP_SIZE;
+
+  // Each warp is responsible for the accumulation of one sample.
+  // This involves doing one dot product between grad[bag_idx] and weight[embedding_idx].
+  for (int sample_idx = warp; sample_idx < num_samples; sample_idx += num_warps) {
+    accscalar_t result = 0.;
+    const int bag_idx = (int)offset2bag[sample_idx];
+    const int embedding_idx = (int)indices[sample_idx];
+    for (int feature_idx = thread_in_warp; feature_idx < embedding_features;
+        feature_idx += WARP_SIZE) {
+      result +=
+          grad[grad_stride0 * bag_idx + grad_stride1 * feature_idx] *
+          weight[weight_stride0 * embedding_idx + weight_stride1 * feature_idx];
+    }
+    result = warpReduceSum<accscalar_t>(result);
+    if (thread_in_warp == 0) {
+      output[sample_idx] = result;
+    }
+  }
+}
+
+Tensor _embedding_bag_per_sample_weights_backward_cuda(
+    const Tensor& grad,
+    const Tensor& weight,  // NB: embedding table, not per_sample_weights
+    const Tensor& indices,
+    const Tensor& offsets,
+    const Tensor& offset2bag,
+    int64_t mode) {
+  TORCH_CHECK(
+      mode == MODE_SUM,
+      "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
+
+  AT_ASSERT(grad.dim() == 2)
+  auto embedding_features = grad.size(1);
+
+  AT_ASSERT(indices.dim() == 1);
+  auto num_samples = indices.size(0);
+
+  AT_ASSERT(weight.dim() == 2);
+  AT_ASSERT(weight.size(1) == embedding_features);
+
+  const int threads_per_block = 1024;
+  const int warps_per_block = threads_per_block / WARP_SIZE;
+
+  dim3 block(threads_per_block);
+  dim3 grid((num_samples + warps_per_block - 1) / warps_per_block);
+
+  auto output = at::empty({num_samples}, grad.options());
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
+      _embedding_bag_per_sample_weights_backward_kernel<scalar_t>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+          grad.data<scalar_t>(), grad.stride(0), grad.stride(1),
+          weight.data<scalar_t>(), weight.stride(0), weight.stride(1),
+          indices.data<int64_t>(),
+          offset2bag.data<int64_t>(),
+          num_samples,
+          embedding_features,
+          output.data<scalar_t>());
+    }
+  );
+  return output;
 }
 
 }

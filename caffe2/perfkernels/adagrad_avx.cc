@@ -104,9 +104,12 @@ void adagrad_fp16_update_prefetch__avx_f16c(
 
   for (; i < N; ++i) {
     float gi = g[i];
-    float hi = h[i] + gi * gi;
-    nh[i] = hi;
-    nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
+    float nhi =
+        _cvtsh_ss(reinterpret_cast<const unsigned short*>(h)[i]) + gi * gi;
+    reinterpret_cast<unsigned short*>(nh)[i] = _cvtss_sh(nhi, 0);
+    float nwi = _cvtsh_ss(reinterpret_cast<const unsigned short*>(w)[i]) +
+        lr * gi / (std::sqrt(nhi) + epsilon);
+    reinterpret_cast<unsigned short*>(nw)[i] = _cvtss_sh(nwi, 0);
   }
 }
 

@@ -1,6 +1,8 @@
 #!/bin/bash
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 export PATH="/usr/local/bin:$PATH"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -28,7 +30,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
   export PATH=/Developer/NVIDIA/CUDA-${CUDA_VERSION}/bin${PATH:+:${PATH}}
   export DYLD_LIBRARY_PATH=/Developer/NVIDIA/CUDA-${CUDA_VERSION}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}
   export CUDA_HOME=/Developer/NVIDIA/CUDA-${CUDA_VERSION}
-  export NO_CUDA=0
+  export USE_CUDA=1
 
   if [ -z "${IN_CIRCLECI}" ]; then
     # Eigen gives "explicit specialization of class must precede its first use" error

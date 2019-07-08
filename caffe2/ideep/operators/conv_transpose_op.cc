@@ -1,42 +1,24 @@
 #include "caffe2/operators/conv_transpose_op.h"
 #include "caffe2/ideep/operators/conv_transpose_unpool_base_op.h"
-#include "caffe2/ideep/operators/operator_fallback_ideep.h"
-#include <vector>
 
-// TODO: The code below works around correctness issues with particular input shapes
-// in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-bool need_type_zero_pad(const mkldnn_memory_desc_t *pd) {
-  if (pd->ndims == 0) {
-    return false;
-  }
-  int p1 = 1, p2 = 1;
-  for (int i = 0; i < pd->ndims; i++) {
-    p1 *= pd->dims[i];
-    p2 *= pd->layout_desc.blocking.padding_dims[i];
-  }
-  return (p1 != p2);
-}
+using namespace caffe2;
 
-namespace caffe2 {
+namespace {
 
 class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
  public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS();
-  // TODO: The code below works around correctness issues with particular input shapes
-  // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-  using FALLBACK_OP = IDEEPFallbackOp<ConvTransposeOp<float, CPUContext>>;
 
   IDEEPConvTransposeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvTransposeUnpoolBase(operator_def, ws),
         training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)),
-        fallback_(operator_def, ws) {
+            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
   }
-  virtual ~IDEEPConvTransposeOp() {}
+  ~IDEEPConvTransposeOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(INPUT);
@@ -77,24 +59,13 @@ class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
         // we have to do explicit conversion here.
         filter_in.set_public_format(ideep::format::iohw);
         filter_.init(expected_descriptor);
-        ideep::reorder::compute(filter_in, filter_);
+        filter_.feed_from(filter_in);
       }
 
-      // TODO: The code below works around correctness issues with particular input shapes
-      // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-      if (need_type_zero_pad(filter_.get_mkldnn_memory_desc_t())) {
-        return fallback_.Run(0);
-      }
     } else {
       CAFFE_ENFORCE_EQ(
         filter.get_dim(1), X.get_dim(1),
         "filter number must be equal to input channel number");
-
-      // TODO: The code below works around correctness issues with particular input shapes
-      // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-      if (need_type_zero_pad(filter.get_mkldnn_memory_desc_t())) {
-        return fallback_.Run(0);
-      }
 
       Y_dims = CalcOutputDims(X, filter.get_dim(0));
     }
@@ -122,24 +93,16 @@ class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
   const bool training_mode_;
   ideep::tensor filter_;
   ideep::tensor::descriptor cached_weights_descriptor_;
-  // TODO: The code below works around correctness issues with particular input shapes
-  // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-  FALLBACK_OP fallback_;
-
 };
 
 class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
  public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS();
-  // TODO: The code below works around correctness issues with particular input shapes
-  // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-  using FALLBACK_OP = IDEEPFallbackOp<ConvTransposeGradientOp<float, CPUContext>>;
 
   IDEEPConvTransposeGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvTransposeUnpoolBase(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", false)),
-        fallback_(operator_def, ws) {
+        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", false)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -151,7 +114,7 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
         "In order to backward propagate weights correctly, "
         "please set training_mode=1");
   }
-  virtual ~IDEEPConvTransposeGradientOp() {}
+  ~IDEEPConvTransposeGradientOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(INPUT);
@@ -178,21 +141,7 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
       // we have to do explicit conversion here.
       filter_in.set_public_format(ideep::format::iohw);
       filter_.init(expected_descriptor);
-      ideep::reorder::compute(filter_in, filter_);
-
-      // TODO: The code below works around correctness issues with particular input shapes
-      // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-      if (((filter_in.get_dim(0) % 8 != 0) && (stride_[0] * stride_[1] != 1)) ||
-          need_type_zero_pad(filter_.get_mkldnn_memory_desc_t())) {
-        return fallback_.Run(0);
-      }
-    } else {
-      // TODO: The code below works around correctness issues with particular input shapes
-      // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-      if (((filter_in.get_dim(0) % 8 != 0) && (stride_[0] * stride_[1] != 1)) ||
-          need_type_zero_pad(filter.get_mkldnn_memory_desc_t())) {
-        return fallback_.Run(0);
-      }
+      filter_.feed_from(filter_in);
     }
 
     if (no_bias_) {
@@ -233,9 +182,6 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
 
  private:
   bool no_bias_;
-  // TODO: The code below works around correctness issues with particular input shapes
-  // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
-  FALLBACK_OP fallback_;
 
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
   OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
@@ -244,4 +190,4 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
 REGISTER_IDEEP_OPERATOR(ConvTranspose, IDEEPConvTransposeOp);
 REGISTER_IDEEP_OPERATOR(ConvTransposeGradient, IDEEPConvTransposeGradientOp);
 
-} // namespace caffe2
+} // namespace

@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <sstream>
 
 namespace c10 {
 
@@ -29,6 +30,7 @@ OpRegistrationListener::~OpRegistrationListener() {}
 
 Dispatcher::Dispatcher()
 : operators_()
+, operatorLookupTable_()
 , listeners_(guts::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
@@ -39,41 +41,89 @@ C10_EXPORT Dispatcher& Dispatcher::singleton() {
   return _singleton;
 }
 
-OperatorHandle Dispatcher::registerSchema(FunctionSchema schema) {
-  // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  operators_.emplace_back(std::move(schema));
-  auto op = OperatorHandle(--operators_.end());
-
-  // note: call listeners *after* operator is added, i.e. dispatcher is already valid for new op
-  listeners_->callOnOperatorRegistered(op);
-
-  return op;
+c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
+    auto found = operatorLookupTable.find(overload_name);
+    if (found == operatorLookupTable.end()) {
+      return c10::nullopt;
+    }
+    return found->second;
+  });
 }
 
-void Dispatcher::deregisterSchema(const OperatorHandle& op) {
-  // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (!op.operatorDefIterator_->dispatchTable.isEmpty()) {
-    AT_ERROR("Tried to deregister op schema that still has kernels registered");
+OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
+  const auto found = findSchema(schema.operator_name());
+  if (found != c10::nullopt) {
+    if (found->schema() != schema) {
+      std::ostringstream str;
+      str << schema << " vs " << found->schema();
+      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
+    }
+    if (found->options() != options) {
+      TORCH_CHECK(false, "Tried to register multiple operators with the same schema but different options: ", toString(schema));
+    }
+    return *found;
   }
 
-  // note: call listeners *before* operator is removed, i.e. dispatcher is still valid for removed op
-  listeners_->callOnOperatorDeregistered(op);
+  OperatorName op_name = schema.operator_name();
+  operators_.emplace_back(std::move(schema), std::move(options));
+  OperatorHandle handle(--operators_.end());
+  operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+    operatorLookupTable.emplace(op_name, handle);
+  });
 
-  operators_.erase(op.operatorDefIterator_);
+  return handle;
 }
 
-void Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func) {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.operatorDefIterator_->dispatchTable.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, cache_creator_func});
+SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
+  // we need a lock to avoid concurrent writes
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  OperatorName op_name = schema.operator_name();
+
+  auto op = findOrRegisterSchema_(std::move(schema), std::move(options));
+
+  ++op.operatorIterator_->refcount;
+  if (1 == op.operatorIterator_->refcount) {
+    // note: call listeners *after* operator is added, i.e. dispatcher is already valid for new op
+    listeners_->callOnOperatorRegistered(op);
+  }
+
+  return SchemaRegistrationHandleRAII {op, RegistrationHandleRAII([this, op, op_name] {
+    deregisterSchema_(op, op_name);
+  })};
 }
 
-void Dispatcher::deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key) {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.operatorDefIterator_->dispatchTable.deregisterKernel(dispatch_key);
+void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name) {
+  // we need a lock to avoid concurrent writes
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  TORCH_INTERNAL_ASSERT(op.schema().operator_name() == op_name);
+
+  // reduce refcount and actually deregister if no references left
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->refcount > 0);
+  --op.operatorIterator_->refcount;
+  if (0 == op.operatorIterator_->refcount) {
+    op.operatorIterator_->op.prepareForDeregistration();
+
+    // note: call listeners *before* operator is removed, i.e. dispatcher is still valid for removed op
+    listeners_->callOnOperatorDeregistered(op);
+
+    operators_.erase(op.operatorIterator_);
+    operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+      operatorLookupTable.erase(op_name);
+    });
+  }
+}
+
+RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func) {
+  // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
+}
+
+RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func) {
+  // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.registerCatchallKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
 }
 
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {

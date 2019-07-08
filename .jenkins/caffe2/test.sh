@@ -17,7 +17,7 @@ else
   # For Python builds we install into python
   # cd to /usr first so the python import doesn't get confused by any 'caffe2'
   # directory in cwd
-  python_installation="$(dirname $(dirname $(cd /usr && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
+  python_installation="$(dirname $(dirname $(cd /usr && $PYTHON -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
   caffe2_pypath="$python_installation/caffe2"
   cpp_test_dir="$python_installation/torch/test"
   ld_library_path="$python_installation/torch/lib"
@@ -92,7 +92,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
 
   # Unknown reasons, need to debug
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/piecewise_linear_transform_test.py")
-  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/softmax_ops_test.py")
 
   # On ROCm, RCCL (distributed) development isn't complete.
   # https://github.com/ROCmSoftwarePlatform/rccl
@@ -102,6 +101,11 @@ fi
 # NB: Warnings are disabled because they make it harder to see what
 # the actual erroring test is
 echo "Running Python tests.."
+if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
+  # locale setting is required by click package with py3
+  export LC_ALL=C.UTF-8
+  export LANG=C.UTF-8
+fi
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
@@ -121,6 +125,6 @@ pip install --user pytest-sugar
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  pip install --user torchvision
+  pip install -q --user git+https://github.com/pytorch/vision.git
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

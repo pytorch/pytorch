@@ -10,6 +10,7 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/saved_variable.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch { namespace autograd { namespace generated {
 
@@ -41,7 +42,7 @@ struct TypeAndSize {
 
 private:
   std::vector<int64_t> sizes;
-  Type* type;
+  at::DeprecatedTypeProperties* type;
 };
 
 ${autograd_function_declarations}

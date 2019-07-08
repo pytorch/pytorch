@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <cuda.h>
 #include <nvrtc.h>
 
@@ -16,6 +17,8 @@
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
   _(nvrtcGetErrorString)                         \
+  _(nvrtcGetProgramLogSize)                      \
+  _(nvrtcGetProgramLog)                          \
   _(cuLaunchKernel)                              \
   _(nvrtcCompileProgram)                         \
   _(cuCtxGetCurrent)                             \
@@ -28,4 +31,4 @@ extern "C" typedef struct THNVRTC {
 #undef CREATE_MEMBER
 } THNVRTC;
 
-extern "C" THNVRTC* torch_load_nvrtc();
+extern "C" TORCH_API THNVRTC* torch_load_nvrtc();

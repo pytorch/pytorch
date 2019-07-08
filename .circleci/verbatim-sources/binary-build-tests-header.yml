@@ -1,4 +1,0 @@
-  # Binary build tests
-  # These are the smoke tests run right after the build, before the upload. If
-  # these fail, the upload doesn't happen
-  #############################################################################

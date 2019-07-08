@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "batch_permutation_op.h"
+#include "modules/detectron/batch_permutation_op.h"
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {

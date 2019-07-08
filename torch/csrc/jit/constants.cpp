@@ -7,8 +7,22 @@
 namespace torch {
 namespace jit {
 
-// IValue -> Constant node
 Value* insertConstant(
+    Graph& g,
+    const IValue& val,
+    const c10::TypePtr& result_type,
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
+  auto value = tryInsertConstant(g, val, result_type, loc, scope);
+  if (value) {
+    return *value;
+  }
+  throw constant_not_supported_error(
+      "Unsupported value kind: " + val.tagKind());
+}
+
+// IValue -> Constant node
+c10::optional<Value*> tryInsertConstant(
     Graph& g,
     const IValue& val,
     const c10::TypePtr& result_type,
@@ -41,17 +55,17 @@ Value* insertConstant(
     n->i_(attr::value, val.toBool());
     n->output()->setType(BoolType::get());
   } else if (val.isBoolList()) {
-    auto bool_list = val.toBoolList()->elements();
+    auto bool_list = val.toBoolList();
     n->is_(
         attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
     n->output()->setType(ListType::ofBools());
   } else if (val.isIntList()) {
-    n->is_(attr::value, val.toIntList()->elements());
+    n->is_(attr::value, val.toIntListRef().vec());
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
     n->ts_(
         attr::value,
-        fmap(val.toTensorList()->elements(), [](const at::Tensor& t) {
+        fmap(val.toTensorListRef(), [](const at::Tensor& t) {
           AT_ASSERT(t.is_variable() && !t.requires_grad());
           return t;
         }));
@@ -68,11 +82,10 @@ Value* insertConstant(
     n->output()->setType(NoneType::get());
   } else {
     n->destroy();
-    throw constant_not_supported_error(
-        "Unsupported value kind: " + val.tagKind());
+    return c10::nullopt;
   }
   if (loc)
-    n->setSourceLocation(std::make_shared<SourceRange>(*loc));
+    n->setSourceRange(*loc);
   if (scope)
     n->setScope(*scope);
   if (result_type) {
@@ -90,6 +103,7 @@ RegisterOperators reg({
     Operator(
         FunctionSchema(
             prim::Constant,
+            "",
             {},
             {},
             /*is_vararg=*/false,

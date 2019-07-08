@@ -6,13 +6,13 @@
 namespace at { namespace native {
 
 miopenDataType_t getMiopenDataType(const at::Tensor& tensor) {
-  if (tensor.type().scalarType() == at::kFloat) {
+  if (tensor.scalar_type() == at::kFloat) {
     return miopenFloat;
-  } else if (tensor.type().scalarType() == at::kHalf) {
+  } else if (tensor.scalar_type() == at::kHalf) {
     return miopenHalf;
   }
   std::string msg("getMiopenDataType() not supported for ");
-  msg += toString(tensor.type().scalarType());
+  msg += toString(tensor.scalar_type());
   throw std::runtime_error(msg);
 }
 

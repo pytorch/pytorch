@@ -119,7 +119,7 @@ static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *
 #else
   uint32_t a = *eax, b, c = *ecx, d;
   asm volatile ( "cpuid\n\t"
-		 : "+a"(a), "=b"(b), "+c"(c), "=d"(d) );
+                 : "+a"(a), "=b"(b), "+c"(c), "=d"(d) );
   *eax = a;
   *ebx = b;
   *ecx = c;

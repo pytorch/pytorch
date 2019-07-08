@@ -69,9 +69,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
   static constexpr int kNeonNoiseReadSize = kOutputChannels * 16;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
+  explicit PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   bool RunOnDevice() override {

@@ -4,6 +4,7 @@
 #include <c10/core/Device.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
+#include <torch/csrc/jit/script/module.h>
 
 #include <iosfwd>
 #include <memory>
@@ -44,10 +45,21 @@ class TORCH_API InputArchive final {
 
   ~InputArchive() = default;
 
+  /// Reads a `tensor` associated with a given `key`. If there is no `tensor`
+  /// associated with the `key`, this returns false, otherwise it returns true.
+  /// If the tensor is expected to be a buffer (not differentiable), `is_buffer`
+  /// must be `true`.
+  bool try_read(const std::string& key, Tensor& tensor, bool is_buffer = false);
+
   /// Reads a `tensor` associated with a given `key`.
   /// If the tensor is expected to be a buffer (not differentiable), `is_buffer`
   /// must be `true`.
   void read(const std::string& key, Tensor& tensor, bool is_buffer = false);
+
+  /// Reads a `InputArchive` associated with a given `key`. If there is no
+  /// `InputArchive` associated with the `key`, this returns false, otherwise
+  /// it returns true.
+  bool try_read(const std::string& key, InputArchive& archive);
 
   /// Reads an `InputArchive` associated with a given `key`.
   /// The archive can thereafter be used for further deserialization of the
@@ -75,7 +87,7 @@ class TORCH_API InputArchive final {
   }
 
  private:
-  std::shared_ptr<jit::script::Module> module_;
+  jit::script::Module module_;
 };
 } // namespace serialize
 } // namespace torch

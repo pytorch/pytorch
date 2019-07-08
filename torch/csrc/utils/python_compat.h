@@ -2,7 +2,8 @@
 
 #include <torch/csrc/python_headers.h>
 
-#if PY_VERSION_HEX < 0x03060100
+// PyPy 3.6 does not yet have PySlice_Unpack
+#if PY_VERSION_HEX < 0x03060100 || defined(PYPY_VERSION)
 
 // PySlice_Unpack not introduced till python 3.6.1
 // included here for backwards compatibility

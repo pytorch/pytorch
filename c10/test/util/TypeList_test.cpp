@@ -145,3 +145,10 @@ namespace test_find_if {
   static_assert(2 == find_if<typelist<char, int, char&, int&>, std::is_reference>::value, "");
   static_assert(3 == find_if<typelist<char, int, char, int&>, std::is_reference>::value, "");
 }
+
+namespace test_contains {
+  static_assert(contains<typelist<double>, double>::value, "");
+  static_assert(contains<typelist<int, double>, double>::value, "");
+  static_assert(!contains<typelist<int, double>, float>::value, "");
+  static_assert(!contains<typelist<>, double>::value, "");
+}

@@ -140,10 +140,7 @@ will not pass ``--local_rank`` when you specify this flag.
 import sys
 import subprocess
 import os
-import socket
 from argparse import ArgumentParser, REMAINDER
-
-import torch
 
 
 def parse_args():
@@ -231,7 +228,7 @@ def main():
         process.wait()
         if process.returncode != 0:
             raise subprocess.CalledProcessError(returncode=process.returncode,
-                                                cmd=process.args)
+                                                cmd=cmd)
 
 
 if __name__ == "__main__":

@@ -81,7 +81,7 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
   // "init" must be the identity element for binary_op
   int ndim = THCTensor_(nDimensionLegacyNoScalars)(state, src);
   THArgCheck(dimension >= 0 && dimension < ndim, 3, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THCTensor_(resizeAs)(state, self_, src);
   THCTensor *self = THCTensor_(newContiguous)(state, self_);

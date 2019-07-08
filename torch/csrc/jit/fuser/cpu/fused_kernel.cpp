@@ -88,7 +88,7 @@ static void runCompiler(
     config.openmp = false; // disable for future compiles
     return runCompiler(cpp_file, so_file);
   }
-  AT_CHECK(r == 0, "Failed to compile a fused CPU kernel");
+  TORCH_CHECK(r == 0, "Failed to compile a fused CPU kernel");
 }
 
 static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";

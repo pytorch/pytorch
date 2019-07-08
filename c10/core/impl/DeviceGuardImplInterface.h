@@ -81,9 +81,11 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const noexcept = 0;
 
   /**
-   * Get the number of devices.
+   * Get the number of devices.  WARNING: This is REQUIRED to not raise
+   * an exception.  If there is some sort of problem, e.g., driver error,
+   * you should report that there are zero available devices.
    */
-  virtual DeviceIndex deviceCount() const = 0;
+  virtual DeviceIndex deviceCount() const noexcept = 0;
 
   /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.
@@ -129,6 +131,10 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   auto p = device_guard_impl_registry[static_cast<size_t>(type)].load();
   AT_ASSERTM(p, "DeviceGuardImpl for ", type, " is not available");
   return p;
+}
+
+inline bool hasDeviceGuardImpl(DeviceType type) {
+  return device_guard_impl_registry[static_cast<size_t>(type)].load();
 }
 
 }} // namespace c10::impl

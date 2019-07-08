@@ -1,12 +1,8 @@
-import torch
-
 from .module import Module
 from .utils import _single, _pair, _triple
 from .. import functional as F
-from ..._jit_internal import weak_module, weak_script_method
 
 
-@weak_module
 class _MaxPoolNd(Module):
     __constants__ = ['kernel_size', 'stride', 'padding', 'dilation',
                      'return_indices', 'ceil_mode']
@@ -26,7 +22,6 @@ class _MaxPoolNd(Module):
             ', dilation={dilation}, ceil_mode={ceil_mode}'.format(**self.__dict__)
 
 
-@weak_module
 class MaxPool1d(_MaxPoolNd):
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
@@ -70,7 +65,6 @@ class MaxPool1d(_MaxPoolNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.max_pool1d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
@@ -81,7 +75,6 @@ class MaxPool1d(_MaxPoolNd):
             ', dilation={dilation}, ceil_mode={ceil_mode}'.format(**self.__dict__)
 
 
-@weak_module
 class MaxPool2d(_MaxPoolNd):
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
@@ -141,14 +134,12 @@ class MaxPool2d(_MaxPoolNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.max_pool2d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
 
 
-@weak_module
 class MaxPool3d(_MaxPoolNd):
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
@@ -212,14 +203,12 @@ class MaxPool3d(_MaxPoolNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """  # noqa: E501
 
-    @weak_script_method
     def forward(self, input):
         return F.max_pool3d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
 
 
-@weak_module
 class _MaxUnpoolNd(Module):
 
     def extra_repr(self):
@@ -228,7 +217,6 @@ class _MaxUnpoolNd(Module):
         )
 
 
-@weak_module
 class MaxUnpool1d(_MaxUnpoolNd):
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
@@ -294,7 +282,6 @@ class MaxUnpool1d(_MaxUnpoolNd):
                               self.padding, output_size)
 
 
-@weak_module
 class MaxUnpool2d(_MaxUnpoolNd):
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
@@ -368,7 +355,6 @@ class MaxUnpool2d(_MaxUnpoolNd):
                               self.padding, output_size)
 
 
-@weak_module
 class MaxUnpool3d(_MaxUnpoolNd):
     r"""Computes a partial inverse of :class:`MaxPool3d`.
 
@@ -431,7 +417,6 @@ class MaxUnpool3d(_MaxUnpoolNd):
                               self.padding, output_size)
 
 
-@weak_module
 class _AvgPoolNd(Module):
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad']
 
@@ -441,7 +426,6 @@ class _AvgPoolNd(Module):
         )
 
 
-@weak_module
 class AvgPool1d(_AvgPoolNd):
     r"""Applies a 1D average pooling over an input signal composed of several
     input planes.
@@ -492,14 +476,12 @@ class AvgPool1d(_AvgPoolNd):
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
 
-    @weak_script_method
     def forward(self, input):
         return F.avg_pool1d(
             input, self.kernel_size, self.stride, self.padding, self.ceil_mode,
             self.count_include_pad)
 
 
-@weak_module
 class AvgPool2d(_AvgPoolNd):
     r"""Applies a 2D average pooling over an input signal composed of several input
     planes.
@@ -559,13 +541,11 @@ class AvgPool2d(_AvgPoolNd):
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
 
-    @weak_script_method
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
                             self.padding, self.ceil_mode, self.count_include_pad)
 
 
-@weak_module
 class AvgPool3d(_AvgPoolNd):
     r"""Applies a 3D average pooling over an input signal composed of several input
     planes.
@@ -632,7 +612,6 @@ class AvgPool3d(_AvgPoolNd):
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
 
-    @weak_script_method
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride,
                             self.padding, self.ceil_mode, self.count_include_pad)
@@ -644,7 +623,6 @@ class AvgPool3d(_AvgPoolNd):
         self.__dict__.setdefault('count_include_pad', True)
 
 
-@weak_module
 class FractionalMaxPool2d(Module):
     r"""Applies a 2D fractional max pooling over an input signal composed of several input planes.
 
@@ -696,7 +674,6 @@ class FractionalMaxPool2d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    @weak_script_method
     def forward(self, input):
         return F.fractional_max_pool2d(
             input, self.kernel_size, self.output_size, self.output_ratio,
@@ -704,7 +681,6 @@ class FractionalMaxPool2d(Module):
             _random_samples=self._random_samples)
 
 
-@weak_module
 class FractionalMaxPool3d(Module):
     r"""Applies a 3D fractional max pooling over an input signal composed of several input planes.
 
@@ -756,7 +732,6 @@ class FractionalMaxPool3d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    @weak_script_method
     def forward(self, input):
         return F.fractional_max_pool3d(
             input, self.kernel_size, self.output_size, self.output_ratio,
@@ -764,7 +739,6 @@ class FractionalMaxPool3d(Module):
             _random_samples=self._random_samples)
 
 
-@weak_module
 class _LPPoolNd(Module):
     __constants__ = ['norm_type', 'kernel_size', 'stride', 'ceil_mode']
 
@@ -780,7 +754,6 @@ class _LPPoolNd(Module):
             'ceil_mode={ceil_mode}'.format(**self.__dict__)
 
 
-@weak_module
 class LPPool1d(_LPPoolNd):
     r"""Applies a 1D power-average pooling over an input signal composed of several input
     planes.
@@ -816,14 +789,11 @@ class LPPool1d(_LPPoolNd):
         >>> output = m(input)
     """
 
-    @weak_script_method
-    @weak_script_method
     def forward(self, input):
         return F.lp_pool1d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
 
 
-@weak_module
 class LPPool2d(_LPPoolNd):
     r"""Applies a 2D power-average pooling over an input signal composed of several input
     planes.
@@ -873,13 +843,11 @@ class LPPool2d(_LPPoolNd):
 
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.lp_pool2d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
 
 
-@weak_module
 class _AdaptiveMaxPoolNd(Module):
     __constants__ = ['output_size', 'return_indices']
 
@@ -895,7 +863,6 @@ class _AdaptiveMaxPoolNd(Module):
 #   output shapes are, and how the operation computes output.
 
 
-@weak_module
 class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
     r"""Applies a 1D adaptive max pooling over an input signal composed of several input planes.
 
@@ -915,12 +882,10 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
 
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
 
-@weak_module
 class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
     r"""Applies a 2D adaptive max pooling over an input signal composed of several input planes.
 
@@ -951,12 +916,10 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
 
-@weak_module
 class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
     r"""Applies a 3D adaptive max pooling over an input signal composed of several input planes.
 
@@ -988,12 +951,10 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
 
-@weak_module
 class _AdaptiveAvgPoolNd(Module):
     __constants__ = ['output_size']
 
@@ -1005,7 +966,6 @@ class _AdaptiveAvgPoolNd(Module):
         return 'output_size={}'.format(self.output_size)
 
 
-@weak_module
 class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):
     r"""Applies a 1D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1023,12 +983,10 @@ class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):
 
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.adaptive_avg_pool1d(input, self.output_size)
 
 
-@weak_module
 class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
     r"""Applies a 2D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1057,12 +1015,10 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.adaptive_avg_pool2d(input, self.output_size)
 
 
-@weak_module
 class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
     r"""Applies a 3D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1091,6 +1047,5 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.adaptive_avg_pool3d(input, self.output_size)

@@ -2,11 +2,10 @@ import os
 import subprocess
 import glob
 
-from .env import IS_CONDA, IS_LINUX, IS_WINDOWS, CONDA_DIR, check_env_flag, check_negative_env_flag, gather_paths
-from .cuda import USE_CUDA
+from .env import IS_CONDA, IS_WINDOWS, CONDA_DIR, check_env_flag, check_negative_env_flag, gather_paths
 
 # On ROCm, RCCL development isn't complete. https://github.com/ROCmSoftwarePlatform/rccl
-USE_DISTRIBUTED = not check_negative_env_flag("USE_DISTRIBUTED") and not IS_WINDOWS and not check_env_flag("USE_ROCM")
+USE_DISTRIBUTED = not check_negative_env_flag("USE_DISTRIBUTED") and not IS_WINDOWS
 USE_GLOO_IBVERBS = False
 
 IB_DEVINFO_CMD = "ibv_devinfo"
@@ -17,12 +16,12 @@ def get_command_path(command):
     Helper function that checks if the command exists in the path and gets the
     full path of a given linux command if it exists.
     """
-    def excutable(command_path):
+    def executable(command_path):
         return os.path.isfile(command_path) and os.access(command_path, os.X_OK)
 
     for path in os.environ["PATH"].split(os.pathsep):
         command_path = os.path.join(path, command)
-        if excutable(command_path):
+        if executable(command_path):
             return command_path
 
     return None

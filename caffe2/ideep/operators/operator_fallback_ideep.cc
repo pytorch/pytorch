@@ -2,12 +2,10 @@
 #include <caffe2/ideep/utils/ideep_operator.h>
 
 #include <caffe2/operators/abs_op.h>
-#include <caffe2/operators/atan_op.h>
 #include <caffe2/operators/accuracy_op.h>
 #include <caffe2/operators/affine_channel_op.h>
+#include <caffe2/operators/atan_op.h>
 #include <caffe2/operators/batch_matmul_op.h>
-#include "caffe2/operators/bbox_transform_op.h"
-#include "caffe2/operators/box_with_nms_limit_op.h"
 #include <caffe2/operators/cast_op.h>
 #include <caffe2/operators/clip_op.h>
 #include <caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.h>
@@ -29,25 +27,28 @@
 #include <caffe2/operators/given_tensor_fill_op.h>
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
-#include <caffe2/operators/order_switch_ops.h>
+#include <caffe2/operators/normalize_op.h>
 #include <caffe2/operators/pad_op.h>
 #include <caffe2/operators/prelu_op.h>
 #include <caffe2/operators/reduce_ops.h>
+#include <caffe2/operators/rmac_regions_op.h>
 #include <caffe2/operators/roi_align_op.h>
 #include <caffe2/operators/roi_align_rotated_op.h>
+#include <caffe2/operators/roi_pool_op.h>
 #include <caffe2/operators/scale_op.h>
 #include <caffe2/operators/slice_op.h>
-#include <caffe2/operators/sqrt_op.h>
 #include <caffe2/operators/softmax_op.h>
 #include <caffe2/operators/softmax_with_loss_op.h>
+#include <caffe2/operators/sqrt_op.h>
 #include <caffe2/operators/stop_gradient.h>
 #include <caffe2/operators/tanh_op.h>
 #include <caffe2/operators/tensor_protos_db_input.h>
-#include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
 #include <caffe2/queue/queue_ops.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
+#include "caffe2/operators/bbox_transform_op.h"
+#include "caffe2/operators/box_with_nms_limit_op.h"
 
 #ifdef CAFFE2_USE_GLOO
 #include <caffe2/contrib/gloo/common_world_ops.h>
@@ -78,7 +79,6 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<AveragedLoss<float, CPUContext>, SkipIndices<0>>);
 REGISTER_IDEEP_OPERATOR(Flatten, IDEEPFallbackOp<FlattenOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(ResizeLike, IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(Transpose, IDEEPFallbackOp<TransposeOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Slice, IDEEPFallbackOp<SliceOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Clip, IDEEPFallbackOp<ClipOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
@@ -123,6 +123,10 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(Load, IDEEPFallbackOp<LoadOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Save, IDEEPFallbackOp<SaveOp<CPUContext>>);
 
+REGISTER_IDEEP_OPERATOR(
+    RMACRegions,
+    IDEEPFallbackOp<RMACRegionsOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(RoIPool, IDEEPFallbackOp<RoIPoolOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     RoIAlign,
     IDEEPFallbackOp<RoIAlignOp<float, CPUContext>>);
@@ -194,6 +198,12 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<UnaryElementwiseOp<
       TensorTypes<float>, CPUContext, SqrtFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
+    Sign,
+    IDEEPFallbackOp<UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        SignFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
     Div,
     IDEEPFallbackOp<BinaryElementwiseOp<
       NumericTypes, CPUContext, DivFunctor<CPUContext>>>);
@@ -245,12 +255,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     SoftmaxWithLossGradient,
     IDEEPFallbackOp<SoftmaxWithLossGradientOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    NHWC2NCHW,
-    IDEEPFallbackOp<NHWC2NCHWOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    NCHW2NHWC,
-    IDEEPFallbackOp<NCHW2NHWCOp<float, CPUContext>>);
 
 REGISTER_IDEEP_OPERATOR(
     Expand,
@@ -259,6 +263,9 @@ REGISTER_IDEEP_OPERATOR(
         CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Gather, IDEEPFallbackOp<GatherOp<CPUContext>>);
 
+REGISTER_IDEEP_OPERATOR(
+    Normalize,
+    IDEEPFallbackOp<NormalizeOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     ReduceL2,
     IDEEPFallbackOp<

@@ -4,16 +4,28 @@
 namespace torch {
 namespace jit {
 
-static std::function<void(std::shared_ptr<script::Module> module)>
-    emit_module_callback;
-TORCH_API void didFinishEmitModule(std::shared_ptr<script::Module> module) {
+static ModuleHook emit_module_callback;
+void didFinishEmitModule(script::Module module) {
   if (emit_module_callback) {
     emit_module_callback(std::move(module));
   }
 }
-TORCH_API void setEmitModuleHook(
-    std::function<void(std::shared_ptr<script::Module> module)> cb) {
-  emit_module_callback = std::move(cb);
+
+static FunctionHook emit_function_callback;
+void didFinishEmitFunction(StrongFunctionPtr fn) {
+  if (emit_function_callback) {
+    emit_function_callback(fn);
+  }
 }
+
+void setEmitHooks(ModuleHook for_mod, FunctionHook for_fn) {
+  emit_module_callback = std::move(for_mod);
+  emit_function_callback = std::move(for_fn);
+}
+
+std::pair<ModuleHook, FunctionHook> getEmitHooks() {
+  return std::make_pair(emit_module_callback, emit_function_callback);
+}
+
 } // namespace jit
 } // namespace torch

@@ -14,7 +14,7 @@ template <typename T, class Context>
 class DeformConvOpBase : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  DeformConvOpBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit DeformConvOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws),
         deformable_group_(
             this->template GetSingleArgument<int>("deformable_group", 1)) {}
@@ -57,7 +57,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
  public:
   USE_DEFORMABLE_CONV_BASE_FUNCTIONS(T, Context);
 
-  DeformConvOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DeformConvOp(const OperatorDef& operator_def, Workspace* ws)
       : DeformConvOpBase<T, Context>(operator_def, ws) {
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
@@ -84,7 +84,7 @@ class DeformConvGradientOp final : public DeformConvOpBase<T, Context> {
  public:
   USE_DEFORMABLE_CONV_BASE_FUNCTIONS(T, Context);
 
-  DeformConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DeformConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : DeformConvOpBase<T, Context>(operator_def, ws),
         no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(

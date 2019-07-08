@@ -12,8 +12,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class LambdaRankNdcgOp final : public Operator<Context> {
  public:
-  LambdaRankNdcgOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LambdaRankNdcgOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         use_ndcg_as_loss_(
             this->template GetSingleArgument<bool>("use_ndcg_as_loss", false)),
         use_exp_gain_(

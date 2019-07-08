@@ -190,7 +190,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     tensor.mutable_data<float>()[i] = i;
   }
   for (int gpu_id = 0; gpu_id < NumCudaDevices(); ++gpu_id) {
-    DeviceGuard guard(gpu_id);
+    CUDAGuard guard(gpu_id);
     CUDAContext context(gpu_id); // switch to the current gpu
     blob.Reset(new Tensor(tensor, CUDA));
     string serialized = SerializeBlob(blob, "test");

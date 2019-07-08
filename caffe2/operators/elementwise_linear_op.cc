@@ -154,11 +154,26 @@ Y:
 </details>
 
   )DOC")
-    .Input(0, "X", "2D input tensor of size $NxD$. This input represents the input data to be operated on.")
-    .Input(1, "w", "1D scaling factors, or weights, of size $D$. This input contains the weights that will be multiplied by the data.")
-    .Input(2, "b", "1D biases of size $D$. This input contains the biases that will be added to the products of the weights and data.")
-    .Output(0, "Y", "2D output tensor of size $NxD$. Calculated as described above.")
-    .Arg("axis", "*(type: int; default: 1)* Describes the axis of the inputs; defaults to one because the 0th axis most likely describes the batch size.");
+    .Input(
+        0,
+        "X",
+        "2D input tensor of size $NxD$. This input represents the input data to be operated on.")
+    .Input(
+        1,
+        "w",
+        "1D scaling factors, or weights, of size $D$. This input contains the weights that will be multiplied by the data.")
+    .Input(
+        2,
+        "b",
+        "1D biases of size $D$. This input contains the biases that will be added to the products of the weights and data.")
+    .Output(
+        0,
+        "Y",
+        "2D output tensor of size $NxD$. Calculated as described above.")
+    .Arg(
+        "axis",
+        "*(type: int; default: 1)* Describes the axis of the inputs; defaults to one because the 0th axis most likely describes the batch size.")
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(ElementwiseLinearGradient)
   .NumInputs(3)

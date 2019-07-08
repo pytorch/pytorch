@@ -9,6 +9,11 @@
 
 accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 {
+  if ( (THTensor_nDimension(self) != 1) || (THTensor_nDimension(src) != 1) ) {
+    THError("1D tensors expected, got %dD, %dD tensors",
+       THTensor_nDimension(self), THTensor_nDimension(src));
+  }
+
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   THArgCheck(THCTensor_(nElement)(state, self) ==
@@ -48,9 +53,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
-  if( (mat->dim() != 2) || (THTensor_nDimensionLegacyNoScalars(vec) != 1) )
+  if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
-       mat->dim(), THTensor_nDimensionLegacyNoScalars(vec));
+       mat->dim(), THTensor_nDimension(vec));
 
 
   auto vec_size = THTensor_sizeLegacyNoScalars(vec, 0);
@@ -155,9 +160,9 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
-  if ( (THTensor_nDimensionLegacyNoScalars(vec1) != 1) || (THTensor_nDimensionLegacyNoScalars(vec2) != 1) ) {
+  if ( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
-       THTensor_nDimensionLegacyNoScalars(vec1), THTensor_nDimensionLegacyNoScalars(vec2));
+       THTensor_nDimension(vec1), THTensor_nDimension(vec2));
   }
   auto vec1_size = THTensor_sizeLegacyNoScalars(vec1, 0);
   auto vec2_size = THTensor_sizeLegacyNoScalars(vec2, 0);
@@ -744,114 +749,6 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
   ERROR_ONLY_FP_TYPES("baddbmm");
 #endif
 }
-
-void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTensor *rpivots_, THCudaIntTensor *rinfo_, int pivot, THCTensor *a)
-{
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  THAssert(THCTensor_(checkGPU)(state, 2, ra_, a));
-  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, a) == 3, 3, "expected 3D tensor");
-  THArgCheck(THCTensor_(size)(state, a, 1) ==
-             THCTensor_(size)(state, a, 2), 3, "matrices must be square");
-
-  if (ra_ != a) {
-    THCTensor_(resizeAs)(state, ra_, a);
-    if (ra_->stride(2) == 1) {
-      THCTensor_(transpose)(state, ra_, NULL, 1, 2);
-    }
-    THCTensor_(copy)(state, ra_, a);
-  }
-
-
-  int n = a->size(1);
-  int lda;
-  THCTensor *ra__;
-
-  if (ra_->stride(1) == 1) {
-    // column ordered, what BLAS wants
-    lda = ra_->stride(2);
-    ra__ = ra_;
-  } else {
-    // not column ordered, need to make it such (requires copy)
-    THCTensor *transp_r_ = THCTensor_(newTranspose)(state, ra_, 1, 2);
-    ra__ = THCTensor_(newClone)(state, transp_r_);
-    THCTensor_(free)(state, transp_r_);
-    THCTensor_(transpose)(state, ra__, NULL, 1, 2);
-    lda = ra__->stride(2);
-  }
-
-  int64_t num_batches = ra__->size(0);
-
-  if (!pivot) {
-    THCudaIntTensor *t = THCudaIntTensor_new(state);
-    auto t_aten = THTensor_wrap(t);
-    at::range_out(t_aten, 1, n, 1);
-    THCudaIntTensor_unsqueeze1d(state, t, t, 0);
-    THCudaIntTensor** ptrs = (THCudaIntTensor**) THAlloc(sizeof(THCudaIntTensor*)*num_batches);
-    for (int64_t i=0; i<num_batches; i++) {
-      ptrs[i] = t;
-    }
-    THCudaIntTensor_catArray(state, rpivots_, ptrs, num_batches, 0);
-    THCudaIntTensor_free(state, t);
-    THFree(ptrs);
-  } else {
-    THCudaIntTensor_resize2d(state, rpivots_, num_batches, n);
-  }
-
-  bool free_rinfo_ = !rinfo_;
-  if (rinfo_ == NULL) rinfo_ = THCudaIntTensor_new(state);
-  THCudaIntTensor_resize1d(state, rinfo_, num_batches);
-  // THCudaBlas_Sgetrf,THCudaBlas_Dgetrf will NOT write out the info if the dimensionality is 0;
-  // we could check this explicitly, but this seems safer.
-  THCudaIntTensor_zero(state, rinfo_);
-  int *info_gpu = THCudaIntTensor_data(state, rinfo_);
-
-  // Copy pointers to device.
-  size_t matrices_size = num_batches * sizeof(scalar_t*);
-  auto d_result = static_cast<scalar_t**>(THCudaMalloc(state, matrices_size));
-
-  if (num_batches > 0) {
-    const int64_t block = 512;
-    const int64_t grid = (num_batches + block - 1) / block;
-    createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-      (const scalar_t**)d_result, THCTensor_(data)(state, ra__),
-      ra__->stride(0), num_batches);
-  }
-
-  int *pivots_gpu = NULL;
-  if (pivot) {
-    pivots_gpu = THCudaIntTensor_data(state, rpivots_);
-  }
-#ifdef THC_REAL_IS_FLOAT
-  THCudaBlas_Sgetrf(state, n, d_result, lda, pivots_gpu, info_gpu, num_batches);
-#elif defined(THC_REAL_IS_DOUBLE)
-  THCudaBlas_Dgetrf(state, n, d_result, lda, pivots_gpu, info_gpu, num_batches);
-#endif
-
-  THCudaFree(state, d_result);
-
-  if (ra__ != ra_) {
-    THCTensor_(freeCopyTo)(state, ra__, ra_);
-  }
-
-  if (free_rinfo_) {
-    if(THCTensor_nElement(state, rinfo_) != 0) {
-      int min = THCudaIntTensor_minall(state, rinfo_);
-      int max = THCudaIntTensor_maxall(state, rinfo_);
-      THCudaIntTensor_free(state, rinfo_);
-      if (min != 0 || max != 0) {
-        THError("failed to factorize some batch elements (min info == %d, max info == %d)",
-                min, max);
-      }
-    } else {
-      THCudaIntTensor_free(state, rinfo_);
-    }
-  }
-
-#else
-  THError("btrifact for CUDA tensors is only supported for floats and doubles");
-#endif
-}
-
 
 void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b,
                            THCTensor *atf, THCudaIntTensor *pivots)

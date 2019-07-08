@@ -1,17 +1,8 @@
-from numbers import Number
-
 import torch
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, clamp_probs
-
-
-def _dirichlet_sample_nograd(concentration):
-    probs = torch._standard_gamma(concentration)
-    probs /= probs.sum(-1, True)
-    return clamp_probs(probs)
 
 
 # This helper is exposed for testing.
@@ -24,7 +15,7 @@ def _Dirichlet_backward(x, concentration, grad_output):
 class _Dirichlet(Function):
     @staticmethod
     def forward(ctx, concentration):
-        x = _dirichlet_sample_nograd(concentration)
+        x = torch._sample_dirichlet(concentration)
         ctx.save_for_backward(x, concentration)
         return x
 
@@ -71,9 +62,7 @@ class Dirichlet(ExponentialFamily):
     def rsample(self, sample_shape=()):
         shape = self._extended_shape(sample_shape)
         concentration = self.concentration.expand(shape)
-        if isinstance(concentration, torch.Tensor):
-            return _Dirichlet.apply(concentration)
-        return _dirichlet_sample_nograd(concentration)
+        return _Dirichlet.apply(concentration)
 
     def log_prob(self, value):
         if self._validate_args:

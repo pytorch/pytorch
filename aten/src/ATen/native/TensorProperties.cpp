@@ -26,7 +26,7 @@ int64_t stride(const Tensor& self, int64_t dim) {
 bool cudnn_is_acceptable(const Tensor& self) {
   if (!globalContext().userEnabledCuDNN()) return false;
   if (!self.is_cuda()) return false;
-  auto st = self.type().scalarType();
+  auto st = self.scalar_type();
   if (!(st == kDouble || st == kFloat || st == kHalf)) return false;
   if (!detail::getCUDAHooks().compiledWithCuDNN()) return false;
   // cuDNN functions like grid_sampler returns CUDNN_STATUS_BAD_PARAM on empty
@@ -53,11 +53,19 @@ Tensor & detach_(Tensor & self) {
 }
 
 Tensor contiguous(const Tensor & self) {
-  if (self.is_contiguous()) {
-    return self;
-  }
-  return self.clone();
+  return contiguous(self, MemoryFormat::Contiguous);
 }
 
+Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
+  if (self.is_contiguous(memory_format)) {
+    return self;
+  }
+  TORCH_CHECK(
+      memory_format != MemoryFormat::Preserve,
+      "preserve memory format is unsupported by the contiguous operator");
+
+  auto result = at::empty_like(self, self.options(), memory_format);
+  return result.copy_(self);
 }
-}
+} // namespace native
+} // namespace at

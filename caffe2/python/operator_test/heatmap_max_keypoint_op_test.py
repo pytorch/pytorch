@@ -29,6 +29,7 @@ def heatmap_approx_keypoint_ref(maps, rois):
 
 class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
     def setUp(self):
+        super(TestHeatmapMaxKeypointOp, self).setUp()
         np.random.seed(0)
 
         # initial coordinates and interpolate HEATMAP_SIZE from it

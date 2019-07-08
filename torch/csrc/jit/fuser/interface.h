@@ -39,6 +39,11 @@ TORCH_API std::vector<at::Tensor> debugLaunchGraph(
     Graph& graph,
     at::ArrayRef<at::Tensor> inputs);
 
+// Treats the given graph as a fusion group and returns the generated code.
+TORCH_API std::string debugGetFusedKernelCode(
+    Graph& graph,
+    at::ArrayRef<at::Tensor> inputs);
+
 TORCH_API size_t nCompiledKernels();
 
 } // namespace jit

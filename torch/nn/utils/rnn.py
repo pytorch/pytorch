@@ -33,8 +33,29 @@ class PackedSequence(PackedSequence_):
         data (Tensor): Tensor containing packed sequence
         batch_sizes (Tensor): Tensor of integers holding
             information about the batch size at each sequence step
+        sorted_indices (Tensor, optional): Tensor of integers holding how this
+            :class:`PackedSequence` is constructed from sequences.
+        unsorted_indices (Tensor, optional): Tensor of integers holding how this
+            to recover the original sequences with correct order.
+
+    .. note::
+        :attr:`data` can be on arbitrary device and of arbitrary dtype.
+        :attr:`sorted_indices` and :attr:`unsorted_indices` must be ``torch.int64``
+        tensors on the same device as :attr:`data`.
+
+        However, :attr:`batch_sizes` should always be a CPU ``torch.int64`` tensor.
+
+        This invariant is maintained throughout :class:`PackedSequence` class,
+        and all functions that construct a `:class:PackedSequence` in PyTorch
+        (i.e., they only pass in tensors conforming to this constraint).
 
     """
+
+    # NOTE [ device and dtype of a PackedSequence ]
+    #
+    # See the note above in doc string (starting with ":attr:`data` can be on
+    # arbitrary device...").
+
     def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
         # PackedSequence used to only have __init__(self, data, batch_sizes)
         # without a __new__ like this. So to preserve BC for calling in keyword
@@ -58,11 +79,20 @@ class PackedSequence(PackedSequence_):
             return super(PackedSequence, cls).__new__(
                 cls, data[0], data[1], sorted_indices)
 
+    def pin_memory(self):
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
+        return type(self)(self.data.pin_memory(), self.batch_sizes,
+                          bind(self.sorted_indices, lambda t: t.pin_memory()),
+                          bind(self.unsorted_indices, lambda t: t.pin_memory()))
+
     def cuda(self, *args, **kwargs):
         """Returns a GPU copy if `self.data` not already on the GPU"""
         if self.is_cuda:
             return self
         else:
+            # Why not convert `batch_sizes`?
+            # See NOTE [ device and dtype of a PackedSequence ]
             return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes,
                               bind(self.sorted_indices, lambda t: t.cuda(*args, **kwargs)),
                               bind(self.unsorted_indices, lambda t: t.cuda(*args, **kwargs)))
@@ -70,6 +100,8 @@ class PackedSequence(PackedSequence_):
     def cpu(self):
         """Returns a CPU copy if `self.data` not already on the CPU"""
         if self.is_cuda:
+            # Why not convert `batch_sizes`?
+            # See NOTE [ device and dtype of a PackedSequence ]
             return type(self)(self.data.cpu(), self.batch_sizes,
                               bind(self.sorted_indices, lambda t: t.cpu()),
                               bind(self.unsorted_indices, lambda t: t.cpu()))
@@ -78,41 +110,65 @@ class PackedSequence(PackedSequence_):
 
     def double(self):
         r"""Returns copy with `self.data` cast to double type"""
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(self.data.double(), self.batch_sizes,
                           self.sorted_indices, self.unsorted_indices)
 
     def float(self):
         r"""Returns copy with `self.data` cast to float type"""
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(self.data.float(), self.batch_sizes,
                           self.sorted_indices, self.unsorted_indices)
 
     def half(self):
         r"""Returns copy with `self.data` cast to half type"""
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(self.data.half(), self.batch_sizes,
                           self.sorted_indices, self.unsorted_indices)
 
     def long(self):
         r"""Returns copy with `self.data` cast to long type"""
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(self.data.long(), self.batch_sizes,
                           self.sorted_indices, self.unsorted_indices)
 
     def int(self):
         r"""Returns copy with `self.data` cast to int type"""
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(self.data.int(), self.batch_sizes,
                           self.sorted_indices, self.unsorted_indices)
 
     def short(self):
         r"""Returns copy with `self.data` cast to short type"""
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(self.data.short(), self.batch_sizes,
                           self.sorted_indices, self.unsorted_indices)
 
     def char(self):
         r"""Returns copy with `self.data` cast to char type"""
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(self.data.char(), self.batch_sizes,
                           self.sorted_indices, self.unsorted_indices)
 
     def byte(self):
         r"""Returns copy with `self.data` cast to byte type"""
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(self.data.byte(), self.batch_sizes,
                           self.sorted_indices, self.unsorted_indices)
 
@@ -127,6 +183,9 @@ class PackedSequence(PackedSequence_):
             and :class:`torch.device`, then ``self`` is returned.
             Otherwise, returns a copy with the desired configuration.
         """
+
+        # Why not convert `batch_sizes`?
+        # See NOTE [ device and dtype of a PackedSequence ]
         data = self.data.to(*args, **kwargs)
         sorted_indices = self.sorted_indices
         unsorted_indices = self.unsorted_indices
@@ -145,6 +204,10 @@ class PackedSequence(PackedSequence_):
         r"""Returns true if `self.data` stored on a gpu"""
         return self.data.is_cuda
 
+    def is_pinned(self):
+        r"""Returns true if `self.data` stored on in pinned memory"""
+        return self.data.is_pinned()
+
 
 def invert_permutation(permutation):
     if permutation is None:
@@ -158,12 +221,12 @@ def invert_permutation(permutation):
 def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True):
     r"""Packs a Tensor containing padded sequences of variable length.
 
-    Input can be of size ``T x B x *`` where `T` is the length of the longest sequence
-    (equal to ``lengths[0]``), `B` is the batch size, and `*` is any number of
-    dimensions (including 0). If ``batch_first`` is True ``B x T x *`` inputs are
-    expected.
+    :attr:`input` can be of size ``T x B x *`` where `T` is the length of the
+    longest sequence (equal to ``lengths[0]``), ``B`` is the batch size, and
+    ``*`` is any number of dimensions (including 0). If ``batch_first`` is
+    ``True``, ``B x T x *`` :attr:`input` is expected.
 
-    For unsorted sequences, use `enforce_sorted = False`. If ``enforce_sorted`` is
+    For unsorted sequences, use `enforce_sorted = False`. If :attr:`enforce_sorted` is
     ``True``, the sequences should be sorted by length in a decreasing order, i.e.
     ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the shortest
     one. `enforce_sorted = True` is only necessary for ONNX export.

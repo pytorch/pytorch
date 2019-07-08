@@ -1,10 +1,14 @@
 #include "fbgemm_pack_op.h"
 
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/tensor_int8.h"
 
 #include "caffe2_dnnlowp_utils.h"
 
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
+C10_DECLARE_double(caffe2_dnnlowp_acc16_density_threshold);
+C10_DECLARE_int32(caffe2_dnnlowp_acc16_n_threshold);
+C10_DECLARE_int32(caffe2_dnnlowp_acc16_k_threshold);
 
 namespace caffe2 {
 
@@ -115,7 +119,7 @@ template void ComputeColumnOffsets<int16_t>(
     const vector<TensorQuantizationParams>& qparams,
     vector<int32_t>& col_offsets);
 
-fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
+int CountOutliers(
     int groups,
     int kernel_dim,
     int M,
@@ -133,6 +137,17 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
       }
     }
   }
+  return outlier_cnt;
+}
+
+fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
+    int groups,
+    int kernel_dim,
+    int M,
+    int nbits_in_non_outlier,
+    vector<int8_t>& W_quantized) {
+  int outlier_cnt =
+      CountOutliers(groups, kernel_dim, M, nbits_in_non_outlier, W_quantized);
 
   fbgemm::CompressedSparseColumn* Wq_outlier =
       new fbgemm::CompressedSparseColumn(kernel_dim, M);
@@ -160,6 +175,7 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
       }
     }
   } // for each group
+  CAFFE_ENFORCE_EQ(outlier_cnt, Wq_outlier->RowIdx().size());
   Wq_outlier->ColPtr()[M] = outlier_cnt;
 
   return Wq_outlier;
@@ -311,6 +327,8 @@ ConvDNNLowPPackWeightOp::ConvDNNLowPPackWeightOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : ConvPoolDNNLowPOpBase<uint8_t, ConvFp32Op>(operator_def, ws),
+      save_unpacked_weights_(
+          this->GetSingleArgument<bool>("save_unpacked_weights", false)),
       quantize_groupwise_(
           this->GetSingleArgument<bool>("quantize_groupwise", false)) {
   if (this->debug_def().engine() == "DNNLOWP_ACC16") {
@@ -342,9 +360,9 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
   bool ret = this->debug_def().engine() != "DNNLOWP_ACC16" && group_ == M &&
       C_per_group == 1 && group_ % 8 == 0 && this->kernel_.size() == 3 &&
       this->kernel_[0] == 3 && this->kernel_[1] == 3 && this->kernel_[2] == 3 &&
-      this->stride_[0] == this->stride_[1] &&
-      this->stride_[0] == this->stride_[2] &&
       (this->stride_[0] == 1 || this->stride_[0] == 2) &&
+      (this->stride_[1] == 1 || this->stride_[1] == 2) &&
+      (this->stride_[2] == 1 || this->stride_[2] == 2) &&
       this->dilation_[0] == 1 && this->dilation_[1] == 1 &&
       this->dilation_[2] == 1 &&
       accumulate(
@@ -404,6 +422,13 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
       Y->qparams,
       W_quantized,
       qfactory_.get());
+  if (save_unpacked_weights_) {
+        ReinitializeTensor(&Y->original_tensor, filter.sizes(), at::dtype<int8_t>().device(CPU));
+    auto* buffer =
+        Y->original_tensor.template mutable_data<int8_t>();
+    CAFFE_ENFORCE_EQ(Y->original_tensor.numel(), W_quantized.size());
+    memcpy(buffer, W_quantized.data(), W_quantized.size() * sizeof(int8_t));
+  }
 
   if (this->InputIsType<int8::Int8TensorCPU>(FILTER) && quantize_groupwise_) {
     static int log_occurences = 0;
@@ -422,57 +447,115 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   ComputeColumnOffsets(
       kernel_dim, M, W_quantized.data(), Y->qparams, *Y->column_offsets);
 
+  // Check if we should fallback to 32-bit accumulation.
+  // This check is only meaningful when engine is DNNLOWP_ACC16.
+  bool fallback_to_32_bit_accumulation = false;
+  if (nbits_in_non_outlier_ == 0) {
+    LOG(INFO) << "nbits_in_non_outlier == 0 means everything is outlier so we "
+                 "fallback to acc32";
+    fallback_to_32_bit_accumulation = true;
+  }
+  // In Skylake, acc16 is not faster when N or K is smaller than 128
+  // FIXME : code duplication with conv_dnnlowp_acc16_op.cc
+  constexpr int SKYLAKE_ACC16_N_THRESHOLD_MIN = 128,
+                SKYLAKE_ACC16_K_THRESHOLD_MIN = 128;
+  int acc16_n_threshold = FLAGS_caffe2_dnnlowp_acc16_n_threshold;
+  if (caffe2::GetCpuId().avx512f() &&
+      acc16_n_threshold < SKYLAKE_ACC16_N_THRESHOLD_MIN) {
+    acc16_n_threshold = SKYLAKE_ACC16_N_THRESHOLD_MIN;
+  }
+  int acc16_k_threshold = FLAGS_caffe2_dnnlowp_acc16_k_threshold;
+  if (caffe2::GetCpuId().avx512f() &&
+      acc16_k_threshold < SKYLAKE_ACC16_K_THRESHOLD_MIN) {
+    acc16_k_threshold = SKYLAKE_ACC16_K_THRESHOLD_MIN;
+  }
+  if (!fallback_to_32_bit_accumulation && M / group_ < acc16_n_threshold) {
+    LOG(INFO) << "N " << M / group_ << " of weight blob "
+              << this->debug_def().input(0) << " is smaller than threshold "
+              << acc16_n_threshold << " . Falling back to acc32";
+    fallback_to_32_bit_accumulation = true;
+  }
+  if (!fallback_to_32_bit_accumulation && kernel_dim < acc16_k_threshold) {
+    LOG(INFO) << "K " << kernel_dim << " of weight blob "
+              << this->debug_def().input(0) << " is smaller than threshold "
+              << acc16_k_threshold << " . Falling back to acc32";
+    fallback_to_32_bit_accumulation = true;
+  }
+
   // When nbits_in_non_outlier == 0, we fall back to acc32
   if (this->debug_def().engine() == "DNNLOWP_ACC16" &&
-      nbits_in_non_outlier_ > 0) {
+      !fallback_to_32_bit_accumulation) {
     if (nbits_in_non_outlier_ < 8) {
-      Y->W_outlier.reset(ExtractOutlierMatrix(
-          group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized));
-      int outlier_cnt = Y->W_outlier->ColPtr()[M];
+      int outlier_cnt = CountOutliers(
+          group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized);
 
       LOG(INFO) << "Proportion of outlier for Conv layer with weight blob "
                 << this->debug_def().input(0) << " is "
                 << static_cast<float>(outlier_cnt) / W_quantized.size();
       LOG(INFO) << "nbits_in_non_outlier " << nbits_in_non_outlier_;
+
+      if (static_cast<float>(outlier_cnt) / W_quantized.size() >
+          FLAGS_caffe2_dnnlowp_acc16_density_threshold) {
+        LOG(INFO) << "Density of outliers is higher than threshold "
+                  << FLAGS_caffe2_dnnlowp_acc16_density_threshold
+                  << " . Falling back to acc32";
+        fallback_to_32_bit_accumulation = true;
+      } else {
+        Y->W_outlier.reset(ExtractOutlierMatrix(
+            group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized));
+      }
     }
 
-    Y->nbits_in_non_outlier = nbits_in_non_outlier_;
-    Y->W_acc16.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
-        fbgemm::matrix_op_t::Transpose,
-        group_ * kernel_dim,
-        M / group_,
-        W_quantized.data(),
-        kernel_dim,
-        nullptr, // pmat
-        group_));
-  } else if (TakeDepthWise3x3FastPath_()) {
-    Y->W_depthwise_3x3.reset(
-        new fbgemm::Packed3x3ConvMatrix(group_, W_quantized.data()));
-  } else if (TakeDepthWise3x3x3FastPath_()) {
-    Y->W_depthwise_3x3x3.reset(
-        new fbgemm::Packed3x3x3ConvMatrix(group_, W_quantized.data()));
-  } else if (TakeGConvFastPath_()) {
-    fbgemm::conv_param_t<> conv_p(
-        1,
-        group_ * C_per_group,
-        M,
-        {1, 1},
-        group_,
-        {this->kernel_[0], this->kernel_[1]},
-        {this->stride_[0], this->stride_[1]},
-        {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+    if (!fallback_to_32_bit_accumulation) {
+      Y->nbits_in_non_outlier = nbits_in_non_outlier_;
+      Y->W_acc16.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
+          fbgemm::matrix_op_t::Transpose,
+          group_ * kernel_dim,
+          M / group_,
+          W_quantized.data(),
+          kernel_dim,
+          nullptr, // pmat
+          group_));
+    }
+  }
 
-    Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
-        fbgemm::matrix_op_t::Transpose, conv_p, W_quantized.data()));
-  } else {
-    Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
-        fbgemm::matrix_op_t::Transpose,
-        group_ * kernel_dim,
-        M / group_,
-        W_quantized.data(),
-        kernel_dim,
-        nullptr, // pmat
-        group_));
+  if (fallback_to_32_bit_accumulation) {
+    Y->W_acc16.reset();
+    Y->W_outlier.reset();
+  }
+
+  if (this->debug_def().engine() != "DNNLOWP_ACC16" ||
+      fallback_to_32_bit_accumulation) {
+    // acc32
+    if (TakeDepthWise3x3FastPath_()) {
+      Y->W_depthwise_3x3.reset(
+          new fbgemm::Packed3x3ConvMatrix(group_, W_quantized.data()));
+    } else if (TakeDepthWise3x3x3FastPath_()) {
+      Y->W_depthwise_3x3x3.reset(
+          new fbgemm::Packed3x3x3ConvMatrix(group_, W_quantized.data()));
+    } else if (TakeGConvFastPath_()) {
+      fbgemm::conv_param_t<> conv_p(
+          1,
+          group_ * C_per_group,
+          M,
+          {1, 1},
+          group_,
+          {this->kernel_[0], this->kernel_[1]},
+          {this->stride_[0], this->stride_[1]},
+          {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+      Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
+          fbgemm::matrix_op_t::Transpose, conv_p, W_quantized.data()));
+    } else {
+      Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
+          fbgemm::matrix_op_t::Transpose,
+          group_ * kernel_dim,
+          M / group_,
+          W_quantized.data(),
+          kernel_dim,
+          nullptr, // pmat
+          group_));
+    }
   }
 
   if (InputSize() >= 2) {
@@ -488,9 +571,115 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   return true;
 }
 
+bool Int8DNNLowpPackedWeightBlobShapeFunctions::IsSameMetaType(
+    TypeIdentifier id) {
+  return id == TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>() ||
+      id == TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>();
+}
+
+TypeIdentifier Int8DNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId(
+    const string& name) {
+  if (name == "FC") {
+    return TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>();
+  } else if (name == "Conv") {
+    return TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>();
+  } else {
+    CAFFE_THROW("Class type is not supported: ", name);
+    return TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>();
+  }
+}
+
+TypeMeta Int8DNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
+    const void* c) {
+  // There might be some problem if type if FC.
+  // We should use a different function.
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
+  return (int8_tensor->original_tensor).dtype();
+}
+
+vector<int64_t>
+Int8DNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorInfo(
+    const void* c,
+    size_t* capacity,
+    DeviceOption* device) {
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
+  return GetTensorInfo(&(int8_tensor->original_tensor), capacity, device);
+}
+
+void Int8DNNLowpPackedWeightBlobShapeFunctions::LoadInfoOfBlob(
+    const Blob* blob,
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis) {
+  scale->clear();
+  offset->clear();
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(blob->GetRaw());
+  const auto& qparams = int8_tensor->qparams;
+  for (const auto& qparam : qparams) {
+    scale->emplace_back(qparam.scale);
+    offset->emplace_back(static_cast<float>(qparam.zero_point));
+  }
+  *axis = 1;
+}
+
+void Int8DNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
+    const Blob* blob,
+    std::vector<std::vector<uint64_t>>* shapes,
+    std::vector<std::vector<float>>* all_scales,
+    std::vector<std::vector<int32_t>>* all_offsets,
+    ExternalTensorDescriptor* desc) {
+  const auto& dnntensor = blob->template Get<Int8ConvDNNLowPPackedWeightBlob>();
+  const Tensor& cpu_tensor = dnntensor.original_tensor;
+
+  if (cpu_tensor.template IsType<uint8_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_UINT8;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int32_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_INT32;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<int32_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<int8_t>());
+  } else {
+    CAFFE_THROW(
+        "Unsupported Int8ConvDNNLowPPackedWeightBlob type in ONNXIFI: ",
+        cpu_tensor.dtype().name());
+  }
+
+  desc->quantizationParams = dnntensor.qparams.size();
+  desc->quantizationAxis = 1;
+  std::vector<float> scales;
+  std::vector<int32_t> offsets;
+  for (const auto v : dnntensor.qparams) {
+    scales.push_back(v.scale);
+    offsets.push_back(reinterpret_cast<int32_t>(v.zero_point));
+  }
+  all_scales->push_back(scales);
+  all_offsets->push_back(offsets);
+  desc->scales = all_scales->back().data();
+  desc->biases = all_offsets->back().data();
+
+  // Set up dim and shape
+  const auto shape = cpu_tensor.sizes();
+  desc->dimensions = shape.size();
+  shapes->emplace_back(shape.cbegin(), shape.cend());
+  desc->shape = shapes->back().data();
+}
+
 // Explicitly register TypeMeta
 CAFFE_KNOWN_TYPE(Int8FCDNNLowPPackedWeightBlob);
 CAFFE_KNOWN_TYPE(Int8ConvDNNLowPPackedWeightBlob);
+
+// Register DNNLOWP Type in caffe2 core
+REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
+    (TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>()),
+    Int8DNNLowpPackedWeightBlobShapeFunctions);
+REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
+    (TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>()),
+    Int8DNNLowpPackedWeightBlobShapeFunctions);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,

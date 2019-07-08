@@ -23,15 +23,14 @@
 #     differentiable subcomponents.
 #
 from __future__ import print_function
-import os
-import sys
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
+from .env import BUILD_NAMEDTENSOR
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 's_copy_', '_s_copy_from'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -75,6 +74,9 @@ DONT_REQUIRE_DERIVATIVE = {
     # These are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
     '__lshift__', '__or__', '__rshift__', '__xor__',
+    # These work on integral data types, and hence don't require derivative
+    '_sobol_engine_draw', '_sobol_engine_ff', '_sobol_engine_scramble_',
+    '_sobol_engine_initialize_state_',
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
 }
@@ -135,18 +137,22 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 # The following list contains functions that we don't enforce the invariant on.
 DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
-    '_th_set_', '_cudnn_rnn_flatten_weight',
+    'set_', '_cudnn_rnn_flatten_weight',
 }
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+static ${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+${return_type} VariableType::${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
+""")
+
+WRAPPER_REGISTRATION = CodeTemplate("""\
+.registerVariableOp<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -170,13 +176,16 @@ grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
-CALL_VIA_TYPE = CodeTemplate("""\
-TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
+CALL_DEFAULT = CodeTemplate("""\
+TypeDefault::${api_name}(${type_method_args})""")
 
-CALL_VIA_DERIVED = CodeTemplate("""\
-baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
+CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
+at::${api_name}(${unpacked_args})""")
 
-# If the `baseType` operation has return values, we use the `tmp` variable to hold the
+CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
+self_.${api_name}(${unpacked_method_args})""")
+
+# If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
@@ -195,7 +204,9 @@ DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 """)
 
 SET_HISTORY = CodeTemplate("""\
-${fn}_history(${differentiable_outputs}, grad_fn);
+if (grad_fn) {
+    ${fn}_history(${differentiable_outputs}, grad_fn);
+}
 """)
 
 CONDITIONAL = CodeTemplate("""\
@@ -205,7 +216,8 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Function::peek_at_next_sequence_nr());
+""")
 
 SELECT = CodeTemplate("""\
 if (${cond}) {
@@ -268,8 +280,13 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
+    if BUILD_NAMEDTENSOR:
+        # Short-term plan: Don't support tracing Dimname.
+        # Long-term plan: Add Dimname as a first-class type to the JIT.
+        if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
+            return False
     # Operations involving Storage or Type are not traceable at the moment
-    if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
+    if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
     if 'Tensor' not in declaration['return_type']:
@@ -396,6 +413,8 @@ def format_prerecord_trace(declaration):
 
 
 def format_trace(declaration):
+    if not should_trace(declaration):
+        return ('', '')
     return (format_prerecord_trace(declaration), format_postrecord_trace(declaration))
 
 
@@ -435,30 +454,27 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     type_declarations = []
     type_definitions = []
+    wrapper_registrations = []
 
     for declaration in aten_declarations:
-        # Factory methods usually do not appear in `VariableType` at all, since they
-        # don't dispatch via `Type`; except in the case where the implementation is 'abstract'
-        # in which case they do!
-        if declaration['is_factory_method']:
-            continue
+        formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
-            type_definitions.append(emit_method_definition(declaration))
+            body = emit_body(declaration)
+            type_definitions.append(METHOD_DEFINITION.substitute(
+                declaration, type_definition_body=body))
+        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+            declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
+        'wrapper_registrations': wrapper_registrations,
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
-
-
-def emit_method_definition(declaration):
-    body = emit_body(declaration)
-    return METHOD_DEFINITION.substitute(declaration, type_definition_body=body)
 
 
 def emit_body(declaration):
@@ -476,23 +492,37 @@ def emit_body(declaration):
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
 
-    # These exclude things like BoolTensor, int64_t, and Scalar
     def is_differentiable(arg):
         if 'TensorOptions' in arg['type']:
             return False
         if 'Tensor' not in arg['type']:
             return False
-        if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
+        if arg['name'] in declaration.get('non_differentiable_arg_names', []):
             return False
         return True
 
+    def find_args_with_derivatives(differentiable_inputs):
+        """Find arguments that have derivative definitions"""
+        if func is None:
+            return differentiable_inputs
+        names = set(name for d in func['derivatives'] for name in d['var_names'])
+        differentiable = [arg for arg in differentiable_inputs if arg['name'] in names]
+        if len(differentiable) != len(names):
+            missing = names - set(arg['name'] for arg in differentiable)
+            raise RuntimeError('Missing arguments for derivatives: {} in {}'.format(missing, func['name']))
+        return differentiable
+
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
+    args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
+    non_differentiable_arg_names = declaration.get('non_differentiable_arg_names', [])
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
-    if func is not None and func.get('output_differentiability') is not None:
+    if declaration['output_differentiability'] is not None:
         differentiable_outputs = []
-        output_differentiability = func.get('output_differentiability')
+        output_differentiability = declaration['output_differentiability']
+        if False in output_differentiability and inplace:
+            raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")
         for differentiable, output in zip(output_differentiability, returns):
             if differentiable:
                 differentiable_outputs.append(output)
@@ -507,14 +537,15 @@ def emit_body(declaration):
         strategy == 'use_derived')
 
     if func is not None and not requires_derivative:
-        print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
+        raise RuntimeError('ERROR: derivative ignored for {} -- specified an autograd function without derivative'
+                           .format(name))
 
     def emit_save_inputs():
         setup = []
         if func is None:
             return setup
 
-        has_tensorlist_arg = any(arg['type'] == 'TensorList' for arg in func['args_with_gradients'])
+        has_tensorlist_arg = any(arg['type'] == 'TensorList' for arg in func['args_with_derivatives'])
 
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements
@@ -534,7 +565,7 @@ def emit_body(declaration):
 
             # If there's a single derivative we could compute, we already have
             # a requires_grad check that is sufficient
-            if len(func['args_with_gradients']) <= 1:
+            if len(func['args_with_derivatives']) <= 1:
                 return None
 
             # We really only care about trimming down the amount of tensors we save
@@ -553,26 +584,25 @@ def emit_body(declaration):
             derivative_var_name = derivative['var_names'][0]
 
             # Figure out the offset of the edge that uses this variable
-            for edge_off, arg in enumerate(func['args_with_gradients']):
+            for edge_off, arg in enumerate(func['args_with_derivatives']):
                 if arg['name'] == derivative_var_name:
                     break
             else:
-                assert False
+                raise AssertionError()
 
             return 'grad_fn->should_compute_output({})'.format(edge_off)
 
         setup.extend(save_variables(func['saved_inputs'], False, guard_for))
-        for arg in func['args_with_gradients']:
+        for arg in func['args_with_derivatives']:
             if arg['type'] == 'TensorList':
                 setup.append("grad_fn->{}_size_ = {}.size();".format(arg['name'], arg['name']))
 
         return setup
 
-    def setup_derivative():
-        args_with_derivatives = find_args_with_derivatives()
+    def setup_derivative(differentiable_inputs):
 
         env = {}
-        env['args_with_derivatives'] = reference_args(args_with_derivatives)
+        env['args_with_derivatives'] = [arg['name'] for arg in args_with_derivatives]
         env['op'] = func['op'] if func is not None else 'NotImplemented'
         env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
@@ -582,10 +612,10 @@ def emit_body(declaration):
             body.append(DECLARE_GRAD_FN.substitute(op='Function'))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
-                args_with_derivatives=reference_args(differentiable_inputs)))
+                args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
-                args_with_derivatives=reference_args(differentiable_outputs)))
+                args_with_derivatives=[arg['name'] for arg in differentiable_outputs]))
             return body
 
         setup = []
@@ -598,17 +628,6 @@ def emit_body(declaration):
         body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
         return body
 
-    def find_args_with_derivatives():
-        """Find arguments that have derivative definitions"""
-        if func is None:
-            return differentiable_inputs
-        names = set(name for d in func['derivatives'] for name in d['var_names'])
-        differentiable = [arg for arg in differentiable_inputs if arg['name'] in names]
-        if len(differentiable) != len(names):
-            missing = names - set(arg['name'] for arg in differentiable)
-            raise RuntimeError('Missing arguments for derivatives: {} in {}'.format(missing, func['name']))
-        return differentiable
-
     def emit_check_no_requires_grad(tensor_args, args_with_derivatives):
         """Checks that arguments without derivatives don't require grad"""
         body = []
@@ -616,11 +635,13 @@ def emit_body(declaration):
             if arg in args_with_derivatives:
                 continue
             name = arg['name']
+            if name in non_differentiable_arg_names:
+                continue
             if name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
                 # 'output', but only define the derivative for input.
                 continue
-            if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
+            if arg['dynamic_type'] in {'IndexTensor', 'ByteTensor', 'BoolTensor'}:
                 continue
             body.append('check_no_requires_grad({}, "{}");'.format(name, name))
         return body
@@ -653,20 +674,6 @@ def emit_body(declaration):
                 stmts.append('  grad_fn->{} = {};'.format(name, expr))
                 stmts.append('}')
         return stmts
-
-    def reference_args(args):
-        res = []
-        for arg in args:
-            if arg['type'] == 'SparseTensorRef':
-                res.append('{}.tref'.format(arg['name']))
-            else:
-                res.append(arg['name'])
-        return res
-
-    def emit_record_trace(env):
-        if not should_trace(declaration):
-            return ('', '')
-        return format_trace(declaration)
 
     def declare_returned_variables():
         if modifies_arguments:
@@ -761,12 +768,17 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
-            # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
+            # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            base_type_call = CALL_VIA_DERIVED.substitute(combined)
+            if 'namespace' in declaration['method_of']:
+                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
+            else:
+                unpacked_method_args = combined['unpacked_args'][1:]
+                base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
+                    combined, unpacked_method_args=unpacked_method_args)
             if not modifies_arguments and not returns_void:
                 rhs_value, extra_wrapping_stmts = wrap_output('tmp')
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
@@ -777,7 +789,7 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
-            call = CALL_VIA_TYPE.substitute(declaration)
+            call = CALL_DEFAULT.substitute(declaration)
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values(), call)
             call = call + ';'
@@ -837,20 +849,30 @@ def emit_body(declaration):
             return []
         return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
 
+    def check_record_function_input_type(simple_type):
+        return simple_type in ['Tensor', 'Scalar']
+
+    def record_function_input_names():
+        return ', '.join([
+            arg['name'] for arg in declaration['arguments']
+            if check_record_function_input_type(arg['simple_type'])])
+
     env = {}
     combined = nested_dict(env, declaration)
 
     body = []
     if base_name not in DONT_PROFILE:
-        body.append(RECORD_FUNCTION.substitute(combined))
+        input_names = record_function_input_names()
+        body.append(
+            RECORD_FUNCTION.substitute(combined, input_names=input_names))
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
         body.extend(emit_check_inplace())
-        body.extend(setup_derivative())
+        body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables())
 
-    pre_record_trace, post_record_trace = emit_record_trace(env)
+    pre_record_trace, post_record_trace = format_trace(declaration)
 
     body.append(pre_record_trace)
     body.append(emit_call(env))
@@ -885,7 +907,7 @@ def unpack_args(env, declaration):
         dynamic_type = arg['dynamic_type']
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
-            ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
+            ref = (not is_nullable) and dynamic_type not in ['TensorList']
             suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
 
             body.append(UNPACK_TENSOR.substitute(

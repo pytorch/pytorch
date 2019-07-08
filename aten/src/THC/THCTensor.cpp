@@ -104,7 +104,7 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+  TORCH_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
   at::IntArrayRef sizes(size, nDimension);
   at::optional<at::IntArrayRef> strides;
   if (stride) {

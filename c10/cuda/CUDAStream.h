@@ -68,7 +68,7 @@ public:
   /// Construct a CUDAStream from a Stream.  This construction is checked,
   /// and will raise an error if the Stream is not, in fact, a CUDA stream.
   explicit CUDAStream(Stream stream) : stream_(stream) {
-    AT_CHECK(stream_.device_type() == DeviceType::CUDA);
+    TORCH_CHECK(stream_.device_type() == DeviceType::CUDA);
   }
 
   /// Construct a CUDAStream from a Stream with no error checking.

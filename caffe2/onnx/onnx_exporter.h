@@ -28,9 +28,7 @@ using ConvertedResult =
 // output names for predict net.
 CAFFE2_API std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
-    caffe2::NetDef* pred_net,
-    const std::unordered_set<std::string>& exceptions =
-        std::unordered_set<std::string>());
+    caffe2::NetDef* pred_net);
 
 ::ONNX_NAMESPACE::TensorProto::DataType Caffe2TypeToOnnxType(
     caffe2::TensorProto::DataType t);
@@ -66,6 +64,10 @@ class CAFFE2_API OnnxExporter {
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
   ConvertedResult CreateCastNodes(
+      const caffe2::OperatorDef& def,
+      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
+
+  ConvertedResult CreateElementwiseLinearNodes(
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 

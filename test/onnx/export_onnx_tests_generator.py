@@ -13,7 +13,6 @@ import shutil
 import torch
 import traceback
 
-import test_pytorch_common
 import test_onnx_common
 from common_nn import module_tests
 from test_nn import new_module_tests

@@ -15,10 +15,10 @@ void check_all_parameters(
     const torch::jit::script::Module& module,
     Predicate predicate) {
   for (const auto& parameter : module.get_parameters()) {
-    AT_ASSERT(predicate(*parameter->slot()));
+    AT_ASSERT(predicate(parameter.value().toTensor()));
   }
   for (const auto& child : module.get_modules()) {
-    check_all_parameters(*child->module, predicate);
+    check_all_parameters(child, predicate);
   }
 }
 } // namespace helpers
@@ -48,45 +48,42 @@ void get_operator_from_registry_and_execute() {
 
 void load_serialized_module_with_custom_op_and_execute(
     const std::string& path_to_exported_script_module) {
-  std::shared_ptr<torch::jit::script::Module> module =
+  torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
-
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back(torch::ones(5));
-  auto output = module->forward(inputs).toTensor();
+  auto output = module.forward(inputs).toTensor();
 
   AT_ASSERT(output.allclose(torch::ones(5) + 1));
 }
 
 void test_argument_checking_for_serialized_modules(
     const std::string& path_to_exported_script_module) {
-  std::shared_ptr<torch::jit::script::Module> module =
+  torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
-
+  
   try {
-    module->forward({torch::jit::IValue(1), torch::jit::IValue(2)});
+    module.forward({torch::jit::IValue(1), torch::jit::IValue(2)});
     AT_ASSERT(false);
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected at most 1 argument(s) for operator 'forward', "
-                  "but received 2 argument(s)") == 0);
+            .find("Expected at most 2 argument(s) for operator 'forward', "
+                  "but received 3 argument(s)") == 0);
   }
 
   try {
-    module->forward({torch::jit::IValue(5)});
+    module.forward({torch::jit::IValue(5)});
     AT_ASSERT(false);
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected value of type Tensor for argument 'input' in "
-                  "position 0, but instead got value of type int") == 0);
+            .find("forward() Expected a value of type 'Tensor' "
+                  "for argument 'input' but instead found type 'int'") == 0);
   }
 
   try {
-    module->forward({});
+    module.forward({});
     AT_ASSERT(false);
   } catch (const c10::Error& error) {
     AT_ASSERT(
@@ -96,41 +93,39 @@ void test_argument_checking_for_serialized_modules(
 }
 
 void test_move_to_device(const std::string& path_to_exported_script_module) {
-  std::shared_ptr<torch::jit::script::Module> module =
+  torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cpu();
   });
 
-  module->to(torch::kCUDA);
+  module.to(torch::kCUDA);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cuda();
   });
 
-  module->to(torch::kCPU);
+  module.to(torch::kCPU);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cpu();
   });
 }
 
 void test_move_to_dtype(const std::string& path_to_exported_script_module) {
-  std::shared_ptr<torch::jit::script::Module> module =
+  torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
 
-  module->to(torch::kInt);
+  module.to(torch::kInt);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.dtype() == torch::kInt;
   });
 
-  module->to(torch::kDouble);
+  module.to(torch::kDouble);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.dtype() == torch::kDouble;
   });
 }

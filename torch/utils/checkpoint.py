@@ -7,6 +7,10 @@ def detach_variable(inputs):
     if isinstance(inputs, tuple):
         out = []
         for inp in inputs:
+            if not isinstance(inp, torch.Tensor):
+                out.append(inp)
+                continue
+
             x = inp.detach()
             x.requires_grad = inp.requires_grad
             out.append(x)
@@ -17,7 +21,7 @@ def detach_variable(inputs):
 
 
 def check_backward_validity(inputs):
-    if not any(inp.requires_grad for inp in inputs):
+    if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn("None of the inputs have requires_grad=True. Gradients will be None")
 
 
@@ -93,7 +97,9 @@ class CheckpointFunction(torch.autograd.Function):
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
         torch.autograd.backward(outputs, args)
-        return (None, None) + tuple(inp.grad for inp in detached_inputs)
+        grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else inp
+                      for inp in detached_inputs)
+        return (None, None) + grads
 
 
 def checkpoint(function, *args, **kwargs):
@@ -149,6 +155,9 @@ def checkpoint(function, *args, **kwargs):
     return CheckpointFunction.apply(function, preserve, *args)
 
 
+# TODO(sublee): When releasing PyTorch 1.3,
+# fix the function signature to not accept variadic arguments.
+# See also: https://github.com/pytorch/pytorch/issues/19260
 def checkpoint_sequential(functions, segments, *inputs, **kwargs):
     r"""A helper function for checkpointing sequential models.
 
@@ -189,6 +198,18 @@ def checkpoint_sequential(functions, segments, *inputs, **kwargs):
     preserve = kwargs.pop('preserve_rng_state', True)
     if kwargs:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
+
+    # To accept variadic arguments is not consistent with nn.Sequential.
+    # This interface will be changed at PyTorch 1.3.
+    # See also: https://github.com/pytorch/pytorch/issues/19260
+    if not inputs:
+        warnings.warn('Giving no input to checkpoint_sequential has been deprecated, '
+                      'a TypeError will be raised after PyTorch 1.3',
+                      DeprecationWarning)
+    elif len(inputs) > 1:
+        warnings.warn('multiple inputs to checkpoint_sequential has been deprecated, '
+                      'a TypeError will be raised after PyTorch 1.3',
+                      DeprecationWarning)
 
     def run_function(start, end, functions):
         def forward(*inputs):

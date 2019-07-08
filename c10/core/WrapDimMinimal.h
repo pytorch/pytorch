@@ -14,10 +14,11 @@ static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wr
 
   int64_t min = -dim_post_expr;
   int64_t max = dim_post_expr - 1;
-  AT_CHECK(
-      dim >= min && dim <= max,
+  if (dim < min || dim > max) {
+    AT_INDEX_ERROR(
       "Dimension out of range (expected to be in range of [",
       min, ", ", max, "], but got ", dim, ")");
+  }
   if (dim < 0) dim += dim_post_expr;
   return dim;
 }

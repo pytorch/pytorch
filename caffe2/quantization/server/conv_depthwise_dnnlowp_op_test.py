@@ -10,6 +10,7 @@ from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     generate_convnd_inputs,
+    run_conv_or_fc,
 )
 from hypothesis import given
 
@@ -159,18 +160,16 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([relu_op])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
 
     @given(
-        stride=st.integers(1, 2),
+        stride_0=st.integers(1, 2),
+        stride_1=st.integers(1, 2),
+        stride_2=st.integers(1, 2),
         size=st.integers(5, 12),
         # depthwise 3x3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 24, 32]),
@@ -185,7 +184,9 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
     )
     def test_dnnlowp_depthwise_3x3x3_conv(
         self,
-        stride,
+        stride_0,
+        stride_1,
+        stride_2,
         size,
         group,
         batch_size,
@@ -206,7 +207,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         order = "NHWC"
 
         X, W, b = generate_convnd_inputs(
-            (stride,) * 3,
+            (stride_0, stride_1, stride_2),
             (pad,) * 3,
             (kernel,) * 3,
             (dilation,) * 3,
@@ -269,7 +270,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 op_type,
                 ["X_q" if do_quantize else "X", "W", "b"],
                 ["Y_q" if do_dequantize else "Y"],
-                strides=[stride] * 3,
+                strides=[stride_0, stride_1, stride_2],
                 kernels=[kernel] * 3,
                 dilations=[dilation] * 3,
                 pads=[pad] * (3 * 2),
@@ -294,12 +295,8 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)

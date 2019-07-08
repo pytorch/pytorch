@@ -1,7 +1,4 @@
-import os
-from copy import deepcopy
 from . import CWrapPlugin
-from itertools import product
 from ...shared import cwrap_common
 
 

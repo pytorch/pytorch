@@ -42,7 +42,7 @@ bool should_expand(const IntArrayRef &from_size, const IntArrayRef &to_size) {
   return true;
 }
 
-void test(Type &T) {
+void test(DeprecatedTypeProperties &T) {
   std::vector<std::vector<int64_t>> sizes = {{}, {0}, {1}, {1, 1}, {2}};
 
   // single-tensor/size tests

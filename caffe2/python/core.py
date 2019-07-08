@@ -714,6 +714,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
         return input_name + '_grad'
 
+    IS_AUTO_GEN_SUM_OPS_TAG = "is_auto_gen_sum_ops"
+
     def _SetSumOpsDeviceOption(self, sum_ops, generators):
         # we already checked that device options are consistent so we can just
         # use the first one we find
@@ -724,7 +726,9 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 if grad_op.HasField('device_option'):
                     for op in sum_ops:
                         op.device_option.CopyFrom(grad_op.device_option)
-                        del op.device_option.extra_info[:]
+                        op.device_option.extra_info.extend([
+                            "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
+                        ])
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
@@ -1492,6 +1496,12 @@ class Net(object):
         if device_option is not None:
             ops = [copy.deepcopy(op) for op in ops]
             map(lambda x: x.device_option.CopyFrom(device_option), ops)
+            for op in ops:
+                if op.type == "RecurrentNetwork":
+                    for arg in op.arg:
+                        if arg.name.endswith('step_net'):
+                            for step_op in arg.n.op:
+                                step_op.device_option.CopyFrom(device_option)
 
         self._ExtendOps(ops)
         return self

@@ -1,8 +1,4 @@
 add_subdirectory(ios)
-if (USE_ACL)
-  # add_subdirectory(arm-compute)
-endif()
-# Finally pass the src lists back to the parent
 
 if (USE_NNAPI)
   add_subdirectory(nnapi)

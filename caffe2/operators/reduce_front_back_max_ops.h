@@ -11,8 +11,9 @@ namespace caffe2 {
 template <typename T, class Context, bool FIRSTDIMS>
 class MaxReduceDimsOp final : public Operator<Context> {
  public:
-  MaxReduceDimsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit MaxReduceDimsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         num_reduce_dims_(
             this->template GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 
@@ -78,8 +79,9 @@ class MaxReduceDimsOp final : public Operator<Context> {
 template <typename T, class Context, bool FIRSTDIMS>
 class MaxReduceDimsGradientOp final : public Operator<Context> {
  public:
-  MaxReduceDimsGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit MaxReduceDimsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         num_reduce_dims_(
             this->template GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 

@@ -4,7 +4,7 @@ producer_version: "1.1"
 graph {
   node {
     input: "0"
-    input: "1"
+    input: "params.0"
     output: "2"
     op_type: "Add"
   }
@@ -34,7 +34,7 @@ graph {
     dims: 2
     dims: 2
     data_type: 1
-    name: "1"
+    name: "params.0"
     raw_data: "\000\000\200?\000\000\000@\000\000@@\000\000\200@"
   }
   input {
@@ -54,7 +54,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "params.0"
     type {
       tensor_type {
         elem_type: 1

@@ -12,6 +12,8 @@
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
+#include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
+
 
 namespace at { namespace native {
 
@@ -87,10 +89,10 @@ __global__ void embedding_backward_feature_kernel
           match_found_this_thread = 0;
 #ifdef __HIP_PLATFORM_HCC__
         unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
-	int first_remaining_peer = __ffsll(matchmask) - 1;
+        int first_remaining_peer = __ffsll(matchmask) - 1;
 #else
         unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
-	int first_remaining_peer = __ffs(matchmask) - 1;
+        int first_remaining_peer = __ffs(matchmask) - 1;
 #endif
 
         if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
@@ -103,7 +105,7 @@ __global__ void embedding_backward_feature_kernel
 #else
             first_remaining_peer = __ffs(matchmask) - 1;
 #endif
-	    my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
+            my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
             matchmask ^= (1 << first_remaining_peer);
           }
           if(f < s)
@@ -231,19 +233,17 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
-  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
-
-  int64_t stride = grad_weight.stride(0);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   if (num_indices <= 768 && !scale_grad_by_freq) {
     auto indices_contig = indices.contiguous();
-
+    auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
+    int64_t stride = grad_weight.stride(0);
     dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF
-      (grad.type(),
+      (grad.scalar_type(),
        "embedding_backward",
        [&]
        {
@@ -323,23 +323,8 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     );
   }
 
-  dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-  dim3 block(32, 4);
-
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
-    embedding_backward_kernel<<<grid, block, 0, stream>>>(
-      sorted_indices.data<int64_t>(),
-      orig_indices.data<int64_t>(),
-      grad.data<scalar_t>(),
-      grad_weight.data<scalar_t>(),
-      count.defined() ? count.data<int64_t>() : nullptr,
-      num_indices,
-      stride,
-      padding_idx);
-  });
-  THCudaCheck(cudaGetLastError());
-
-  return grad_weight;
+  return embedding_backward_cuda_kernel(grad, orig_indices,
+      sorted_indices, count, num_weights, padding_idx);
 }
 
 Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
@@ -371,7 +356,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   dim3 block(128);
   int dim = self.stride(0);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "embedding_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
       self.data<scalar_t>(),

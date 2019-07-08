@@ -3,14 +3,17 @@
 #include <torch/csrc/cuda/comm.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
+#ifdef USE_C10D_NCCL
 #include <torch/csrc/cuda/nccl.h>
+#endif
 
 #include <c10d/ProcessGroup.hpp>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <memory>
@@ -129,6 +132,12 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     ProcessGroup& processGroup,
     std::vector<std::vector<at::Tensor>>& gradsBatch,
     const std::vector<int64_t>& devices) {
+#ifndef USE_C10D_NCCL
+  if (devices.size() > 1) {
+    AT_ERROR(
+        "queueReduction with more than 1 device not suppported without NCCL");
+  }
+#endif
   AT_ASSERT(!gradsBatch.empty());
   AT_ASSERT(!devices.empty());
 
@@ -145,8 +154,18 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     events[devIdx].record();
     workerStreams.push_back(
         at::cuda::getStreamFromPool(false, devices[devIdx]));
-    // Let the worker stream to wait for the default stream
+    // Let worker streams to wait for default streams to make sure worker
+    // streams do not touch `gradsBatch` until all pending ops to create
+    // `gradBatch` finish.
     events[devIdx].block(workerStreams.back());
+
+    // Input `gradsBatch` are created on current streams and used in worker
+    // streams. Hence, they must record worker streams to prevent being
+    // freed before their worker stream ops finish.
+    for (at::Tensor& grad : gradsBatch[devIdx]) {
+      c10::cuda::CUDACachingAllocator::recordStream(
+          grad.storage().data(), workerStreams.back());
+    }
   }
 
   // Stream guards, now the current stream is the worker stream
@@ -160,7 +179,12 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   }
 
   if (devices.size() > 1) {
+#ifdef USE_C10D_NCCL
     torch::cuda::nccl::reduce(gradsBatchCoalesced, 0);
+#else
+    AT_ERROR(
+        "shouldn't have gotten here -- queueReduction not suppported without NCCL");
+#endif
   }
 
   gradsBatchCoalesced[0] /= processGroup.getSize();
@@ -179,6 +203,15 @@ void syncReduction(
   // and intra-node reduce to be operated on this worker stream to
   // improve performance
   at::cuda::CUDAStream workerStream = at::cuda::getStreamFromPool();
+
+  // Input `gradsBatch` are created on the current stream and used on the worker
+  // stream. Hence, they must record worker streams to prevent being freed
+  // before their worker stream ops finish.
+  for (at::Tensor& grad : gradsBatch) {
+    c10::cuda::CUDACachingAllocator::recordStream(
+        grad.storage().data(), workerStream);
+  }
+
   at::cuda::CUDAStreamGuard cudaGuard(workerStream);
 
   // Let the worker stream wait on the reduction stream

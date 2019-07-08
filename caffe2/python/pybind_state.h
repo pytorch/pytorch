@@ -162,7 +162,7 @@ class TensorFetcher : public BlobFetcherBase {
     }
 
     if (result.copied) {
-      // TODO: use DeviceGuard here instead of context and employ explicit sync
+      // TODO: use CUDAGuard here instead of context and employ explicit sync
       // copy
       auto context = CreateContext(tensor.GetDeviceType());
       context->CopyBytesToCPU(tensor.nbytes(), tensor.raw_data(), outPtr);

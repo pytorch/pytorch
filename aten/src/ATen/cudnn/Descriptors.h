@@ -194,7 +194,6 @@ struct AT_CUDA_API DropoutDescriptor
   }
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
-  // See Note [cuDNN dropout descriptor initialization]
   void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
     AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     state = state_;
@@ -205,7 +204,6 @@ struct AT_CUDA_API DropoutDescriptor
   }
 
   // Restore a dropout descriptor corresponding to no dropout
-  // See Note [cuDNN dropout descriptor initialization]
   void set_no_dropout(cudnnHandle_t handle) {
     // NB: seed doesn't matter when dropout = 0, because no random number
     // initialization actually takes place when there is no dropout.

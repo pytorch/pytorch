@@ -10,8 +10,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class AccumulateOp final : public Operator<Context> {
  public:
-  AccumulateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit AccumulateOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         gamma_(static_cast<T>(
             this->template GetSingleArgument<float>("gamma", 1.0))) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;

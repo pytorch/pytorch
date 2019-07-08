@@ -1,5 +1,4 @@
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/typeid.h>
 #include <c10/core/DeviceType.h>
 
 // TODO: rename flags to C10
@@ -53,13 +52,24 @@ void* alloc_cpu(size_t nbytes) {
 #elif defined(_MSC_VER)
   data = _aligned_malloc(nbytes, gAlignment);
 #else
-  CAFFE_ENFORCE_EQ(posix_memalign(&data, gAlignment, nbytes), 0);
+  int err = posix_memalign(&data, gAlignment, nbytes);
+  if (err != 0) {
+    CAFFE_THROW(
+        "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
+        nbytes,
+        " bytes. Error code ",
+        err,
+        " (",
+        strerror(err),
+        ")");
+  }
 #endif
 
   CAFFE_ENFORCE(
       data,
-      "DefaultCPUAllocator: not enough memory: you tried to allocate %dGB. Buy new RAM!",
-      nbytes / 1073741824);
+      "DefaultCPUAllocator: not enough memory: you tried to allocate ",
+      nbytes,
+      " bytes. Buy new RAM!");
 
   // move data to a thread's NUMA node
   NUMAMove(data, nbytes, GetCurrentNUMANode());

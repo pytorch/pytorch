@@ -64,6 +64,13 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
+OPERATOR_SCHEMA(ConvRelu)
+    .NumInputs(2, 3)
+    .NumOutputs(1)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+    .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
+        ConvPoolOpBase<CPUContext>::CostInferenceForConv));
+
 REGISTER_CPU_OPERATOR(ConvRelu, ConvReluOp<float, CPUContext>);
 
 } // namespace caffe2

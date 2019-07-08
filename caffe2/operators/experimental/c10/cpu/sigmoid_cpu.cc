@@ -1,8 +1,8 @@
-#include <ATen/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/sigmoid.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/export_c10_op_to_caffe2.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/tensor.h"
 
 using caffe2::Tensor;
 
@@ -12,8 +12,8 @@ template <class DataType>
 void sigmoid_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_) {
-  Tensor input{C10Tensor(input_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor input(input_);
+  Tensor output(output_);
   output.ResizeLike(input);
 
   caffe2::ConstEigenVectorArrayMap<DataType> xM(
@@ -22,11 +22,18 @@ void sigmoid_op_cpu_impl(
       output.mutable_data<DataType>(), input.numel()) =
       1. / (1. + (-xM).exp());
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::Sigmoid)
-    .kernel<decltype(caffe2::sigmoid_op_cpu_impl<float>), &caffe2::sigmoid_op_cpu_impl<float>>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    "_c10_experimental::Sigmoid",
+    c10::RegisterOperators::options()
+      .kernel<
+        decltype(sigmoid_op_cpu_impl<float>),
+        &sigmoid_op_cpu_impl<float>>(CPUTensorId()));
+
+} // namespace
+
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
+    "_c10_experimental::Sigmoid",
+    C10Sigmoid_DontUseThisOpYet)
+
+} // namespace caffe2

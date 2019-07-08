@@ -14,7 +14,7 @@ from caffe2.python.modeling.parameter_sharing import (
 )
 from caffe2.python.modeling.net_modifier import NetModifier
 
-from caffe2.python.optimizer import get_param_device
+from caffe2.python.optimizer import get_param_device, Optimizer
 from caffe2.python.regularizer import Regularizer, RegularizationBy
 from caffe2.python.layers import layers
 from caffe2.proto import caffe2_pb2
@@ -105,6 +105,14 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._metrics_schema = self._metrics_schema + schema.Struct(
             (name, value)
         )
+
+    # an empty white_set will skip everything
+    def filter_metrics_schema(self, white_set):
+        logger.info("Filter metric schema with white_set {}".format(white_set))
+        field_names = self._metrics_schema.field_names()
+        for name in field_names:
+            if name not in white_set:
+                self._metrics_schema = self._metrics_schema - schema.Struct((name, schema.Scalar()))
 
     def add_ad_hoc_plot_blob(self, blob, dtype=None):
         assert isinstance(
@@ -228,6 +236,66 @@ class LayerModelHelper(model_helper.ModelHelper):
                     scope.CurrentNameScope(), param_name, ref_shape, shape)
             )
 
+    def _validate_param_optim(self, param_name, optim):
+        # there are three possible values for optim:
+        # 1) None (which will use self._default_optimizer after this layer is instantiated)
+        # 2) self.NoOptim
+        # 3) an instance of Optimizer class such as AdagradOptimizer
+
+        # this implies this parameter is not shared with any other parameter so far
+        if param_name not in self.param_to_optim:
+            return
+
+        logger.info("{} shares the same parameter with another parameter. "
+                    "Validating if the same optimizer has been specified for them.".format(
+                        param_name,
+                    ))
+
+        ref_optim = self.param_to_optim[param_name]
+
+        if optim is None:
+            assert ref_optim == self._default_optimizer, (
+                "Optim for {} is None which will fall back to use default_optimizer. "
+                "However, the optimizer that has been specified for this shared parameter "
+                "is {} which is different from default_optimizer {}. "
+                "Please check the optimizers specified for parameters shared "
+                "with {} and the default_optimizer to ensure the consistency.".format(
+                    param_name, ref_optim, self._default_optimizer, param_name
+                )
+            )
+        elif optim == self.NoOptim:
+            assert ref_optim == self.NoOptim, (
+                "Optim for {} is NoOptim. However, the optimizer for the parameters "
+                "shared with {} is {} which is different from NoOptim. "
+                "Please check the optimizer specified for other parameters in the "
+                "shared group to ensure consistency.".format(
+                    param_name, param_name, ref_optim
+                )
+            )
+        elif isinstance(optim, Optimizer):
+            assert isinstance(ref_optim, Optimizer), (
+                "Optim for {} is an instance of Optimizer. However, the optimizer "
+                "for the parameters shared with {} is {} which is not an instance "
+                "of Optimizer. Please check the optimizer specified for other "
+                " parameters in the shared group to ensure consistency.".format(
+                    param_name, param_name, ref_optim, optim
+                )
+            )
+
+            assert type(optim) is type(ref_optim) and optim.attributes == ref_optim.attributes, (
+                "Optim for {} is an instance of Optimizer. However, the optimizer "
+                "for the parameters shared with {} is {}. "
+                "This optimizer either doesn't have the same type as the current optimizer: "
+                "{} vs {}, or its attributes such as learning rate are different from "
+                "that of current optimizer which is {} vs {}. "
+                "Please check the optimizer specified for other parameters in the "
+                "shared group to ensure consistency.".format(
+                    param_name, param_name, ref_optim, type(optim), type(ref_optim), optim.attributes, ref_optim.attributes
+                )
+            )
+        else:
+            raise ValueError("optim should be either None, NoOptim, or an instance of Optimizer, Got {} ".format(optim))
+
     def create_param(self, param_name, shape, initializer, optimizer=None,
                      ps_param=None, regularizer=None):
         if isinstance(param_name, core.BlobReference):
@@ -270,6 +338,8 @@ class LayerModelHelper(model_helper.ModelHelper):
 
         self._validate_param_shape(param_name, shape)
 
+        self._validate_param_optim(param_name, optimizer)
+
         self._param_to_shape[param_name] = shape
 
         return param
@@ -295,6 +365,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
             self.params.append(param.parameter)
             if isinstance(param, layers.LayerParameter):
+                logger.info("Add parameter regularizer {0}".format(param.parameter))
                 self.param_to_reg[param.parameter] = param.regularizer
             elif isinstance(param, ParameterInfo):
                 # TODO:
@@ -543,12 +614,15 @@ class LayerModelHelper(model_helper.ModelHelper):
         train_init_net,
         blob_to_device=None,
     ):
+        logger.info("apply regularizer on loss")
         for param, regularizer in viewitems(self.param_to_reg):
             if regularizer is None:
                 continue
+            logger.info("add regularizer {0} for param {1} to loss".format(regularizer, param))
             assert isinstance(regularizer, Regularizer)
             added_loss_blob = regularizer(train_net, train_init_net, param, grad=None,
                                           by=RegularizationBy.ON_LOSS)
+            logger.info(added_loss_blob)
             if added_loss_blob is not None:
                 self.add_loss(
                     schema.Scalar(blob=added_loss_blob),
@@ -562,6 +636,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
+        logger.info("apply regulizer after optimizer")
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
@@ -569,6 +644,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             if regularizer is None:
                 continue
             assert isinstance(regularizer, Regularizer)
+            logger.info("add regularizer {0} for param {1} to optimizer".format(regularizer, param))
             device = get_param_device(
                 param,
                 grad_map.get(str(param)),

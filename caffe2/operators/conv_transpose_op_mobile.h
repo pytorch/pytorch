@@ -3,11 +3,7 @@
 
 #include "caffe2/core/common.h"
 
-#ifndef C10_MOBILE
-#error "mobile build state not defined"
-#endif
-
-#if C10_MOBILE
+#ifdef C10_MOBILE
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"

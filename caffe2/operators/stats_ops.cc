@@ -8,8 +8,9 @@ namespace caffe2 {
 
 class StatRegistryCreateOp : public Operator<CPUContext> {
  public:
-  StatRegistryCreateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit StatRegistryCreateOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<StatRegistry>>(0) =
@@ -20,8 +21,9 @@ class StatRegistryCreateOp : public Operator<CPUContext> {
 
 class StatRegistryExportOp : public Operator<CPUContext> {
  public:
-  StatRegistryExportOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit StatRegistryExportOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         reset_(GetSingleArgument<bool>("reset", true)) {}
 
   bool RunOnDevice() override {
@@ -55,8 +57,9 @@ class StatRegistryExportOp : public Operator<CPUContext> {
 
 class StatRegistryUpdateOp : public Operator<CPUContext> {
  public:
-  StatRegistryUpdateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit StatRegistryUpdateOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     const auto& keys = Input(0);
@@ -118,7 +121,7 @@ class TimerInstance {
 };
 
 struct TimerBeginOp : public Operator<CPUContext> {
-  TimerBeginOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit TimerBeginOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
         given_name_(GetSingleArgument<std::string>(
             "counter_name",
@@ -137,8 +140,8 @@ struct TimerBeginOp : public Operator<CPUContext> {
 };
 
 struct TimerEndOp : public Operator<CPUContext> {
-  TimerEndOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit TimerEndOp(Args&&... args) : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     OperatorBase::Input<TimerInstance*>(0)->end();
@@ -147,8 +150,9 @@ struct TimerEndOp : public Operator<CPUContext> {
 };
 
 struct TimerGetAndEndOp : public Operator<CPUContext> {
-  TimerGetAndEndOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit TimerGetAndEndOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     int64_t nanos = OperatorBase::Input<TimerInstance*>(0)->get_ns();
@@ -161,8 +165,8 @@ struct TimerGetAndEndOp : public Operator<CPUContext> {
 };
 
 struct TimerGetOp : public Operator<CPUContext> {
-  TimerGetOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit TimerGetOp(Args&&... args) : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     int64_t nanos = OperatorBase::Input<TimerInstance*>(0)->get_ns();

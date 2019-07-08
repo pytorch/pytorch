@@ -25,7 +25,7 @@ import os
 
 import torch
 try:
-    import torchvision
+    import torchvision  # noqa: F401
 except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
@@ -85,7 +85,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2018, Torch Contributors'
+copyright = '2019, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -172,7 +172,7 @@ def setup(app):
 
     # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
     # `add_stylesheet` (deprecated in 1.8).
-    add_css = getattr(app, 'add_css_file', getattr(app, 'add_stylesheet'))
+    add_css = getattr(app, 'add_css_file', app.add_stylesheet)
     for css_file in html_css_files:
         add_css(css_file)
 

@@ -23,5 +23,9 @@ Tensor FunctionalImpl::forward(Tensor input) {
 Tensor FunctionalImpl::operator()(Tensor input) {
   return forward(std::move(input));
 }
+
+bool FunctionalImpl::is_serializable() const {
+  return false;
+}
 } // namespace nn
 } // namespace torch

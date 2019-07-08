@@ -14,7 +14,7 @@ typedef struct THMemoryFile__
     THCharStorage *storage;
     ssize_t size;
     ssize_t position;
-	int longSize;
+        int longSize;
 
 } THMemoryFile;
 

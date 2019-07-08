@@ -108,9 +108,10 @@ __global__ void MaxPoolBackward(
 template <typename T>
 bool MaxPoolWithIndexOp::DoRunWithType() {
   auto& X = Input(0);
-  auto* Y = Output(0);
 
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
+  auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, X.dim32(1));
+  auto* Y = Output(0, sizes, at::dtype<T>());
+
   int output_size = Y->numel();
   auto* mask = Output(1, {output_size}, at::dtype<int>());
 

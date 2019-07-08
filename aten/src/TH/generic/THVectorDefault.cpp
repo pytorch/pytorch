@@ -2,22 +2,7 @@
 #define TH_GENERIC_FILE "TH/generic/THVectorDefault.cpp"
 #else
 
-#include <TH/THRandom.h>
-
-void THVector_(copy_DEFAULT)(scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
-  ptrdiff_t i = 0;
-
-  for(; i <n-4; i+=4)
-  {
-    x[i] = y[i];
-    x[i+1] = y[i+1];
-    x[i+2] = y[i+2];
-    x[i+3] = y[i+3];
-  }
-
-  for(; i < n; i++)
-    x[i] = y[i];
-}
+#include <ATen/Context.h>
 
 void THVector_(fill_DEFAULT)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   ptrdiff_t i = 0;
@@ -32,6 +17,23 @@ void THVector_(fill_DEFAULT)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
 
   for(; i < n; i++)
     x[i] = c;
+}
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
+void THVector_(copy_DEFAULT)(scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
+  ptrdiff_t i = 0;
+
+  for(; i <n-4; i+=4)
+  {
+    x[i] = y[i];
+    x[i+1] = y[i+1];
+    x[i+2] = y[i+2];
+    x[i+3] = y[i+3];
+  }
+
+  for(; i < n; i++)
+    x[i] = y[i];
 }
 
 void THVector_(cadd_DEFAULT)(scalar_t *z, const scalar_t *x, const scalar_t *y, const scalar_t c, const ptrdiff_t n)
@@ -150,17 +152,22 @@ static void THVector_(interleaved_normal_fill_16)(scalar_t *data,
 
 void THVector_(normal_fill_DEFAULT)(scalar_t *data,
                                     int64_t size,
-                                    THGenerator *generator,
+                                    at::Generator *generator,
                                     const scalar_t mean,
                                     const scalar_t stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for normal fill");
-
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+  
   for (int64_t i = 0; i < size; ++i) {
 #ifdef TH_REAL_IS_FLOAT
-    data[i] = THRandom_uniformFloat(generator, 0, 1);
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(gen);
 #else
-    data[i] = THRandom_uniform(generator, 0, 1);
+    at::uniform_real_distribution<double> uniform(0, 1);
+    data[i] = uniform(gen);
 #endif
   }
 
@@ -173,9 +180,11 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
     data = data + size - 16;
     for (int64_t i = 0; i < 16; ++i) {
 #ifdef TH_REAL_IS_FLOAT
-      data[i] = THRandom_uniformFloat(generator, 0, 1);
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(gen);
 #else
-      data[i] = THRandom_uniform(generator, 0, 1);
+    at::uniform_real_distribution<double> uniform(0, 1);
+    data[i] = uniform(gen);
 #endif
     }
     THVector_(interleaved_normal_fill_16)(data, mean, stddev);
@@ -213,7 +222,7 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
   } \
 
 #if defined(TH_REAL_IS_LONG)
-VECTOR_IMPLEMENT_FUNCTION(abs,labs)
+VECTOR_IMPLEMENT_FUNCTION(abs,std::abs)
 #endif /* long only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
@@ -261,7 +270,7 @@ VECTOR_IMPLEMENT_FUNCTION(sqrt,TH_MATH_NAME(sqrt))
 VECTOR_IMPLEMENT_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt))
 VECTOR_IMPLEMENT_FUNCTION(ceil,TH_MATH_NAME(ceil))
 VECTOR_IMPLEMENT_FUNCTION(floor,TH_MATH_NAME(floor))
-VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(round))
+VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(nearbyint))
 VECTOR_IMPLEMENT_FUNCTION(abs,TH_MATH_NAME(fabs))
 VECTOR_IMPLEMENT_FUNCTION(trunc,TH_MATH_NAME(trunc))
 VECTOR_IMPLEMENT_FUNCTION(frac,TH_MATH_NAME(TH_frac))
@@ -271,5 +280,7 @@ VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 #endif /* floating point only part */
 
 VECTOR_IMPLEMENT_FUNCTION(neg,-)
+
+#endif /* non bool only part */
 
 #endif

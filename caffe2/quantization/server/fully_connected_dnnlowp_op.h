@@ -6,7 +6,7 @@
 
 namespace caffe2 {
 
-template <typename T>
+template <typename T, bool ReluFused = false>
 class FullyConnectedDNNLowPOp
     : public DNNLowPOp<T, FullyConnectedOp<CPUContext>> {
  public:

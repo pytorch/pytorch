@@ -6,7 +6,7 @@ namespace {
 
 class GetAllBlobNamesOp final : public Operator<CPUContext> {
  public:
-  GetAllBlobNamesOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit GetAllBlobNamesOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
         include_shared_(GetSingleArgument<int>("include_shared", true)),
         ws_(ws) {}

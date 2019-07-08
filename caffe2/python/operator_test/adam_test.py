@@ -60,6 +60,7 @@ class TestAdam(hu.HypothesisTestCase):
            **hu.gcs)
     def test_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
         param, mom1, mom2, grad = inputs
+        mom2 = np.abs(mom2)
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
 
@@ -93,6 +94,7 @@ class TestAdam(hu.HypothesisTestCase):
            **hu.gcs_cpu_only)
     def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
         param, mom1, mom2, grad = inputs
+        mom2 = np.abs(mom2)
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
 

@@ -33,7 +33,7 @@ private:
   std::ios saved;
 };
 
-std::ostream& operator<<(std::ostream & out, const Type& t) {
+std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {
   return out << t.toString();
 }
 
@@ -238,8 +238,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else {
-    Type& cpudouble = tensor_.type().toBackend(Backend::CPU).toScalarType(kDouble);
-    Tensor tensor = tensor_.toType(cpudouble).contiguous();
+    Tensor tensor = tensor_.to(kCPU, kDouble).contiguous();
     if(tensor.ndimension() == 0) {
       stream << defaultfloat << tensor.data<double>()[0] << std::endl;
       stream << "[ " << tensor_.toString() << "{} ]";

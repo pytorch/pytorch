@@ -8,12 +8,15 @@
 #include <gloo/reduce.h>
 #include <gloo/scatter.h>
 
+#include <ATen/SparseTensorUtils.h>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <gloo/rendezvous/context.h>
@@ -122,9 +125,14 @@ void setOutput(O& opts, at::Tensor& tensor) {
 #ifdef USE_CUDA
 
 at::Tensor pinnedLike(at::Tensor& tensor) {
-  auto& type = tensor.type().toBackend(at::Backend::CPU);
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
-  return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
+  auto storage = c10::Storage(
+      tensor.dtype(),
+      at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
+      allocator,
+      /*resizable=*/false);
+  return at::empty({0}, tensor.options().device(at::kCPU))
+      .set_(storage, 0, tensor.sizes(), tensor.strides());
 }
 
 // This function initializes a vector of CUDA streams, one for every
@@ -150,6 +158,24 @@ void initializeStreamsEvents(
         /* isHighPriority */ true, tensors[i].device().index()));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
+
+    // `tensors` are created on a different stream. Hence, they must record
+    // new streams in this Work to prevent being freed before the Work finishes.
+    if (tensors[i].is_sparse()) {
+      if (tensors[i].is_coalesced()) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            tensors[i].indices().storage().data(), streams[i]);
+        c10::cuda::CUDACachingAllocator::recordStream(
+            tensors[i].values().storage().data(), streams[i]);
+      } else {
+        // We will need to coalesce first, which means new tensors will
+        // be allocated on the streams we just allocated, and there
+        // is no need to record them separately.
+      }
+    } else {
+      c10::cuda::CUDACachingAllocator::recordStream(
+          tensors[i].storage().data(), streams[i]);
+    }
   }
 }
 
@@ -187,6 +213,14 @@ void initializeStreamsEvents(
         /* isHighPriority */ true, tensors[i][0].device().index()));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
+
+    for (at::Tensor& tensor : tensors[i]) {
+      // `tensors` are created on a different stream. Hence, they must record
+      // new streams in this Work to prevent being freed before the Work
+      // finishes.
+      c10::cuda::CUDACachingAllocator::recordStream(
+          tensor.storage().data(), streams[i]);
+    }
   }
 }
 
@@ -238,9 +272,7 @@ void ProcessGroupGloo::RecvWork::wait() {
 }
 
 ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)),
-      threads(2),
-      cacheNumAlgorithmEntries(1) {}
+    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
@@ -277,16 +309,15 @@ ProcessGroupGloo::ProcessGroupGloo(
 
 ProcessGroupGloo::~ProcessGroupGloo() {
   std::unique_lock<std::mutex> lock(workMutex_);
-  while (!workQueue_.empty()) {
-    workConsumeCV_.wait(lock);
-  }
+  workConsumeCV_.wait(lock, [&] { return workQueue_.empty(); });
 
   // Queue is empty, signal stop
   stop_ = true;
 
   // Release lock to allow threads to terminate
-  workProduceCV_.notify_all();
   lock.unlock();
+
+  workProduceCV_.notify_all();
 
   // Wait for worker threads to terminate
   for (auto& thread : threads_) {
@@ -309,10 +340,13 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
     auto work = std::move(workQueue_.front());
     workQueue_.pop_front();
-    workConsumeCV_.notify_one();
-
     workInProgress_[workerIndex] = work;
     lock.unlock();
+
+    // Notify after releasing the lock so that the waiter
+    // does not immediately block.
+    workConsumeCV_.notify_one();
+
     AsyncWork::execute(std::move(work));
     lock.lock();
     workInProgress_[workerIndex] = nullptr;
@@ -322,6 +356,10 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 void ProcessGroupGloo::enqueue(std::shared_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
   workQueue_.push_back(std::move(work));
+  lock.unlock();
+
+  // Notify after releasing the lock so that the waiter
+  // does not immediately block.
   workProduceCV_.notify_one();
 }
 
@@ -522,6 +560,246 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
+class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncSparseAllreduceWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      uint32_t tag)
+      : context(context), inputs(inputs), tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<at::Tensor> inputs;
+  std::vector<at::Tensor> outputs;
+  const uint32_t tag;
+
+  // We share dimensionality about the sparse tensors before collecting
+  // their contents. We assume here that the maximum number of sparse
+  // and dense dimensions is 4. This is stored in a contiguous piece of
+  // memory so that we can easily run allgather on it.
+  //
+  // The layout of this memory is as follows:
+  //
+  //   - [0:4]: sparse dims
+  //   - [4:8]: dense dims
+  //   -   [8]: nnz
+  //
+  class SparseTensorMetadata {
+   public:
+    static constexpr auto dim = 9;
+
+    // Construct from an existing metadata tensor to facilitate structured
+    // access to metadata from peers, after gathering it.
+    explicit SparseTensorMetadata(at::Tensor metadata)
+        : metadata_(metadata), data_(metadata_.data<long>()) {
+      AT_ASSERT(metadata.scalar_type() == at::kLong);
+      AT_ASSERT(metadata.dim() == 1);
+      AT_ASSERT(metadata.size(0) == dim);
+    }
+
+    // Populate the metadata.
+    void populate_from_sparse_tensor(const at::Tensor& tensor) {
+      const auto sparse_dim = tensor.sparse_dim();
+      AT_ASSERT(sparse_dim <= 4);
+      for (auto i = 0; i < 4; i++) {
+        if (i < sparse_dim) {
+          data_[i] = tensor.size(i);
+        }
+      }
+      const auto dense_dim = tensor.dense_dim();
+      AT_ASSERT(dense_dim <= 4);
+      for (auto i = 0; i < 4; i++) {
+        if (i < dense_dim) {
+          data_[i + 4] = tensor.size(sparse_dim + i);
+        }
+      }
+      data_[8] = tensor._nnz();
+    }
+
+    std::vector<int64_t> sizes() const {
+      std::vector<int64_t> sizes;
+      // Sparse sizes
+      for (auto i = 0; i < 4; i++) {
+        if (data_[i] <= 0) {
+          break;
+        }
+        sizes.push_back(data_[i]);
+      }
+      // Dense sizes
+      for (auto i = 4; i < 8; i++) {
+        if (data_[i] <= 0) {
+          break;
+        }
+        sizes.push_back(data_[i]);
+      }
+      return sizes;
+    }
+
+    int64_t nnz() const {
+      return data_[8];
+    }
+
+   protected:
+    at::Tensor metadata_;
+    long* data_;
+  };
+
+  // Sparse allreduce is implemented with allgather on indices and values.
+  // Every process then sums the resulting sparse tensors locally.
+  // The nnz for sparse tensors may be different across processes, so first
+  // we run allgather on the nnz, and then allgather with max(nnz).
+  // We could use an allgatherv for this, if it were available.
+  at::Tensor allreduce(std::vector<at::Tensor>& tensors) {
+    auto input = tensors[0];
+
+    // Perform local reduction if we have multiple inputs.
+    for (size_t i = 1; i < tensors.size(); i++) {
+      input += tensors[i];
+    }
+
+    // Need to coalesce before we can access indices and values.
+    input = input.coalesce();
+
+    // Gather metadata information from all ranks.
+    auto metadata = allgather_metadata(input);
+
+    // Sanity check dimensionality across ranks.
+    {
+      const auto expected = metadata[context->rank].sizes();
+      for (size_t i = 0; i < context->size; i++) {
+        if (i == context->rank) {
+          continue;
+        }
+        const auto actual = metadata[i].sizes();
+        AT_CHECK(actual == expected, "Sparse dimensions do not match");
+      }
+    }
+
+    // Gather all indices and all values.
+    auto indices = allgather_indices(input, metadata);
+    auto values = allgather_values(input, metadata);
+
+    // Perform global reduction.
+    AT_ASSERT(indices.size() == context->size);
+    AT_ASSERT(values.size() == context->size);
+    auto output = at::sparse_coo_tensor(
+        indices[0], values[0], input.sizes(), input.options());
+    for (size_t i = 1; i < context->size; i++) {
+      output += at::sparse_coo_tensor(
+          indices[i], values[i], input.sizes(), input.options());
+    }
+
+    // Coalesce for good measure.
+    return output.coalesce();
+  }
+
+  void run() override {
+    auto output = allreduce(inputs);
+
+    // Copy back to input tensors.
+    outputs.reserve(inputs.size());
+    for (size_t i = 0; i < inputs.size(); i++) {
+      outputs.push_back(output.clone());
+    }
+  }
+
+  std::vector<at::Tensor> result() const override {
+    return outputs;
+  }
+
+ private:
+  std::vector<SparseTensorMetadata> allgather_metadata(
+      const at::Tensor& tensor) {
+    auto buffer =
+        at::zeros({context->size, SparseTensorMetadata::dim}, at::kLong);
+
+    // Prepare metadata vector (1 entry per rank)
+    std::vector<SparseTensorMetadata> metadata;
+    metadata.reserve(context->size);
+    for (auto i = 0; i < context->size; i++) {
+      metadata.emplace_back(buffer.select(0, i));
+    }
+
+    // Populate data for this rank
+    metadata[context->rank].populate_from_sparse_tensor(tensor);
+
+    // Allgather metadata
+    gloo::AllgatherOptions opts(context);
+    opts.setOutput(buffer.data<long>(), buffer.numel());
+    opts.setTag(tag);
+    gloo::allgather(opts);
+
+    return metadata;
+  }
+
+  std::vector<at::Tensor> allgather_indices(
+      const at::Tensor& tensor,
+      const std::vector<SparseTensorMetadata>& metadata) {
+    auto max_nnz = metadata[0].nnz();
+    for (size_t i = 1; i < metadata.size(); i++) {
+      max_nnz = std::max(max_nnz, metadata[i].nnz());
+    }
+
+    // There are #sparse_dim() 1-dimensional tensors with nnz elems per rank.
+    auto buffer =
+        at::empty({context->size, tensor.sparse_dim(), max_nnz}, at::kLong);
+    buffer.select(0, context->rank)
+        .narrow(1, 0, tensor._nnz())
+        .copy_(tensor.indices());
+
+    // Allgather indices.
+    gloo::AllgatherOptions opts(context);
+    opts.setOutput(buffer.data<long>(), buffer.numel());
+    opts.setTag(tag);
+    gloo::allgather(opts);
+
+    // Compile indices tensor per rank.
+    std::vector<at::Tensor> indices;
+    indices.reserve(metadata.size());
+    for (size_t i = 0; i < metadata.size(); i++) {
+      indices.push_back(buffer.select(0, i).narrow(1, 0, metadata[i].nnz()));
+    }
+
+    return indices;
+  }
+
+  std::vector<at::Tensor> allgather_values(
+      const at::Tensor& tensor,
+      const std::vector<SparseTensorMetadata>& metadata) {
+    auto max_nnz = metadata[0].nnz();
+    for (size_t i = 1; i < metadata.size(); i++) {
+      max_nnz = std::max(max_nnz, metadata[i].nnz());
+    }
+
+    // There are nnz #dense_dim()-dimensional tensors per rank.
+    const auto value_shape = tensor.sizes().slice(tensor.sparse_dim());
+    auto buffer_shape = std::vector<int64_t>({context->size, max_nnz});
+    std::copy(
+        value_shape.begin(),
+        value_shape.end(),
+        std::back_inserter(buffer_shape));
+    auto buffer = at::empty(buffer_shape, tensor.scalar_type());
+    buffer.select(0, context->rank)
+        .narrow(0, 0, tensor._nnz())
+        .copy_(tensor.values());
+
+    // Allgather values.
+    gloo::AllgatherOptions opts(context);
+    GENERATE_ALL_TYPES(tensor.scalar_type(), setOutput, opts, buffer);
+    opts.setTag(tag);
+    gloo::allgather(opts);
+
+    // Compile values tensor per rank.
+    std::vector<at::Tensor> values;
+    values.reserve(metadata.size());
+    for (size_t i = 0; i < metadata.size(); i++) {
+      values.push_back(buffer.select(0, i).narrow(0, 0, metadata[i].nnz()));
+    }
+
+    return values;
+  }
+};
+
 #ifdef USE_CUDA
 
 class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
@@ -581,6 +859,61 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
   std::vector<at::cuda::CUDAEvent> events;
 };
 
+class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
+ public:
+  AsyncSparseAllreduceCUDAWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      uint32_t tag)
+      : AsyncSparseAllreduceWork(context, inputs, tag) {
+    initializeStreamsEvents(inputs, streams, events);
+
+    // Kick off copy from CUDA tensors to CPU tensors.
+    // Note that both coalescing the sparse tensor and copying it to CPU
+    // memory must be performed asynchronously, or we block the caller.
+    tmp.reserve(inputs.size());
+    at::cuda::OptionalCUDAStreamGuard guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.reset_stream(streams[i]);
+      tmp.push_back(
+          inputs[i].coalesce().to(at::DeviceType::CPU, /*non_blocking=*/true));
+    }
+  }
+
+  void run() override {
+    // Synchronize with copy operations.
+    at::cuda::OptionalCUDAGuard device_guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      device_guard.set_index(inputs[i].device().index());
+      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+    }
+
+    // Run allreduce on host side tensors.
+    auto output = allreduce(tmp);
+
+    // Kick off copy back to the CUDA tensors.
+    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      stream_guard.reset_stream(streams[i]);
+      outputs.push_back(output.to(inputs[i].device(), /*non_blocking=*/true));
+      events[i].record(streams[i]);
+    }
+  }
+
+  void synchronize() override {
+    // Synchronize with the copy back to CUDA tensors.
+    at::cuda::OptionalCUDAGuard guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.set_index(inputs[i].device().index());
+      events[i].block(at::cuda::getCurrentCUDAStream());
+    }
+  }
+
+  std::vector<at::Tensor> tmp;
+  std::vector<at::cuda::CUDAStream> streams;
+  std::vector<at::cuda::CUDAEvent> events;
+};
+
 #endif
 
 } // namespace
@@ -593,7 +926,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   };
 
   assertNonEmpty(invalidArgument, inputs);
-  assertDense(invalidArgument, inputs);
+  assertLayoutMatch(invalidArgument, inputs);
   assertTypeAndSizesMatch(invalidArgument, inputs);
 
   const auto& device = inputs[0].device();
@@ -607,15 +940,36 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
       invalidArgument("unsupported device type");
   }
 
-  std::shared_ptr<AsyncAllreduceWork> work;
+  const auto& layout = inputs[0].layout();
+  if (layout == c10::kSparse && opts.reduceOp != ReduceOp::SUM) {
+    invalidArgument(
+        "unsupported reduction operation "
+        "(allreduce of sparse tensors only works with ReduceOp.SUM)");
+  }
+
+  std::shared_ptr<AsyncWork> work;
   auto& context = contexts_[0];
   if (device.type() == at::kCPU) {
-    work = std::make_shared<AsyncAllreduceWork>(
-        context, inputs, opts.reduceOp, nextTag());
+    if (layout == c10::kStrided) {
+      work = std::make_shared<AsyncAllreduceWork>(
+          context, inputs, opts.reduceOp, nextTag());
+    } else if (layout == c10::kSparse) {
+      work = std::make_shared<AsyncSparseAllreduceWork>(
+          context, inputs, nextTag());
+    } else {
+      invalidArgument("unsupported layout");
+    }
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
-    work = std::make_shared<AsyncAllreduceCUDAWork>(
-        context, inputs, opts.reduceOp, nextTag());
+    if (layout == c10::kStrided) {
+      work = std::make_shared<AsyncAllreduceCUDAWork>(
+          context, inputs, opts.reduceOp, nextTag());
+    } else if (layout == c10::kSparse) {
+      work = std::make_shared<AsyncSparseAllreduceCUDAWork>(
+          context, inputs, nextTag());
+    } else {
+      invalidArgument("unsupported layout");
+    }
 #endif
   } else {
     throw std::runtime_error("Invalid backend");
@@ -1011,7 +1365,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
   void gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs) {
-    const auto scalarType = inputs[0].type().scalarType();
+    const auto scalarType = inputs[0].scalar_type();
     gloo::GatherOptions opts(context);
     opts.setRoot(root);
     opts.setTag(tag);
@@ -1208,7 +1562,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
   void scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs) {
-    const auto scalarType = outputs[0].type().scalarType();
+    const auto scalarType = outputs[0].scalar_type();
     gloo::ScatterOptions opts(context);
     opts.setRoot(root);
     opts.setTag(tag);
@@ -1362,6 +1716,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   return work;
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
+    std::vector<at::Tensor>& outputs,
+    std::vector<std::vector<at::Tensor>>& inputs,
+    const ReduceScatterOptions& opts) {
+  throw std::runtime_error("ProcessGroupGloo does not support reduce_scatter");
+}
+
 at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
     throw std::runtime_error("ProcessGroupGloo::send takes a single tensor");
@@ -1390,7 +1751,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1409,7 +1770,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1427,7 +1788,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1498,10 +1859,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
       contexts_[0], std::move(priorWork), nextTag());
   enqueue(work);
   return work;
-}
-
-std::unordered_map<int, int> ProcessGroupGloo::getGroupRank() {
-  throw std::runtime_error("ProcessGroupGloo does not support getGroupRank");
 }
 
 } // namespace c10d

@@ -16,16 +16,14 @@ namespace onnx {
 class OnnxExporter;
 }
 
-struct OnnxifiTransformerOptions {
-  explicit OnnxifiTransformerOptions() : bound_shape_spec(0, 0) {}
+struct OnnxifiTransformerOptions final : public BackendTransformOptions {
+  explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
 
-  // Dump onnx model for debugging
-  bool debug{false};
   // Pass serialized onnx model if true, otherwise pass serialized c2 model
-  bool use_onnx{true};
+  bool use_onnx{false};
 
-  // Bound shape spec
-  BoundShapeSpec bound_shape_spec;
+  // Whether to adjust batch at the ouptuts or not
+  bool adjust_batch{true};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -60,12 +58,13 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const ShapeInfoMap& shape_hints);
 
   // We already have all the ops and external inputs and outputs!
-  OperatorDef BuildOnnxifiOp(
+  OperatorDef buildOnnxifiOp(
       const std::string& onnx_model_str,
       const std::unordered_map<std::string, TensorShape>& output_size_hints,
       const std::unordered_set<std::string>& initialization_list,
       const std::vector<std::string>& external_inputs,
-      const std::vector<std::string>& external_outputs);
+      const std::vector<std::string>& external_outputs,
+      const std::unordered_map<std::string, ShapeInfo>& shape_hints);
 
   // Transform by passing C2 proto to backend
   NetDef TransformViaC2(

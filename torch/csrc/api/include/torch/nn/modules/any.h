@@ -383,7 +383,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
   /// Calls `forward()` on the underlying module, casting each `Value` in the
   /// argument vector to a concrete value.
   Value forward(std::vector<Value>&& arguments) override {
-    AT_CHECK(
+    TORCH_CHECK(
         arguments.size() == sizeof...(ArgumentTypes),
         c10::demangle(type_info.name()),
         "'s forward() method expects ",
@@ -419,7 +419,20 @@ template <typename ModuleType>
 AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
     : content_(make_holder(
           std::move(module),
-          &std::remove_reference<ModuleType>::type::forward)) {}
+          &std::remove_reference<ModuleType>::type::forward)) {
+  // `AnyModule` can only store an `nn::Module` subclass object that provides
+  // a `forward()` method that has a non-templatized return type.
+  // (e.g. `AnyModule` cannot store `nn::Sequential`, because `nn::Sequential`'s
+  // `forward()` method has a templatized return type.)
+  static_assert(
+      torch::detail::is_module<ModuleType>::value,
+      "Can only store object derived from nn::Module into AnyModule");
+  static_assert(
+      torch::detail::has_forward<ModuleType>::value,
+      "Can only store module with a forward() method that has a non-templatized"
+      "return type into AnyModule (e.g. we cannot store nn::Sequential"
+      "into AnyModule, because its forward() method's return type is templatized)");
+}
 
 template <typename ModuleType, typename>
 AnyModule::AnyModule(ModuleType&& module)
@@ -453,7 +466,7 @@ AnyModule& AnyModule::operator=(std::shared_ptr<ModuleType> module) {
 
 template <typename... ArgumentTypes>
 AnyModule::Value AnyModule::any_forward(ArgumentTypes&&... arguments) {
-  AT_CHECK(!is_empty(), "Cannot call forward() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call forward() on an empty AnyModule");
   std::vector<Value> values;
   values.reserve(sizeof...(ArgumentTypes));
   torch::apply(
@@ -470,13 +483,13 @@ ReturnType AnyModule::forward(ArgumentTypes&&... arguments) {
 
 template <typename T, typename>
 T& AnyModule::get() {
-  AT_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
   return get_<T>();
 }
 
 template <typename T, typename>
 const T& AnyModule::get() const {
-  AT_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
   return get_<T>();
 }
 
@@ -486,20 +499,20 @@ T AnyModule::get() const {
 }
 
 inline std::shared_ptr<Module> AnyModule::ptr() const {
-  AT_CHECK(!is_empty(), "Cannot call ptr() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call ptr() on an empty AnyModule");
   return content_->ptr();
 }
 
 template <typename T, typename>
 std::shared_ptr<T> AnyModule::ptr() const {
-  AT_CHECK(!is_empty(), "Cannot call ptr() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call ptr() on an empty AnyModule");
   // Call get() but discard the value, just to do the type checking.
   get_<T>();
   return std::dynamic_pointer_cast<T>(ptr());
 }
 
 inline const std::type_info& AnyModule::type_info() const {
-  AT_CHECK(!is_empty(), "Cannot call type_info() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call type_info() on an empty AnyModule");
   return content_->type_info;
 }
 

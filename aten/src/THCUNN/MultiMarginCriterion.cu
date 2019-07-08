@@ -1,7 +1,7 @@
 #include <THCUNN/THCUNN.h>
 #include <THCUNN/common.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCTensor.hpp>
 #include <THC/THCStorage.hpp>
 
@@ -14,7 +14,7 @@ __global__ void cunn_MultiMarginCriterion_updateOutput_kernel(Dtype *output, Dty
   int k = blockIdx.x;
   Dtype *input_k = input + k*dim;
   Dtype *output_k = output + k;
-  int target_k = ((int)target[k]) - TH_INDEX_BASE;
+  int target_k = ((int)target[k]);
   Dtype input_target_k = input_k[target_k];
 
   int i_start = threadIdx.x;
@@ -66,7 +66,7 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(Dtype *gradInpu
   int k = blockIdx.x;
   Dtype *input_k = input + k*dim;
   Dtype *gradInput_k = gradInput + k*dim;
-  int target_k = ((int)target[k]) - TH_INDEX_BASE;
+  int target_k = ((int)target[k]);
   Dtype input_target_k = input_k[target_k];
 
   Dtype *gradOutput_k = gradOutput;

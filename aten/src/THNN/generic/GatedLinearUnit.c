@@ -9,10 +9,9 @@ void THNN_(GatedLinear_updateOutput)(
           int dim)
 {
   // size output to half of input
-  dim = dim - TH_INDEX_BASE;
   const int64_t nIn = THTensor_sizeLegacyNoScalars(input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
-      dim + TH_INDEX_BASE, nIn);
+      dim, nIn);
 
   const int64_t inputSize = THTensor_(size)(input, dim) / 2;
   std::vector<int64_t> newSizes = THTensor_sizesLegacyNoScalars(input);
@@ -39,10 +38,9 @@ void THNN_(GatedLinear_updateGradInput)(
           int dim)
 {
   // set up tensors
-  dim = dim - TH_INDEX_BASE;
   const int64_t nIn = THTensor_(size)(input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
-      dim + TH_INDEX_BASE, nIn);
+      dim, nIn);
 
   THTensor_(resizeAs)(gradInput, input);
   const int64_t inputSize = THTensor_(size)(input, dim) / 2;

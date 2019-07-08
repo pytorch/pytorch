@@ -1,7 +1,6 @@
 import json
 import torch
 import torch.legacy.optim as optim
-from pprint import pprint
 
 
 def rosenbrock(tensor):
@@ -17,6 +16,7 @@ algorithms = {
     'adadelta': optim.adadelta,
     'adagrad': optim.adagrad,
     'adam': optim.adam,
+    'adamw': optim.adamw,
     'adamax': optim.adamax,
     'asgd': optim.asgd,
     'cg': optim.cg,

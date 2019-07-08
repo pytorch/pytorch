@@ -1,16 +1,19 @@
-
 #pragma once
 
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(ResizeNearest);
 
 namespace caffe2 {
 
 template <typename T, class Context>
 class ResizeNearestOp final : public Operator<Context> {
  public:
-  ResizeNearestOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ResizeNearestOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         width_scale_(1),
         height_scale_(1),
         order_(StringToStorageOrder(
@@ -45,8 +48,9 @@ class ResizeNearestOp final : public Operator<Context> {
 template <typename T, class Context>
 class ResizeNearestGradientOp final : public Operator<Context> {
  public:
-  ResizeNearestGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ResizeNearestGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         width_scale_(1),
         height_scale_(1),
         order_(StringToStorageOrder(

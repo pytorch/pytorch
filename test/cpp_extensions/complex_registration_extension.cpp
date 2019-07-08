@@ -1,10 +1,5 @@
 #include <torch/extension.h>
 
-#include <ATen/CPUFloatType.h>
-#include <ATen/Type.h>
-#include <ATen/core/VariableHooksInterface.h>
-#include <ATen/detail/ComplexHooksInterface.h>
-
 #include <c10/core/Allocator.h>
 #include <ATen/CPUGenerator.h>
 #include <ATen/DeviceGuard.h>
@@ -15,6 +10,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/ATenDispatch.h>
 
 #include <cstddef>
 #include <functional>
@@ -25,61 +21,36 @@
 
 namespace at {
 
-struct CPUComplexFloatType : public at::CPUTypeDefault {
-  CPUComplexFloatType()
-      : CPUTypeDefault(
-            CPUTensorId(),
-            /*is_variable=*/false,
-            /*is_undefined=*/false) {}
+static Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(!optional_memory_format.has_value(), "memory format is not supported")
+  AT_ASSERT(options.device().is_cpu());
 
-  ScalarType scalarType() const override;
-  caffe2::TypeMeta typeMeta() const override;
-  Backend backend() const override;
-  const char* toString() const override;
-  size_t elementSizeInBytes() const override;
-  TypeID ID() const override;
-
-  Tensor empty(IntArrayRef size, const TensorOptions & options) const override {
-    // Delegate to the appropriate cpu tensor factory
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_cpu(/* actuals */ size, options);
+  for (auto x: size) {
+    TORCH_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
   }
-};
+  auto* allocator = at::getCPUAllocator();
+  int64_t nelements = at::prod_intlist(size);
+  auto dtype = options.dtype();
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+      dtype,
+      nelements,
+      allocator->allocate(nelements * dtype.itemsize()),
+      allocator,
+      /*resizable=*/true);
 
-struct ComplexHooks : public at::ComplexHooksInterface {
-  ComplexHooks(ComplexHooksArgs) {}
-  void registerComplexTypes(Context* context) const override {
-    context->registerType(
-        Backend::CPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
+  // Default TensorImpl has size [0]
+  if (size.size() != 1 || size[0] != 0) {
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
-};
-
-ScalarType CPUComplexFloatType::scalarType() const {
-  return ScalarType::ComplexFloat;
+  return tensor;
 }
 
-caffe2::TypeMeta CPUComplexFloatType::typeMeta() const {
-  return scalarTypeToTypeMeta(ScalarType::ComplexFloat);
+static auto& complex_empty_registration = globalATenDispatch().registerOp(
+    Backend::ComplexCPU,
+    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+    &empty_complex);
+
 }
-
-Backend CPUComplexFloatType::backend() const {
-  return Backend::CPU;
-}
-
-const char* CPUComplexFloatType::toString() const {
-  return "CPUComplexFloatType";
-}
-
-TypeID CPUComplexFloatType::ID() const {
-  return TypeID::CPUComplexFloat;
-}
-
-size_t CPUComplexFloatType::elementSizeInBytes() const {
-  return sizeof(float);
-}
-
-REGISTER_COMPLEX_HOOKS(ComplexHooks);
-
-} // namespace at
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { }

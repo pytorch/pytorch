@@ -10,10 +10,10 @@ namespace c10 {
 // to implement this without going through Derived Types (which are not part of core).
 inline at::Tensor scalar_to_tensor(Scalar s) {
   if (s.isFloatingPoint()) {
-    return at::scalar_tensor(s, at::CPU(kDouble).options());
+    return at::scalar_tensor(s, at::device(at::kCPU).dtype(at::kDouble));
   } else {
     AT_ASSERT(s.isIntegral());
-    return at::scalar_tensor(s, at::CPU(kLong).options());
+    return at::scalar_tensor(s, at::device(at::kCPU).dtype(at::kLong));
   }
 }
 

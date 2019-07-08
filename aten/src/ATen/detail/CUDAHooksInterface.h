@@ -58,8 +58,12 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual std::unique_ptr<Generator> initCUDAGenerator(Context*) const {
-    AT_ERROR("Cannot initialize CUDA generator without ATen_cuda library. ", CUDA_HELP);
+  virtual Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
+    AT_ERROR("Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual Device getDeviceFromPtr(void* data) const {
+    AT_ERROR("Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool hasCUDA() const {
@@ -82,10 +86,6 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Pinned memory requires CUDA. ", CUDA_HELP);
   }
 
-  virtual void registerCUDATypes(Context*) const {
-    AT_ERROR("Cannot registerCUDATypes() without ATen_cuda library. ", CUDA_HELP);
-  }
-
   virtual bool compiledWithCuDNN() const {
     return false;
   }
@@ -102,24 +102,28 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual std::string showConfig() const {
+    AT_ERROR("Cannot query detailed CUDA version without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual double batchnormMinEpsilonCuDNN() const {
     AT_ERROR(
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheMaxSize() const {
+  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+  virtual void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheSize() const {
+  virtual int64_t cuFFTGetPlanCacheSize(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTClearPlanCache() const {
+  virtual void cuFFTClearPlanCache(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 

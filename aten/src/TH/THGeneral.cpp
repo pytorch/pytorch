@@ -4,10 +4,6 @@
 #include <c10/core/CPUAllocator.h>
 #endif
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 #ifndef TH_HAVE_THREAD
 #define __thread
 #elif _MSC_VER
@@ -24,15 +20,10 @@
 #include <malloc/malloc.h>
 #endif
 
-#ifdef TH_BLAS_MKL
-#include <mkl.h>
-#endif
-
 /* Torch Error Handling */
 static void defaultErrorHandlerFunction(const char *msg, void *data)
 {
-  printf("$ Error: %s\n", msg);
-  exit(-1);
+  throw std::runtime_error(msg);
 }
 
 static THErrorHandlerFunction defaultErrorHandler = defaultErrorHandlerFunction;
@@ -89,11 +80,9 @@ void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data)
 /* Torch Arg Checking Handling */
 static void defaultArgErrorHandlerFunction(int argNumber, const char *msg, void *data)
 {
-  if(msg)
-    printf("$ Invalid argument %d: %s\n", argNumber, msg);
-  else
-    printf("$ Invalid argument %d\n", argNumber);
-  exit(-1);
+  std::stringstream new_error;
+  new_error << "invalid argument " << argNumber << ": " << msg;
+  throw std::runtime_error(new_error.str());
 }
 
 static THArgErrorHandlerFunction defaultArgErrorHandler = defaultArgErrorHandlerFunction;
@@ -222,53 +211,6 @@ double THLog2(const double x)
 double THExpm1(const double x)
 {
   return expm1(x);
-}
-
-void THSetNumThreads(int num_threads)
-{
-#ifdef _OPENMP
-  omp_set_num_threads(num_threads);
-#endif
-#ifdef TH_BLAS_MKL
-  mkl_set_num_threads(num_threads);
-
-  // because PyTorch uses OpenMP outside of MKL invocations
-  // as well, we want this flag to be false, so that
-  // threads aren't destroyed and recreated across every
-  // MKL / non-MKL boundary of OpenMP usage
-  // See https://github.com/pytorch/pytorch/issues/13757
-  mkl_set_dynamic(false);
-#endif
-
-}
-
-int THGetNumThreads(void)
-{
-#ifdef _OPENMP
-  return omp_get_max_threads();
-#else
-  return 1;
-#endif
-}
-
-int THGetNumCores(void)
-{
-#ifdef _OPENMP
-  return omp_get_num_procs();
-#else
-  return 1;
-#endif
-}
-
-TH_API void THInferNumThreads(void)
-{
-#if defined(_OPENMP) && defined(TH_BLAS_MKL)
-  // If we are using MKL an OpenMP make sure the number of threads match.
-  // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
-  // size of the OpenMP thread pool, resulting in worse performance (and memory
-  // leaks in GCC 5.4)
-  omp_set_num_threads(mkl_get_max_threads());
-#endif
 }
 
 THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {

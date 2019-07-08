@@ -206,7 +206,7 @@ TEST(LeftRightTest, givenInt_whenWriteThrowsExceptionOnSecondCall_thenKeepsNewSt
                 write_called = true;
             }
         }),
-	MyException
+        MyException
     );
 
     // check reading it returns new value

@@ -1,35 +1,82 @@
-import subprocess
-import re
-import os
-import sys
 import itertools
-from collections import defaultdict
-
 import torch
-from torch._six import FileNotFoundError
 
-
-class range(object):
-    def __init__(self, name):
-        self.name = name
-
-    def __enter__(self):
-        torch.autograd._push_range(self.name)
-
-    def __exit__(self, *args):
-        torch.autograd._pop_range()
-        return False
+from collections import defaultdict, namedtuple
+from operator import attrgetter
 
 
 class EventList(list):
     """A list of Events (for pretty printing)"""
     def __init__(self, *args, **kwargs):
         super(EventList, self).__init__(*args, **kwargs)
+        self._cpu_children_populated = False
 
     def __str__(self):
         return self.table()
 
-    def table(self, sort_by=None):
+    def populate_cpu_children(self):
+        """Populates child events into each underlying FunctionEvent object.
+        One event is a child of another if [s1, e1) is inside [s2, e2). Where
+        s1 and e1 would be start and end of the child event's interval. And
+        s2 and e2 start and end of the parent event's interval
+
+        Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
+        be a parent of two other intervals.
+
+        If for any reason two intervals intersect only partialy, this function
+        will not record a parent child relationship between then.
+        """
+        if self.cpu_children_populated:
+            return
+        events = sorted(
+            self,
+            key=attrgetter("thread"),
+        )
+        threads = itertools.groupby(events, key=attrgetter("thread"))
+
+        # For each thread we keep a stack of current nested parents.
+        # We maintain the invariant that each interval is a subset of all other
+        # intervals lower in the stack.
+        #
+        # First we sort the intervals by their start time. Then we iterate over them.
+        # Every time we see a new interval we remove several parents from
+        # the top until we restore the invariant. Then parent child relationship
+        # if recorded if the stack is not empty.
+        # Finally we add new interval to the list
+        #
+        # Algorithm has O(N * log(N)) complexity where N is number of
+        # intervals
+        for thread_id, thread_events in threads:
+            thread_events = sorted(
+                thread_events,
+                key=lambda event: [event.cpu_interval.start, -event.cpu_interval.end],
+            )
+            current_events = []
+            cur_end = 0
+            for event in thread_events:
+                while len(current_events) > 0:
+                    parent = current_events[-1]
+                    if event.cpu_interval.start >= parent.cpu_interval.end or \
+                            event.cpu_interval.end > parent.cpu_interval.end:
+                        # this can't be a parent
+                        current_events.pop()
+                    else:
+                        parent.append_cpu_child(event)
+                        break
+
+                current_events.append(event)
+
+        self._cpu_children_populated = True
+
+    @property
+    def self_cpu_time_total(self):
+        return sum([event.self_cpu_time_total for event in self])
+
+    @property
+    def cpu_children_populated(self):
+        return self._cpu_children_populated
+
+    def table(self, sort_by=None, row_limit=100, header=None):
         """Prints an EventList as a nicely formatted table.
 
         Arguments:
@@ -41,7 +88,8 @@ class EventList(list):
         Returns:
             A string containing the table.
         """
-        return build_table(self, sort_by)
+        return build_table(
+            self, sort_by=sort_by, row_limit=row_limit, header=header)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -101,15 +149,28 @@ class EventList(list):
 
             json.dump(chrome_events, f)
 
-    def key_averages(self):
+    def key_averages(self, group_by_input_shapes=False):
         """Averages all function events over their keys.
+
+        @param group_by_input_shapes The key would become
+        (event name, input dimensions) rather than just event name.
+        This is useful to see which dimensionality contributes to the runtime
+        the most and may help with dimension specific optimizations or
+        choosing best candidates for quantization (aka fitting a roof line)
 
         Returns:
             An EventList containing FunctionEventAvg objects.
         """
+        self.populate_cpu_children()
         stats = defaultdict(FunctionEventAvg)
+
+        def get_key(event, group_by_input_shapes):
+            if not group_by_input_shapes:
+                return event.key
+            return (event.key, str(event.input_shapes))
         for evt in self:
-            stats[evt.key] += evt
+            stats[get_key(evt, group_by_input_shapes)].add(
+                evt, group_by_input_shapes)
         return EventList(stats.values())
 
     def total_average(self):
@@ -128,6 +189,9 @@ class EventList(list):
 
 class profile(object):
     """Context manager that manages autograd profiler state and holds a summary of results.
+    Under the hood it just records events of functions being executed in C++ and
+    exposes those events to Python. You can wrap any code into it and it will
+    only report runtime of PyTorch functions.
 
     Arguments:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
@@ -137,6 +201,17 @@ class profile(object):
             Adds approximately 4us of overhead to each tensor operation.
             Default: ``False``
 
+        record_shapes (bool, optional): If shapes recording is set, information
+            about input dimensions will be collected. This allows one to see which
+            dimensions have been used under the hood and further group by them
+            using prof.key_averages(group_by_input_shape=True). Please note that
+            shape recording might skew your profiling data. It is recommended to
+            use separate runs with and without shape recording to validate the timing.
+            Most likely the skew will be negligible for bottom most events (in a case
+            of nested function calls). But for higher level functions the total
+            self cpu time might be artificially increased because of the shape
+            collection.
+
     .. warning:
         This context managers should not be called recursively, i.e. at most one
         instance should be enabled at any given time.
@@ -144,30 +219,30 @@ class profile(object):
     Example:
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
-        ...     y = x ** 2
-        ...     y.backward()
+        >>>     for _ in range(100):  # any normal python code, really!
+        >>>         y = x ** 2
+        >>          y.backward()
         >>> # NOTE: some columns were removed for brevity
-        ... print(prof)
-        -------------------------------------  ---------------  ---------------
-        Name                                          CPU time        CUDA time
-        -------------------------------------  ---------------  ---------------
-        PowConstant                                  142.036us          0.000us
-        N5torch8autograd9GraphRootE                   63.524us          0.000us
-        PowConstantBackward                          184.228us          0.000us
-        MulConstant                                   50.288us          0.000us
-        PowConstant                                   28.439us          0.000us
-        Mul                                           20.154us          0.000us
-        N5torch8autograd14AccumulateGradE             13.790us          0.000us
-        N5torch8autograd5CloneE                        4.088us          0.000us
-    """
+        >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+        -----------------------------------  ---------------  ---------------  ---------------
+        Name                                 Self CPU total   CPU time avg     Number of Calls
+        -----------------------------------  ---------------  ---------------  ---------------
+        mul                                  32.048ms         32.048ms         200
+        pow                                  27.041ms         27.041ms         200
+        PowBackward0                         9.727ms          55.483ms         100
+        torch::autograd::AccumulateGrad      9.148ms          9.148ms          100
+        torch::autograd::GraphRoot           691.816us        691.816us        100
+        -----------------------------------  ---------------  ---------------  ---------------
 
-    def __init__(self, enabled=True, use_cuda=False):
+    """
+    def __init__(self, enabled=True, use_cuda=False, record_shapes=False):
         self.enabled = enabled
         self.use_cuda = use_cuda
         self.function_events = None
         if not self.enabled:
             return
         self.entered = False
+        self.record_shapes = record_shapes
 
     def __enter__(self):
         if not self.enabled:
@@ -177,7 +252,8 @@ class profile(object):
         self.entered = True
         profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
             else torch.autograd.ProfilerState.CPU
-        torch.autograd._enable_profiler(profiler_kind)
+        torch.autograd._enable_profiler(
+            torch.autograd.ProfilerConfig(profiler_kind, self.record_shapes))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -200,10 +276,12 @@ class profile(object):
     def _check_finish(self):
         if self.function_events is None:
             raise RuntimeError("can't export a trace that didn't finish running")
+        self.function_events.populate_cpu_children()
 
-    def table(self, sort_by=None):
+    def table(self, sort_by=None, row_limit=100, header=None):
         self._check_finish()
-        return self.function_events.table(sort_by)
+        return self.function_events.table(
+            sort_by=sort_by, row_limit=row_limit, header=header)
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
@@ -211,15 +289,23 @@ class profile(object):
         return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
-    def key_averages(self):
+    def key_averages(self, group_by_input_shape=False):
         self._check_finish()
-        return self.function_events.key_averages()
+        return self.function_events.key_averages(group_by_input_shape)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
         return self.function_events.total_average()
     total_average.__doc__ = EventList.total_average.__doc__
+
+    @property
+    def self_cpu_time_total(self):
+        """ Returns total time spent on CPU obtained as a sum of
+        all self times across all the events.
+        """
+        self._check_finish()
+        return self.function_events.self_cpu_time_total
 
 
 class emit_nvtx(object):
@@ -241,8 +327,16 @@ class emit_nvtx(object):
         instance should be enabled at any given time.
 
     Arguments:
-        enabled (bool, optional): Setting this to False makes this context manager a no-op.
+        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
+        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
+            each autograd op will append information about the sizes of Tensor arguments received
+            by that op, in the following format:
+            ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
+            Non-tensor arguments will be represented by ``[]``.
+            Arguments will be listed in the order they are received by the backend op.
+            Please note that this order may not match the order in which those arguments were passed
+            on the Python side.  Also note that shape recording may increase the overhead of nvtx range creation.
 
     Example:
         >>> with torch.cuda.profiler.profile():
@@ -259,7 +353,7 @@ class emit_nvtx(object):
 
     During the forward pass, each function range is decorated with ``seq=<N>``.  ``seq`` is a running
     counter, incremented each time a new backward Function object is created and stashed for backward.
-    Thus, the `seq=<N>` annotation associated with each forward function range tells you that
+    Thus, the ``seq=<N>`` annotation associated with each forward function range tells you that
     if a backward Function object is created by this forward function,
     the backward object will receive sequence number N.
     During the backward pass, the top-level range wrapping each C++ backward Function's
@@ -295,9 +389,10 @@ class emit_nvtx(object):
         backward Function object.  You may need to make a judgment based on analytic knowledge of what
         the expected correspondence should be.
     """
-    def __init__(self, enabled=True):
+    def __init__(self, enabled=True, record_shapes=False):
         self.enabled = enabled
         self.entered = False
+        self.record_shapes = record_shapes
 
     def __enter__(self):
         if not self.enabled:
@@ -306,7 +401,12 @@ class emit_nvtx(object):
             raise RuntimeError("NVTX annotation context manager is not reentrant")
         self.entered = True
         torch.cuda.synchronize()
-        torch.autograd._enable_profiler(torch.autograd.ProfilerState.NVTX)
+        torch.autograd._enable_profiler(
+            torch.autograd.ProfilerConfig(
+                torch.autograd.ProfilerState.NVTX,
+                self.record_shapes
+            )
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -331,7 +431,21 @@ def load_nvprof(path):
 
 def format_time(time_us):
     """Defines how to format time in FunctionEvent"""
+    US_IN_SECOND = 1000.0 * 1000.0
+    US_IN_MS = 1000.0
+    if time_us >= US_IN_SECOND:
+        return '{:.3f}s'.format(time_us / US_IN_SECOND)
+    if time_us >= US_IN_MS:
+        return '{:.3f}ms'.format(time_us / US_IN_MS)
     return '{:.3f}us'.format(time_us)
+
+
+def format_time_share(time_us, total_time_us):
+    """Defines how to format time in FunctionEvent"""
+    if total_time_us == 0:
+        assert(time_us == 0)
+        return "NaN"
+    return '{:.2f}%'.format(time_us * 100.0 / total_time_us)
 
 
 def attr_formatter(name):
@@ -347,6 +461,7 @@ class FormattedTimesMixin(object):
     cuda_time_str = attr_formatter('cuda_time')
     cpu_time_total_str = attr_formatter('cpu_time_total')
     cuda_time_total_str = attr_formatter('cuda_time_total')
+    self_cpu_time_total_str = attr_formatter('self_cpu_time_total')
 
     @property
     def cpu_time(self):
@@ -366,26 +481,39 @@ class Interval(object):
         return self.end - self.start
 
 
-class Kernel(object):
-    def __init__(self, name, device, interval):
-        self.name = name
-        self.device = device
-        self.interval = interval
+Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 
 
 # TODO: record TID too
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
-    def __init__(self, id, name, thread, cpu_start, cpu_end):
+    def __init__(self, id, name, thread, cpu_start, cpu_end, input_shapes=None):
         self.id = id
         self.name = name
         self.cpu_interval = Interval(cpu_start, cpu_end)
         self.thread = thread
         self.kernels = []
         self.count = 1
+        self.cpu_children = []
+        self.input_shapes = input_shapes
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
+
+    def append_cpu_child(self, child):
+        """Append a CPU child of type FunctionEvent.
+
+        One is supposed to append only dirrect children to the event to have
+        correct self cpu time being reported.
+        """
+        assert(isinstance(child, FunctionEvent))
+        self.cpu_children.append(child)
+
+    @property
+    def self_cpu_time_total(self):
+        return self.cpu_time_total - sum(
+            [child.cpu_time_total for child in self.cpu_children]
+        )
 
     @property
     def cuda_time_total(self):
@@ -400,29 +528,61 @@ class FunctionEvent(FormattedTimesMixin):
         return self.name
 
     def __repr__(self):
-        return '<FunctionEvent id={} cpu_time={} cuda_time={} name={} thread={}>'.format(
-            self.id, self.cpu_time_str, self.cuda_time_str, self.name, self.thread)
+        return (
+            '<FunctionEvent id={} cpu_time={} cpu_start={} cpu_end={} '
+            'cpu_children={} cuda_time={} name={} thread={} input_shapes={}>'.format(
+                self.id,
+                self.cpu_time_str,
+                self.cpu_interval.start,
+                self.cpu_interval.end,
+                str([child.id for child in self.cpu_children]),
+                self.cuda_time_str,
+                self.name,
+                self.thread,
+                str(self.input_shapes),
+            )
+        )
 
 
 class FunctionEventAvg(FormattedTimesMixin):
     """Used to average stats over multiple FunctionEvent objects."""
     def __init__(self):
         self.key = None
-        self.count = self.cpu_time_total = self.cuda_time_total = 0
+        self.count = 0
+        self.cpu_time_total = 0
+        self.cuda_time_total = 0
+        self.self_cpu_time_total = 0
+        self.input_shapes = None
 
-    def __iadd__(self, other):
+    def add(self, other, group_by_input_shapes=False):
         if self.key is None:
             self.key = other.key
+            if group_by_input_shapes:
+                self.input_shapes = other.input_shapes
+
+        assert (
+            not group_by_input_shapes or
+            other.input_shapes == self.input_shapes
+        )
         assert isinstance(other, FunctionEvent)
         assert other.key == self.key
         self.cpu_time_total += other.cpu_time
         self.cuda_time_total += other.cuda_time
+        self.self_cpu_time_total += other.self_cpu_time_total
         self.count += 1
         return self
 
     def __repr__(self):
-        return '<FunctionEventAvg cpu_time={} cuda_time={} key={}>'.format(
-            self.cpu_time_str, self.cuda_time_str, self.key)
+        return (
+            '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
+            'cuda_time={} input_shapes={}>'.format(
+                self.key,
+                self.self_cpu_time_total_str,
+                self.cpu_time_str,
+                self.cuda_time_str,
+                str(self.input_shapes),
+            )
+        )
 
 
 ################################################################################
@@ -477,7 +637,8 @@ def parse_cpu_trace(thread_records):
                 name=string_table[start.name()],
                 thread=start.thread_id(),
                 cpu_start=start_record.cpu_elapsed_us(start),
-                cpu_end=start_record.cpu_elapsed_us(record))
+                cpu_end=start_record.cpu_elapsed_us(record),
+                input_shapes=start.shapes())
             if start.has_cuda():
                 cuda_start = adjusted_time(start)
                 cuda_end = adjusted_time(record)
@@ -570,20 +731,59 @@ def parse_nvprof_trace(path):
 ################################################################################
 # Pretty printer
 
-def build_table(events, sort_by=None, header=None):
-    """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
-    if sort_by is not None:
-        events = sorted(events, key=lambda evt: getattr(evt, sort_by))
 
-    name_lengths = [len(evt.key) for evt in events]
-    if len(name_lengths) == 0:
+def build_table(events, sort_by=None, header=None, row_limit=100):
+    """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
+    if len(events) == 0:
         return ""
-    max_name_length = max(name_lengths)
-    max_name_length += 4  # Add some nice padding
-    col_width = 15
-    col_format = '  {: >' + str(col_width) + '}'
-    row_format = '{: <' + str(max_name_length) + '}' + col_format * 5
-    header_sep = '-' * max_name_length + ('  ' + '-' * col_width) * 5
+
+    if sort_by is not None:
+        events = EventList(sorted(
+            events, key=lambda evt: getattr(evt, sort_by), reverse=True
+        ))
+
+    has_input_shapes = any(
+        [event.input_shapes is not None for event in events])
+    name_column_width = max([len(evt.key) for evt in events]) + 4
+    DEFAULT_COLUMN_WIDTH = 15
+    SHAPES_COLUMN_WIDTH = 35
+
+    headers = [
+        'Name',
+        'Self CPU total %',
+        'Self CPU total',
+        'CPU total %',
+        'CPU total',
+        'CPU time avg',
+        'CUDA total %',
+        'CUDA total',
+        'CUDA time avg',
+        'Number of Calls',
+    ]
+
+    # Have to use a list because nonlocal is Py3 only...
+    SPACING_SIZE = 2
+    row_format = [""]
+    header_sep = [""]
+    line_length = [-SPACING_SIZE]
+
+    def add_column(padding):
+        row_format[0] += '{: <' + str(padding) + '}  '
+        header_sep[0] += '-' * padding + '  '
+        line_length[0] += padding + SPACING_SIZE
+
+    add_column(name_column_width)
+    for _ in headers[1:]:
+        add_column(DEFAULT_COLUMN_WIDTH)
+
+    if has_input_shapes:
+        headers.append('Input Shapes')
+        add_column(SHAPES_COLUMN_WIDTH)
+
+    row_format = row_format[0]
+    header_sep = header_sep[0]
+    line_length = line_length[0]
+    add_column = None
 
     # Have to use a list because nonlocal is Py3 only...
     result = []
@@ -592,16 +792,38 @@ def build_table(events, sort_by=None, header=None):
         result.append(s)
         result.append('\n')  # Yes, newline after the end as well
 
+    self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
+    cuda_time_total = sum([evt.cuda_time_total for evt in events])
     # Actual printing
     if header is not None:
-        line_length = max_name_length + (col_width + 2) * 5
         append('=' * line_length)
         append(header)
     append(header_sep)
-    append(row_format.format('Name', 'CPU time', 'CUDA time', 'Calls', 'CPU total', 'CUDA total'))
-    append(header_sep)
-    for evt in events:
-        append(row_format.format(evt.key, evt.cpu_time_str, evt.cuda_time_str,
-                                 evt.count, evt.cpu_time_total_str, evt.cuda_time_total_str))
+    append(row_format.format(*headers))
 
+    append(header_sep)
+    for evt in events[:row_limit]:
+        row_values = [
+            evt.key,  # Name
+            # Self CPU total %
+            format_time_share(evt.self_cpu_time_total,
+                              self_cpu_time_total),
+            evt.self_cpu_time_total_str,  # Self CPU total
+            # CPU total %
+            format_time_share(evt.cpu_time_total, self_cpu_time_total),
+            evt.cpu_time_total_str,  # CPU total
+            evt.cpu_time_str,  # CPU time avg
+            # CUDA time total %
+            format_time_share(evt.cuda_time_total, cuda_time_total),
+            evt.cuda_time_total_str,
+            evt.cuda_time_str,  # Cuda time avg
+            evt.count,  # Number of calls
+        ]
+        if has_input_shapes:
+            row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
+        append(row_format.format(*row_values))
+
+    append(header_sep)
+    append("Self CPU time total: {}".format(format_time(self_cpu_time_total)))
+    append("CUDA time total: {}".format(format_time(cuda_time_total)))
     return ''.join(result)

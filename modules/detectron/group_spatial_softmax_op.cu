@@ -17,7 +17,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "group_spatial_softmax_op.h"
+#include "modules/detectron/group_spatial_softmax_op.h"
 
 namespace caffe2 {
 

@@ -9,6 +9,7 @@ from collections import namedtuple, defaultdict
 from past.builtins import basestring
 
 import logging
+import copy
 
 import numpy as np
 
@@ -71,6 +72,13 @@ class Optimizer(object):
         return '%s_%d_%s%s_gpu%d' % (
             classname, self._instance_num, base_str, node_name, gpu_id,
         )
+
+    @property
+    def attributes(self):
+        # return a dict that contains attributes related to init args only
+        attr = copy.deepcopy(self.__dict__)
+        del attr['_instance_num']
+        return attr
 
     def make_unique_blob_name(self, base_str):
         """

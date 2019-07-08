@@ -21,10 +21,9 @@ template <class Context>
 class FloatToFusedRandRowwiseQuantizedOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  FloatToFusedRandRowwiseQuantizedOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit FloatToFusedRandRowwiseQuantizedOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         bitwidth_(OperatorBase::GetSingleArgument<int32_t>("bitwidth", 8)),
         random_(OperatorBase::GetSingleArgument<bool>("random", true)) {
     CAFFE_ENFORCE(

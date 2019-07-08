@@ -31,7 +31,9 @@ class Filler {
     for (const auto& item : *input_data) {
       bytes += item.nbytes();
     }
-    CAFFE_ENFORCE(bytes > 0, "input bytes should be positive");
+    if (bytes == 0) {
+      LOG(WARNING) << "0 input bytes filled";
+    }
 
     return bytes;
   }
@@ -77,6 +79,11 @@ class DataNetFiller : public Filler {
   const NetDef data_net_;
 };
 
+void fill_with_type(
+    const TensorFiller& filler,
+    const std::string& type,
+    TensorCPU* output);
+
 /*
  * @run_net: the predict net with parameter and input names
  * @input_dims: the input dimentions of all operator inputs of run_net
@@ -93,10 +100,7 @@ class DataRandomFiller : public Filler {
 
   void fill_parameter(Workspace* ws) const override;
 
- protected:
-  DataRandomFiller() {}
-
-  TensorFiller get_tensor_filler(
+  static TensorFiller get_tensor_filler(
       const OperatorDef& op_def,
       int input_index,
       const std::vector<std::vector<int64_t>>& input_dims) {
@@ -114,6 +118,9 @@ class DataRandomFiller : public Filler {
     auto filler = schema->InputFillers(input_dims)[input_index];
     return filler;
   }
+
+ protected:
+  DataRandomFiller() {}
 
   using filler_type_pair_t = std::pair<TensorFiller, std::string>;
   std::unordered_map<std::string, filler_type_pair_t> parameters_;
@@ -135,6 +142,13 @@ class TestDataRandomFiller : public DataRandomFiller {
   // Fill input directly to the workspace.
   void fillInputToWorkspace(Workspace* workspace) const;
 };
+
+// Convenient helpers to fill data to workspace.
+CAFFE2_API void fillRandomNetworkInputs(
+    const NetDef& net,
+    const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+    const std::vector<std::vector<std::string>>& inputTypes,
+    Workspace* workspace);
 
 } // namespace emulator
 } // namespace caffe2

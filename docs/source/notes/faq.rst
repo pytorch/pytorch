@@ -64,7 +64,7 @@ earlier, you should ``del intermediate`` when you are done with it.
 
 **Don't run RNNs on sequences that are too large.**
 The amount of memory required to backpropagate through an RNN scales
-linearly with the length of the RNN; thus, you will run out of memory
+linearly with the length of the RNN input; thus, you will run out of memory
 if you try to feed an RNN a sequence that is too long.
 
 The technical term for this phenomenon is `backpropagation through time
@@ -124,10 +124,10 @@ write::
     class MyModule(nn.Module):
         # ... __init__, other methods, etc.
 
-        # padding_input is of shape [B x T x *] (batch_first mode) and contains
+        # padded_input is of shape [B x T x *] (batch_first mode) and contains
         # the sequences sorted by lengths
-        # B is the batch size
-        # T is max sequence length
+        #   B is the batch size
+        #   T is max sequence length
         def forward(self, padded_input, input_lengths):
             total_length = padded_input.size(1)  # get the max sequence length
             packed_input = pack_padded_sequence(padded_input, input_lengths,
