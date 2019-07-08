@@ -143,7 +143,7 @@ void initTreeViewBindings(PyObject* module) {
 
   py::class_<Stmt, TreeView>(m, "Stmt"); // NOLINT(bugprone-unused-raii)
   py::class_<Expr, TreeView>(m, "Expr"); // NOLINT(bugprone-unused-raii)
-  py::class_<Def, TreeView>(m, "Def").def(
+  py::class_<Def, Stmt>(m, "Def").def(
       py::init([](const Ident& name, Decl decl, std::vector<Stmt> body) {
         const auto& r = name.range();
         return Def::create(r, name, decl, wrap_list(r, std::move(body)));

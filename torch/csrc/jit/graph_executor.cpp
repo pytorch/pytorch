@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/inplace_check.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
@@ -617,6 +618,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   }
 
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
+    Inline(*graph, /*inline_autograd=*/true);
+
     // run custom passes that different backends can register
     for (const auto& pass : getCustomPasses()) {
       pass(graph);

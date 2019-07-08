@@ -274,6 +274,38 @@ struct FunctionValue : public SugaredValue {
   std::shared_ptr<CompilationUnit> cu_;
 };
 
+struct AutogradFunctionValue : public SugaredValue {
+  // FunctionValue(Function* callee) : callee_(std::move(callee)) {}
+  AutogradFunctionValue(const StrongAutogradFunctionPtr& p)
+      : callee_(p.fw_function_), backward_(p.bw_function_), cu_(p.cu_) {}
+
+  std::string kind() const override {
+    return "autograd_function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& f,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    callee_->ensure_defined();
+    backward_->ensure_defined();
+    MatchedSchema match =
+        matchSchema(callee_->getSchema(), loc, *f.graph(), inputs, attributes);
+    Value* output =
+        f.graph()->insertAutogradFunctionCall(callee_, backward_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
+  }
+
+ private:
+  Function* callee_;
+  Function* backward_;
+  // TODO holding this thing is creepy
+  std::shared_ptr<CompilationUnit> cu_;
+};
+
 struct TORCH_API ClosureValue : public SugaredValue {
   ClosureValue(Value* value) : value_(value) {
     TORCH_INTERNAL_ASSERT(value_->node()->kind() == prim::Function);

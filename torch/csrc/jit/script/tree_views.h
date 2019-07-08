@@ -386,8 +386,8 @@ struct Decl : public TreeView {
   }
 };
 
-struct Def : public TreeView {
-  explicit Def(const TreeRef& tree) : TreeView(tree) {
+struct Def : public Stmt {
+  explicit Def(const TreeRef& tree) : Stmt(tree) {
     tree->match(TK_DEF);
   }
   Def withName(std::string new_name) const {

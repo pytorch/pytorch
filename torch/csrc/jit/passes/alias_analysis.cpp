@@ -296,6 +296,7 @@ void AliasDb::analyzeImpl(Node* node) {
       // mapAliases(node->inputs(), node->outputs());
       return;
     case prim::CallFunction:
+    case prim::CallAutogradFunction:
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst

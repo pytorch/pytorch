@@ -71,7 +71,13 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
     if (inputsMap.count(input) == 0) {
       // Clone constants inside the subgraph instead of referencing them, to
       // enable more optimizations
-      if (auto value = toIValue(input)) {
+      // we cannot IValue(...) functions...
+      if (input->type()->kind() == TypeKind::FunctionType) {
+        auto nv = subgraph->insertNode(subgraph->create(prim::Constant))
+                      ->output()
+                      ->setType(input->type());
+        inputsMap[input] = nv;
+      } else if (auto value = toIValue(input)) {
         auto nv = subgraph->insertConstant(*value);
         nv->setType(input->type()); // Need to retain type information on Nones
         inputsMap[input] = nv;

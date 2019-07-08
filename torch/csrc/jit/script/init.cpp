@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/symbolic_script.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -637,6 +638,56 @@ void initJitScriptBindings(PyObject* module) {
         return self.function_->name();
       });
 
+  py::class_<StrongAutogradFunctionPtr>(
+      m, "AutogradFunction", py::dynamic_attr())
+      .def(
+          "__call__",
+          [](py::args args, py::kwargs kwargs) {
+            // see: [pybind11 varargs]
+            auto strongPtr = py::cast<StrongAutogradFunctionPtr>(args[0]);
+            Function& callee = *strongPtr.direct_call_function_;
+            bool tracing = tracer::isTracing();
+            if (tracing) {
+              tracer::getTracingState()->graph->push_scope(callee.name());
+            }
+            py::object result = invokeScriptFunctionFromPython(
+                callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+            if (tracing) {
+              tracer::getTracingState()->graph->pop_scope();
+            }
+            return result;
+          })
+      .def_property_readonly(
+          "graph",
+          [](const StrongAutogradFunctionPtr& self) {
+            return self.fw_function_->graph();
+          })
+      .def_property_readonly(
+          "schema",
+          [](const StrongAutogradFunctionPtr& self) {
+            return self.fw_function_->getSchema();
+          })
+      .def_property_readonly(
+          "code",
+          [](const StrongAutogradFunctionPtr& self) {
+            std::ostringstream ss;
+            std::vector<at::Tensor> tensors;
+            std::vector<c10::NamedTypePtr> classes;
+            SourceRangeRecords source_ranges;
+            PythonPrint(
+                ss,
+                source_ranges,
+                *self.fw_function_,
+                false,
+                tensors,
+                classes,
+                false);
+            return ss.str();
+          })
+      .def_property_readonly("name", [](const StrongAutogradFunctionPtr& self) {
+        return self.fw_function_->name();
+      });
+
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
           "__call__",
@@ -678,6 +729,51 @@ void initJitScriptBindings(PyObject* module) {
             def.range(), defined->getSchema(), def.name().name(), defaults));
         StrongFunctionPtr ret(std::move(cu), defined);
         didFinishEmitFunction(ret);
+        return ret;
+      });
+
+  m.def(
+      "_jit_autograd_script_compile",
+      [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
+        C10_LOG_API_USAGE_ONCE("torch.script.compile");
+        // TODO what todo about this?  should be the global python CU
+        CompilationUnit tmp_cu;
+        auto cu = std::make_shared<CompilationUnit>();
+        tmp_cu.define({def}, {pythonResolver(std::move(rcb))}, nullptr);
+        auto defined = tmp_cu.get_functions().at(0);
+        auto pair_schema = getGradientPairAndSchema(defined);
+        /*defined->setSchema(getSchemaWithNameAndDefaults(
+          def.range(), defined->getSchema(), def.name().name(), defaults));*/
+        // which of those parts do we need here?
+        auto fw_defined =
+            cu->create_function(def.name().name(), pair_schema.first.forward);
+        fw_defined->setSchema(pair_schema.second);
+        auto bw_defined = cu->create_function(
+            def.name().name() + ".backward", pair_schema.first.backward);
+        auto direct_call = std::make_shared<Graph>();
+        auto& fw_graph = pair_schema.first.forward;
+        std::vector<NamedValue> nv;
+        for (const auto& i : fw_graph->inputs()) {
+          Value* v = direct_call->addInput(i->debugName())->setType(i->type());
+          nv.emplace_back(v);
+        }
+        MatchedSchema match = matchSchema(
+            fw_defined->getSchema(),
+            def.decl().range(),
+            *fw_defined->graph(),
+            nv,
+            {});
+        Value* output = direct_call->insertAutogradFunctionCall(
+            fw_defined, bw_defined, match);
+        output->node()->setSourceRange(def.range());
+        direct_call->registerOutput(output);
+
+        auto direct_call_defined = cu->create_function(
+            def.name().name() + ".direct_call", direct_call);
+        StrongAutogradFunctionPtr ret(
+            std::move(cu), fw_defined, bw_defined, direct_call_defined);
+        // didFinishEmitFunction(ret); should I add a new hook type and change
+        // pair -> tuple?!
         return ret;
       });
 

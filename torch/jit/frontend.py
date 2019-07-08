@@ -155,7 +155,7 @@ def get_jit_class_def(cls, self_name):
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
-def get_jit_def(fn, self_name=None):
+def get_jit_def(fn, self_name=None, _is_autograd=False):
     sourcelines, file_lineno = inspect.getsourcelines(fn)
     source = ''.join(sourcelines)
     filename = inspect.getsourcefile(fn)
@@ -165,17 +165,17 @@ def get_jit_def(fn, self_name=None):
         raise RuntimeError("expected a single top-level function")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn), _is_autograd=_is_autograd)
     return build_def(ctx, py_ast.body[0], type_line, self_name)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True, _is_autograd=False):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
-
+        self.is_autograd = _is_autograd
 
 class Builder(object):
     def __call__(self, ctx, node):
@@ -342,6 +342,23 @@ class StmtBuilder(Builder):
         return For(
             r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
+
+    @staticmethod
+    def build_FunctionDef(ctx, py_def):
+        r = ctx.make_range(py_def.lineno, py_def.col_offset,
+                           py_def.col_offset + len("def"))
+        if not ctx.is_autograd:
+            raise NotSupportedError(r, "nested function definitions are only allowed for autodiff backwards")
+        body = py_def.body
+        param_list = build_param_list(ctx, py_def.args, None)
+        return_type = None
+        if getattr(py_def, 'returns', None) is not None:
+            return_type = build_expr(ctx, py_def.returns)
+        decl = Decl(r, param_list, return_type)
+        # note: we do not support type line (comments)
+        return Def(Ident(r, py_def.name),
+               decl,
+               build_stmts(ctx, body))
 
     @staticmethod
     def build_If(ctx, stmt):

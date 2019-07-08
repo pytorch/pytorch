@@ -15,18 +15,51 @@ static void replace(
     at::ArrayRef<Value*> inputs) {
   WithInsertPoint guard(to_replace);
   auto new_output =
-      inlineCallTo(*to_replace->owningGraph(), *fn->graph(), inputs).at(0);
+      inlineCallTo(
+          *to_replace->owningGraph(),
+          *fn->graph(),
+          inputs,
+          /*unpack_outputs=*/to_replace->kind() == prim::CallAutogradFunction)
+          .at(0);
   if (to_replace->output()->hasDebugName()) {
     new_output->setDebugName(to_replace->output()->debugName());
   }
+  //  new_outputs = inlineCallTo(
+  //      *graph, *fw_graph, node->inputs().slice(2), /*unpack_outputs=*/true);
+  /*
+    auto outputs = node->outputs();
+    AT_ASSERT(new_outputs.size() == outputs.size() + 1);
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      new_outputs.at(i)->setType(outputs[i]->type());
+      outputs[i]->replaceAllUsesWith(new_outputs.at(i));
+    }
+  */
   to_replace->output()->replaceAllUsesWith(new_output);
 }
 
-void inlineCalls(Block* block) {
+void inlineCalls(Block* block, bool inline_autograd) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
     switch (cur->kind()) {
+      case prim::CallAutogradFunction:
+        if (inline_autograd) {
+          AT_ASSERT(cur->inputs().at(0)->node()->kind() == prim::Constant);
+          AT_ASSERT(cur->inputs().at(1)->node()->kind() == prim::Constant);
+          auto function_constant = cur->inputs().at(0)->node();
+          auto backward_constant = cur->inputs().at(1)->node();
+          auto fun_type =
+              function_constant->output()->type()->expect<FunctionType>();
+          replace(cur, fun_type->function(), cur->inputs().slice(2));
+          cur->destroy();
+          if (!function_constant->hasUses()) {
+            function_constant->destroy();
+          }
+          if (!backward_constant->hasUses()) {
+            backward_constant->destroy();
+          }
+        }
+        break;
       case prim::CallFunction: {
         AT_ASSERT(cur->inputs().at(0)->node()->kind() == prim::Constant);
         auto function_constant = cur->inputs().at(0)->node();
@@ -47,15 +80,15 @@ void inlineCalls(Block* block) {
       } break;
       default: {
         for (auto b : cur->blocks()) {
-          inlineCalls(b);
+          inlineCalls(b, inline_autograd);
         }
       } break;
     }
   }
 }
 
-void Inline(Graph& graph) {
-  inlineCalls(graph.block());
+void Inline(Graph& graph, bool inline_autograd) {
+  inlineCalls(graph.block(), inline_autograd);
 }
 
 } // namespace jit

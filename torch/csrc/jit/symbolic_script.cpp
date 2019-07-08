@@ -1344,54 +1344,61 @@ bool isHelperFunction(const std::string& method_name) {
   return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
+std::pair<GradientPair, FunctionSchema> getGradientPairAndSchema(
+    const Function* method,
+    bool is_aten) {
+  GradientPair pair;
+  pair.forward = method->graph();
+
+  // lookup the backward function
+  Node* forward_tuple = pair.forward->outputs().at(0)->node();
+
+  if (forward_tuple->kind() != prim::TupleConstruct) {
+    throw script::ErrorReport(forward_tuple->sourceRange())
+        << "gradient must return literal a tuple";
+  }
+
+  Value* context;
+  std::tie(pair.backward, context) =
+      extractClosure(forward_tuple->inputs().back());
+
+  // do surgery on the forward function to remove the closure tuple and
+  // replace it with the context variable:
+  //  backward = (<lambda>, context_tuple)
+  //  return original, backward
+  //  -----
+  //  return original, context_tuple
+  std::vector<Value*> new_inputs = forward_tuple->inputs().vec();
+  new_inputs.back() = context;
+  Value* new_tuple =
+      pair.forward->appendNode(pair.forward->createTuple(new_inputs))->output();
+  pair.forward->eraseOutput(0);
+  pair.forward->registerOutput(new_tuple);
+  forward_tuple->destroy();
+
+  // derive schema from original function's schema:
+  const FunctionSchema& loaded_schema = method->getSchema();
+  FunctionSchema actual_schema(
+      is_aten ? Symbol::aten(loaded_schema.name()).toQualString()
+              : loaded_schema.name(),
+      loaded_schema.overload_name(),
+      loaded_schema.arguments(),
+      {originalReturnType(new_tuple->type()->expect<TupleType>())});
+  return std::make_pair(std::move(pair), std::move(actual_schema));
+}
+
 void loadModule(const script::CompilationUnit& module) {
   for (const auto& method : module.get_functions()) {
     if (isHelperFunction(method->name()))
       continue;
 
-    GradientPair pair;
-    pair.forward = method->graph();
-
-    // lookup the backward function
-    Node* forward_tuple = pair.forward->outputs().at(0)->node();
-
-    if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw script::ErrorReport(forward_tuple->sourceRange())
-          << "gradient must return literal a tuple";
-    }
-
-    Value* context;
-    std::tie(pair.backward, context) =
-        extractClosure(forward_tuple->inputs().back());
-
-    // do surgery on the forward function to remove the closure tuple and
-    // replace it with the context variable:
-    //  backward = (<lambda>, context_tuple)
-    //  return original, backward
-    //  -----
-    //  return original, context_tuple
-    std::vector<Value*> new_inputs = forward_tuple->inputs().vec();
-    new_inputs.back() = context;
-    Value* new_tuple =
-        pair.forward->appendNode(pair.forward->createTuple(new_inputs))
-            ->output();
-    pair.forward->eraseOutput(0);
-    pair.forward->registerOutput(new_tuple);
-    forward_tuple->destroy();
-
-    // derive schema from original function's schema:
-    const FunctionSchema& loaded_schema = method->getSchema();
-    FunctionSchema actual_schema(
-        Symbol::aten(loaded_schema.name()),
-        loaded_schema.overload_name(),
-        loaded_schema.arguments(),
-        {originalReturnType(new_tuple->type()->expect<TupleType>())});
+    auto pair_schema = getGradientPairAndSchema(method, /*is_aten=*/true);
 
     // modify canonical string for function overloading
     // prefer not to modify the schema name
-    auto schema_string = overloadedSchemaString(actual_schema);
+    auto schema_string = overloadedSchemaString(pair_schema.second);
 
-    schema_to_graphs[schema_string] = std::move(pair);
+    schema_to_graphs[schema_string] = std::move(pair_schema.first);
   }
 }
 

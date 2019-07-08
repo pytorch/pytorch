@@ -1109,6 +1109,15 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         fn.__doc__ = obj.__doc__
         return fn
 
+def autograd_script(fn):
+    if not _enabled:
+        return fn
+    _rcb = _jit_internal.createResolutionCallback(1)
+    ast = get_jit_def(fn, _is_autograd=True)
+    fn = torch._C._jit_autograd_script_compile(ast, _rcb, get_default_args(fn))
+    # Forward docstrings
+    fn.__doc__ = fn.__doc__
+    return fn
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -2091,7 +2100,9 @@ def _graph_for(self, *args, **kwargs):
 
 torch._C.ScriptMethod.graph_for = _graph_for
 torch._C.Function.graph_for = _graph_for
+torch._C.AutogradFunction.graph_for = _graph_for
 Function = torch._C.Function
+AutogradFunction = torch._C.AutogradFunction
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

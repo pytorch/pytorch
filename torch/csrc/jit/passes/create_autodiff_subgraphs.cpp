@@ -87,7 +87,8 @@ class SubgraphSlicer {
     size_t i = 0;
     for (auto it = subgraph->nodes().begin(); it != subgraph->nodes().end();
          ++it) {
-      if (++i >= minSubgraphSize_) {
+      if (++i >= minSubgraphSize_ ||
+          (*it)->kind() == prim::CallAutogradFunction) {
         return false;
       }
     }
@@ -111,8 +112,13 @@ class SubgraphSlicer {
   }
 
   bool shouldConsiderForMerge(Node* node) {
-    // if we're already in the process of merging
-    if (node->kind() == prim::DifferentiableGraph) {
+    if (node->kind() == prim::DifferentiableGraph || // if we're already in the
+                                                     // process of merging
+        node->kind() == prim::CallAutogradFunction) {
+      return true;
+    }
+    if (node->kind() == prim::TupleUnpack &&
+        shouldConsiderForMerge(node->input()->node())) {
       return true;
     }
     if (node->kind() == prim::Constant) {

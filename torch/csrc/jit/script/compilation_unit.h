@@ -208,7 +208,7 @@ struct TORCH_API CompilationUnit {
 
 } // namespace script
 
-// An owning pointer to a Function. Just a pair of a raw Function ptr and it's
+// An owning pointer to a Function. Just a pair of a raw Function ptr and its
 // owning CU. We need this because pybind requires a ref-counted way to refer to
 // Functions.
 struct StrongFunctionPtr {
@@ -221,6 +221,30 @@ struct StrongFunctionPtr {
   }
   std::shared_ptr<script::CompilationUnit> cu_;
   Function* function_;
+};
+
+// An owning pointer to Forward and Backward. Just a triple of a raw Function
+// ptrs and their owning CU. We need this because pybind requires a ref-counted
+// way to refer to Functions.
+struct StrongAutogradFunctionPtr {
+  StrongAutogradFunctionPtr(
+      std::shared_ptr<script::CompilationUnit> cu,
+      Function* fw_function,
+      Function* bw_function,
+      Function* direct_call_function)
+      : cu_(std::move(cu)),
+        fw_function_(fw_function),
+        bw_function_(bw_function),
+        direct_call_function_(direct_call_function) {
+    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(fw_function_);
+    TORCH_INTERNAL_ASSERT(bw_function_);
+    TORCH_INTERNAL_ASSERT(direct_call_function_);
+  }
+  std::shared_ptr<script::CompilationUnit> cu_;
+  Function* fw_function_;
+  Function* bw_function_;
+  Function* direct_call_function_;
 };
 } // namespace jit
 } // namespace torch

@@ -1098,6 +1098,10 @@ struct Graph {
   TORCH_API Value* insertFunctionCall(
       Function* callee,
       script::MatchedSchema& matched);
+  TORCH_API Value* insertAutogradFunctionCall(
+      Function* callee,
+      Function* backward,
+      script::MatchedSchema& matched);
   TORCH_API Value* insertMethodCall(
       std::string method_name,
       script::MatchedSchema& matched);
