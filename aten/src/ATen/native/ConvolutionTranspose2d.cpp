@@ -247,7 +247,7 @@ void conv_transpose2d_out_cpu_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND_LONG(
       input.scalar_type(), "conv_transpose2d_out_cpu", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
@@ -438,7 +438,7 @@ static void conv_transpose2d_backward_out_cpu_template(
   grad_columns.resize_({n_output_plane * kernel_width * kernel_height,
                         input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND_LONG(
       grad_output.scalar_type(), "conv_transpose2d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n = Tensor();
@@ -623,7 +623,7 @@ void conv_transpose2d_acc_grad_parameters_cpu(
   columns.resize_({n_output_plane * kernel_width * kernel_height,
                    input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND_LONG(
       input.scalar_type(), "conv_transpose2d_acc_grad_parameters_cpu", [&] {
         // Helpers
         Tensor input_n = Tensor();
