@@ -203,7 +203,7 @@ class ShapePropagator {
     return tensor_types;
   }
 
-  c10::ScalarType typeToScalarType(c10::TypePtr type) {
+  c10::ScalarType typeToScalarType(const c10::TypePtr & type) {
     if (auto cast = type->cast<CompleteTensorType>()) {
       return cast->scalarType();
     } else if(auto cast = type->cast<DimensionedTensorType>()) {

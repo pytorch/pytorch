@@ -100,8 +100,8 @@ class TestTypePromotion(TestCase):
         f = torch.tensor([1, 1, 1, 1], dtype=torch.float, device=self.device)
         o = torch.tensor([0, 0, 0, 0], dtype=torch.long, device=self.device)
         self.assertRaisesRegex(RuntimeError,
-            "can't be cast to",
-            lambda: torch.add(f, f, out=o))
+                               "can't be cast to",
+                               lambda: torch.add(f, f, out=o))
         d = torch.tensor([1, 1, 1, 1], dtype=torch.double, device=self.device)
         torch.add(f, f, out=d)
         self.assertEqual(d.dtype, torch.double)
@@ -114,7 +114,6 @@ class TestTypePromotion(TestCase):
         s = (tens + 2).sum()
         s.backward()
         self.assertEqual(f.grad, tens)
-
 
     # verifies that a.add(b) is the same as a.to(b.dtype).add(b) in cases
     # where that should hold.
