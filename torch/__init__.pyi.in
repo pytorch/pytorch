@@ -24,6 +24,7 @@ from .autograd import no_grad as no_grad, enable_grad as enable_grad, \
     set_grad_enabled as set_grad_enabled
 from . import cuda as cuda
 from . import optim as optim
+from . import nn as nn
 
 class dtype: ...
 
@@ -126,3 +127,4 @@ def compiled_with_cxx11_abi() -> bool: ...
 # (similar to `unique`, `lu`, etc.); as such, it is not
 # possible to type correctly
 def nonzero(input: Tensor, *, out: Optional[Tensor]=None, as_tuple: Optional[bool]=None): ...
+
