@@ -562,8 +562,6 @@ void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scal
                        })
 }
 
-#if !defined(TH_REAL_IS_BOOL)
-
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
   int64_t tensor_size = THTensor_(nElement)(tensor);
@@ -672,6 +670,8 @@ void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* s
                    });
   c10::raw::intrusive_ptr::decref(srct);
 }
+
+#if !defined(TH_REAL_IS_BOOL)
 
 void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {

@@ -2,7 +2,6 @@
 
 #include <ATen/Parallel.h>
 #include <torch/csrc/autograd/grad_mode.h>
-
 #include <cstdint>
 
 namespace torch {
