@@ -77,8 +77,8 @@ template <typename dtype> // int64_t, bool, double
 Operation listConstruct(int64_t num_inputs) {
   return [=](Stack& stack) {
     auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    std::vector<dtype> vals =
-        fmap(inputs, [](const IValue& v) { return v.to<dtype>(); });
+    c10::List<dtype> vals =
+        c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
     drop(stack, num_inputs);
     push(stack, std::move(vals));
     return 0;
@@ -240,6 +240,21 @@ RegisterOperators reg(
            };
          }),
      Operator(
+         "prim::BailoutTemplate() -> int",
+         [](const Node* /* node */) {
+           return [](Stack& stack) {
+             // TODO: today, we put a single bailout template at the front to
+             // carry the un-optimized graph for bailout nodes to use. Ideally
+             // this should never run, but we haven't written the code to remove
+             // it yet.
+             // TORCH_INTERNAL_ASSERT(false);
+
+             // Returns an int so that we have an easy way to do graph traversal
+             push(stack, 1);
+             return 0;
+           };
+         }),
+     Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;
@@ -250,46 +265,6 @@ RegisterOperators reg(
              elems.push_back(i);
            }
            push(stack, std::move(elems));
-           return 0;
-         }),
-     Operator(
-         "prim::Bool(Tensor a) -> bool",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_nonzero());
-           return 0;
-         }),
-     Operator(
-         "prim::Bool(int a) -> bool",
-         [](Stack& stack) {
-           int64_t i;
-           pop(stack, i);
-           push(stack, (bool)i);
-           return 0;
-         }),
-     Operator(
-         "prim::Bool(float a) -> bool",
-         [](Stack& stack) {
-           double d;
-           pop(stack, d);
-           push(stack, (bool)d);
-           return 0;
-         }),
-     Operator(
-         "prim::Int(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<int64_t>());
-           return 0;
-         }),
-     Operator(
-         "prim::Float(Tensor a) -> float",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<double>());
            return 0;
          }),
      Operator(
@@ -332,43 +307,39 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Float(Scalar a) -> float",
+         "aten::Bool(Tensor a) -> bool",
          [](Stack& stack) {
-           IValue scalar;
-           pop(stack, scalar);
-           if (scalar.isDouble()) {
-             push(stack, std::move(scalar));
-           } else {
-             push(stack, static_cast<double>(scalar.toInt()));
-           }
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_nonzero());
            return 0;
          }),
      Operator(
-         "prim::Float(int a) -> float",
+         "aten::Bool(int a) -> bool",
          [](Stack& stack) {
            int64_t i;
            pop(stack, i);
-           push(stack, (float)i);
+           push(stack, (bool)i);
            return 0;
          }),
      Operator(
-         "prim::Int(float a) -> int",
+         "aten::Bool(float a) -> bool",
          [](Stack& stack) {
            double d;
            pop(stack, d);
-           push(stack, (int64_t)d);
+           push(stack, (bool)d);
            return 0;
          }),
      Operator(
-         "prim::Float(bool a) -> float",
+         "aten::Int(Tensor a) -> int",
          [](Stack& stack) {
-           bool b;
-           pop(stack, b);
-           push(stack, (float)b);
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<int64_t>());
            return 0;
          }),
      Operator(
-         "prim::Int(bool a) -> int",
+         "aten::Int(bool a) -> int",
          [](Stack& stack) {
            bool b;
            pop(stack, b);
@@ -376,7 +347,15 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> int",
+         "aten::Int(float a) -> int",
+         [](Stack& stack) {
+           double d;
+           pop(stack, d);
+           push(stack, (int64_t)d);
+           return 0;
+         }),
+     Operator(
+         "aten::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -388,7 +367,43 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Float(str a) -> float",
+         "aten::Float(Tensor a) -> float",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<double>());
+           return 0;
+         }),
+     Operator(
+         "aten::Float(Scalar a) -> float",
+         [](Stack& stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isDouble()) {
+             push(stack, std::move(scalar));
+           } else {
+             push(stack, static_cast<double>(scalar.toInt()));
+           }
+           return 0;
+         }),
+     Operator(
+         "aten::Float(int a) -> float",
+         [](Stack& stack) {
+           int64_t i;
+           pop(stack, i);
+           push(stack, (float)i);
+           return 0;
+         }),
+     Operator(
+         "aten::Float(bool a) -> float",
+         [](Stack& stack) {
+           bool b;
+           pop(stack, b);
+           push(stack, (float)b);
+           return 0;
+         }),
+     Operator(
+         "aten::Float(str a) -> float",
          [](Stack& stack) {
            auto s = pop(stack).toString();
            if (s->string() == "inf")
@@ -400,6 +415,14 @@ RegisterOperators reg(
                  "Only 'inf' or '-inf' can be cast to a float, but got '",
                  s->string(),
                  "'");
+           return 0;
+         }),
+     Operator(
+         "aten::str(t elem) -> str",
+         [](Stack& stack) {
+           std::stringstream ss;
+           ss << pop(stack);
+           push(stack, ss.str());
            return 0;
          }),
      Operator(
@@ -501,6 +524,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::is_mkldnn(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mkldnn());
+           return 0;
+         }),
+     Operator(
          "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor a;
@@ -583,7 +614,7 @@ RegisterOperators reg(
                    size, peek(stack, i, num_inputs).toIntListRef());
              }
              drop(stack, num_inputs);
-             push(stack, std::move(size));
+             push(stack, c10::impl::toList(std::move(size)));
              return 0;
            };
          }),
@@ -958,7 +989,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::List<IValue> vals;
+               c10::impl::GenericList vals;
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -1043,7 +1074,8 @@ RegisterOperators reg(
            const auto type = node->output()->type()->expect<ClassType>();
            const size_t numAttrs = type->numAttributes();
            return [type, numAttrs](Stack& stack) {
-             auto userObj = c10::ivalue::Object::create(type, numAttrs);
+             auto userObj = c10::ivalue::Object::create(
+                 c10::StrongTypePtr(type->compilation_unit(), type), numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };
@@ -1507,12 +1539,11 @@ int listNe<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-Operation listList(const Node* node) {
-  return [=](Stack& stack) {
-    // Intentional no-op, needed to match Python semantics for list(iterable),
-    // but in JIT these will already be lists
-    return 0;
-  };
+template <typename T>
+int listList(Stack& stack) {
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  push(stack, a.copy());
+  return 0;
 }
 
 template <class T>
@@ -1522,18 +1553,19 @@ int listAdd(Stack& stack) {
   pop(stack, a, b);
 
   c10::List<T> ret;
-  const auto total_size = a.size() + b.size();
-  ret.reserve(total_size);
-  for (T a_element : a) {
-    ret.push_back(std::move(a_element));
+
+  if (a.use_count() == 1) {
+    ret = std::move(a);
+  } else {
+    ret = a.copy();
   }
-  for (T b_element : b) {
-    ret.push_back(std::move(b_element));
-  }
+
+  ret.append(std::move(b));
 
   push(stack, std::move(ret));
   return 0;
 }
+
 template <class T>
 int listInplaceAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<List<T>>();
@@ -2011,7 +2043,8 @@ RegisterOperators reg2({
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
           listSlice<c_type::value_type>),                                           \
-      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList),       \
+      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]",                  \
+          listList<c_type::value_type>),                                            \
       Operator(                                                                     \
           "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
           listMulIntLeft<c_type::value_type>),                                      \
@@ -2081,14 +2114,6 @@ RegisterOperators reg2({
           auto string = pop(stack).toStringRef();
           char c = string.at(index);
           push(stack, std::string(&c, 1));
-          return 0;
-        }),
-    Operator(
-        "prim::str(t elem) -> str",
-        [](Stack& stack) {
-          std::stringstream ss;
-          ss << pop(stack);
-          push(stack, ss.str());
           return 0;
         }),
     Operator(
@@ -2821,16 +2846,16 @@ RegisterOperators reg3({
 at::Tensor leaky_relu(const at::Tensor& tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
-at::Tensor cat(const std::vector<at::Tensor>& tensors) {
-  return at::cat(tensors);
+at::Tensor cat(const c10::List<at::Tensor>& tensors) {
+  return at::cat(c10::impl::toVector(tensors));
 }
 
-std::string get_first(const std::vector<std::vector<std::string>>& strings) {
-  return strings[0][0];
+std::string get_first(const c10::List<c10::List<std::string>>& strings) {
+  return strings.get(0).get(0);
 }
 
 static auto reg4 =
-    torch::jit::RegisterOperators()
+    torch::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",
             &leaky_relu)
         .op("_test::cat(Tensor[] inputs) -> Tensor", &cat)

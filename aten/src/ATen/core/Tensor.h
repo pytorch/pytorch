@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -16,7 +15,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
 
@@ -173,7 +172,7 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> names() const {
     return impl::internal_get_names(unsafeGetTensorImpl());
   }
@@ -210,9 +209,6 @@ class CAFFE2_API Tensor {
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
         is_variable());
-  }
-  Type & dispatch_type() const {
-    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
@@ -264,7 +260,7 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
   bool is_named() const;
 
@@ -349,19 +345,13 @@ class CAFFE2_API Tensor {
     return impl_->grad();
   }
 
-  void set_data(Tensor new_data);
-
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
-  void backward(
-      c10::optional<Tensor> gradient = c10::nullopt,
-      bool keep_graph = false,
-      bool create_graph = false);
-
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
   //example
   //Tensor * add(Tensor & b);
+  void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
+  void set_data(const Tensor & new_data) const;
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -510,7 +500,7 @@ class CAFFE2_API Tensor {
   Tensor hardshrink_backward(const Tensor & grad_out, Scalar lambd) const;
   Tensor rsqrt() const;
   Tensor & rsqrt_();
-  #ifdef NAMEDTENSOR_ENABLED
+  #ifdef BUILD_NAMEDTENSOR
   Tensor select(Dimname dim, int64_t index) const;
   #endif
   Tensor select(int64_t dim, int64_t index) const;

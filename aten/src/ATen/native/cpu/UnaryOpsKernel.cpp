@@ -60,7 +60,7 @@ static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
         [=]() -> H { return value; },
         [=]() { return Vec256<H>(value); });
   } else if (iter.dtype() == ScalarType::BFloat16) {
-    auto value = value_scalar.to<at::BFloat16>().val_;
+    auto value = value_scalar.to<at::BFloat16>().x;
     using H = decltype(value);
     cpu_kernel_vec(
         iter,

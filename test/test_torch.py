@@ -3339,7 +3339,8 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 if dt == torch.bfloat16:
-                    continue  # fix once random is implemented for bfloat16 on cuda
+                    self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
+                    continue
 
                 if dt == torch.half and device == 'cpu':
                     # fix once random is implemented for Half on CPU
@@ -3352,11 +3353,13 @@ class _TestTorchMixin(object):
         from copy import copy
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
-                x_clone = x.clone()
 
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.clone())
+                    continue
+
+                x_clone = x.clone()
                 y = copy(x)
                 y.fill_(1)
 
@@ -3368,8 +3371,6 @@ class _TestTorchMixin(object):
         shape = (2, 2)
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 x.resize_(shape)
                 self.assertEqual(shape, x.shape)
@@ -3377,8 +3378,6 @@ class _TestTorchMixin(object):
     def test_resize_as_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
                 x.resize_as_(y)
@@ -3387,17 +3386,19 @@ class _TestTorchMixin(object):
     def test_view_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.view(6))
+                    continue
                 self.assertEqual(x.view(6).shape, [6])
 
     def test_fill_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor((1, 1), dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.fill_(1))
+                    continue
                 x.fill_(1)
 
                 self.assertEqual(x, torch.tensor([1, 1], dtype=dt, device=device))
@@ -3406,18 +3407,22 @@ class _TestTorchMixin(object):
     def test_clone_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor((1, 1), dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.clone())
+                    continue
+
                 y = x.clone()
                 self.assertEqual(x, y)
 
     def test_cat_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    continue  # Remove once cuda available for bfloat16
                 x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
+                    continue
+
                 expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
                 self.assertEqual(torch.cat((x, x), 0), expected1)
 
@@ -3431,8 +3436,6 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for shape in shapes:
                 for dt in torch.testing.get_all_dtypes():
-                    if dt == torch.bfloat16:
-                        continue  # Remove once random is supported for bfloat16 on cuda
 
                     if (device == 'cuda' and dt == torch.bfloat16):
                         continue  # Remove once cuda available for bfloat16
@@ -3450,6 +3453,9 @@ class _TestTorchMixin(object):
                         # update once random is implemented for half on CPU
                         self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                     else:
+                        if dt == torch.bfloat16:
+                            self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt))
+                            continue  # Remove once random is supported for bfloat16 on cuda
                         self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                         self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
 
@@ -9352,8 +9358,9 @@ class _TestTorchMixin(object):
                     if TEST_NUMPY:
                         tup1 = torch.nonzero(tensor, as_tuple=True)
                         tup2 = tensor.nonzero(as_tuple=True)
+                        tup3 = torch.where(tensor)
                         np1 = tensor.cpu().numpy().nonzero()
-                        for t in (tup1, tup2):
+                        for t in (tup1, tup2, tup3):
                             self.assertEqual(len(t), len(np1))
                             for i in range(len(t)):
                                 self.assertEqual(t[i].cpu().numpy(), np1[i])
@@ -9594,6 +9601,10 @@ class _TestTorchMixin(object):
         self.assertEqual(r[50:].mean(), 1, 0.2)
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+        r = torch.normal(2, 3, (100, 100))
+        self.assertEqual(r.mean(), 2, 0.2)
+        self.assertEqual(r.std(), 3, 0.2)
 
     def test_generator_cpu(self):
         # test default generators are equal
@@ -10420,9 +10431,8 @@ class _TestTorchMixin(object):
             if t.is_cuda and not torch.cuda.is_available():
                 continue
             if t == torch.cuda.BFloat16Tensor:
-                continue  # TODO: remove once bfloat16 is available on cuda
-            if t == torch.BFloat16Tensor:
-                continue  # TODO: Fix in the future PRs regarding bfloat16
+                self.assertRaises(RuntimeError, lambda: t(100, 100).fill_(1))
+                continue
             obj = t(100, 100).fill_(1)
             obj.__repr__()
             str(obj)
@@ -10567,6 +10577,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x = torch.tensor(0.00002)
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor(2.0000e-05)''')
+
+        # test print boolean tensor
+        x = torch.tensor([True])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([True])''')
+
+        x = torch.tensor(True)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor(True)''')
 
         # [Numpy] test print float in sci_mode when min < 0.0001.
         x = torch.tensor([0.00002])
@@ -10917,6 +10936,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # implements `==`
             for i in range(len(array)):
                 self.assertEqual(tensor_from_array[i], array[i])
+
+        # Test unsupported type
+        array = np.array([1, 2, 3, 4], dtype=np.complex)
+        with self.assertRaises(TypeError):
+            tensor_from_array = torch.from_numpy(array)
 
         # check storage offset
         x = np.linspace(1, 125, 125)
@@ -11822,7 +11846,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1], device="cuda"))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).cuda())
-        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.set_default_tensor_type(torch.cuda.FloatTensor))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
 
     def test_cast_binary_op(self):
