@@ -87,6 +87,7 @@ class BatchNormNet(nn.Module):
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
+ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99) 
 
 
 def get_timeout(test_id):
@@ -1536,6 +1537,36 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        model = nn.parallel.DistributedDataParallel(ONLY_SBN_NET.cuda(rank), device_ids=[rank])
+
+        input_var = []
+        for i in range(int(WORLD_SIZE)):
+            input_var_rank = torch.cat([
+                torch.ones(2, 1, 10 ** (i + 1)) * (0.1 ** (i - 1)),
+                torch.ones(2, 1, 10 ** (i + 1)) * (0.3 ** (i - 1))
+            ], dim=1)
+            input_var.append(input_var_rank)
+
+        all_input_var = torch.cat(
+            [x.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1) for x in input_var],
+            dim=1
+        ).cuda(rank)
+
+        for i in range(100):
+            y = model(input_var[rank].cuda(rank))
+            y.mean().backward()
+
+        running_mean, running_var = model.module.running_mean, model.module.running_var
+        torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
+        torch.testing.assert_allclose(running_var, all_input_var.var(1))
 
     @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
