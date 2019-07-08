@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 from torch._C import ListType
 import warnings
@@ -110,7 +112,7 @@ def _maybe_get_scalar(value):
 
 def _get_const(value, desc, arg_name):
     if _is_value(value) and value.node().kind() != 'onnx::Constant':
-        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument".format(arg_name))
+        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`".format(arg_name, value))
     return _parse_arg(value, desc)
 
 
@@ -122,6 +124,8 @@ def _unpack_list(list_value):
 
 def parse_args(*arg_descriptors):
     def decorator(fn):
+        fn._arg_descriptors = arg_descriptors
+
         def wrapper(g, *args):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
@@ -187,13 +191,13 @@ def _try_get_scalar_type(*args):
             pass
     return None
 
-def _slice_op(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
+def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version == 9:
-        from torch.onnx.symbolic_opset9 import slice_op
-        return slice_op(g, input, axes, starts, ends)
+        from torch.onnx.symbolic_opset9 import _slice
+        return _slice(g, input, axes, starts, ends)
     if _export_onnx_opset_version == 10:
-        from torch.onnx.symbolic_opset10 import slice_op
-        return slice_op(g, input, axes, starts, ends, steps, dynamic_slice)
+        from torch.onnx.symbolic_opset10 import _slice
+        return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
 # ---------------------------------------------------------------------
 # ONNX operator version
@@ -238,6 +242,10 @@ def _set_opset_version(opset_version):
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
 
+_operator_export_type = None
+def _set_operator_export_type(operator_export_type):
+    global _operator_export_type
+    _operator_export_type = operator_export_type
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an

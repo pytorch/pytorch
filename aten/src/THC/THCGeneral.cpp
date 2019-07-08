@@ -2,7 +2,6 @@
 #include <TH/TH.h>
 #include <THC/THCAllocator.h>
 #include <THC/THCCachingHostAllocator.h>
-#include <THC/THCTensorRandom.h>
 #include <THC/THCGeneral.hpp>
 
 #include <c10/cuda/CUDAStream.h>
@@ -57,9 +56,6 @@ void THCudaInit(THCState* state)
   state->resourcesPerDevice = (THCCudaResourcesPerDevice*)
     calloc(numDevices, sizeof(THCCudaResourcesPerDevice));
 
-  state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
-  THCRandom_init(state, numDevices, device);
-
   // p2pAccessEnabled records if p2p copies are allowed between pairs of
   // devices. Values include "1" (copy allowed), "0" (copy not allowed), and
   // "-1" (unknown).
@@ -98,9 +94,6 @@ void THCudaInit(THCState* state)
 
 void THCudaShutdown(THCState* state)
 {
-  THCRandom_shutdown(state);
-
-  free(state->rngState);
 
   int deviceCount = 0;
   int prevDev = -1;
@@ -171,11 +164,6 @@ int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
     THCudaCheck(cudaSetDevice(prevDev));
   }
   return state->p2pAccessEnabled[dev][devToAccess];
-}
-
-struct THCRNGState* THCState_getRngState(THCState *state)
-{
-  return state->rngState;
 }
 
 c10::Allocator* THCState_getCudaHostAllocator(THCState* state)

@@ -43,10 +43,7 @@ class AliasDb {
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
-  TORCH_API bool writesToAlias(
-      Node* n,
-      const ValueSet& vs,
-      bool recurseBlocks = false) const;
+  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs) const;
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
@@ -100,11 +97,8 @@ class AliasDb {
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  MemoryLocations getWrites(Node* n, bool recurseBlocks = false) const;
-  void getWritesImpl(Block* b, MemoryLocations& ret, bool recurseBlocks = false)
-      const;
-  void getWritesImpl(Node* n, MemoryLocations& ret, bool recurseBlocks = false)
-      const;
+  MemoryLocations getWrites(Node* n) const;
+  void getWritesImpl(Node* n, MemoryLocations& ret) const;
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
@@ -112,9 +106,8 @@ class AliasDb {
   void registerWrite(const Element* e, Node* n);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
-  MemoryLocations getReads(Node* n, bool recurseBlocks = false) const;
-  void getReadsImpl(Node* n, MemoryLocations& ret, bool recurseBlocks = false)
-      const;
+  MemoryLocations getReads(Node* n) const;
+  void getReadsImpl(Node* n, MemoryLocations& ret) const;
 
   /**
    * Wildcard methods

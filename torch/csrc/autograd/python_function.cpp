@@ -45,7 +45,7 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
-  : type(&var.dispatch_type())
+  : backend(tensorTypeIdToBackend(var.type_id()))
   , device(var.device())
   , scalar_type(var.scalar_type())
   , size(var.sizes().vec())
@@ -55,7 +55,8 @@ VariableInfo::VariableInfo(const Variable& var)
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   // NB: This will NOT work if we ever get mixed device gradients
   device_guard.reset_device(device);
-  return at::zeros(size, type->options(scalar_type));
+  return at::zeros(size,
+    at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)).is_variable(true));
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
@@ -676,7 +677,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   RECORD_FUNCTION(
     Py_TYPE(self)->tp_name,
     std::vector<c10::IValue>(),
-    Function::peek_at_next_sequence_nr());
+    autograd::Function::peek_at_next_sequence_nr());
 
   auto info_pair = unpack_input<true>(_inputs);
   auto& unpacked_input = info_pair.first;
@@ -709,7 +710,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
     std::vector<c10::IValue>(),
-    Function::peek_at_next_sequence_nr());
+    autograd::Function::peek_at_next_sequence_nr());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
@@ -993,7 +994,7 @@ PyObject* getMember(PyObject* obj, void* _unused) {
   return Convert(self->*ptr);
 }
 
-template<typename M, M Function::*ptr, PyObject* (*Convert)(long)>
+template<typename M, M autograd::Function::*ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);

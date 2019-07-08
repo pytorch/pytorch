@@ -1,10 +1,7 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/utils/memory.h>
-
-#include <list>
 
 namespace torch {
 namespace jit {
@@ -92,35 +89,27 @@ bool AliasDb::hasWriters(const Value* v) const {
   return writeCache_.intersects(el->getMemoryLocations());
 }
 
-void AliasDb::getWritesImpl(Block* b, MemoryLocations& ret, bool recurseBlocks)
-    const {
-  for (auto node : b->nodes()) {
-    getWritesImpl(node, ret, recurseBlocks);
-  }
-}
-
-void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret, bool recurseBlocks)
-    const {
+void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
   if (writeIndex_.count(n)) {
     const auto& writes = writeIndex_.at(n);
     ret |= writes;
   }
 
-  if (recurseBlocks) {
     for (auto block : n->blocks()) {
-      getWritesImpl(block, ret, recurseBlocks);
+      for (auto node : block->nodes()) {
+        getWritesImpl(node, ret);
+      }
     }
-  }
 }
 
 // Does `n` write to an alias of one of the values in `vs`?
-bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
-    const {
-  const auto writtenTo = getWrites(n, recurseBlocks);
+bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
+  const auto writtenTo = getWrites(n);
   if (writtenTo.empty()) {
     return false;
   }
 
+  MemoryLocations locs;
   for (const auto v : vs) {
     auto it = elementMap_.find(v);
     if (it != elementMap_.end()) {
@@ -134,39 +123,39 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
   return false;
 }
 
-MemoryLocations AliasDb::getWrites(Node* n, bool recurseBlocks) const {
+MemoryLocations AliasDb::getWrites(Node* n) const {
   MemoryLocations writes;
-  getWritesImpl(n, writes, recurseBlocks);
+  getWritesImpl(n, writes);
   return writes;
 }
 
-void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret, bool recurseBlocks)
-    const {
+void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
   for (const auto input : n->inputs()) {
     auto it = elementMap_.find(input);
     if (it != elementMap_.end()) {
-      ret |= it->second->getMemoryLocations();
-    }
-  }
-  for (const auto output : n->outputs()) {
-    auto it = elementMap_.find(output);
-    if (it != elementMap_.end()) {
-      ret |= it->second->getMemoryLocations();
+      auto el = it->second;
+      // Add all memory locations this element may alias.
+      ret |= el->getMemoryLocations();
+
+      // We also consider memory locations of contained values to be "read".
+      for (const auto& type : input->type()->containedTypes()) {
+        if (auto wildcard = getWildcard(type)) {
+          ret |= wildcard->getMemoryLocations();
+        }
+      }
     }
   }
 
-  if (recurseBlocks) {
-    for (auto block : n->blocks()) {
-      for (auto node : block->nodes()) {
-        getReadsImpl(node, ret, recurseBlocks);
-      }
+  for (auto block : n->blocks()) {
+    for (auto node : block->nodes()) {
+      getReadsImpl(node, ret);
     }
   }
 }
 
-MemoryLocations AliasDb::getReads(Node* n, bool recurseBlocks) const {
+MemoryLocations AliasDb::getReads(Node* n) const {
   MemoryLocations reads;
-  getReadsImpl(n, reads, recurseBlocks);
+  getReadsImpl(n, reads);
   return reads;
 }
 
@@ -174,7 +163,7 @@ static std::string getElementName(const Element* e) {
   if (e->value == nullptr) {
     return "WILDCARD";
   } else {
-    return e->value->uniqueName();
+    return e->value->debugName();
   }
 }
 
@@ -192,9 +181,9 @@ void AliasDb::dump() const {
       }
       std::cout << "\n";
     }
-    if (!element->contained_elements.empty()) {
+    if (!element->containedElements.empty()) {
       std::cout << getElementName(element) << " contains: ";
-      for (const auto contained : element->contained_elements) {
+      for (const auto contained : element->containedElements) {
         std::cout << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
       }
       std::cout << "\n";
@@ -208,7 +197,7 @@ void AliasDb::dump() const {
   //   std::cout << *node;
   //   std::cout << "  ";
   //   for (const auto value : values) {
-  //     std::cout << value->uniqueName() << ", ";
+  //     std::cout << value->debugName() << ", ";
   //   }
   //   std::cout << "\n";
   // }
@@ -620,9 +609,10 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   for (auto input : node->inputs()) {
     setWildcard(input);
   }
-  for (auto output : node->outputs()) {
-    giveFreshAlias(output);
-  }
+
+  TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+  auto container = node->output();
+  giveFreshAlias(container);
 }
 
 // BroadcastingChunk: all inputs are broadcasted, and then individually chunked.
@@ -828,8 +818,8 @@ class AliasDb::WorkingSet {
     for (const auto user : getUsersSameBlock(mover_)) {
       moverUsers_.insert(user);
     }
-    moverWrites_ |= aliasDb_.getWrites(mover_, /*recurseBlocks=*/true);
-    moverReads_ |= aliasDb_.getReads(mover_, /*recurseBlocks=*/true);
+    moverWrites_ |= aliasDb_.getWrites(mover_);
+    moverReads_ |= aliasDb_.getReads(mover_);
   }
 
   // Add `n` to the working set
@@ -839,8 +829,8 @@ class AliasDb::WorkingSet {
       users_.insert(user);
     }
 
-    writes_ |= aliasDb_.getWrites(n, /*recurseBlocks=*/true);
-    reads_ |= aliasDb_.getReads(n, /*recurseBlocks=*/true);
+    writes_ |= aliasDb_.getWrites(n);
+    reads_ |= aliasDb_.getReads(n);
   }
 
   void eraseMover() {
@@ -865,6 +855,9 @@ class AliasDb::WorkingSet {
 
  private:
   bool hasDataDependency(Node* n) const {
+    if (!mover_ && nodes_.empty()) {
+      return false;
+    }
     const Node* pivot = mover_ ? mover_ : nodes_.front();
     if (n->isAfter(pivot)) {
       return producesFor(n);
@@ -875,7 +868,7 @@ class AliasDb::WorkingSet {
 
   bool hasMutabilityDependency(Node* n) const {
     // Check that `n` does not write to anything used by the working set
-    const auto& nWrites = aliasDb_.getWrites(n, /*recurseBlocks=*/true);
+    const auto& nWrites = aliasDb_.getWrites(n);
     if (reads_.intersects(nWrites)) {
       return true;
     }
@@ -884,7 +877,7 @@ class AliasDb::WorkingSet {
     }
 
     // Check that the working set doesn't write to anything that `n` uses.
-    const auto& nReads = aliasDb_.getReads(n, /*recurseBlocks=*/true);
+    const auto& nReads = aliasDb_.getReads(n);
     if (writes_.intersects(nReads)) {
       return true;
     }
@@ -1183,10 +1176,8 @@ Element* AliasDb::getOrCreateWildcard(const TypePtr& type) {
 // Search the wildcard index for an element that corresponds to the given type.
 // Const version returns nullptr
 Element* AliasDb::getWildcard(const TypePtr& type) const {
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
   const auto kind = getMutableTypeKind(type);
-  TORCH_INTERNAL_ASSERT(kind);
-  if (!wildcardIndex_.count(*kind)) {
+  if (!kind || !wildcardIndex_.count(*kind)) {
     return nullptr;
   }
   return wildcardIndex_.at(*kind);

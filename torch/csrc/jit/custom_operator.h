@@ -24,20 +24,28 @@ struct TORCH_API RegisterOperators {
 
   /// Calls `op(...)` with the given operator name and implementation.
   template <typename Implementation>
+  C10_DEPRECATED_MESSAGE("torch::jit::RegisterOperators is deprecated. Please use torch::RegisterOperators instead.")
   RegisterOperators(const std::string& name, Implementation&& implementation) {
-    op(name, std::forward<Implementation>(implementation));
+    op_(name, std::forward<Implementation>(implementation));
   }
 
   template <typename Implementation>
+  C10_DEPRECATED_MESSAGE("torch::jit::RegisterOperators is deprecated. Please use torch::RegisterOperators instead.")
   RegisterOperators& op(
       const std::string& name,
       Implementation&& implementation) {
-    registrars_.emplace_back(std::make_shared<c10::RegisterOperators>(name, std::forward<Implementation>(implementation)));
+    op_(name, std::forward<Implementation>(implementation));
 
     return *this;
   }
 
 private:
+
+  template <typename Implementation>
+  void op_(const std::string& name, Implementation&& implementation) {
+    registrars_.emplace_back(std::make_shared<c10::RegisterOperators>(name, std::forward<Implementation>(implementation)));
+  }
+
   // A c10::RegisterOperators instance is not copyable, so to make
   // torch::jit::RegisterOperators copyable, we use shared_ptrs.
   // We need to keep the c10::RegisterOperators instances around
@@ -47,7 +55,5 @@ private:
 };
 
 } // namespace jit
-
-using RegisterOperators = c10::RegisterOperators;
 
 } // namespace torch

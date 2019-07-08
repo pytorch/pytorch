@@ -36,6 +36,7 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+#include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/python_ir.h>
@@ -46,6 +47,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/auto_gil.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -53,6 +55,7 @@
 #include <ATen/core/function_schema.h>
 
 #include <pybind11/functional.h>
+#include <pybind11/iostream.h>
 
 #include <memory>
 #include <sstream>
@@ -104,6 +107,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)
+      .def("_jit_pass_onnx_remove_print", RemovePrintOps)
+      .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
@@ -122,6 +127,11 @@ void initJITBindings(PyObject* module) {
             return EliminateDeadCode(g->block()); // overload resolution
           })
       .def(
+          "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
+          [](std::shared_ptr<Graph>& g) {
+            return EliminateDeadCode(g->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload resolution
+          })
+      .def(
           "_jit_pass_cse",
           [](std::shared_ptr<Graph>& g) {
             return EliminateCommonSubexpression(g); // overload resolution
@@ -131,7 +141,7 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& methodName,
              py::function pyObserverFunction) {
             // Create a new node that would be used in the insert observer pass:
@@ -145,7 +155,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<script::Function>& function_var,
+          [](const StrongFunctionPtr& function_var,
              py::function pyObserverFunction) {
             // Overloaded jit pass for pure functions instead of modules.
             // Create a new node that would be used in the insert observer pass:
@@ -153,13 +163,13 @@ void initJITBindings(PyObject* module) {
             Graph g;
             Node* new_node = g.createPythonOp(
                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(function_var, new_node);
+            InsertObserverNodes(function_var.function_, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& methodName,
              py::dict& pyQParamDict) {
             if (!pyQParamDict.size()) {
@@ -173,7 +183,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant_for_weight_bias",
-          [](std::shared_ptr<script::Module>& moduleObj,
+          [](const script::Module& moduleObj,
              const std::string& method_name,
              const std::string& param_name,
              py::function pyGetQParamFunc) {
@@ -208,14 +218,12 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
           "_jit_pass_pattern_based_rewrite",
-          [](std::shared_ptr<script::Module>& m) {
-            return PatternBasedRewrite(m);
-          })
+          [](const script::Module& m) { return PatternBasedRewrite(m); })
       .def(
           "_jit_pass_custom_pattern_based_rewrite",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             std::shared_ptr<script::Module> m) {
+             const script::Module& m) {
             SubgraphRewriter subgraph_rewriter;
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnModule(m);
@@ -333,8 +341,17 @@ void initJITBindings(PyObject* module) {
           "_jit_set_profiling_mode",
           [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
       .def(
-          "_jit_set_first_class_mode",
-          [](bool enabled) { script::getFirstClassMode() = enabled; })
+          "_jit_set_inline_everything_mode",
+          [](bool enabled) { script::getInlineEverythingMode() = enabled; })
+      .def(
+          "_jit_try_infer_type",
+          [](py::object obj) -> TypePtr {
+            auto match = tryToInferType(obj);
+            if (match.type) {
+              return *match.type;
+            }
+            return nullptr;
+          })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
@@ -563,6 +580,16 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
+
+  setPrintHandler([](const std::string& str) {
+    py::gil_scoped_acquire acquire;
+    try {
+      auto _stdout = py::module::import("sys").attr("stdout");
+      _stdout.attr("write")(str);
+    } catch (py::error_already_set& e) {
+      throw std::runtime_error(e.what());
+    }
+  });
 }
 } // namespace jit
 } // namespace torch

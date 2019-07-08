@@ -44,6 +44,8 @@ class CachedReader(DBFileReader):
         original_reader: Reader.
             If provided, it's the original reader used to build the cache file.
         db_path: str.
+
+    Optional Args:
         db_type: str. DB type of file. A db_type is registed by
             `REGISTER_CAFFE2_DB(<db_type>, <DB Class>)`.
             Default to 'LevelDB'.
@@ -52,6 +54,10 @@ class CachedReader(DBFileReader):
             Default to '<db_name>_<default_name_suffix>'.
         batch_size: int.
             How many examples are read for each time the read_net is run.
+            Defaults to 100.
+        loop_over: bool.
+            If True given, will go through examples in random order endlessly.
+            Defaults to False.
     """
     def __init__(
         self,
@@ -60,6 +66,7 @@ class CachedReader(DBFileReader):
         db_type='LevelDB',
         name=None,
         batch_size=100,
+        loop_over=False,
     ):
         assert original_reader is not None, "original_reader can't be None"
         self.original_reader = original_reader
@@ -69,6 +76,7 @@ class CachedReader(DBFileReader):
             db_type,
             name,
             batch_size,
+            loop_over,
         )
 
     def _init_reader_schema(self, *args, **kwargs):
@@ -96,7 +104,7 @@ class CachedReader(DBFileReader):
                     and build a new one overwritting the existing one anyway.
 
             Returns:
-                build_cache_step: ExcutionStep.
+                build_cache_step: ExecutionStep.
                     The step to be run for building a cache DB file.
         """
         if os.path.exists(self.db_path) and not overwrite:

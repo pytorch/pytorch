@@ -17,6 +17,9 @@ function cleanup {
 
 set -ex
 
+# Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
+SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
+
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
@@ -89,7 +92,7 @@ if which sccache > /dev/null; then
   sccache --zero-stats
   function sccache_epilogue() {
     echo '=================== sccache compilation log ==================='
-    python "$(dirname "${BASH_SOURCE[0]}")/print_sccache_log.py" ~/sccache_error.log
+    python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
     echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
     sccache --show-stats
     sccache --stop-server || true
@@ -143,6 +146,12 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
     fi
   fi
 fi
+
+function pip_install() {
+  local pkg=$1
+  # retry 3 times
+  pip install -q ${pkg} --user || pip install -q ${pkg} --user || pip install -q ${pkg} --user
+}
 
 function get_exit_code() {
   set +e

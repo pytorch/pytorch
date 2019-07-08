@@ -119,9 +119,13 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 
   // finally squeeze summed dimensions if desired
   if (! keepdim) {
-    for (int i = dim-1; i>=0; i--)
-      if (sum_dims[i])
-        result.squeeze_(i);
+    auto sizes = result.sizes().vec();
+    for (int i = dim-1; i>=0; i--) {
+      if (sum_dims[i]) {
+        sizes.erase(sizes.begin() + i);
+      }
+    }
+    result = result.view(sizes);
   }
   return result;
 }
@@ -240,7 +244,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis in the right hand side");
         TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
         int64_t letter_num = c-'a';
-        TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, "occurs twice in output");
+        TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, " occurs twice in output");
         idxes_to_preprocessed_dims[letter_mapping[letter_num]] = num_output_dims;
         num_output_dims++;
       }
@@ -354,8 +358,12 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     result = at::native::sumproduct_pair(result, preprocessed_operands[i], sum_dims, true);
   }
   // finally, we squeeze out all non-result dimensions
-  for (int64_t dim = num_total_idxes-1; dim >= num_output_dims; dim--)
-    result.squeeze_(dim);
+  auto sizes = result.sizes().vec();
+  for (int64_t dim = num_total_idxes-1; dim >= num_output_dims; dim--) {
+    sizes.erase(sizes.begin() + dim);
+  }
+
+  result = result.view(sizes);
   return result;
 }
 

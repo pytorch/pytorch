@@ -157,7 +157,7 @@ class SkipIndices<> {
 // HasCudaRuntime() tells the program whether the binary has Cuda runtime
 // linked. This function should not be used in static initialization functions
 // as the underlying boolean variable is going to be switched on when one
-// loads libcaffe2_gpu.so.
+// loads libtorch_gpu.so.
 CAFFE2_API bool HasCudaRuntime();
 CAFFE2_API bool HasHipRuntime();
 namespace internal {

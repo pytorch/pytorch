@@ -11,7 +11,6 @@ try:
 except ImportError:
     from yaml import Loader
 
-
 # [temp translations]
 # We're currently incrementally moving from the custom func schema to the
 # JIT signature schema incrementally. This will reduce overall complexity
@@ -70,6 +69,8 @@ def type_argument_translations(arg):
     elif t == 'int64_t?':
         raise RuntimeError("Please use int? and not int64_t?. "
                            "See [temp translations] for details.")
+    elif t == 'Dimname[]?':
+        t = 'DimnameList?'
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
@@ -129,6 +130,8 @@ def type_argument_translations(arg):
         default = 'Reduction::Mean'
     elif default == 'contiguous_format':
         default = 'MemoryFormat::Contiguous'
+    elif default == 'per_tensor_affine':
+        default = 'QScheme::PER_TENSOR_AFFINE'
     else:
         try:
             default = int(default)
@@ -363,6 +366,9 @@ def propagate_field_names(output_arguments, return_arguments):
         for i, r in enumerate(return_arguments):
             if 'field_name' in r:
                 output_arguments[i]['field_name'] = r['field_name']
+
+def is_named_tensor_only(declaration):
+    return any(['Dimname' in arg['type'] for arg in declaration['arguments']])
 
 
 def run(paths):

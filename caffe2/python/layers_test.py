@@ -31,7 +31,6 @@ from caffe2.python.layers.layers import (
     is_request_only_scalar,
     get_key,
 )
-
 import logging
 logger = logging.getLogger(__name__)
 
@@ -231,6 +230,46 @@ class TestLayers(LayersTestCase):
 
         train_init_net, train_net = self.get_training_nets()
 
+    def testSparseLookupSumPoolingWithEviction(self):
+        # Create test embedding table of 1 row
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('sparse_feature_0', schema.ListWithEvicted(
+                    schema.Scalar(np.int64,
+                                  metadata=schema.Metadata(categorical_limit=1)),)),)),
+        ))
+        embedding_dim = 8
+        lengths_blob = record.sparse.sparse_feature_0.lengths.get()
+        values_blob = record.sparse.sparse_feature_0.items.get()
+        evicted_values_blob = record.sparse.sparse_feature_0._evicted_values.get()
+        lengths = np.array([1]).astype(np.int32)
+        values = np.array([0]).astype(np.int64)
+        # Need to reset row 0
+        evicted_values = np.array([0]).astype(np.int64)
+        workspace.FeedBlob(lengths_blob, lengths)
+        workspace.FeedBlob(values_blob, values)
+        workspace.FeedBlob(evicted_values_blob, evicted_values)
+
+        embedding_after_pooling = self.model.SparseLookup(
+            record.sparse.sparse_feature_0, [embedding_dim], 'Sum', weight_init=("ConstantFill", {"value": 1.0}))
+
+        self.model.output_schema = schema.Struct()
+        self.assertEqual(
+            schema.Scalar((np.float32, (embedding_dim, ))),
+            embedding_after_pooling
+        )
+        train_init_net, train_net = self.get_training_nets()
+        workspace.RunNetOnce(train_init_net)
+        embedding_after_init = workspace.FetchBlob("sparse_lookup/w")
+        # Change row 0's value before reset
+        new_values = np.array([[2, 2, 2, 2, 2, 2, 2, 2]]).astype(np.float32)
+        workspace.FeedBlob("sparse_lookup/w", new_values)
+        workspace.RunNetOnce(train_net.Proto())
+        embedding_after_training = workspace.FetchBlob("sparse_lookup/w")
+        # Verify row 0's value does not change after reset
+        self.assertEquals(embedding_after_training.all(), embedding_after_init.all())
+
+
 
     def testSparseLookupSumPooling(self):
         record = schema.NewRecord(self.model.net, schema.Struct(
@@ -275,8 +314,10 @@ class TestLayers(LayersTestCase):
     @given(
         use_hashing=st.booleans(),
         modulo=st.integers(min_value=100, max_value=200),
+        use_divide_mod=st.booleans(),
+        divisor=st.integers(min_value=10, max_value=20),
     )
-    def testSparseFeatureHashIdList(self, use_hashing, modulo):
+    def testSparseFeatureHashIdList(self, use_hashing, modulo, use_divide_mod, divisor):
         record = schema.NewRecord(
             self.model.net,
             schema.List(schema.Scalar(
@@ -284,10 +325,14 @@ class TestLayers(LayersTestCase):
                 metadata=schema.Metadata(categorical_limit=60000)
             ))
         )
+        use_divide_mod = use_divide_mod if use_hashing is False else False
         output_schema = self.model.SparseFeatureHash(
             record,
             modulo=modulo,
-            use_hashing=use_hashing)
+            use_hashing=use_hashing,
+            use_divide_mod=use_divide_mod,
+            divisor=divisor,
+        )
 
         self.model.output_schema = output_schema
 
@@ -295,6 +340,10 @@ class TestLayers(LayersTestCase):
         self.assertEqual(output_schema._items.metadata.categorical_limit,
                 modulo)
         train_init_net, train_net = self.get_training_nets()
+        if use_divide_mod:
+            self.assertEqual(len(train_net.Proto().op), 3)
+        else:
+            self.assertEqual(len(train_net.Proto().op), 2)
 
     @given(
         use_hashing=st.booleans(),
@@ -767,6 +816,14 @@ class TestLayers(LayersTestCase):
             ('prediction', schema.Scalar((np.float32, (2,)))),
         ))
         loss = self.model.BatchMSELoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
+    def testBatchHuberLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, (1,)))),
+            ('prediction', schema.Scalar((np.float32, (2,)))),
+        ))
+        loss = self.model.BatchHuberLoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
     def testBatchSigmoidCrossEntropyLoss(self):

@@ -279,12 +279,12 @@ def varlen_lstm_creator(script=False, **kwargs):
 
 
 # cudnn_layernorm_lstm: since cudnn does not have Layernorm LSTM, we cannot benchmark
-# the lowerbound directly. Instead, we only benchmark the foward pass by mimicing the
+# the lowerbound directly. Instead, we only benchmark the forward pass by mimicing the
 # computation of a cudnn lstm + seq_len * 3 layernorm computation. This should serve
 # as a perf lowerbound for the Layernorm LSTM forward pass(given that Layernorm itself
 # is invariant), the lowerbound of backward pass is hard to get since we lose the
 # intermediate results, we can still optimize the layernorm implementation to make
-# a faster foward lowerbound though.
+# a faster forward lowerbound though.
 def layernorm_pytorch_lstm_creator(**kwargs):
     input, hidden, _, module = lstm_inputs(return_module=True, **kwargs)
     batch_size = kwargs['miniBatch']

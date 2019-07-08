@@ -24,11 +24,11 @@
 //      .build()
 //
 // [MyKernel.cpp / MyKernel.cu]
-//   binary_kernel(iter, [](float a, float b) {
+//   cpu_kernel(iter, [](float a, float b) {
 //     return a + b;
 //   });
 //
-//   gpu_binary_kernel(iter, []GPU_LAMBDA(float a, float b) -> float {
+//   gpu_kernel(iter, []GPU_LAMBDA(float a, float b) -> float {
 //     return a + b;
 //   });
 //
@@ -129,15 +129,14 @@ struct CAFFE2_API TensorIterator {
   // implements element-wise operations in terms of 1-d strided tensors.
   //
   // Arguments:
-  //  ntensors: number of operands
   //  data: data pointers for each operand (length `ntensors`)
   //  strides: stride for each operand (length `ntensors`)
   //  size: size of inner loop
   //
   // The `size` often matches shape[0], but may be smaller due to
   // parallelization of the inner loop.
-  using loop_t = std::function<void(int ntensors, char** data, const int64_t* strides, int64_t size)>;
-  using loop2d_t = std::function<void(int ntensors, char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
+  using loop_t = std::function<void(char** data, const int64_t* strides, int64_t size)>;
+  using loop2d_t = std::function<void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
 
   using loop_subiter_t = std::function<void(TensorIterator& subiter)>;
 

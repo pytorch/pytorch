@@ -1,24 +1,8 @@
 #pragma once
 
 #include <TH/THMath.h>
-
 #include <ATen/ATen.h>
-#include <ATen/CPUGenerator.h>
-#include <ATen/CheckGenerator.h>
-#include <ATen/Generator.h>
-#include <TH/THGenerator.hpp>
-
 #include <c10/macros/Macros.h>
-
-namespace at {namespace native {
-
-static inline THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
-  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
-  return gen_->generator;
-}
-
-}}  // namespace at::native
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
 #if defined(__CUDA_ARCH__) || defined(__HIPCC__)

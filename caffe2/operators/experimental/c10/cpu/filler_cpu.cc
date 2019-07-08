@@ -7,15 +7,14 @@ using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorCPU;
 using std::vector;
-using c10::ivalue::TensorList;
 
 namespace caffe2 {
 namespace {
 void filler_init(
-    ArrayRef<at::Tensor> inputs,
+    torch::List<at::Tensor> inputs,
     const at::Tensor& output_,
-    ArrayRef<int64_t> shape,
-    ArrayRef<int64_t> extra_shape,
+    torch::List<int64_t> shape,
+    torch::List<int64_t> extra_shape,
     bool input_as_shape) {
   Tensor output(output_);
   if (inputs.size()) {
@@ -39,16 +38,16 @@ void filler_init(
     real_shape.insert(real_shape.end(), extra_shape.begin(), extra_shape.end());
     output.Resize(real_shape);
   } else {
-    output.Resize(shape);
+    output.Resize(c10::impl::toVector(shape));
   }
 }
 
 template <class Type, class Context>
 void given_tensor_fill_op_cpu_impl(
-    std::vector<at::Tensor> inputs,
+    torch::List<at::Tensor> inputs,
     const at::Tensor& output_,
-    std::vector<int64_t> shape,
-    std::vector<int64_t> extra_shape,
+    torch::List<int64_t> shape,
+    torch::List<int64_t> extra_shape,
     bool input_as_shape,
     const at::Tensor& values_) {
   Tensor output(output_);
@@ -70,10 +69,10 @@ void given_tensor_fill_op_cpu_impl(
 }
 
 void constant_fill_op_cpu_impl(
-    std::vector<at::Tensor> inputs,
+    torch::List<at::Tensor> inputs,
     const at::Tensor& output_,
-    std::vector<int64_t> shape,
-    std::vector<int64_t> extra_shape,
+    torch::List<int64_t> shape,
+    torch::List<int64_t> extra_shape,
     bool input_as_shape,
     int64_t dtype,
     c10::Scalar value) {
@@ -110,10 +109,10 @@ void constant_fill_op_cpu_impl(
 }
 
 void uniform_fill_op_cpu_impl(
-    std::vector<at::Tensor> inputs,
+    torch::List<at::Tensor> inputs,
     const at::Tensor& output_,
-    std::vector<int64_t> shape,
-    std::vector<int64_t> extra_shape,
+    torch::List<int64_t> shape,
+    torch::List<int64_t> extra_shape,
     bool input_as_shape,
     double min,
     double max) {

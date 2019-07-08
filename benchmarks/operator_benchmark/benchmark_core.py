@@ -65,6 +65,7 @@ class BenchmarkRunner(object):
         self.multiplier = 2
         self.predefined_minimum_secs = 4
         self.max_iters = 1e6
+        self.use_jit = args.use_jit
         if self.args.iterations:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
@@ -111,8 +112,8 @@ class BenchmarkRunner(object):
                      "# Input: {}\n" \
                      "{} Execution Time (us) : {:.3f}\n"
             if test_case.framework == "PyTorch":
-                # FIXME: add JIT 
-                output = "# Mode: Eager\n" + output
+                output = "# Mode: {}\n". \
+                    format("JIT" if self.use_jit else "Eager") + output
             print(output.format(
                 test_case.test_config.test_name,
                 test_case.test_config.input_config,
@@ -135,7 +136,10 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
-        forward_time = timeit.timeit(functools.partial(test_case.run_forward, iters), number=1)
+        func = test_case.run_forward
+        if self.use_jit:
+            func = test_case.run_jit_forward
+        forward_time = timeit.timeit(functools.partial(func, iters), number=1)
         return forward_time
 
     def _launch_backward(self, test_case, iters):
@@ -193,8 +197,8 @@ class BenchmarkRunner(object):
         if (self._check_keep(op_test_config.test_name, self.args.test_name) and
             self._check_keep(op_test_config.tag, self.args.tag_filter) and
             self._check_keep(test_case.op_bench.module_name(), self.args.operator) and
-            self._check_keep_list(test_case.framework, frameworks) and 
-                (op_test_config.run_backward == self.args.forward_only)):
+            self._check_keep_list(test_case.framework, frameworks) and
+                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only)):
             return True
 
         return False
