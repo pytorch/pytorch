@@ -438,7 +438,7 @@ static void conv_transpose2d_backward_out_cpu_template(
   grad_columns.resize_({n_output_plane * kernel_width * kernel_height,
                         input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_LONG(
+  AT_DISPATCH_FLOATING_TYPES(
       grad_output.scalar_type(), "conv_transpose2d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n = Tensor();
@@ -623,7 +623,7 @@ void conv_transpose2d_acc_grad_parameters_cpu(
   columns.resize_({n_output_plane * kernel_width * kernel_height,
                    input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_LONG(
+  AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "conv_transpose2d_acc_grad_parameters_cpu", [&] {
         // Helpers
         Tensor input_n = Tensor();

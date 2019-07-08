@@ -515,7 +515,7 @@ void conv_transpose3d_backward_out_cpu_template(
       {n_output_plane * kernel_width * kernel_height * kernel_depth,
        input_depth * input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_LONG(
+  AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "conv_transpose3d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n;
@@ -733,7 +733,7 @@ void conv_transpose3d_acc_grad_parameters_cpu(
   columns.resize_({n_output_plane * kernel_width * kernel_height * kernel_depth,
                    input_depth * input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_LONG(
+  AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(),
       "conv_transpose3d_acc_grad_parameters_cpu",
       [&] {
