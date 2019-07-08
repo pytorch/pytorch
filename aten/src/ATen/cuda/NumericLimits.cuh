@@ -88,7 +88,7 @@ struct numeric_limits<int64_t> {
 
 template <>
 struct numeric_limits<at::BFloat16> {
-  static inline __host__ __device__ at::BFloat16 lowest() { return at::BFloat16(0x0080, at::BFloat16::from_bits()); }
+  static inline __host__ __device__ at::BFloat16 lowest() { return at::BFloat16(0xFF7F, at::BFloat16::from_bits()); }
   static inline __host__ __device__ at::BFloat16 max() { return at::BFloat16(0x7F7F, at::BFloat16::from_bits()); }
   static inline __host__ __device__ at::BFloat16 lower_bound() { return at::BFloat16(0xFF80, at::BFloat16::from_bits()); }
   static inline __host__ __device__ at::BFloat16 upper_bound() { return at::BFloat16(0x7F80, at::BFloat16::from_bits()); }

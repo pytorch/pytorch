@@ -10,7 +10,7 @@ bool is_cuda(const Tensor& self) {
 }
 
 bool is_distributed(const Tensor& self) {
-  return self.dispatch_type().is_distributed();
+  return false;
 }
 
 bool is_complex(const Tensor& self) {
@@ -23,6 +23,9 @@ bool is_floating_point(const Tensor& self) {
 
 bool is_signed(const Tensor &self) {
   if (self.scalar_type() == ScalarType::Half) {
+    return true;
+  }
+  if (self.scalar_type() == ScalarType::BFloat16) {
     return true;
   }
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "is_signed", [&]() -> bool {

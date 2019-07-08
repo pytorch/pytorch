@@ -522,9 +522,6 @@ class TestCase(expecttest.TestCase):
                             a = a.to(torch.int)
                             b = b.to(torch.int)
 
-                        print(a)
-                        print(b)
-                        print('\n')
                         diff = a - b
                         if a.is_floating_point():
                             # check that NaNs are in the same locations
@@ -543,11 +540,17 @@ class TestCase(expecttest.TestCase):
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
+            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
+            elif x.is_quantized and y.is_quantized:
+                self.assertEqual(x.qscheme(), y.qscheme())
+                self.assertEqual(x.q_scale(), y.q_scale())
+                self.assertEqual(x.q_zero_point(), y.q_zero_point())
+                self.assertEqual(x.int_repr(), y.int_repr())
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):

@@ -23,6 +23,9 @@
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensorMathPairwise.h>
+#include <THC/THCGenerateBFloat16Type.h>
+
+#include <THC/generic/THCTensorMathPairwise.h>
 #include <THC/THCGenerateBoolType.h>
 
 #include <THC/generic/THCTensorMathPointwise.h>
@@ -30,6 +33,9 @@
 
 #include <THC/generic/THCTensorMathPointwise.h>
 #include <THC/THCGenerateBoolType.h>
+
+#include <THC/generic/THCTensorMathPointwise.h>
+#include <THC/THCGenerateBFloat16Type.h>
 
 #include <THC/generic/THCTensorMathReduce.h>
 #include <THC/THCGenerateAllTypes.h>

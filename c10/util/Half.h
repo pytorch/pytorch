@@ -432,7 +432,6 @@ struct Converter<
 template <typename To, typename From>
 typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
     From f) {
-      std::cout << "overflowsZX" << std::endl;
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (!limit::is_signed && std::numeric_limits<From>::is_signed) {
     // allow for negative numbers to wrap using two's complement arithmetic.
@@ -448,19 +447,13 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
 template <typename To, typename From>
 typename std::enable_if<std::is_floating_point<From>::value, bool>::type
 overflows(From f) {
-  std::cout << "overflows" << std::endl;
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
-    std::cout << f << std::endl;
-    std::cout <<static_cast<double>(f) << std::endl;
-    std::cout << "overflows1" << std::endl;
     return false;
   }
   if (!limit::has_quiet_NaN && (f != f)) {
-    std::cout << "overflows2" << std::endl;
     return true;
   }
-  std::cout << "overflows3" << std::endl;
   return f < limit::lowest() || f > limit::max();
 }
 
@@ -471,7 +464,6 @@ overflows(From f) {
 template <typename To, typename From>
 typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
     From f) {
-      std::cout << "overflowsSSSSS" << std::endl;
   // casts from complex to real are considered to overflow if the
   // imaginary component is non-zero
   if (!is_complex_t<To>::value && f.imag() != 0) {
@@ -493,7 +485,6 @@ template <typename To, typename From>
 To checked_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
   bool res = overflows<To, From>(f);
-  std::cout << "overflows res: " << res << std::endl;
   if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
     std::ostringstream oss;
     oss << "value cannot be converted to type " << name

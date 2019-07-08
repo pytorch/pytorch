@@ -168,6 +168,21 @@ struct TensorRemainderOp<at::Half> {
   const at::Half val;
 };
 
+template <>
+struct TensorRemainderOp<at::BFloat16> {
+  TensorRemainderOp(at::BFloat16 v): val(v) {}
+
+  __device__ __forceinline__ void operator()(at::BFloat16* out, at::BFloat16* in) {
+    *out = *in - val * floorf(*in / val);
+  }
+
+  __device__ __forceinline__ void operator()(at::BFloat16* v) {
+    *v = *v - val * floorf(*v / val);
+  }
+
+  const at::BFloat16 val;
+};
+
 template <typename T>
 struct TensorFmodOp {
   TensorFmodOp(T v) : val((float)v) {}
@@ -303,6 +318,9 @@ struct TensorBitXorConstantOp {
 
 #include <THC/generic/THCTensorMathPairwise.cu>
 #include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensorMathPairwise.cu>
+#include <THC/THCGenerateBFloat16Type.h>
 
 #include <THC/generic/THCTensorMathPairwise.cu>
 #include <THC/THCGenerateBoolType.h>

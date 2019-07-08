@@ -215,6 +215,43 @@ struct THCNumerics<at::BFloat16> {
   static inline __host__ __device__ at::BFloat16 pow(at::BFloat16 a, at::BFloat16 b) { return ::pow(a, b); }
   static inline __host__ __device__ at::BFloat16 atan2(at::BFloat16 a, at::BFloat16 b) { return ::atan2(a, b); }
 
+  static inline __host__ __device__ at::BFloat16 exp(at::BFloat16 a) { return std::exp(a); }
+  static inline __host__ __device__ at::BFloat16 exp10(at::BFloat16 a) { return ::exp10(a); }
+  static inline __host__ __device__ at::BFloat16 log(at::BFloat16 a) { return ::log(a); }
+  static inline __host__ __device__ at::BFloat16 log10(at::BFloat16 a) { return ::log10(a); }
+  static inline __host__ __device__ at::BFloat16 log1p(at::BFloat16 a) { return ::log1p(a); }
+  static inline __host__ __device__ at::BFloat16 log2(at::BFloat16 a) { return ::log2(a); }
+  static inline __host__ __device__ at::BFloat16 lgamma(at::BFloat16 a) { return ::lgamma(a); }
+  static inline __host__ __device__ at::BFloat16 expm1(at::BFloat16 a) { return ::expm1(a); }
+  static inline __host__ __device__ at::BFloat16 cos(at::BFloat16 a) { return ::cos(a); }
+  static inline __host__ __device__ at::BFloat16 sin(at::BFloat16 a) { return ::sin(a); }
+  static inline __host__ __device__ at::BFloat16 sqrt(at::BFloat16 a) { return ::sqrt(a); }
+  static inline __host__ __device__ at::BFloat16 rsqrt(at::BFloat16 a) { return ::rsqrt(a); }
+  static inline __host__ __device__ at::BFloat16 ceil(at::BFloat16 a) { return ::ceil(a); }
+  static inline __host__ __device__ at::BFloat16 floor(at::BFloat16 a) { return ::floor(a); }
+  static inline __host__ __device__ at::BFloat16 trunc(at::BFloat16 a) { return ::trunc(a); }
+  static inline __host__ __device__ at::BFloat16 neg(at::BFloat16 a) { return -a; }
+  static inline __host__ __device__ at::BFloat16 acos(at::BFloat16 a) { return ::acos(a); }
+  static inline __host__ __device__ at::BFloat16 cosh(at::BFloat16 a) { return ::cosh(a); }
+  static inline __host__ __device__ at::BFloat16 asin(at::BFloat16 a) { return ::asin(a); }
+  static inline __host__ __device__ at::BFloat16 sinh(at::BFloat16 a) { return ::sinh(a); }
+  static inline __host__ __device__ at::BFloat16 tan(at::BFloat16 a) { return ::tan(a); }
+  static inline __host__ __device__ at::BFloat16 atan(at::BFloat16 a) { return ::atan(a); }
+  static inline __host__ __device__ at::BFloat16 tanh(at::BFloat16 a) { return ::tanh(a); }
+  static inline __host__ __device__ at::BFloat16 erf(at::BFloat16 a) { return ::erf(a); }
+  static inline __host__ __device__ at::BFloat16 erfc(at::BFloat16 a) { return ::erfc(a); }
+  static inline __host__ __device__ at::BFloat16 erfinv(at::BFloat16 a) { return ::erfinv(a); }
+  static inline __host__ __device__ at::BFloat16 abs(at::BFloat16 a) { return std::abs(a); }
+  static inline __host__ __device__ at::BFloat16 round(at::BFloat16 a) { return ::nearbyint(a); }
+
+  static inline __host__ __device__ at::BFloat16 frac(at::BFloat16 a) {
+    #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+        return a - ::trunc(a);
+    #else // __CUDA_ARCH__
+        return a - ::floor(a);
+    #endif
+  }
+
   static inline __host__ __device__ bool isnan(at::BFloat16 a) {
     #ifdef _MSC_VER
       // Windows requires this explicit conversion. The reason is unclear

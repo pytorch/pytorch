@@ -622,6 +622,7 @@
   name: _th_lt
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -644,6 +645,7 @@
   name: _th_lt_
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -663,6 +665,7 @@
   name: _th_gt
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -685,6 +688,7 @@
   name: _th_gt_
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -704,6 +708,7 @@
   name: _th_le
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -726,6 +731,7 @@
   name: _th_le_
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -745,6 +751,7 @@
   name: _th_ge
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -767,6 +774,7 @@
   name: _th_ge_
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -829,6 +837,7 @@
   name: _th_ne
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -851,6 +860,7 @@
   name: _th_ne_
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -910,6 +920,7 @@
   name: _th_max
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   variants:
     - function
   options:
@@ -930,6 +941,7 @@
   name: _th_max
   cpu_bool: True
   cuda_bool: True
+  cuda_bfloat16: True
   variants: function
   options:
     - cname: max
@@ -1005,6 +1017,7 @@
 ]]
 [[
   name: _th_abs
+  cuda_bfloat16: True
   cname: abs
   backends:
     - CUDA
