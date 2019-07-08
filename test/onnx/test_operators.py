@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 from test_pytorch_common import TestCase, run_tests, flatten
 
 import torch
@@ -355,7 +357,7 @@ class TestOperators(TestCase):
 
     def test_reduced_mean_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.mean(x, dim=2, keepdim=True), x)
+        self.assertONNX(lambda x: torch.mean(x, dim=(2, 3), keepdim=True), x)
 
     def test_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -383,7 +385,7 @@ class TestOperators(TestCase):
 
     def test_reduced_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.sum(x, dim=2), x)
+        self.assertONNX(lambda x: torch.sum(x, dim=(1, 2)), x)
 
     def test_reduced_sum_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -670,6 +672,12 @@ class TestOperators(TestCase):
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
+
+    def test_layer_norm_aten(self):
+        model = torch.nn.LayerNorm([10, 10])
+        x = torch.randn(20, 5, 10, 10)
+        self.assertONNX(model, x,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
 
 if __name__ == '__main__':

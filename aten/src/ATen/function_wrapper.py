@@ -29,7 +29,7 @@ if sys.version_info[0] == 3:
 else:
     string_type = basestring
 
-from env import NAMEDTENSOR_ENABLED
+from env import BUILD_NAMEDTENSOR
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
@@ -47,7 +47,7 @@ ${return_type} ${api_name}(${type_method_formals});
 """)
 LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
     ${device_guard_declaration}
@@ -62,7 +62,7 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals});
 """)
 LEGACY_TH_DEFINITION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
     ${device_guard_declaration}
@@ -94,7 +94,7 @@ static ${return_type} ${api_name}(${type_method_formals});
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
 ${return_type} TypeDefault::${api_name}(${type_method_formals}) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
     ${device_guard_declaration}
@@ -104,7 +104,7 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) {
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
     ${device_guard_declaration}
@@ -194,7 +194,7 @@ if (${name}.defined()) {
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
 NAMEDTENSOR_CHECK = CodeTemplate("""\
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 ${code}
 #endif""")
 
@@ -602,6 +602,10 @@ def device_guard(option, dispatch_options, dispatch_tensor):
 
 def named_guard(option, tensors, tensorlists):
     if not option.get('named_guard', True) or (len(tensors) + len(tensorlists) == 0):
+        return ''
+    # Override: named_guard = True for _th_ functions. This is because:
+    # There is always some at:: function that calls the _th_ function.
+    if option['name'].startswith('_th_'):
         return ''
     named_conditions = []
     for tensor in tensors:
@@ -1083,10 +1087,10 @@ def create_generic(top_env, declarations):
                 fn_definition = FUNCTION_DEFINITION.substitute(option)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
-        # Emit #ifdef NAMEDTENSOR_ENABLED macros for any code generated here
+        # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
         # that is sent to top_env. This is because some of this code (Type.h,
         # Tensor.h, TensorMethods.h) is checked into the repo and must be
-        # the same regardless of NAMEDTENSOR_ENABLED status.
+        # the same regardless of BUILD_NAMEDTENSOR status.
         is_named_tensor_only = has_named_tensor_formals(formals)
 
         def check_namedtensor_enabled(code):
@@ -1136,7 +1140,7 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        if NAMEDTENSOR_ENABLED or not is_named_tensor_only:
+        if BUILD_NAMEDTENSOR or not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
         option['native_type_method_dispatch'] = type_method_dispatch
@@ -1194,7 +1198,7 @@ def create_generic(top_env, declarations):
             top_env['function_declarations'].append(code.declaration)
             method_of.append('namespace')
 
-        if not NAMEDTENSOR_ENABLED and is_named_tensor_only:
+        if not BUILD_NAMEDTENSOR and is_named_tensor_only:
             return None
         return OutputDeclaration(
             name=option['api_name'],

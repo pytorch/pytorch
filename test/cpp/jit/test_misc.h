@@ -171,9 +171,9 @@ void testTHNNConv() {
 
   // make JIT graph
   auto graph = std::make_shared<Graph>();
-  auto ksz_val = graph->insertConstant(IValue(kernel_size));
-  auto kst_val = graph->insertConstant(IValue(stride));
-  auto pad_val = graph->insertConstant(IValue(padding));
+  auto ksz_val = graph->insertConstant(c10::impl::toList(kernel_size));
+  auto kst_val = graph->insertConstant(c10::impl::toList(stride));
+  auto pad_val = graph->insertConstant(c10::impl::toList(padding));
 
   auto inputg = graph->addInput("self");
   auto weightg = graph->addInput("weight");
@@ -994,8 +994,7 @@ void testInsertBailOuts() {
   std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
 
   for (auto blo : bailouts) {
-    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
-    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::BailoutTemplate);
   }
 }
 

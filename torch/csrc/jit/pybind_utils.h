@@ -305,7 +305,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  c10::List<IValue> elems;
+  c10::impl::GenericList elems;
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
@@ -384,23 +384,31 @@ inline IValue toIValue(
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
           if (!N || !py::isinstance<py::int_>(obj)) {
-            return py::cast<std::vector<int64_t>>(obj);
+            return c10::impl::toList(py::cast<std::vector<int64_t>>(obj));
           } else {
             double value = py::cast<int64_t>(obj);
-            std::vector<double> repeated(*N, value);
+            c10::List<double> repeated;
+            repeated.reserve(*N);
+            for (int i = 0; i < *N; ++i) {
+              repeated.push_back(value);
+            }
             return repeated;
           }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
-            return py::cast<std::vector<double>>(obj);
+            return c10::impl::toList(py::cast<std::vector<double>>(obj));
           } else {
             double value = py::cast<double>(obj);
-            std::vector<double> repeated(*N, value);
+            c10::List<double> repeated;
+            repeated.reserve(*N);
+            for (int i = 0; i < *N; ++i) {
+              repeated.push_back(value);
+            }
             return repeated;
           }
         case TypeKind::DimensionedTensorType:
         case TypeKind::TensorType:
-          return py::cast<std::vector<at::Tensor>>(obj);
+          return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
           return createGenericList(obj, elem_type);
       }
@@ -423,7 +431,9 @@ inline IValue toIValue(
       auto classType = type->expect<ClassType>();
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
-      auto userObj = c10::ivalue::Object::create(classType, numAttrs);
+      auto userObj = c10::ivalue::Object::create(
+          c10::StrongTypePtr(classType->compilation_unit(), classType),
+          numAttrs);
 
       // 2. copy all the contained types
       for (size_t slot = 0; slot < numAttrs; slot++) {
@@ -566,8 +576,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
-    auto& pyCu = script::CompilationUnit::_get_python_cu();
-    const auto classType = pyCu.get_class(c10::QualifiedName(obj->name()));
+    auto pyCu = script::CompilationUnit::_get_python_cu();
+    const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());
