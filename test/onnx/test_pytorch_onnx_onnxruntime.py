@@ -246,6 +246,57 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 1, requires_grad=True)
         self.run_test(model, (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        self.run_test(ArangeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0)+2, dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0)+2, dtype=torch.float).view(-1, 1) + a
+
+        self.run_test(ArangeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end_step(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0)*a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0)*a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        self.run_test(ArangeModel(), x)
+
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input, other):
@@ -374,6 +425,7 @@ TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
 TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
                               (unittest.TestCase,),
                               dict(TestONNXRuntime.__dict__, opset_version=8))
+
 
 # opset 10 tests
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
