@@ -68,13 +68,8 @@ Dict<Key, Value>::Dict()
   :Dict(make_intrusive<detail::DictImpl>(
       detail::DictImpl::dict_map_type(),
       detail::DictImpl::DictElementTypes{getTypePtr<Key>(), getTypePtr<Value>()})) {
-}
-
-template<>
-inline Dict<IValue, IValue>::Dict()
-  :Dict(make_intrusive<detail::DictImpl>(
-    detail::DictImpl::dict_map_type(),
-    c10::nullopt)) {
+  static_assert(!std::is_same<Key, IValue>::value, "This constructor is not valid for Dict<IValue, _>. Please use c10::impl::GenericDict(keyType, valueType) instead, or if you absolutely have to, use c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()).");
+  static_assert(!std::is_same<Value, IValue>::value, "This constructor is not valid for Dict<_, IValue>. Please use c10::impl::GenericDict(keyType, valueType) instead, or if you absolutely have to, use c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()).");
 }
 
 template<class Key, class Value>
@@ -82,6 +77,15 @@ Dict<Key, Value>::Dict(TypePtr keyType, TypePtr valueType)
 : Dict(make_intrusive<detail::DictImpl>(
     detail::DictImpl::dict_map_type(),
     detail::DictImpl::DictElementTypes {std::move(keyType), std::move(valueType)})) {
+  static_assert(std::is_same<Key, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
+  static_assert(std::is_same<Value, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
+}
+
+template<class Key, class Value>
+Dict<Key, Value>::Dict(impl::deprecatedUntypedDict)
+: Dict(make_intrusive<detail::DictImpl>(
+    detail::DictImpl::dict_map_type(),
+    c10::nullopt)) {
   static_assert(std::is_same<Key, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
   static_assert(std::is_same<Value, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
 }
