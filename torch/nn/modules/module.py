@@ -1096,8 +1096,6 @@ class Module(object):
         """
         for p in self.parameters():
             p.requires_grad_(requires_grad)
-        for module in self.children():
-            module.requires_grad_(requires_grad)
         return self
 
     def zero_grad(self):
