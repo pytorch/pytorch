@@ -496,19 +496,6 @@ void addInputs(
 void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::ScalarType>& value) {
-  if (value.has_value()) {
-    detail::genericAddInput(n, static_cast<int64_t>(*value));
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone(IntType::get()))->output();
-    n->addInput(none);
-  }
-}
-
-void addInputs(
-    Node* n,
-    const char* name,
     at::TensorList value,
     bool allow_undefined) {
   Graph* g = n->owningGraph();

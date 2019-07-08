@@ -7985,8 +7985,8 @@ class _TestTorchMixin(object):
             x = torch.tensor([[True, True, True], [True, True, True]], device=device)
             res = torch.zeros(3, 3, dtype=torch.bool, device=device)
             res = res.scatter_(0, torch.tensor([[0, 1, 2], [0, 1, 2]], device=device), x)
-            self.assertEqual(res, torch.tensor([[True, False, False], 
-                                                [False, True, False], 
+            self.assertEqual(res, torch.tensor([[True, False, False],
+                                                [False, True, False],
                                                 [False, False, True]], device=device))
 
     def test_scatter_add_bool(self):
@@ -7994,8 +7994,8 @@ class _TestTorchMixin(object):
             x = torch.tensor([[True, True, True, True, True], [True, True, True, True, True]], device=device)
             res = torch.zeros(3, 5, dtype=torch.bool, device=device)
             res = res.scatter_add_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]], device=device), x)
-            self.assertEqual(res, torch.tensor([[True, True, True, True, True], 
-                                                [False, True, False, True, False], 
+            self.assertEqual(res, torch.tensor([[True, True, True, True, True],
+                                                [False, True, False, True, False],
                                                 [True, False, True, False, True]], device=device))
 
     def test_masked_scatter(self):
@@ -12199,8 +12199,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
 
         like = torch.empty_like(nhwc)
-        self.assertTrue(like.is_contiguous())
-        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
 
         sparse = x.to_sparse()
         with self.assertRaises(RuntimeError):
