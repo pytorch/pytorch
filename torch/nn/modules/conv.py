@@ -13,12 +13,12 @@ from ..._jit_internal import weak_module, weak_script_method, List
 class _ConvNd(Module):
 
     __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias',
-                     'padding_mode', 'output_padding', 'in_channels',
+                     'padding_mode', 'padding_is_static', 'output_padding', 'in_channels',
                      'out_channels', 'kernel_size']
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
-                 groups, bias, padding_mode):
+                 groups, bias, padding_mode, padding_is_static):
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -34,6 +34,7 @@ class _ConvNd(Module):
         self.output_padding = output_padding
         self.groups = groups
         self.padding_mode = padding_mode
+        self.padding_is_static = padding_is_static
         if transposed:
             self.weight = Parameter(torch.Tensor(
                 in_channels, out_channels // groups, *kernel_size))
@@ -53,15 +54,16 @@ class _ConvNd(Module):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
 
-    def _padding_is_static(self):
-        assert isinstance(self.stride, tuple)
-        def is_static(stride, filter, dilation):
+    def _is_padding_static(self, kernel_size, stride, dilation):
+        def is_static(filter, stride, dilation):
             return stride == 1 and ((filter-1) * dilation) % 2 == 0
-        return all([is_static(i[0], i[1], i[2]) for i in zip(self.stride, self.kernel_size, self.dilation)])
 
-    def _compute_padding_same(self, input, dim):
+        return all([is_static(i[0], i[1], i[2]) for i in zip(kernel_size, stride, dilation)])
+
+    def _compute_padding_same(self, input_size, dim):
+        # type: (List[int], int) -> int
         # When calculating convolutions, we can examine each dimension independently
-        input_size = input.size(dim + 2) # Ignoring batch size + channel dims
+        input_size = input_size[dim + 2] # Ignoring batch size + channel dims
         filter_size = self.weight.size(dim + 2)
         # Here we calculate the equivalent filter size factoring in dilation
         effective_filter_size = (filter_size - 1) * self.dilation[dim] + 1
@@ -208,14 +210,15 @@ class Conv1d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
+        padding_is_static = padding != "same" or self._is_padding_static(kernel_size, stride, dilation)
+        padding = padding if isinstance(padding, str) else _single(padding)
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _single(0), groups, bias, padding_mode)
-        if isinstance(padding, str) and self._padding_is_static():
+            False, _single(0), groups, bias, padding_mode, padding_is_static)
+        if padding_is_static:
             self.padding = (
-                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=0) // 2,
+                        self._compute_padding_same([0, 0, 0, 0], dim=0) // 2,
             )
 
     @weak_script_method
@@ -225,8 +228,8 @@ class Conv1d(_ConvNd):
             return F.conv1d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
-        elif self.padding == 'same':
-            padding_rows = self._compute_padding_same(dim=0)
+        if not self.padding_is_static:
+            padding_rows = self._compute_padding_same(input, 0)
             if padding_rows % 2:
                 input = F.pad(input, [0, padding_rows % 2])
             return F.conv1d(input, self.weight, self.bias, self.stride,
@@ -362,15 +365,16 @@ class Conv2d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
-        padding = padding if isinstance(padding, str) else _pair(padding)
         dilation = _pair(dilation)
+        padding_is_static = padding != "same" or self._is_padding_static(kernel_size, stride, dilation)
+        padding = _pair(0) if isinstance(padding, str) else _pair(padding)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _pair(0), groups, bias, padding_mode)
-        if isinstance(padding, str) and self._padding_is_static():
+            False, _pair(0), groups, bias, padding_mode, padding_is_static)
+        if padding_is_static:
             self.padding = (
-                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=0) // 2,
-                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=1) // 2,
+                        self._compute_padding_same([0, 0, 0, 0], dim=0) // 2,
+                        self._compute_padding_same([0, 0, 0, 0], dim=1) // 2,
             )
 
     @weak_script_method
@@ -381,9 +385,9 @@ class Conv2d(_ConvNd):
             return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
-        elif self.padding == 'same':
-            padding_rows = self._compute_padding_same(input, dim=0)
-            padding_cols = self._compute_padding_same(input, dim=1)
+        if not self.padding_is_static:
+            padding_rows = self._compute_padding_same(input.size(), 0)
+            padding_cols = self._compute_padding_same(input.size(), 1)
             if padding_rows % 2 or padding_cols % 2:
                 input = F.pad(input, [0, padding_cols % 2, 0, padding_rows % 2])
             return F.conv2d(input, self.weight, self.bias, self.stride,
@@ -514,8 +518,9 @@ class Conv3d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
-        padding = padding if isinstance(padding, str) else _triple(padding)
         dilation = _triple(dilation)
+        padding_is_static = padding != "same" or self._is_padding_static(kernel_size, stride, dilation)
+        padding = _triple(0) if isinstance(padding, str) else _triple(padding)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode)
@@ -535,10 +540,10 @@ class Conv3d(_ConvNd):
             return F.conv3d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride, _triple(0),
                             self.dilation, self.groups)
-        elif self.padding == 'same':
-            padding = [self._compute_padding_same(input, dim=0),
-                       self._compute_padding_same(input, dim=1),
-                       self._compute_padding_same(input, dim=2)]
+        if not self.padding_is_static:
+            padding = [self._compute_padding_same(input, 0),
+                       self._compute_padding_same(input, 1),
+                       self._compute_padding_same(input, 2)]
 
             if padding[0] % 2 or padding[1] % 2 or padding[2] % 2:
                 input = F.pad(input, [0, padding[0] % 2, 0, padding[1] % 2, 0, padding[2] % 2])
@@ -702,7 +707,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         output_padding = _single(output_padding)
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias, padding_mode)
+            True, output_padding, groups, bias, padding_mode, True)
 
     @weak_script_method
     def forward(self, input, output_size=None):
@@ -850,7 +855,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         output_padding = _pair(output_padding)
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias, padding_mode)
+            True, output_padding, groups, bias, padding_mode, True)
 
     @weak_script_method
     def forward(self, input, output_size=None):
@@ -995,7 +1000,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         output_padding = _triple(output_padding)
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias, padding_mode)
+            True, output_padding, groups, bias, padding_mode, True)
 
     @weak_script_method
     def forward(self, input, output_size=None):
