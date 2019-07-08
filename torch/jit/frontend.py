@@ -357,8 +357,8 @@ class StmtBuilder(Builder):
         decl = Decl(r, param_list, return_type)
         # note: we do not support type line (comments)
         return Def(Ident(r, py_def.name),
-               decl,
-               build_stmts(ctx, body))
+                   decl,
+                   build_stmts(ctx, body))
 
     @staticmethod
     def build_If(ctx, stmt):
