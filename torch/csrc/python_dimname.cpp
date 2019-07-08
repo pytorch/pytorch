@@ -1,4 +1,4 @@
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <torch/csrc/python_dimname.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_strings.h>

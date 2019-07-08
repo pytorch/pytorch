@@ -326,6 +326,16 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
 
+    def test_adamw(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamW(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2),

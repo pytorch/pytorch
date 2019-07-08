@@ -247,10 +247,12 @@ struct ChunkDatasetOptions {
   ChunkDatasetOptions(
       size_t preloader_count,
       size_t batch_size,
-      size_t cache_size = 2048)
+      size_t cache_size = 2048,
+      size_t cross_chunk_shuffle_count = 1)
       : preloader_count_(preloader_count),
         batch_size_(batch_size),
-        cache_size_(cache_size) {
+        cache_size_(cache_size),
+        cross_chunk_shuffle_count_(cross_chunk_shuffle_count) {
     TORCH_CHECK(
         preloader_count_ > 0,
         "Preloader count is 0. At least one preloader needs to be specified.");
@@ -264,6 +266,9 @@ struct ChunkDatasetOptions {
         cache_size_ >= batch_size_,
         "Cache size is less than batch size. Cache needs to be large enough to "
         "hold at least one batch.");
+    TORCH_CHECK(
+        cross_chunk_shuffle_count_ > 0,
+        "cross_chunk_shuffle_count needs to be greater than 0.");
   }
 
   /// The number of worker thread to preload chunk data.
@@ -274,6 +279,17 @@ struct ChunkDatasetOptions {
 
   /// The capacity of the queue for batch caching.
   TORCH_ARG(size_t, cache_size) = 2048;
+
+  // The number of chunks to perfrom cross-chunk shuffling. Default to 1 meaning
+  // no cross-chunk shuffling. When it is equal to n (n > 1), n random
+  // chunks will be loaded at once and example shuffling will be performed
+  // across all those n chunks.
+  // Note: Usually the default config (1 chunk shuffle + example shuffle) is
+  // good enough to generate random distributed data. Use this parameter only if
+  // you know cross-shuffle is needed in your case. Also there is a performance
+  // penalty when this value is greater than 1, as we need to do extra merge
+  // between multiple chunks before performing example sampling.
+  TORCH_ARG(size_t, cross_chunk_shuffle_count) = 1;
 };
 
 /// A stateful dataset that support hierarchical sampling and prefetching of
@@ -405,16 +421,21 @@ class ChunkDataset final
   void preloader(size_t id) {
     while (!quit_worker_.load()) {
       try {
-        size_t chunk_id = 0;
+        std::vector<size_t> chunk_idx;
         {
           std::lock_guard<std::mutex> lock(chunk_index_guard_);
-          if (auto chunk_sampler_result = chunk_sampler_.next(1)) {
-            chunk_id = chunk_sampler_result.value()[0];
+          if (auto chunk_sampler_result = chunk_sampler_.next(this->options_.cross_chunk_shuffle_count_)) {
+            chunk_idx = chunk_sampler_result.value();
           } else {
             break;
           }
         }
-        UnwrappedBatchType data = chunk_reader_.read_chunk(chunk_id);
+        UnwrappedBatchType data = chunk_reader_.read_chunk(chunk_idx[0]);
+        for (size_t i = 1; i < chunk_idx.size(); ++i) {
+          auto chunk_data = chunk_reader_.read_chunk(chunk_idx[i]);
+          std::move(
+              chunk_data.begin(), chunk_data.end(), std::back_inserter(data));
+        }
         if (!data.empty()) { // skip empty chunks.
           batch_buffer_->add_chunk_data(std::move(data));
         }
