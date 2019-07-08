@@ -330,10 +330,23 @@ def test_equal():
                              torch.tensor([7, 8])])
     a3 = torch.nestedtensor([torch.tensor([3, 4]), 
                              torch.tensor([5, 6])])
+    # Just exercising them until we have __bool__, all() etc.
+    print(a1 == a2)
+    print(a1 != a3)
+    print(a1 != a2)
+    print(a1 == a3)
+
+def test_float():
+    a1 = torch.nestedtensor([torch.tensor([1, 2]), 
+                             torch.tensor([7, 8])])
+    a2 = a1.to(torch.float)
+
+    a3 = torch.nestedtensor([torch.tensor([3, 4]), 
+                             torch.tensor([5, 6])])
+    a4 = a3.to(torch.float)
+
+    print(a2)
     import pdb; pdb.set_trace()
-
-
-
 
 # TODO: Carefully test reference passing vs. value passing for each function
 # TODO: Add more tests for variable length examples
@@ -341,6 +354,7 @@ if __name__ == "__main__":
     test_unbind()
     test_nested_size()
     test_equal()
+    test_float()
     # test_embedding_monkey()
     # test_nested_cross_entropy_loss()
     # test_nested_linear()

@@ -9,17 +9,37 @@ def set_binary_method(cls, tfunc, pbf, func, inplace):
                         input2: torch.Tensor):
                 getattr(torch, tfunc)(input1, input2, out=output)
             if inplace:
-                func(_t_func, self, self, other)
-                return self
+                return func(_t_func, self, self, other)
             else:
                 output = self.clone()
-                func(_t_func, output, self, other)
-                return output
+                return func(_t_func, output, self, other)
         return _func
     setattr(cls, pbf, _gen_func(pbf))
 
 
-def add_pointwise_binary_functions(cls, func):
+def set_binary_function(module, cls, tfunc, pbf, func):
+    def _gen_func(pbf):
+        orig_tfunc = getattr(torch, tfunc)
+        def _func(*args, **kwargs):
+            if isinstance(args[0], cls):
+                def _t_func(output: torch.Tensor,
+                            input1: torch.Tensor,
+                            input2: torch.Tensor):
+                    orig_tfunc(input1, input2, out=output)
+                assert len(args) == 2
+                if len(kwargs):
+                    assert list(kwargs.keys()) == ['out']
+                    output = kwargs['out']
+                else:
+                    output = args[0].clone()
+                return func(_t_func, output, args[0], args[1])
+            else:
+                return orig_tfunc(*args, **kwargs)
+        return _func
+    setattr(module, pbf, _gen_func(pbf))
+
+
+def add_pointwise_binary_functions(module, cls, func):
     funcs = [
         'add',
         'mul',
@@ -30,11 +50,13 @@ def add_pointwise_binary_functions(cls, func):
         set_binary_method(cls, pbf, pbf + "_", func, True)
         set_binary_method(cls, pbf, "__" + pbf + "__", func, False)
         set_binary_method(cls, pbf, "__i" + pbf + "__", func, True)
+        set_binary_function(module, cls, pbf, pbf, func)
     set_binary_method(cls, "div", "div", func, False)
     set_binary_method(cls, "div", "div_", func, True)
     set_binary_method(cls, "div", "__truediv__", func, False)
     set_binary_method(cls, "div", "__itruediv__", func, True)
-    return cls
+    set_binary_function(module, cls, "div", "div", func)
+    return module, cls
 
 
 # It's up to the user to make sure that output is of type torch.uint8

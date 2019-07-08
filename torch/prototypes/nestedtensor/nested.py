@@ -41,19 +41,23 @@ class NestedTensor():
     def __init__(self, tensors):
         for tensor in tensors:
             assert torch.is_tensor(tensor)
-        # TODO: Empty NestedTensor behavior
-        if len(tensors) == 0:
-            return self
-        self.dim = tensors[0].dim()
-        self.layout = tensors[0].layout
-        self.device = tensors[0].device
-        self.dtype = tensors[0].dtype
-        for tensor in tensors:
-            assert(self.dim == tensor.dim())
-            assert(self.layout == tensor.layout)
-            assert(self.device == tensor.device)
-            assert(self.dtype == tensor.dtype)
         self.tensors = tensors
+        if len(tensors):
+            self.dim = tensors[0].dim()
+            self.layout = tensors[0].layout
+            self.device = tensors[0].device
+            self.dtype = tensors[0].dtype
+            for tensor in tensors:
+                assert(self.dim == tensor.dim())
+                assert(self.layout == tensor.layout)
+                assert(self.device == tensor.device)
+                assert(self.dtype == tensor.dtype)
+        else:
+            empty_tensor = torch.Tensor([])
+            self.dim = empty_tensor.dim()
+            self.layout = empty_tensor.layout
+            self.device = empty_tensor.device
+            self.dtype = empty_tensor.dtype
 
     def __getattribute__(self, attr):
         if attr == 'shape':
@@ -62,6 +66,11 @@ class NestedTensor():
 
     def __len__(self):
         return len(self.tensors)
+
+    def __bool__(self):
+        # Explicitly punt on this until we have fully
+        # specificed reduction semantics.
+        raise NotImplementedError()
 
     def __str__(self):
         tensors = self.unbind()

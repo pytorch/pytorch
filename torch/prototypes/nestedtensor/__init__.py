@@ -16,6 +16,7 @@ def f(func, output, input1, input2):
         assert output.tensors[i].size() == input1.tensors[i].size()
         assert input2.tensors[i].size() == input1.tensors[i].size()
         func(output.tensors[i], input1.tensors[i], input2.tensors[i])
+    return output
 
 def f1(func, output, input1, input2):
     assert len(output) == len(input1)
@@ -37,7 +38,7 @@ def f2(func, output, input1):
         func(output.tensors[i], input1.tensors[i])
 
 
-NestedTensor = tensorextension.add_pointwise_binary_functions(NestedTensor, f)
+torch, NestedTensor = tensorextension.add_pointwise_binary_functions(torch, NestedTensor, f)
 NestedTensor = tensorextension.add_pointwise_comparison_functions(NestedTensor, f1)
 NestedTensor = tensorextension.add_pointwise_unary_functions(NestedTensor, f2)
 
