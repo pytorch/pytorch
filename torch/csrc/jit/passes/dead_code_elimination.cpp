@@ -305,7 +305,7 @@ class DeadCodeEliminator {
       size_t i = i_1 - 1;
       if (!node->outputs().at(i)->hasUses() &&
           !loop_body->inputs().at(loop_body_offset + i)->hasUses()) {
-        log_dead_loop_outputs(node, i, loop_input_offset, loop_body_offset);
+        logDeadLoopOutputs(node, i, loop_input_offset, loop_body_offset);
         node->eraseOutput(i);
         node->removeInput(loop_input_offset + i);
         loop_body->eraseInput(loop_body_offset + i);
@@ -314,7 +314,7 @@ class DeadCodeEliminator {
     }
   }
 
-  void log_dead_loop_outputs(
+  void logDeadLoopOutputs(
       Node* node,
       size_t i,
       size_t loop_input_offset,
