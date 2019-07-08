@@ -791,6 +791,8 @@ class TestCase(expecttest.TestCase):
     if sys.version_info < (3, 2):
         # assertRegexpMatches renamed to assertRegex in 3.2
         assertRegex = unittest.TestCase.assertRegexpMatches
+        # assertNotRegexpMatches renamed to assertNotRegex in 3.2
+        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
         # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 
