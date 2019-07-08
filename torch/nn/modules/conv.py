@@ -53,9 +53,15 @@ class _ConvNd(Module):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
 
+    def _padding_is_static(self):
+        assert isinstance(self.stride, tuple)
+        def is_static(stride, filter, dilation):
+            return stride == 1 and ((filter-1) * dilation) % 2 == 0
+        return all([is_static(i[0], i[1], i[2]) for i in zip(self.stride, self.kernel_size, self.dilation)])
+
     def _compute_padding_same(self, input, dim):
         # When calculating convolutions, we can examine each dimension independently
-        input_size = input.size(dim + 2)
+        input_size = input.size(dim + 2) # Ignoring batch size + channel dims
         filter_size = self.weight.size(dim + 2)
         # Here we calculate the equivalent filter size factoring in dilation
         effective_filter_size = (filter_size - 1) * self.dilation[dim] + 1
@@ -207,6 +213,10 @@ class Conv1d(_ConvNd):
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
+        if isinstance(padding, str) and self._padding_is_static():
+            self.padding = (
+                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=0) // 2,
+            )
 
     @weak_script_method
     def forward(self, input):
@@ -357,6 +367,11 @@ class Conv2d(_ConvNd):
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias, padding_mode)
+        if isinstance(padding, str) and self._padding_is_static():
+            self.padding = (
+                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=0) // 2,
+                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=1) // 2,
+            )
 
     @weak_script_method
     def forward(self, input):
@@ -504,6 +519,12 @@ class Conv3d(_ConvNd):
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode)
+        if isinstance(padding, str) and self._padding_is_static():
+            self.padding = (
+                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=0) // 2,
+                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=1) // 2,
+                        self._compute_padding_same(torch.zeros([0, 0, 0, 0]), dim=2) // 2,
+            )
 
     @weak_script_method
     def forward(self, input):
