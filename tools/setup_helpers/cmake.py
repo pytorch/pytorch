@@ -11,7 +11,7 @@ import distutils
 import distutils.sysconfig
 from distutils.version import LooseVersion
 
-from . import escape_path
+from . import escape_path, which
 from .env import (IS_64BIT, IS_DARWIN, IS_WINDOWS,
                   DEBUG, REL_WITH_DEB_INFO,
                   check_env_flag, check_negative_env_flag)
@@ -20,20 +20,6 @@ from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
                    NCCL_SYSTEM_LIB, USE_NCCL)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
-
-
-def _which(thefile):
-    path = os.environ.get("PATH", os.defpath).split(os.pathsep)
-    for d in path:
-        fname = os.path.join(d, thefile)
-        fnames = [fname]
-        if IS_WINDOWS:
-            exts = os.environ.get('PATHEXT', '').split(os.pathsep)
-            fnames += [fname + ext for ext in exts]
-        for name in fnames:
-            if os.access(name, os.F_OK | os.X_OK) and not os.path.isdir(name):
-                return name
-    return None
 
 
 def _mkdir_p(d):
@@ -47,7 +33,7 @@ def _mkdir_p(d):
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
 USE_NINJA = (not check_negative_env_flag('USE_NINJA') and
-             _which('ninja') is not None)
+             which('ninja') is not None)
 
 
 class CMake:
@@ -80,9 +66,9 @@ class CMake:
         cmake_command = 'cmake'
         if IS_WINDOWS:
             return cmake_command
-        cmake3 = _which('cmake3')
+        cmake3 = which('cmake3')
         if cmake3 is not None:
-            cmake = _which('cmake')
+            cmake = which('cmake')
             if cmake is not None:
                 bare_version = CMake._get_version(cmake)
                 if (bare_version < LooseVersion("3.5.0") and

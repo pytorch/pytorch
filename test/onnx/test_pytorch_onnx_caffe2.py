@@ -1724,7 +1724,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(NestedTupleModel(), train=False, input=(x, y), batch_size=BATCH_SIZE,
                             example_outputs=x + y[0] + y[1][0] + y[1][1])
 
-    @skipIfUnsupportedOpsetVersion([10])
     def test_topk(self):
         class TopKModel(torch.nn.Module):
             def forward(self, input):
@@ -1733,7 +1732,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.arange(1., 6.)
         self.run_model_test(TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
-    @skipIfUnsupportedOpsetVersion([10])
     def test_topk_script(self):
         class TopKModel(torch.jit.ScriptModule):
             @torch.jit.script_method
