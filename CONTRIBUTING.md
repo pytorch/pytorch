@@ -243,15 +243,15 @@ only interested in a specific component.
   Caffe2 operators.
 
 On the initial build, you can also speed things up with the environment
-variables `DEBUG` and `NO_CUDA`.
+variables `DEBUG` and `USE_CUDA`.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
 - `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
-- `NO_CUDA=1` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
+- `USE_CUDA=0` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
 
 For example:
 ```bash
-NO_CUDA=1 DEBUG=1 python setup.py develop
+USE_CUDA=0 DEBUG=1 python setup.py develop
 ```
 
 Make sure you continue to pass these flags on subsequent builds.
@@ -548,7 +548,8 @@ which is in PyTorch's `requirements.txt`.
 
 ### Pre-commit Tidy/Linting Hook
 
-We use clang-tidy and flake8 (installed with flake-mypy) to perform additional
+We use clang-tidy and flake8 (installed with flake8-bugbear,
+flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 

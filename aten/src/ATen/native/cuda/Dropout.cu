@@ -1,17 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/CUDAGenerator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
 
 #include <THC/THCGeneral.h>
-#include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.hpp>
-
-
-THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace at{
 namespace native{
@@ -21,13 +17,6 @@ namespace {
 // philox generates 128 bits of randomness at a time. Kernel uses this explicitly by putting suitably transformed result into float4
 // for all members of float4 to be consumed UNROLL has to be 4. Don't change!
 const int UNROLL = 4;
-
-std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
-  auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
-  uint64_t offset = gen_->state.philox_seed_offset.fetch_add(increment);
-  return std::make_pair(gen_->state.initial_seed, offset);
-}
-
 
 template <
           typename scalar_t,
@@ -98,7 +87,8 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor
 } //anonymous namespace
 
 std::tuple<Tensor,Tensor>
-fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
+fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   Tensor ret = at::empty_like(self);
   Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte));
   const int64_t nelem = self.numel();
@@ -111,6 +101,12 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
 //number of times random will be generated per thread, to offset philox counter in thc random state
   int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
+  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
+  }
   if (cuda::detail::canUse32BitIndexMath(self)){
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
@@ -123,10 +119,10 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
       }
    });
   } else {
@@ -141,10 +137,10 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
       }
    });
   }

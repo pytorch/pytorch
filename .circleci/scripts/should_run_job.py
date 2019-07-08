@@ -44,9 +44,13 @@ default_set = [
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
+    # XLA
+    'pytorch-xla-linux-trusty-py3.6-gcc5.4',
+
     # Other checks
     'pytorch-short-perf-test-gpu',
-    'pytorch-doc-push',
+    'pytorch-python-doc-push',
+    'pytorch-cpp-doc-push',
 ]
 
 # Takes in commit message to analyze via stdin

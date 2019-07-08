@@ -29,15 +29,7 @@ struct CAFFE2_API ${Type}Dispatch {
   static std::unordered_map<std::string, void *>& get_fn_table();
 };
 
-struct CAFFE2_API ${Type} : public TypeDefault {
-  explicit ${Type}();
-
-  Allocator* allocator() const override;
-  Device getDeviceFromPtr(void * data) const override;
-  virtual Backend backend() const override;
-  virtual const char * toString() const override;
-  virtual TypeID ID() const override;
-
+struct CAFFE2_API ${Type} {
   ${type_method_declarations}
 };
 

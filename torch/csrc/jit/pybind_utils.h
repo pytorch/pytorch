@@ -305,7 +305,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  c10::ListPtr<IValue> elems = c10::make_list<IValue>();
+  c10::impl::GenericList elems;
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
@@ -316,7 +316,7 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
+  c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(
@@ -384,23 +384,31 @@ inline IValue toIValue(
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
           if (!N || !py::isinstance<py::int_>(obj)) {
-            return py::cast<std::vector<int64_t>>(obj);
+            return c10::impl::toList(py::cast<std::vector<int64_t>>(obj));
           } else {
             double value = py::cast<int64_t>(obj);
-            std::vector<double> repeated(*N, value);
+            c10::List<double> repeated;
+            repeated.reserve(*N);
+            for (int i = 0; i < *N; ++i) {
+              repeated.push_back(value);
+            }
             return repeated;
           }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
-            return py::cast<std::vector<double>>(obj);
+            return c10::impl::toList(py::cast<std::vector<double>>(obj));
           } else {
             double value = py::cast<double>(obj);
-            std::vector<double> repeated(*N, value);
+            c10::List<double> repeated;
+            repeated.reserve(*N);
+            for (int i = 0; i < *N; ++i) {
+              repeated.push_back(value);
+            }
             return repeated;
           }
         case TypeKind::DimensionedTensorType:
         case TypeKind::TensorType:
-          return py::cast<std::vector<at::Tensor>>(obj);
+          return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
           return createGenericList(obj, elem_type);
       }
@@ -423,7 +431,9 @@ inline IValue toIValue(
       auto classType = type->expect<ClassType>();
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
-      auto userObj = c10::ivalue::Object::create(classType, numAttrs);
+      auto userObj = c10::ivalue::Object::create(
+          c10::StrongTypePtr(classType->compilation_unit(), classType),
+          numAttrs);
 
       // 2. copy all the contained types
       for (size_t slot = 0; slot < numAttrs; slot++) {
@@ -543,10 +553,15 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
-    if (tuple->type && tuple->type->hasNames() && tuple->type->unqualName()) {
+    if (tuple->type && tuple->type->schema() &&
+        tuple->type->schema()->name() != "") {
+      auto unqualName = tuple->type->basename();
+      auto fieldNames = fmap(tuple->type->schema()->arguments(), [](const Argument& arg) {
+        return arg.name();
+      });
       return py::module::import("torch.jit")
           .attr("_create_named_tuple")(
-              t, tuple->type->names(), tuple->type->unqualName().value());
+              t, unqualName, fieldNames);
     } else {
       return std::move(t);
     }
@@ -561,8 +576,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
-    auto& pyCu = script::CompilationUnit::_get_python_cu();
-    const auto classType = pyCu.get_class(c10::QualifiedName(obj->name()));
+    auto pyCu = script::CompilationUnit::_get_python_cu();
+    const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());
@@ -577,7 +592,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return pyObj;
   } else {
-    AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
+    AT_ERROR(
+        "Missing cases in 'toPyObject'! Can't convert ",
+        ivalue.tagKind(),
+        " to a Python object");
   }
 }
 
@@ -716,6 +734,9 @@ inline py::object invokeScriptFunctionFromPython(
     AutoNoGIL no_gil_guard;
     callee.run(stack);
   }
+  AT_CHECK(
+      stack.size() > 0,
+      "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
 

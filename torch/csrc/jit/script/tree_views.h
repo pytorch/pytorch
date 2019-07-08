@@ -26,6 +26,8 @@ namespace script {
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
 // ClassDef = ClassDef(Ident name, List<Def> body)                      TK_CLASS_DEF
+// NamedTupleDef = NamedTupleDef(Ident name, List<Ident> fields,
+//                               List<Maybe<Expr>> types)
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
@@ -432,6 +434,29 @@ struct ClassDef : public TreeView {
   }
 };
 
+struct NamedTupleDef : public TreeView {
+  explicit NamedTupleDef(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_NAMED_TUPLE_DEF);
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  List<Ident> fields() const {
+    return List<Ident>(subtree(1));
+  }
+  List<Maybe<Expr>> type_exprs() const {
+    return List<Maybe<Expr>>(subtree(2));
+  }
+  static NamedTupleDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const List<Ident>& fields,
+      const List<Maybe<Expr>>& type_exprs) {
+    return NamedTupleDef(Compound::create(
+        TK_NAMED_TUPLE_DEF, range, {name, fields, type_exprs}));
+  }
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 // Statements
 ////////////////////////////////////////////////////////////////////////////////
@@ -486,8 +511,8 @@ struct For : public Stmt {
   explicit For(const TreeRef& tree) : Stmt(tree) {
     tree->match(TK_FOR);
   }
-  List<Ident> targets() const {
-    return List<Ident>(subtree(0));
+  List<Expr> targets() const {
+    return List<Expr>(subtree(0));
   }
   List<Expr> itrs() const {
     return List<Expr>(subtree(1));
@@ -497,7 +522,7 @@ struct For : public Stmt {
   }
   static For create(
       const SourceRange& range,
-      const List<Ident>& targets,
+      const List<Expr>& targets,
       const List<Expr>& itrs,
       const List<Stmt>& body) {
     return For(Compound::create(TK_FOR, range, {targets, itrs, body}));
@@ -512,8 +537,8 @@ struct ListComp : public Expr {
   Expr elt() const {
     return Expr(subtree(0));
   }
-  Ident target() const {
-    return Ident(subtree(1));
+  Expr target() const {
+    return Expr(subtree(1));
   }
   Expr iter() const {
     return Expr(subtree(2));
@@ -522,7 +547,7 @@ struct ListComp : public Expr {
   static ListComp create(
       const SourceRange& range,
       const Expr& elt,
-      const Ident& target,
+      const Expr& target,
       const Expr& iter) {
     return ListComp(Compound::create(TK_LIST_COMP, range, {elt, target, iter}));
   }
