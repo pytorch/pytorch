@@ -2,8 +2,7 @@ import torch._C
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, Parameter, Sequential
-from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args, \
-    FrontendError
+from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
