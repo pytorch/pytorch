@@ -102,6 +102,10 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   return at::_s_where(b_condition, b_self, b_other);
 }
 
+std::vector<Tensor> where(const Tensor& condition) {
+  return condition.nonzero_numpy();
+}
+
 Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
   Tensor ret = at::empty(self.sizes(), self.options());
   AT_DISPATCH_ALL_TYPES(ret.scalar_type(), "where_cpu", [&] {

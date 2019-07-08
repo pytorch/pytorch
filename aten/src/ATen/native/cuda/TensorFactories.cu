@@ -89,7 +89,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   }
 
   if (result.scalar_type() == at::ScalarType::Half) {  // Half in thrust is spotty. Avoid.
-    auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
+    auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)).dtype(kFloat));
     return result.copy_(randperm_out_cuda(result_float, n, generator));
   }
 

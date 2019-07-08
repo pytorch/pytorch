@@ -348,19 +348,19 @@ struct Environment {
           {"float",
            makeMagic(
                "__float__",
-               std::make_shared<CastValue>(FloatType::get(), prim::Float))},
+               std::make_shared<CastValue>(FloatType::get(), aten::Float))},
           {"int",
            makeMagic(
                "__int__",
-               std::make_shared<CastValue>(IntType::get(), prim::Int))},
+               std::make_shared<CastValue>(IntType::get(), aten::Int))},
           {"bool",
            makeMagic(
                "__bool__",
-               std::make_shared<CastValue>(BoolType::get(), prim::Bool))},
+               std::make_shared<CastValue>(BoolType::get(), aten::Bool))},
           {"str",
            makeMagic(
                "__str__",
-               std::make_shared<CastValue>(StringType::get(), prim::str))},
+               std::make_shared<CastValue>(StringType::get(), aten::str))},
           {"getattr", std::make_shared<GetAttrValue>()},
           {"isinstance", std::make_shared<IsInstanceValue>()},
           // todo(zach): remove when we can correctly export torch.full via ONNX
@@ -388,7 +388,8 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
-          {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
+          {"divmod",
+           std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
@@ -2924,7 +2925,7 @@ struct to_ir {
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      const std::unordered_map<std::string, Function*>&
           functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
@@ -2945,20 +2946,21 @@ struct FunctionResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, std::shared_ptr<Function>>&
+  const std::unordered_map<std::string, Function*>&
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source) {
+CompilationUnit::CompilationUnit(const std::string& source)
+    : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
   define(source, nativeResolver(), nullptr);
 }
 
-std::shared_ptr<Function> CompilationUnit::define(
+std::unique_ptr<Function> CompilationUnit::define(
     const Def& def,
     const ResolverPtr& resolver,
     const Self& self,
-    const std::unordered_map<std::string, std::shared_ptr<Function>>&
+    const std::unordered_map<std::string, Function*>&
         function_table) const {
   const std::string& name = def.name().name();
   TORCH_INTERNAL_ASSERT(resolver);
@@ -2973,7 +2975,7 @@ std::shared_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     to_ir(def, _resolver, self, method);
   };
-  return std::make_shared<Function>(
+  return torch::make_unique<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);
 }
 
@@ -2994,13 +2996,13 @@ void CompilationUnit::define(
   }
 
   std::vector<Function*> methods;
-  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
+  std::unordered_map<std::string, Function*> function_table;
   if (init_idx.has_value()) {
     // if we have an init, do it first.
     auto fn = define(
         definitions[*init_idx], resolvers[*init_idx], self, function_table);
     const auto& name = fn->name();
-    function_table[name] = fn;
+    function_table[name] = fn.get();
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }
@@ -3013,7 +3015,7 @@ void CompilationUnit::define(
 
     auto fn = define(definitions[i], resolvers[i], self, function_table);
     const auto& name = fn->name();
-    function_table[name] = fn;
+    function_table[name] = fn.get();
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }

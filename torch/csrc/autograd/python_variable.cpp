@@ -551,10 +551,14 @@ void initTensorImplConversion(PyObject* module) {
     auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
-    TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
-    return py::cast(torch::autograd::Variable(
-        torch::autograd::make_variable(std::move(tensor), false)));
+    // For now, there is no guarantee that the tensors returned from Caffe2 ops
+    // are not Variables, because inputs to Caffe2 ops can be Variables.
+    //
+    // In the near future, once we make every tensor a Variable, we can remove
+    // the `tensor.is_variable()` check and directly return `tensor` as a Variable.
+    return py::cast(tensor.is_variable() ? torch::autograd::Variable(tensor) :
+      torch::autograd::make_variable(std::move(tensor), false));
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions
   m.def("_tensor_impl_raw_handle", [](torch::autograd::Variable* t) -> void* {
