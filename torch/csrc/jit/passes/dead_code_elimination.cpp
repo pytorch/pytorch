@@ -276,7 +276,7 @@ class DeadCodeEliminator {
         GRAPH_UPDATE(
             "Dead ",
             i,
-            "-th ouput ",
+            "-th output ",
             node->outputs().at(i)->debugName(),
             " of node ",
             node->kind().toQualString(),
