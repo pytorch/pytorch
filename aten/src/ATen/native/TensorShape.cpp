@@ -721,7 +721,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> >
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
   auto sizes = tensor.sizes().vec();
   auto strides = tensor.strides().vec();
-  int64_t new_stride = 0;
+  int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
   sizes.insert(sizes.begin() + dim, 1);
   strides.insert(strides.begin() + dim, new_stride);
 
