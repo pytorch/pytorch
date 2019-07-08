@@ -15,9 +15,6 @@ from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
 from common_utils import skipIfNotRegistered
 from common_utils import _quantize, _dequantize, _requantize
 
-def canonical(graph):
-    return str(torch._C._jit_pass_canonicalize(graph))
-
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -69,52 +66,6 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
 
 @skipIfNotRegistered("Relu_ENGINE_FBGEMM",
                      "fbgemm-based Caffe2 ops are not linked")
-class TestQuantized(TestCase):
-    def test_relu(self):
-        a = (torch.tensor([4, 6, 1, 10], dtype=torch.uint8), 0.01, 5)
-        r = torch.ops.c10.quantized_relu(a)
-        np.testing.assert_equal(
-            r[0].numpy(), torch.tensor([5, 6, 5, 10], dtype=torch.uint8).numpy()
-        )
-        np.testing.assert_almost_equal(0.01, r[1])
-        self.assertEqual(5, r[2])
-
-    def test_quantize(self):
-        a = (torch.tensor([4, 6, 1, 10], dtype=torch.uint8), 0.01, 5)
-        r = torch.ops.c10.dequantize(a)
-        np.testing.assert_almost_equal(r.numpy(), [-0.01, 0.01, -0.04, 0.05])
-        # default args
-        q_def = torch.ops.c10.quantize(r)
-        # specified
-        q = torch.ops.c10.quantize(r, scale=0.01, zero_point=5)
-        np.testing.assert_equal(q[0].numpy(), a[0].numpy())
-        np.testing.assert_almost_equal(q[1], a[1])
-        self.assertEqual(q[2], a[2])
-
-    def test_script(self):
-        @torch.jit.script
-        def foo(x):
-            # type: (Tuple[Tensor, float, int]) -> Tuple[Tensor, float, int]
-            return torch.ops.c10.quantized_relu(x)
-
-        self.assertExpectedInline(
-            canonical(foo.graph),
-            """\
-graph(%x : (Tensor, float, int)):
-  %1 : (Tensor, float, int) = c10::quantized_relu(%x)
-  return (%1)
-""",
-        )
-
-    def test_set_data_tensorimpl_type(self):
-        # Dense tensor has impl of type `TensorImpl`, while quantized tensor has impl
-        # of type `QTensorImpl`.
-        x = torch.randn(1, 2)
-        x_q = torch.ops.c10.quantize(torch.randn(1, 2))
-        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
-            x.data = x_q
-
-
 class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
     def _pool_output_shape(self, input_size, kernel_size, padding, stride,
@@ -469,6 +420,7 @@ class TestQuantizedConv(unittest.TestCase):
         pad_h=st.integers(0, 2),
         pad_w=st.integers(0, 2),
         dilation=st.integers(1, 1),
+        use_bias=st.booleans(),
     )
     def test_qconv(
             self,
@@ -484,7 +436,8 @@ class TestQuantizedConv(unittest.TestCase):
             stride_w,
             pad_h,
             pad_w,
-            dilation
+            dilation,
+            use_bias
     ):
 
         qconv = torch.ops.quantized.fbgemm_conv2d
@@ -533,7 +486,7 @@ class TestQuantizedConv(unittest.TestCase):
         )
         conv_op.bias = torch.nn.Parameter(
             b_init.to(dtype=torch.float), requires_grad=False
-        )
+        ) if use_bias else None
 
         X_value_min = 0
         X_value_max = 4
@@ -562,7 +515,7 @@ class TestQuantizedConv(unittest.TestCase):
 
         X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
         W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
 
         W_prepack = qconv_prepack(W_q, groups)
         Y_scale = 7.3

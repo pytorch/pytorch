@@ -429,6 +429,7 @@ def method_tests():
         ('cumprod', prod_zeros(S, [0, 2]), (1,), 'zeros_dim1', (), [0]),
         ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0', (), [0]),
         ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0_cast', (), [0], (), ident, {'dtype': torch.float64}),
+        ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
         ('unfold', (), (0, 1, 1), 'scalar', (), [0]),
         ('unfold', (S, S, S, S), (1, 3, 1), '', (), [0]),
         ('unfold', (S, S, S), (2, 3, 2), 'lastdim', (), [0]),

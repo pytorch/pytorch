@@ -301,7 +301,7 @@ PyObject *THPVariable_get_ndim(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 PyObject *THPVariable_get_names(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -420,6 +420,14 @@ PyObject *THPVariable_is_sparse(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_mkldnn(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_mkldnn());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_quantized(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -468,12 +476,13 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
+  {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   {"names", (getter)THPVariable_get_names, nullptr, nullptr, nullptr},
 #endif
   {nullptr}
