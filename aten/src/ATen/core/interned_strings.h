@@ -65,10 +65,10 @@ namespace c10 {
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
   _(prim, ImplicitTensorToNum)       \
-  _(prim, Bool)                      \
-  _(prim, Int)                       \
-  _(prim, Float)                     \
-  _(prim, str)                       \
+  _(aten, Bool)                      \
+  _(aten, Int)                       \
+  _(aten, Float)                     \
+  _(aten, str)                       \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, shape)                     \
@@ -152,6 +152,7 @@ namespace c10 {
   _(aten, bin)                       \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
+  _(prim, BailoutTemplate)           \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

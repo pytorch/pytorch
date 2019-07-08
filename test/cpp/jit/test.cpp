@@ -16,6 +16,7 @@
 #include <test/cpp/jit/test_class_parser.h>
 #include <test/cpp/jit/test_code_template.h>
 #include <test/cpp/jit/test_constant_pooling.h>
+#include <test/cpp/jit/test_constant_propagation.h>
 #include <test/cpp/jit/test_create_autodiff_subgraphs.h>
 #include <test/cpp/jit/test_custom_operators.h>
 #include <test/cpp/jit/test_dynamic_dag.h>
@@ -71,6 +72,7 @@ namespace jit {
   _(MemoryDAG)                         \
   _(IRParser)                          \
   _(ConstantPooling)                   \
+  _(ConstantPropagation)               \
   _(NetDefConverter)                   \
   _(THNNConv)                          \
   _(ATenNativeBatchNorm)               \

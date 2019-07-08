@@ -550,7 +550,7 @@ class ScriptModuleSerializer final {
   IValue moduleGetState(const script::Module& module);
   bool moduleHasValidGetSetState(const script::Module& module);
 
-  void convertClass(const c10::NamedTypePtr& type, torch::ModelDef* model_def);
+  void convertClass(const c10::NamedTypePtr& type);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -609,7 +609,7 @@ void ScriptModuleSerializer::serialize(
 void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   // Convert all the classes that this model depends on
   for (const auto& class_type : class_table_) {
-    convertClass(class_type, model_def);
+    convertClass(class_type);
   }
 
   // Mapping of filename => src. We need this because multiple clases may go in
@@ -654,8 +654,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 // python print the class and add to the converted_classes_. Recursively
 // python print all classes that this class depends on.
 void ScriptModuleSerializer::convertClass(
-    const c10::NamedTypePtr& class_type,
-    torch::ModelDef* model_def) {
+    const c10::NamedTypePtr& class_type) {
   if (converted_classes_.contains(class_type)) {
     return;
   }
@@ -681,7 +680,7 @@ void ScriptModuleSerializer::convertClass(
       // class isn't in there yet.
       continue;
     }
-    convertClass(c, model_def);
+    convertClass(c);
   }
   // Insert *after* we've traversed the dependencies. This ensures that any
   // given class will appear after its dependencies in the order.

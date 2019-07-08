@@ -53,8 +53,10 @@ class Conv3d(_ConvNd):
 class _ConvTransposeMixin:
     def forward(self, input: Tensor, output_size: Optional[List[int]] = ...): ...
 
-
-class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
+# We need a '# type: ignore' at the end of the declaration of each class that inherits from 
+# `_ConvTransposeMixin` since the `forward` method declared in `_ConvTransposeMixin` is 
+# incompatible with the `forward` method declared in `Module`.
+class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):  # type: ignore
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_1_t, stride: _size_1_t = ...,
                  padding: _size_1_t = ..., output_padding: _size_1_t = ..., groups: int = ..., bias: bool = ...,
                  dilation: int = ..., padding_mode: str = ...) -> None: ...
@@ -62,7 +64,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     def forward(self, input: Tensor, output_size: Optional[List[int]] = ...) -> Tensor: ...
 
 
-class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
+class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):  # type: ignore
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_2_t, stride: _size_2_t = ...,
                  padding: _size_2_t = ..., output_padding: _size_2_t = ..., groups: int = ..., bias: bool = ...,
                  dilation: int = ..., padding_mode: str = ...) -> None: ...
@@ -70,7 +72,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     def forward(self, input: Tensor, output_size: Optional[List[int]] = ...) -> Tensor: ...
 
 
-class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
+class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):  # type: ignore
     def __init__(self, in_channels: int, out_channels: int, kernel_size: _size_3_t, stride: _size_3_t = ...,
                  padding: _size_3_t = ..., output_padding: _size_3_t = ..., groups: int = ..., bias: bool = ...,
                  dilation: int = ..., padding_mode: str = ...) -> None: ...
