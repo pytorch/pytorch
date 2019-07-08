@@ -167,6 +167,8 @@ struct CAFFE2_API TensorIterator {
   bool is_trivial_1d() const;
   /// Reducible to 1-dimensional and all operands are contiguous
   bool is_contiguous() const;
+  bool is_channels_last_contiguous() const;
+  bool is_channels_last_contiguous_all() const;
   bool is_dim_reduced(int dim) const;
 
   /// Accessors for each operand

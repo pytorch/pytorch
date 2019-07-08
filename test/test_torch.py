@@ -11761,7 +11761,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
-    def fake_nhwc(self, N, C, H, W):
+    def permute_as_nhwc(self, N, C, H, W):
         alloc = torch.randn(N, H, W, C)
         return alloc.permute(0, 3, 1, 2)
 
@@ -11772,11 +11772,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, x)
 
-        fake = self.fake_nhwc(10, 3, 32, 32)
-        self.assertFalse(
-            fake.is_contiguous(memory_format=torch.channels_last),
-            "must be tagged to be identified as channels_last")
-
     def _test_memory_format_operators(self, device):
         def chunk_op(x, y):
             x1, x2 = x.chunk(2, dim=1)
@@ -11784,8 +11779,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             y1 = y1.contiguous()
             return y1 + x1
 
-        def unsqueeze_op(x, y):
-            return x[0].unsqueeze(0)
+        def unsqueeze_op_add(x, y):
+            return x[0].unsqueeze(0) + 3
+
+        def unsqueeze_op_clone(x, y):
+            return x[0].unsqueeze(0).clone()
 
         x = torch.randn((10, 4, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
         y = abs(torch.randn((10, 4, 32, 32), device=device)) + 1
@@ -11804,25 +11802,25 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             lambda x, y: x.abs(),
             lambda x, y: x.acos(),
             lambda x, y: x.add(y, alpha=3),
-            # lambda x, y: x.addcdiv(2, y, y),
-            # lambda x, y: x.addcmul(2, y, y),
+            # lambda x, y: x.addcdiv(2, y, y), // TH at THTensorMath.cpp
+            # lambda x, y: x.addcmul(2, y, y), // TH at THTensorMath.cpp
             lambda x, y: x.asin(),
             lambda x, y: x.atan(),
-            # lambda x, y: x.atan2(y),
+            # lambda x, y: x.atan2(y), // TH at THTensorMoreMath.cpp
             lambda x, y: x.ceil(),
-            # lambda x, y: x.clamp(-1, 1),
+            # lambda x, y: x.clamp(-1, 1), // TH at THTensorMath.cpp
             lambda x, y: x.cos(),
             lambda x, y: x.cosh(),
             lambda x, y: x.div(0.5),
             lambda x, y: x.div(y),
-            # lambda x, y: x.digamma(),
+            # lambda x, y: x.digamma(), // TH at THTensorMoreMath.cpp
             lambda x, y: x.erf(),
             lambda x, y: x.erfc(),
-            # lambda x, y: x.erfinv(),
+            # lambda x, y: x.erfinv(), // TH at THTensorMoreMath.cpp
             lambda x, y: x.exp(),
             lambda x, y: x.expm1(),
             lambda x, y: x.floor(),
-            # lambda x, y: x.fmod(2),
+            # lambda x, y: x.fmod(2), // TH at THTensorEvenMoreMath.cpp
             lambda x, y: x.frac(),
             # lambda x, y: x.lerp(y, 0.5),
             lambda x, y: x.log(),
@@ -11830,15 +11828,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             lambda x, y: x.log1p(),
             lambda x, y: x.log2(),
             lambda x, y: x.mul(3),
-            # lambda x, y: x.clone().uniform_(1, 2).mvlgamma(2),
+            # lambda x, y: x.clone().uniform_(1, 2).mvlgamma(2), // Reduction
             lambda x, y: x.neg(),
-            # lambda x, y: x.pow(3),
+            # lambda x, y: x.pow(3), // TH at THTensorMath.cpp
             lambda x, y: x.reciprocal(),
-            # lambda x, y: x.remainder(2),
+            # lambda x, y: x.remainder(2), // TH at THTensorEvenMoreMath.cpp
             lambda x, y: x.round(),
             lambda x, y: x.rsqrt(),
             lambda x, y: x.sigmoid(),
-            # lambda x, y: x.sign(),
+            # lambda x, y: x.sign(), // TH function at THTensorMoreMath.cpp
             lambda x, y: x.sin(),
             lambda x, y: x.sinh(),
             lambda x, y: x.sqrt(),
@@ -11846,7 +11844,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             lambda x, y: x.tanh(),
             lambda x, y: x.trunc(),
             chunk_op,
-            # unsqueeze_op,
+            unsqueeze_op_add,
+            unsqueeze_op_clone,
 
 
         ]
@@ -11868,16 +11867,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_memory_format_operators_cpu(self):
         self._test_memory_format_operators('cpu')
 
-    def test_memory_format_after_permute(self):
+    def test_memory_format_preserved_after_permute(self):
         x = torch.randn(10, 3, 32, 32)
         nhwc = x.contiguous(memory_format=torch.channels_last)
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
-        self.assertFalse(
-            y.is_contiguous(memory_format=torch.channels_last),
-            "permutation supposed to drop channels_last attribute")
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
 
     def test_memory_format_tagging_occupy_same_memory(self):
-        fake = self.fake_nhwc(10, 3, 7, 7)
+        fake = self.permute_as_nhwc(10, 3, 7, 7)
         alias = fake.contiguous(memory_format=torch.channels_last)
         alias.fill_(7)
         self.assertEqual(fake, alias)
@@ -11887,7 +11884,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x = torch.randn(10, 3, 32, 32)
         nhwc = x.contiguous(memory_format=torch.channels_last).cuda()
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
-        self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
+
+    def test_memory_format_reduction(self):
+        fake = self.permute_as_nhwc(10, 3, 7, 7)
+        fake.max()
+
 
     def _test_memory_format_empty_like(self, x):
         nhwc = x.contiguous(memory_format=torch.channels_last)
@@ -11909,8 +11911,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
 
         like = torch.empty_like(nhwc)
-        self.assertTrue(like.is_contiguous())
-        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
 
         sparse = x.to_sparse()
         with self.assertRaises(RuntimeError):

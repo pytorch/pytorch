@@ -27,6 +27,8 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
+IGNORE_FUNCTIONS = ['view'] + ['select'] + ['ne', 'isnan'] + ['permute','empty_like', 'contiguous'] + ['max'] + ['view_as'] + ['normal_','uniform_', 'add', 'to', 'add_','mul_','cudnn_convolution_backward','threshold_backward','zero_']
+ENABLE_CHECKS = False
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
     'resize_', 'resize_as_', 'detach', 'detach_', 'copy_'
@@ -181,6 +183,7 @@ baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+// VITALYF VariableDispatch
 auto tmp = ([&]() {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   return ${base_type_call};
@@ -292,9 +295,36 @@ def is_out_overload(declaration):
 def format_postrecord_trace(declaration):
     # For outplacing ops, *_out overloads require special handling to move the
     # output *argument* to a return value
+
+    CHECK_CHANNELS = """
+        if (input_is_channels_last) {
+            at::Tensor local_output = %s;
+            if (local_output.defined()) {
+            if (local_output.dim() > 2 && local_output.dim() < 6) {
+            bool output_c_l = local_output.unsafeGetTensorImpl()->vitalyf_is_channels_last();
+            std::cout << "output %s of %s is " << output_c_l << " size " << local_output.sizes() << std::endl;
+            AT_ASSERT(output_c_l, " output of %s must be channels_last ");
+            } else {
+            std::cout << "output %s of %s have d:" << local_output.dim() << std::endl;
+            }}
+        };
+    """
+
+
+    add = ''
+    # add = 'std::cout << "inputs of %s was " << input_is_channels_last << std::endl;' % declaration['name'];
+    if ENABLE_CHECKS and declaration['name'] not in IGNORE_FUNCTIONS:
+        for ret in declaration['returns']:
+            if ret['type'] == 'Tensor':
+                add += CHECK_CHANNELS % (ret['name'], ret['name'], declaration['name'], declaration['name'], ret['name'], declaration['name'])
+            else:
+                pass
+                # add += 'std::cout << "output %s of %s is type %s" << std::endl;' % (ret['name'], declaration['name'], ret['type'])
+
     if is_out_overload(declaration):
         output_names_outplace = [arg['name'] for arg in declaration['arguments'] if arg.get('output', False)]
         output_names_inplace = [r['name'] for r in declaration['returns']]
+
 
         # Code size optimization: the common case is that the return value is
         # the same for both variants
@@ -307,11 +337,11 @@ def format_postrecord_trace(declaration):
         local['true'] = ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names_outplace]
         local['false'] = ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names_inplace]
         selection = SELECT.substitute(local)
-        return POST_RECORD_TRACE.substitute(add_trace_outputs=selection)
+        return add + POST_RECORD_TRACE.substitute(add_trace_outputs=selection)
 
     output_names = [r['name'] for r in declaration['returns']]
     outputs = ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names]
-    return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
+    return add + POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
 
 
 def format_trace_op_name(declaration):
@@ -387,6 +417,23 @@ def format_prerecord_trace(declaration):
     local = {}
     is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
 
+    CHECK_CHANNLES_LAST = """
+    {
+    bool ttmmpp = %s.unsafeGetTensorImpl()->vitalyf_is_channels_last();
+    if (ttmmpp) {
+    std::cout << "input %s of %s is " << ttmmpp << " size " << %s.sizes() << std::endl;
+    }
+    input_is_channels_last = input_is_channels_last || ttmmpp;
+    }
+    """
+    a = 'bool input_is_channels_last = false;'
+
+    if ENABLE_CHECKS and declaration['name'] not in IGNORE_FUNCTIONS:
+        for arg in declaration['arguments']:
+            if arg['simple_type'] == 'Tensor':
+                a += CHECK_CHANNLES_LAST % (arg['name'], arg['name'],  declaration['name'], arg['name'])
+
+    # a += 'std::cout << "Final " << input_is_channels_last << std::endl;'
     local['set_op_name'] = format_trace_op_name(declaration)
     local['add_trace_inputs'] = format_trace_inputs(declaration)
 
@@ -396,7 +443,7 @@ def format_prerecord_trace(declaration):
             name=declaration['api_name'],
             mutable_input=declaration['arguments'][0]['name'])
 
-    return PRE_RECORD_TRACE.substitute(local)
+    return a + PRE_RECORD_TRACE.substitute(local)
 
 
 def format_trace(declaration):

@@ -447,6 +447,31 @@ bool TensorIterator::is_contiguous() const {
   return true;
 }
 
+bool TensorIterator::is_channels_last_contiguous_all() const {
+  int num_tensors = ntensors();
+  for (int i = 0; i < num_tensors; i++) {
+    if (!operands_[i].tensor.is_contiguous(MemoryFormat::ChannelsLast)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TensorIterator::is_channels_last_contiguous() const {
+  if (numel() == 1) {
+    return true;
+  }
+  if (ndim() != 1) {
+    return false;
+  }
+  int num_tensors = ntensors();
+  for (int i = 0; i < num_tensors; i++) {
+    if (operands_[i].tensor.strides() != operands_[0].tensor.strides() || operands_[i].tensor.sizes() != operands_[0].tensor.sizes() || !operands_[i].tensor.is_contiguous(MemoryFormat::ChannelsLast)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 bool TensorIterator::is_scalar(int arg) const {
   const auto& stride = operands_[arg].stride_bytes;

@@ -152,7 +152,7 @@ THTensor *THTensor_(newClone)(THTensor *self)
 {
   THTensor *tensor = THTensor_(new)();
   THTensor_(resizeAs)(tensor, self);
-  if (self->is_contiguous(at::MemoryFormat::ChannelsLast)) {
+  if (self->vitalyf_is_channels_last()) {
     tensor->empty_tensor_restride(at::MemoryFormat::ChannelsLast);
   }
   at::Tensor tensor_wrap = THTensor_wrap(tensor);

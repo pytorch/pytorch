@@ -337,7 +337,7 @@ namespace {
     auto output = at::empty({0}, input.options());
     adaptive_avg_pool2d_out_cuda_template(
       output, input, output_size);
-    return output;
+    return output.contiguous(input.suggest_memory_format());
   }
 
   Tensor& adaptive_avg_pool2d_backward_out_cuda(
@@ -358,7 +358,7 @@ namespace {
     auto gradInput = at::zeros_like(input);
     adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);
-    return gradInput;
+    return gradInput.contiguous(input.suggest_memory_format());
   }
 
 } // at::native

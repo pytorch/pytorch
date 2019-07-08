@@ -162,6 +162,9 @@ THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
 {
   THCTensor *tensor = THCTensor_(new)(state);
   THCTensor_(resizeAs)(state, tensor, self);
+  if (self->vitalyf_is_channels_last()) {
+    tensor->empty_tensor_restride(at::MemoryFormat::ChannelsLast);
+  }
   THCTensor_(copy)(state, tensor, self);
   return tensor;
 }

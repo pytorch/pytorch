@@ -1,6 +1,7 @@
 # HEY! Trying to understand what this file does?  Read
 # "what has to be done to add a Operation ..." first!
 
+import copy
 import re
 from code_template import CodeTemplate
 
@@ -29,6 +30,19 @@ if sys.version_info[0] == 3:
 else:
     string_type = basestring
 
+
+CHECK_MEMORY_FORMAT_PRE = CodeTemplate("""\
+    //auto input_is_channels_last = self.unsafeGetTensorImpl()->vitalyf_is_channels_last();
+""")
+
+CHECK_MEMORY_FORMAT_POST = CodeTemplate("""\
+    //auto ouput_is_channels_last = output_result->unsafeGetTensorImpl()->vitalyf_is_channels_last();
+    //if (input_is_channels_last && !ouput_is_channels_last) {
+        //std::cout << "${api_name} got channels last and returned regular tensor" << std::endl;
+    //}
+""")
+
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
 # what has to be done to add a Operation ...
@@ -49,9 +63,11 @@ ${return_type} ${api_name}(${type_method_formals}) {
     ${named_guard_declaration}
 #endif
     ${device_guard_declaration}
+${check_memory_format_pre}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
+${check_memory_format_post}
 }
 """)
 
@@ -113,6 +129,7 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
 #ifdef NAMEDTENSOR_ENABLED
     ${named_guard_declaration}
 #endif
+// vitalyf
     ${device_guard_declaration}
     ${type_definition_body}
 }
@@ -1576,13 +1593,17 @@ def create_derived(backend_type_env, declarations):
         backend = backend_type_env['Backend']
         if backend in option['backend_types']:
             env = nested_dict(option, backend_type_env)
+            # env = copy.deepcopy(env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
             if option.get('broadcast_actuals', None):
                 legacy_th_declarations.append(
                     LEGACY_TH_DECLARATION_BROADCAST.substitute(env))
                 legacy_th_definitions.append(
-                    LEGACY_TH_DEFINITION_BROADCAST.substitute(env))
+                    LEGACY_TH_DEFINITION_BROADCAST.substitute(env,
+                        check_memory_format_pre = CHECK_MEMORY_FORMAT_PRE.substitute(env),
+                        check_memory_format_post = CHECK_MEMORY_FORMAT_POST.substitute(env),
+                        ))
             legacy_th_declarations.append(
                 LEGACY_TH_DECLARATION.substitute(env))
             legacy_th_definitions.append(

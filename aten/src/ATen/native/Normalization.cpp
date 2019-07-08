@@ -370,12 +370,12 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
-    return std::tuple_cat(
+    return std::tuple_cat( // it is fine to pass any tensor as per API
              at::cudnn_batch_norm(
-               input.contiguous(), weight.contiguous(),
-               bias.contiguous(),
-               running_mean.defined() ? running_mean.contiguous() : running_mean,
-               running_var.defined() ? running_var.contiguous() : running_var,
+               input, weight,
+               bias,
+               running_mean.defined() ? running_mean : running_mean,
+               running_var.defined() ? running_var : running_var,
                training, momentum, eps),
              std::make_tuple(1));
   }

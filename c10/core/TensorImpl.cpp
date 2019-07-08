@@ -90,9 +90,18 @@ bool TensorImpl::compute_channels_last_contiguous() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {
-  if (dim() == 4)
-  {
-    return stride(1) < stride(3) < stride(2) < stride(0);
+  if (dim() == 4) {
+    int64_t min = 0;
+    for (auto& d : {1, 3, 2, 0}) {
+      if (size(d) != 1) {
+        if (stride(d) > min) {
+          min = stride(d);
+        } else {
+          return false;
+        }
+      }
+    }
+    return true;
   }
   return false;
 }

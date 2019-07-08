@@ -23,12 +23,41 @@ void copy_kernel_impl(TensorIterator& iter) {
 
 // device-to-device copy, does type conversion
 static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
+  static int64_t c1 = 0;
+  c1 ++;
+  if (c1 % 100 == 0) {
+    std::cout << "GPU copy_device_to_device " << c1 << "\n";
+  }
   int64_t numel = iter.numel();
 
   // We can memcpy the memory if both tensors have the same type AND both
   // tensors are contiguous after dimension coalescing and reordering.
   bool same_type = iter.dtype(0) == iter.dtype(1);
-  bool memcpy_eligible = same_type && iter.is_contiguous();
+  bool cl_cont = iter.is_channels_last_contiguous();
+  bool memcpy_eligible = same_type && ( iter.is_contiguous() || cl_cont );
+  if (same_type && iter.is_contiguous()) {
+    static int64_t c1 = 0;
+    c1 ++;
+    if (c1 % 100 == 0) {
+      std::cout << "GPU copy_device_to_device is_contiguous == true " << c1 << "\n";
+    }
+  }
+
+  if (same_type && cl_cont) {
+    static int64_t c1 = 0;
+    c1 ++;
+    if (c1 % 100 == 0) {
+      std::cout << "GPU copy_device_to_device is_channels_last_contiguous == true " << c1 << "\n";
+    }
+  }
+
+  if (same_type && iter.is_channels_last_contiguous_all()) {
+    static int64_t c11 = 0;
+    c11 ++;
+    if (c11 % 100 == 0) {
+      std::cout << "GPU copy_device_to_device BOTH ChannelsLast == true " << c11 << "\n";
+    }
+  }
 
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
@@ -57,6 +86,11 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   }
 
   if (memcpy_eligible) {
+    static int64_t c2 = 0;
+    c2 ++;
+    if (c2  % 100 == 0) {
+      std::cout << "GPU same memcopy " << c2 << "\n";
+    }
     // Perform the copy
     AT_CUDA_CHECK(cudaMemcpyAsync(
         iter.data_ptr(0),
@@ -65,6 +99,11 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
+    static int64_t c3 = 0;
+    c3++;
+    if (c3 % 100 == 0) {
+      std::cout << "GPU iterator copy " << c3 << "\n";
+    }
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
       using dst_t = scalar_t;
       AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(1), "copy_", [&] {
@@ -157,6 +196,13 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   }
 
   // Copy between CPU and GPU
+
+  static int64_t c4 = 0;
+  c4++;
+  if (c4  % 100 == 0) {
+    std::cout << "copy CPU <-> GPU " << c4 << "\n";
+  }
+
   cuda::OptionalCUDAGuard device_guard;
   cudaMemcpyKind kind;
   if (dst_device.is_cuda() && src_device.is_cpu()) {

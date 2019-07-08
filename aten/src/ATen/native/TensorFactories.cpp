@@ -184,7 +184,7 @@ Tensor empty_like(
   }
 
   auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
+      optional_memory_format.value_or(MemoryFormat::Preserve);
   auto use_memory_format = memory_format;
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_contiguous(MemoryFormat::ChannelsLast)) {

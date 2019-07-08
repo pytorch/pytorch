@@ -83,6 +83,14 @@ namespace at {
 namespace native {
 
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+
+  static int64_t copy_ops = 0;
+  copy_ops ++;
+  if (copy_ops % 100 == 0) {
+    std::cout << "Copy operations " << copy_ops << "\n";
+  }
+
+
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(self.defined(), "src is undefined");

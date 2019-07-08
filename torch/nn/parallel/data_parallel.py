@@ -150,7 +150,12 @@ class DataParallel(Module):
             return self.module(*inputs[0], **kwargs[0])
         replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
         outputs = self.parallel_apply(replicas, inputs, kwargs)
-        return self.gather(outputs, self.output_device)
+
+        result = self.gather(outputs, self.output_device)
+        # print("*** result", result.shape, result.stride())
+        # for o in outputs:
+        #     print("---- o", o.shape, o.stride())
+        return result
 
     def replicate(self, module, device_ids):
         return replicate(module, device_ids, not torch.is_grad_enabled())

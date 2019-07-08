@@ -354,6 +354,7 @@ std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
   IntArrayRef dilation,
   bool ceil_mode)
 {
+  auto memory_format = input.suggest_memory_format();
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
   max_pool2d_with_indices_out_cuda_template(
@@ -365,6 +366,8 @@ std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
     padding,
     dilation,
     ceil_mode);
+  output = output.contiguous(memory_format); // Need to rewrite cuda function here to support it
+  indices = indices.contiguous(memory_format);
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
@@ -402,7 +405,10 @@ Tensor max_pool2d_with_indices_backward_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
+
+  auto memory_format = input.suggest_memory_format();
   auto gradInput = at::zeros_like(input);
+
   max_pool2d_with_indices_backward_out_cuda_template(
     gradInput,
     gradOutput_,
@@ -413,7 +419,8 @@ Tensor max_pool2d_with_indices_backward_cuda(
     padding,
     dilation,
     ceil_mode);
-  return gradInput;
+
+  return gradInput.contiguous(memory_format);
 }
 
 } // at::native

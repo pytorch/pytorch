@@ -365,9 +365,7 @@ at::Tensor _convolution(
 
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
-  if (!input_is_mkldnn) {
-    input = input.contiguous();
-  }
+
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
@@ -401,6 +399,9 @@ at::Tensor _convolution(
 
   Tensor output;
   if (params.is_depthwise(input, weight)) {
+    if (!input_is_mkldnn) {
+      input = input.contiguous(); // vitaly channels
+    }
       /* output.resize_(output_size(input, weight)); */
 
       auto kernel_size = weight.sizes().slice(2);
@@ -417,6 +418,9 @@ at::Tensor _convolution(
              ") should be the same");
 
     if (params.transposed) {
+      if (!input_is_mkldnn) {
+        input = input.contiguous(); // vitaly channels
+      }
       output = at::cudnn_convolution_transpose(
           input, weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
@@ -426,6 +430,9 @@ at::Tensor _convolution(
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_miopen(input)) {
+    if (!input_is_mkldnn) {
+      input = input.contiguous(); // vitaly channels
+    }
     TORCH_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
@@ -443,6 +450,9 @@ at::Tensor _convolution(
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_mkldnn(input)) {
+    if (!input_is_mkldnn) {
+      input = input.contiguous(); // vitaly channels
+    }
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
@@ -460,6 +470,9 @@ at::Tensor _convolution(
     }
 #endif
   } else {
+    if (!input_is_mkldnn) {
+      input = input.contiguous(); // vitaly channels
+    }
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);

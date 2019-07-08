@@ -25,6 +25,11 @@ void copy_kernel_cast(TensorIterator& iter) {
 }
 
 static void copy_kernel(TensorIterator& iter, bool non_blocking) {
+  static int64_t copy_ops = 0;
+  copy_ops ++;
+  if (copy_ops % 100 == 0) {
+    std::cout << "Copy CPU " << copy_ops << "\n";
+  }
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {
     if (dtype == ScalarType::Half) {

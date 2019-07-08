@@ -74,7 +74,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});
   // TODO: is weight required to be contiguous?
-  checkAllContiguous(c, {input, weight, bias, running_mean, running_var});
+  // checkAllContiguous(c, {input, weight, bias, running_mean, running_var});
   checkDimRange(c, input, 2, 6 /* exclusive */);
   auto num_features = input->size(1);
   for (auto t : {weight, bias, running_mean, running_var}) {
@@ -94,7 +94,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
   }
 
-  auto output_t = at::empty(input->sizes(), input->options());
+  auto output_t = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getCudnnHandle();
@@ -171,7 +171,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   checkAllSameType(c, {input, grad_output});
   checkAllSameType(c, {weight, save_mean, save_var});
   // TODO: is weight required to be contiguous?
-  checkAllContiguous(c, {input, grad_output, save_mean, save_var});
+  // checkAllContiguous(c, {input, grad_output, save_mean, save_var});
   checkDimRange(c, input, 2, 6 /* exclusive */);
   checkSameSize(c, input, grad_output);
   auto num_features = input->size(1);
@@ -190,9 +190,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     mode = CUDNN_BATCHNORM_SPATIAL;
   }
 
-  auto grad_input_t  = at::empty(input->sizes(), input->options());
-  auto grad_weight_t = at::empty(weight->sizes(), weight->options());
-  auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
+  auto grad_input_t  = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
+  auto grad_weight_t = at::empty(weight->sizes(), weight->options(), weight->suggest_memory_format());
+  auto grad_bias_t   = at::empty(weight->sizes(), weight->options(), weight->suggest_memory_format());
 
   auto handle = getCudnnHandle();
   auto dataType = getCudnnDataType(*input);
