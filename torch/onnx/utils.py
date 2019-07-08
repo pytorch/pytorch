@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 r"""
 The torch.onnx module contains functions to export models into the ONNX
 IR format.  These models can be loaded with the ONNX library and then
@@ -118,33 +120,33 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             "doc_string" from the exported model, which information about the stack
             trace.
         example_outputs: example outputs of the model that is being exported.
-        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict): 
-            a dictionary to specify dynamic axes of input/output, such that:            
+        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
+            a dictionary to specify dynamic axes of input/output, such that:
             - KEY:  input and/or output names
             - VALUE: index of dynamic axes for given key and potentially the name to be used for
             exported dynamic axes. In general the value is defined according to one of the following
             ways or a combination of both:
 
             (1). A list of integers specifiying the dynamic axes of provided input. In this scenario
-            automated names will be generated and applied to dynamic axes of provided input/output 
-            during export. 
+            automated names will be generated and applied to dynamic axes of provided input/output
+            during export.
 
-            OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in 
-            corresponding input/output TO the name that is desired to be applied on such axis of 
+            OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in
+            corresponding input/output TO the name that is desired to be applied on such axis of
             such input/output during export.
 
-            Example. if we have the following shape for inputs and outputs:             
+            Example. if we have the following shape for inputs and outputs:
                 shape(input_1) = ('b', 3, 'w', 'h')
-                and shape(input_2) = ('b', 4)           
-                and shape(output)  = ('b', 'd', 5)      
+                and shape(input_2) = ('b', 4)
+                and shape(output)  = ('b', 'd', 5)
 
             Then dynamic axes can be defined either as:
             (a). ONLY INDICES:
                  dynamic_axes = {'input_1':[0, 2, 3], 'input_2':[0], 'output':[0, 1]}
                  where automatic names will be generated for exported dynamic axes
 
-            OR (b). INDICES WITH CORRESPONDING NAMES: 
-                dynamic_axes = {'input_1':{0:'batch', 1:'width', 2:'height'}, 
+            OR (b). INDICES WITH CORRESPONDING NAMES:
+                dynamic_axes = {'input_1':{0:'batch', 1:'width', 2:'height'},
                                  'input_2':{0:'batch'},
                                  'output':{0:'batch', 1:'detections'}
                  where provided names will be applied to exported dynamic axes
@@ -212,21 +214,32 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
-    # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
-    torch._C._jit_pass_prepare_division_for_onnx(graph)
-    # onnx does not support tuples, so try to remove them
-    torch._C._jit_pass_lower_all_tuples(graph)
-    # onnx only supports tensors, so we turn all out number types into tensors
-    torch._C._jit_pass_erase_number_types(graph)
-    torch._C._jit_pass_peephole(graph, True)
-    torch._C._jit_pass_lint(graph)
-
     if operator_export_type != OperatorExportTypes.RAW:
+        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
+        torch._C._jit_pass_prepare_division_for_onnx(graph)
+        # onnx does not support tuples, so try to remove them
+        torch._C._jit_pass_lower_all_tuples(graph)
+        torch._C._jit_pass_peephole(graph, True)
+        torch._C._jit_pass_lint(graph)
+
+        torch._C._jit_pass_onnx_remove_print(graph)
+
+        torch._C._jit_pass_onnx_preprocess_caffe2(graph)
+
+        # onnx only supports tensors, so we turn all out number types into tensors
+        torch._C._jit_pass_erase_number_types(graph)
+
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_onnx_peephole(graph)
         torch._C._jit_pass_lint(graph)
-    torch._C._jit_pass_dce(graph)
+
+    # graph is not a valid jit graph anymore because types have been replaced
+    # (e.g. int with Tensor), so it now contains operators that don't actually
+    # exist. We can't run normal dead code elimination because it'd fail trying
+    # to look up if an operator has side effects, but we can run a dead code
+    # elimination variant that doesn't need to look up if an op has side effects.
+    torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
     torch._C._jit_pass_lint(graph)
     torch._C._jit_pass_fixup_onnx_loops(graph)
     torch._C._jit_pass_lint(graph)
@@ -338,7 +351,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
 
     if do_constant_folding and _export_onnx_opset_version == 9:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict)
-        torch._C._jit_pass_dce(graph)
+        torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if verbose:
         print(graph)
@@ -369,9 +382,11 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=False):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+    from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
+    _set_operator_export_type(operator_export_type)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
@@ -395,9 +410,11 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     __IN_ONNX_EXPORT = True
     try:
         from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+        from torch.onnx.symbolic_helper import _set_operator_export_type
         if opset_version is None:
             opset_version = _default_onnx_opset_version
         _set_opset_version(opset_version)
+        _set_operator_export_type(operator_export_type)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
@@ -682,7 +699,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                               "Have you registered your symbolic function with "
                               "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
                               .format(ns, op_name, opset_version, op_name))
-            symbolic_fn = sym_registry.get_registered_op(symbolic_name, ns, opset_version)
+            symbolic_fn = sym_registry.get_registered_op(op_name, ns, opset_version)
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
 
@@ -793,7 +810,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if key not in valid_names:
             warnings.warn("Provided key {} for dynamic axes is not a valid input/output name".format(key))
         if isinstance(value, list):
-            warnings.warn('No names were found for specified dynamic axes of provided input.' 
+            warnings.warn('No names were found for specified dynamic axes of provided input.'
                           'Automatically generated names will be applied to each dynamic axes of input {}'.format(key))
 
             value_dict = {}

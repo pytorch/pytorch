@@ -12,7 +12,6 @@ TEST(Caffe2ToPytorch, SimpleLegacy) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
-  ASSERT_TRUE(&at_tensor.dispatch_type() != nullptr);
 
   auto it = at_tensor.data<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
@@ -27,7 +26,6 @@ TEST(Caffe2ToPytorch, Simple) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
-  ASSERT_TRUE(&at_tensor.dispatch_type() != nullptr);
 
   auto it = at_tensor.data<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
