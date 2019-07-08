@@ -305,7 +305,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // corrent values for the type promotions in complex type cases.
   static constexpr ScalarType _promoteTypesLookup[static_cast<int>(
       ScalarType::NumOptions)][static_cast<int>(ScalarType::NumOptions)] = {
-      /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  b2*/
+      /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  q1  q2  q3  b2*/
       /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, u1, ud, ud, ud, b2},
       /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, i1, ud, ud, ud, b2},
       /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, i2, ud, ud, ud, b2},
@@ -318,9 +318,9 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
       /* c4 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
       /* c8 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
       /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1, ud, ud, ud, b2},
-      /* q */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-      /* q */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-      /* q */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
       /* b2 */ {b2, b2, b2, b2, b2, b2, f4, f8, ud, ud, ud, b2, ud, ud, ud, b2},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];

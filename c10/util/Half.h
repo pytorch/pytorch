@@ -11,7 +11,6 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
-#include <iostream>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -484,7 +483,6 @@ typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
-  bool res = overflows<To, From>(f);
   if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
     std::ostringstream oss;
     oss << "value cannot be converted to type " << name

@@ -3337,9 +3337,10 @@ class _TestTorchMixin(object):
     def test_unfold_all_devices_and_dtypes(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if dt == torch.half and device == 'cpu':
+                if (dt == torch.half or dt == torch.bfloat16) and device == 'cpu':
                     # fix once random is implemented for Half on CPU
-
+                    self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
+                else:
                     x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
                     self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
 
@@ -3348,11 +3349,6 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
-
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.clone())
-                    continue
-
                 x_clone = x.clone()
                 y = copy(x)
                 y.fill_(1)
@@ -3381,18 +3377,12 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.view(6))
-                    continue
                 self.assertEqual(x.view(6).shape, [6])
 
     def test_fill_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.fill_(1))
-                    continue
                 x.fill_(1)
                 self.assertEqual(x, torch.tensor([1, 1], dtype=dt, device=device))
                 self.assertEqual(dt, x.dtype)
@@ -3401,10 +3391,6 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.clone())
-                    continue
-
                 y = x.clone()
                 self.assertEqual(x, y)
 
@@ -3412,9 +3398,6 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
-                    continue
 
                 expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
                 self.assertEqual(torch.cat((x, x), 0), expected1)
@@ -3443,9 +3426,6 @@ class _TestTorchMixin(object):
                         # update once random is implemented for half and/or bfloat16 on CPU
                         self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                     else:
-                        if dt == torch.bfloat16:
-                            self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt))
-                            continue  # Remove once random is supported for bfloat16 on cuda
                         self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                         self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
 

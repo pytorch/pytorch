@@ -263,7 +263,6 @@ struct THCNumerics<at::BFloat16> {
   }
 
   static inline __host__ __device__ bool isinf(at::BFloat16 a) {
-    std::cout << "yo" << std::endl;
     #ifdef _MSC_VER
       // Windows requires this explicit conversion. The reason is unclear
       // related issue with clang: https://reviews.llvm.org/D37906
