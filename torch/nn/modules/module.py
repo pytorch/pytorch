@@ -1085,7 +1085,7 @@ class Module(object):
         in-place.
 
         This method is helpful for freezing part of the module for finetuning
-        and training parts of a model individually (e.g., GAN training).
+        or training parts of a model individually (e.g., GAN training).
 
         Args:
             requires_grad (bool): whether autograd should record operations on
