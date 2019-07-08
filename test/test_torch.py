@@ -8018,8 +8018,8 @@ class _TestTorchMixin(object):
             x = torch.tensor([[True, True, True], [True, True, True]], device=device)
             res = torch.zeros(3, 3, dtype=torch.bool, device=device)
             res = res.scatter_(0, torch.tensor([[0, 1, 2], [0, 1, 2]], device=device), x)
-            self.assertEqual(res, torch.tensor([[True, False, False], 
-                                                [False, True, False], 
+            self.assertEqual(res, torch.tensor([[True, False, False],
+                                                [False, True, False],
                                                 [False, False, True]], device=device))
 
     def test_scatter_add_bool(self):
@@ -8027,8 +8027,8 @@ class _TestTorchMixin(object):
             x = torch.tensor([[True, True, True, True, True], [True, True, True, True, True]], device=device)
             res = torch.zeros(3, 5, dtype=torch.bool, device=device)
             res = res.scatter_add_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]], device=device), x)
-            self.assertEqual(res, torch.tensor([[True, True, True, True, True], 
-                                                [False, True, False, True, False], 
+            self.assertEqual(res, torch.tensor([[True, True, True, True, True],
+                                                [False, True, False, True, False],
                                                 [True, False, True, False, True]], device=device))
 
     def test_masked_scatter(self):
@@ -8054,6 +8054,19 @@ class _TestTorchMixin(object):
             src = torch.randn(num_copy - 1)
             with self.assertRaises(RuntimeError):
                 dest.masked_scatter_(mask, src)
+
+    def test_masked_scatter_bool_tensor(self):
+        for device in torch.testing.get_all_device_types():
+            src = torch.tensor([True, True, True], device=device)
+            dst = torch.tensor([False, False, False], device=device)
+            mask = torch.tensor([False, True, False], device=device)
+
+            dst.masked_scatter_(mask, src)
+            self.assertEqual(dst, torch.tensor([False, True, False], device=device))
+
+            mask = torch.tensor([True, False, True], device=device)
+            dst = dst.masked_scatter(mask, src)
+            self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
     def test_masked_select(self):
         for dtype in [torch.uint8, torch.bool]:
@@ -8086,6 +8099,17 @@ class _TestTorchMixin(object):
             dst.masked_fill_((dst > 0).to(dtype), val)
             dst2.masked_fill_((dst2 > 0).to(dtype), val)
             self.assertEqual(dst, dst2, 0)
+
+    def test_masked_fill_bool_tensor(self):
+        for device in torch.testing.get_all_device_types():
+            dst = torch.tensor([True, False, True], device=device)
+            mask = torch.tensor([False, True, False], device=device)
+
+            dst.masked_fill_(mask, True)
+            self.assertEqual(dst, torch.tensor([True, True, True], device=device))
+
+            dst = dst.masked_fill(mask, False)
+            self.assertEqual(dst, torch.tensor([True, False, True], device=device))
 
     def test_abs(self):
         def _test_abs(tensors_dict):
@@ -9556,49 +9580,49 @@ class _TestTorchMixin(object):
         self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
 
     def test_normal(self):
-        q = torch.Tensor(100, 100)
-        q.normal_()
-        self.assertEqual(q.mean(), 0, 0.2)
-        self.assertEqual(q.std(), 1, 0.2)
+        for device in torch.testing.get_all_device_types():
+            q = torch.empty(100, 100, device=device).normal_()
+            self.assertEqual(q.mean(), 0, 0.2)
+            self.assertEqual(q.std(), 1, 0.2)
 
-        q.normal_(2, 3)
-        self.assertEqual(q.mean(), 2, 0.3)
-        self.assertEqual(q.std(), 3, 0.3)
+            q.normal_(2, 3)
+            self.assertEqual(q.mean(), 2, 0.3)
+            self.assertEqual(q.std(), 3, 0.3)
 
-        q = torch.Tensor(100, 100)
-        q_row1 = q[0:1].clone()
-        q[99:100].normal_()
-        self.assertEqual(q[99:100].mean(), 0, 0.2)
-        self.assertEqual(q[99:100].std(), 1, 0.2)
-        self.assertEqual(q[0:1].clone(), q_row1)
+            q = torch.empty(100, 100, device=device)
+            q_row1 = q[0:1].clone()
+            q[99:100].normal_()
+            self.assertEqual(q[99:100].mean(), 0, 0.2)
+            self.assertEqual(q[99:100].std(), 1, 0.2)
+            self.assertEqual(q[0:1].clone(), q_row1)
 
-        mean = torch.Tensor(100, 100)
-        std = torch.Tensor(100, 100)
-        mean[:50] = 0
-        mean[50:] = 1
-        std[:, :50] = 4
-        std[:, 50:] = 1
+            mean = torch.empty(100, 100, device=device)
+            std = torch.empty(100, 100, device=device)
+            mean[:50] = 0
+            mean[50:] = 1
+            std[:, :50] = 4
+            std[:, 50:] = 1
 
-        r = torch.normal(mean)
-        self.assertEqual(r[:50].mean(), 0, 0.2)
-        self.assertEqual(r[50:].mean(), 1, 0.2)
-        self.assertEqual(r.std(), 1, 0.2)
+            r = torch.normal(mean)
+            self.assertEqual(r[:50].mean(), 0, 0.2)
+            self.assertEqual(r[50:].mean(), 1, 0.2)
+            self.assertEqual(r.std(), 1, 0.2)
 
-        r = torch.normal(mean, 3)
-        self.assertEqual(r[:50].mean(), 0, 0.2)
-        self.assertEqual(r[50:].mean(), 1, 0.2)
-        self.assertEqual(r.std(), 3, 0.2)
+            r = torch.normal(mean, 3)
+            self.assertEqual(r[:50].mean(), 0, 0.2)
+            self.assertEqual(r[50:].mean(), 1, 0.2)
+            self.assertEqual(r.std(), 3, 0.2)
 
-        r = torch.normal(2, std)
-        self.assertEqual(r.mean(), 2, 0.2)
-        self.assertEqual(r[:, :50].std(), 4, 0.3)
-        self.assertEqual(r[:, 50:].std(), 1, 0.2)
+            r = torch.normal(2, std)
+            self.assertEqual(r.mean(), 2, 0.2)
+            self.assertEqual(r[:, :50].std(), 4, 0.3)
+            self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
-        r = torch.normal(mean, std)
-        self.assertEqual(r[:50].mean(), 0, 0.2)
-        self.assertEqual(r[50:].mean(), 1, 0.2)
-        self.assertEqual(r[:, :50].std(), 4, 0.3)
-        self.assertEqual(r[:, 50:].std(), 1, 0.2)
+            r = torch.normal(mean, std)
+            self.assertEqual(r[:50].mean(), 0, 0.2)
+            self.assertEqual(r[50:].mean(), 1, 0.2)
+            self.assertEqual(r[:, :50].std(), 4, 0.3)
+            self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
         r = torch.normal(2, 3, (100, 100))
         self.assertEqual(r.mean(), 2, 0.2)

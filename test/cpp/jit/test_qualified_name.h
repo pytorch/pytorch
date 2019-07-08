@@ -53,6 +53,18 @@ void testQualifiedName() {
     auto bar2 = QualifiedName("sup");
     ASSERT_EQ(foo1, foo2);
   }
+  {
+    // test prefix api
+    auto foo1 = QualifiedName("foo.bar.baz");
+    auto foo2 = QualifiedName("foo.bar");
+    auto foo3 = QualifiedName("bar.bar.baz");
+    auto foo4 = QualifiedName("foo.bar");
+    ASSERT_TRUE(foo2.isPrefixOf(foo1));
+    ASSERT_TRUE(foo2.isPrefixOf(foo4));
+    ASSERT_TRUE(foo4.isPrefixOf(foo2));
+    ASSERT_FALSE(foo1.isPrefixOf(foo2));
+    ASSERT_FALSE(foo2.isPrefixOf(foo3));
+  }
 }
 } // namespace test
 } // namespace jit

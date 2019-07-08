@@ -115,5 +115,17 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
   return self;
 }
 
+Tensor quantized_clone(const Tensor& self) {
+  Tensor dst = at::_empty_affine_quantized(
+      self.sizes(),
+      self.options(),
+      self.q_scale(),
+      self.q_zero_point());
+
+  at::native::copy_(dst, self, false);
+
+  return dst;
+}
+
 } // namespace native
 } // namespace at
