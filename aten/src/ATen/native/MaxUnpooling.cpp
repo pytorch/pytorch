@@ -77,7 +77,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
     Tensor& output,
     const Tensor& self_,
     const Tensor& indices_,
-    IntList output_size) {
+    IntArrayRef output_size) {
   auto oheight = output_size[0];
   auto owidth = output_size[1];
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
@@ -111,7 +111,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
   output.zero_();
 
   AT_DISPATCH_FLOATING_TYPES(
-      self.type(), "max_unpooling2d_forward_out_cpu_frame", ([&] {
+      self.scalar_type(), "max_unpooling2d_forward_out_cpu_frame", ([&] {
         max_unpooling2d_forward_out_cpu_frame<scalar_t>(
             output, self, indices, oheight, owidth);
       }));
@@ -121,7 +121,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
 Tensor max_unpooling2d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
-    IntList output_size) {
+    IntArrayRef output_size) {
   auto output = at::empty({0}, self.options());
   max_unpooling2d_forward_out_cpu(output, self, indices, output_size);
   return output;
@@ -214,9 +214,9 @@ static void max_unpooling3d_shape_check(
     const Tensor& input,
     const Tensor& gradOutput,
     const Tensor& indices,
-    IntList output_size,
-    IntList stride,
-    IntList padding) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
@@ -289,9 +289,9 @@ Tensor& max_unpooling3d_forward_out_cpu(
     Tensor& output,
     const Tensor& self_,
     const Tensor& indices_,
-    IntList output_size,
-    IntList stride,
-    IntList padding) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
@@ -311,7 +311,7 @@ Tensor& max_unpooling3d_forward_out_cpu(
   output.zero_();
 
   AT_DISPATCH_FLOATING_TYPES(
-      self.type(), "max_unpooling3d_forward_out_cpu_frame", ([&] {
+      self.scalar_type(), "max_unpooling3d_forward_out_cpu_frame", ([&] {
         max_unpooling3d_forward_out_cpu_frame<scalar_t>(
             output,
             self,
@@ -332,9 +332,9 @@ Tensor& max_unpooling3d_forward_out_cpu(
 Tensor max_unpooling3d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
-    IntList output_size,
-    IntList stride,
-    IntList padding) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
   max_unpooling3d_forward_out_cpu(
       output, self, indices, output_size, stride, padding);
@@ -394,7 +394,7 @@ Tensor& max_unpooling2d_backward_out_cpu(
     const Tensor& grad_output_,
     const Tensor& self,
     const Tensor& indices_,
-    IntList output_size) {
+    IntArrayRef output_size) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   int64_t oheight = output_size[0];
   int64_t owidth = output_size[1];
@@ -443,7 +443,7 @@ Tensor& max_unpooling2d_backward_out_cpu(
         grad_output.size(dimw));
   }
   AT_DISPATCH_FLOATING_TYPES(
-      self.type(), "max_unpooling2d_backward_out_cpu_frame", ([&] {
+      self.scalar_type(), "max_unpooling2d_backward_out_cpu_frame", ([&] {
         int p;
         for (p = 0; p < nbatch; p++) {
           auto inputOffset = p * nslices * iheight * iwidth;
@@ -466,7 +466,7 @@ Tensor max_unpooling2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,
-    IntList output_size) {
+    IntArrayRef output_size) {
   auto grad_input = at::empty_like(self);
   max_unpooling2d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size);
@@ -531,9 +531,9 @@ Tensor& max_unpooling3d_backward_out_cpu(
     const Tensor& grad_output_,
     const Tensor& self,
     const Tensor& indices_,
-    IntList output_size,
-    IntList stride,
-    IntList padding) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   auto oT = output_size[0];
   auto oH = output_size[1];
@@ -573,7 +573,7 @@ Tensor& max_unpooling3d_backward_out_cpu(
 
   /* backprop */
   AT_DISPATCH_FLOATING_TYPES(
-      self.type(), "max_unpooling3d_backward_out_cpu_frame", ([&] {
+      self.scalar_type(), "max_unpooling3d_backward_out_cpu_frame", ([&] {
         int p;
         for (p = 0; p < nbatch; p++) {
           int inputOffset = p * nslices * iT * iH * iW;
@@ -598,9 +598,9 @@ Tensor max_unpooling3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,
-    IntList output_size,
-    IntList stride,
-    IntList padding) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto grad_input = at::empty_like(self);
   max_unpooling3d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size, stride, padding);
