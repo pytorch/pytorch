@@ -220,13 +220,19 @@ class CMake:
             # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
             'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
         }
-        # Options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars
+        # Build options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars. This is a
+        # dict that maps environment variables to the corresponding variable name in CMake.
         additional_options = {
-            # Key: environment variable name. Value: Corresponding variable name to be passed to CMake.
+            # Key: environment variable name. Value: Corresponding variable name to be passed to CMake. If you are
+            # adding a new build option to this block: Consider making these two names identical and adding this option
+            # in the block below.
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
             'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
         }
         additional_options.update({
+            # Build options that have the same environment variable name and CMake variable name and that do not start
+            # with "BUILD_" or "USE_". If you are adding a new build option, also make sure you add it to
+            # CMakeLists.txt.
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
@@ -257,14 +263,15 @@ class CMake:
         # integration is completed. They appear here not in the CMake.defines call below because they start with either
         # "BUILD_" or "USE_" and must be overwritten here.
         build_options.update({
+            # Note: Do not add new build options to this dict if it is directly read from environment variable -- you
+            # only need to add one in `CMakeLists.txt`. All build options that start with "BUILD_" or "USE_" are
+            # automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
             'USE_CUDA': USE_CUDA,
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
                                check_negative_env_flag('USE_FBGEMM')),
-            'USE_QNNPACK': not (check_env_flag('NO_QNNPACK') or
-                                check_negative_env_flag('USE_QNNPACK')),
             'USE_NCCL': USE_NCCL,
             'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
             'USE_NUMPY': USE_NUMPY,
