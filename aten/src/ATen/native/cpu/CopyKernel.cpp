@@ -17,7 +17,7 @@ void copy_kernel_cast(TensorIterator& iter) {
       iter.dtype(1),
       "copy_kernel_cast",
       [&] {
-        cpu_kernel(iter, [=](scalar_t a) -> self_T {
+        at::native::cpu_kernel(iter, [=](scalar_t a) -> self_T {
           return static_cast<self_T>(
               static_cast<at::native::inter_copy_type_t<self_T>>(a));
         });
@@ -28,7 +28,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
   static int64_t copy_ops = 0;
   copy_ops ++;
   if (copy_ops % 100 == 0) {
-    std::cout << "Copy CPU " << copy_ops << "\n";
+    // std::cout << "Copy CPU " << copy_ops << "\n";
   }
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {

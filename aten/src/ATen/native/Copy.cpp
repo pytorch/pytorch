@@ -5,7 +5,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
-#include <ATen/quantized/Quantizer.h>
 
 namespace {
 
@@ -88,7 +87,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   static int64_t copy_ops = 0;
   copy_ops ++;
   if (copy_ops % 100 == 0) {
-    std::cout << "Copy operations " << copy_ops << "\n";
+    // std::cout << "Copy operations " << copy_ops << "\n";
   }
 
 
@@ -121,10 +120,10 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   if (self.is_quantized() && src.is_quantized()) {
-    TORCH_CHECK(self.qscheme() == src.qscheme(),
-                "Quantized Copy only works with same qscheme");
-    TORCH_CHECK(self.scalar_type() == src.scalar_type());
-    self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
+        TORCH_CHECK(self.qscheme() == src.qscheme(),
+                    "Quantized Copy only works with same qscheme");
+        TORCH_CHECK(self.scalar_type() == src.scalar_type());
+        self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
   }
 
   auto builder = TensorIterator::Builder();
