@@ -315,10 +315,10 @@ using t2var_type = std::unordered_map<PyObject *, THPVariable *>;
 
 // Bump the counters of all recorded dirty input tensors, adding each of them
 // into dirty_inputs.  Also does some sanity checking.
-static std::vector<Variable*> _mark_dirty(THPFunction *self)
+static std::vector<at::TensorImpl*> _mark_dirty(THPFunction *self)
 {
   // Increase versions of modified tensors
-  std::vector<Variable*> dirty_inputs;
+  std::vector<at::TensorImpl*> dirty_inputs;
   if (!self->dirty_tensors) return dirty_inputs;
 
   THPFunction_assert(PyTuple_Check(self->dirty_tensors), "autograd "
@@ -331,7 +331,7 @@ static std::vector<Variable*> _mark_dirty(THPFunction *self)
         "only accept variables, but argument %d is of type %s", i,
         THPUtils_typename(obj));
 
-    dirty_inputs.push_back(&((THPVariable*)obj)->cdata);
+    dirty_inputs.push_back(((THPVariable*)obj)->cdata.unsafeGetTensorImpl());
     auto variable = (THPVariable*)obj;
     variable->cdata.bump_version();
   }
@@ -340,7 +340,7 @@ static std::vector<Variable*> _mark_dirty(THPFunction *self)
   return dirty_inputs;
 }
 
-static std::unordered_set<Variable*> _parse_non_differentiable(THPFunction *self);
+static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(THPFunction *self);
 
 // Given a Python tuple of raw output tensors (raw_output), set each of
 // the corresponding entries in a different Python tuple (outputs) with
@@ -363,26 +363,27 @@ static void _wrap_outputs(THPFunction *self,
     self->output_info.reserve(num_outputs);
   }
 
-  auto as_variable = [&](PyObject* obj, TypeError err) -> Variable* {
+  auto as_variable = [&](PyObject* obj, TypeError err) -> Variable {
     if (THPVariable_Check(obj)) {
-      return (&((THPVariable*)obj)->cdata);
+      return ((THPVariable*)obj)->cdata;
     }
     throw err;
   };
 
-  std::unordered_set<Variable*> inputs;
+  std::unordered_set<at::TensorImpl*> inputs;
   int num_inputs = PyTuple_GET_SIZE(inputs_tuple);
   for (int i = 0; i < num_inputs; i++) {
     PyObject* obj = PyTuple_GET_ITEM(inputs_tuple, i);
     inputs.emplace(as_variable(obj,
       TypeError("%s.forward: expected Variable (got %s) for input %d",
-        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i)));
+        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i)).unsafeGetTensorImpl());
   }
 
   auto non_differentiable = _parse_non_differentiable(self);
   auto dirty_inputs = _mark_dirty(self);
 
-  std::vector<Variable*> raw_output_vars;
+  std::vector<Variable> raw_output_vars;
+  raw_output_vars.reserve(num_outputs);
   for(int i = 0; i < num_outputs; ++i){
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
     raw_output_vars.push_back(as_variable(obj,
@@ -390,7 +391,7 @@ static void _wrap_outputs(THPFunction *self,
         Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i)));
   }
 
-  auto wrapped_outputs = _wrap_outputs(inputs, raw_output_vars, non_differentiable, dirty_inputs, cdata);
+  auto wrapped_outputs = _wrap_outputs(inputs, non_differentiable, dirty_inputs, raw_output_vars, cdata);
   for (int i = 0; i < num_outputs; i++) {
     if (is_executable) {
       self->output_info.emplace_back(wrapped_outputs[i]);
@@ -431,10 +432,10 @@ static void _save_variables(THPFunction* self)
 }
 
 // Mark requires_grad = 0 on non-differentiable variables (as per non_differentiable)
-static std::unordered_set<Variable*>
+static std::unordered_set<at::TensorImpl*>
 _parse_non_differentiable(THPFunction *self)
 {
-  std::unordered_set<Variable*> set;
+  std::unordered_set<at::TensorImpl*> set;
   if (!self->non_differentiable) return set;
 
   THPFunction_assert(PyTuple_Check(self->non_differentiable), "autograd "
@@ -446,7 +447,7 @@ _parse_non_differentiable(THPFunction *self)
     PyObject *t = PyTuple_GET_ITEM(self->non_differentiable, i);
     THPFunction_assert(THPVariable_Check(t), "mark_non_differentiable "
         "only accepts variable arguments, but got %s", THPUtils_typename(t));
-    set.insert(&((THPVariable*)t)->cdata);
+    set.insert(((THPVariable*)t)->cdata.unsafeGetTensorImpl());
   }
   Py_CLEAR(self->non_differentiable);
   return set;

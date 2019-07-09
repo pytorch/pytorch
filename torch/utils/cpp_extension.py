@@ -92,10 +92,13 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819']
+
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
     '-D__CUDA_NO_HALF_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
+    '--expt-relaxed-constexpr'
 ]
 
 
@@ -316,15 +319,15 @@ class BuildExtension(build_ext, object):
                             cflags = self.cflags
                         else:
                             cflags = []
-                        cmd = [
-                            nvcc, '-c', src, '-o', obj, '-Xcompiler',
-                            '/wd4819', '-Xcompiler', '/MD'
-                        ] + include_list + cflags
+                        cflags = COMMON_NVCC_FLAGS + cflags
+                        for flag in COMMON_MSVC_FLAGS:
+                            cflags = ['-Xcompiler', flag] + cflags
+                        cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
-                        cflags = self.cflags['cxx'] + ['/MD']
+                        cflags = COMMON_MSVC_FLAGS + self.cflags['cxx'] 
                         cmd += cflags
                     elif isinstance(self.cflags, list):
-                        cflags = self.cflags + ['/MD']
+                        cflags = COMMON_MSVC_FLAGS + self.cflags
                         cmd += cflags
 
                 return original_spawn(cmd)

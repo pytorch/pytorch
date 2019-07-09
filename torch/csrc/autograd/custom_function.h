@@ -1,10 +1,15 @@
+#pragma once
+
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch { namespace autograd {
 
-std::vector<Variable> _wrap_outputs(std::unordered_set<Variable*> &inputs,
-  std::vector<Variable*> &raw_outputs, std::unordered_set<Variable*> &non_differentiable,
-  std::vector<Variable*> &dirty_inputs, std::shared_ptr<Function> cdata);
+TORCH_API std::vector<Variable> _wrap_outputs(
+  const std::unordered_set<at::TensorImpl*> &inputs,
+  const std::unordered_set<at::TensorImpl*> &non_differentiable,
+  const std::vector<at::TensorImpl*> &dirty_inputs,
+  const std::vector<Variable> &raw_outputs,
+  std::shared_ptr<Function> cdata);
 
 }} // namespace torch::autograd

@@ -3,9 +3,11 @@
 
 namespace torch { namespace autograd {
 
-TORCH_API std::vector<Variable> _wrap_outputs(std::unordered_set<Variable*> &inputs,
-  std::vector<Variable*> &raw_outputs, std::unordered_set<Variable*> &non_differentiable,
-  std::vector<Variable*> &dirty_inputs, std::shared_ptr<Function> cdata) {
+std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &inputs,
+  const std::unordered_set<at::TensorImpl*> &non_differentiable,
+  const std::vector<at::TensorImpl*> &dirty_inputs,
+  const std::vector<Variable> &raw_outputs,
+  std::shared_ptr<Function> cdata) {
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {
@@ -51,14 +53,18 @@ TORCH_API std::vector<Variable> _wrap_outputs(std::unordered_set<Variable*> &inp
     }
   };
 
-  std::vector<torch::autograd::Variable> outputs;
-  for (auto i = 0; i < (int)raw_outputs.size(); ++i) {
-    auto &out = raw_outputs[i];
-    bool is_input = inputs.count(out) > 0;
-    bool is_modified = std::find(dirty_inputs.begin(), dirty_inputs.end(), out) != dirty_inputs.end();
-    bool is_differentiable = cdata && non_differentiable.count(out) == 0;
+  int num_outputs = raw_outputs.size();
 
-    Variable var = *out;
+  std::vector<torch::autograd::Variable> outputs;
+  outputs.reserve(num_outputs);
+
+  for (auto i = 0; i < num_outputs; ++i) {
+    auto out_tensor_impl = raw_outputs[i].unsafeGetTensorImpl();
+    bool is_input = inputs.count(out_tensor_impl) > 0;
+    bool is_modified = std::find(dirty_inputs.begin(), dirty_inputs.end(), out_tensor_impl) != dirty_inputs.end();
+    bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0;
+
+    Variable var = raw_outputs[i];
 
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
@@ -66,9 +72,7 @@ TORCH_API std::vector<Variable> _wrap_outputs(std::unordered_set<Variable*> &inp
     }
     set_history(var, i, is_input, is_modified, is_differentiable);
 
-    if (cdata) {
-      outputs.emplace_back(var);
-    }
+    outputs.emplace_back(var);
   }
 
   return outputs;

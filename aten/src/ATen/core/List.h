@@ -5,6 +5,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 #include <vector>
 
 namespace at {
@@ -13,18 +14,27 @@ class Tensor;
 namespace c10 {
 struct IValue;
 template<class T> class List;
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 
 namespace detail {
 
 template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
   using list_type = std::vector<StorageT>;
+
+  explicit ListImpl(list_type list_, optional<TypePtr> elementType_)
+  : list(std::move(list_))
+  , elementType(std::move(elementType_))
+  {}
+
   list_type list;
 
+  // TODO Right now, this is optional, but we want to make it mandatory for all lists to know their types
+  optional<TypePtr> elementType;
+
   intrusive_ptr<ListImpl> copy() const {
-    auto result = make_intrusive<ListImpl>();
-    result->list = list;
-    return result;
+    return make_intrusive<ListImpl>(list, elementType);
   }
 };
 }
@@ -224,7 +234,7 @@ public:
   /**
    * Constructs an empty list.
    */
-  List();
+  explicit List();
 
   /**
    * Constructs a list with some initial values.
@@ -233,6 +243,13 @@ public:
    */
   explicit List(std::initializer_list<T> initial_values);
   explicit List(ArrayRef<T> initial_values);
+
+  /**
+   * Create a generic list with runtime type information.
+   * This only works for c10::impl::GenericList and is not part of the public API
+   * but only supposed to be used internally by PyTorch.
+   */
+  explicit List(TypePtr elementType);
 
   List(const List&) = default;
   List& operator=(const List&) = default;
@@ -423,18 +440,6 @@ namespace impl {
 // public API. Kernels should use Lists with concrete types instead
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
-
-template<class T>
-List<T> toTypedList(GenericList list) {
-  static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
-  return List<T>(std::move(list.impl_));
-}
-
-template<class T>
-GenericList toGenericList(List<T> list) {
-  static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toGenericList with lists that store their elements as IValues.");
-  return GenericList(std::move(list.impl_));
-}
 
 inline const IValue* ptr_to_first_element(const GenericList& list) {
   return &list.impl_->list[0];
