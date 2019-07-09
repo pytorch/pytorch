@@ -1,8 +1,5 @@
 import torch
 
-
-
-
 def get_unary_functions():
     return [
         'abs',
@@ -15,7 +12,7 @@ def get_unary_functions():
         # 'char',
         'clamp',
         # 'clone',
-        'contiguous',
+        # 'contiguous',
         'cos',
         'cosh',
         # 'cpu',
@@ -29,7 +26,7 @@ def get_unary_functions():
         'erfinv',
         'exp',
         'expm1',
-        'exponential_',
+        # 'exponential_',
         # 'float',
         'floor',
         'fmod',
@@ -96,14 +93,14 @@ def set_function(module, cls, tfunc, func):
         orig_tfunc = getattr(torch, tfunc)
         def _func(*args, **kwargs):
             if isinstance(args[0], cls):
-                return func(*(orig_tfunc + args), **kwargs)
+                return func(*((orig_tfunc,) + args), **kwargs)
             else:
                 return orig_tfunc(*args, **kwargs)
         return _func
-    setattr(module, tfunc, _gen_func(pbf))
+    setattr(module, tfunc, _gen_func(tfunc))
 
 
-def set_unary_method(cls, tfunc, pbf, func, inplace):
+def set_unary_method(cls, tfunc, pbf, inplace):
     def _gen_func(pbf):
         def _func(self: cls):
             assert isinstance(self, cls)
@@ -125,44 +122,45 @@ def set_binary_method(cls, tfunc, pbf, inplace):
             else:
                 return getattr(torch, tfunc)(self, other)
         return _func
+    if getattr(cls, pbf, False):
+        print("WARNING: " + pbf + " already exists")
     setattr(cls, pbf, _gen_func(tfunc))
-
-
 
 
 def get_unary_method_signatures():
     signatures = []
     for pbf in get_unary_functions():
-        signatures.append({'torch': pbf, 'Tensor': pbf,       'inplace': False))
-        signatures.append({'torch': pbf, 'Tensor': pbf + "_", 'inplace': True))
+        signatures.append({'torch': pbf, 'Tensor': pbf,       'inplace': False})
+        signatures.append({'torch': pbf, 'Tensor': pbf + "_", 'inplace': True})
+    return signatures
 
 
 def get_binary_method_signatures():
     signatures = []
     for pbf in ['add', 'mul', 'sub']:
-        signatures.append({'torch': pbf, 'Tensor':         pbf,        'inplace': False))
-        signatures.append({'torch': pbf, 'Tensor':         pbf + "_",  'inplace': True))
-        signatures.append({'torch': pbf, 'Tensor':  "__" + pbf + "__", 'inplace': False))
-        signatures.append({'torch': pbf, 'Tensor': "__i" + pbf + "__", 'inplace': True))
-    signatures.append({'torch': 'div', 'Tensor':         'div',        'inplace': False))
-    signatures.append({'torch': 'div', 'Tensor':         'div' + "_",  'inplace': True))
-    signatures.append({'torch': 'div', 'Tensor':  "__" + 'div' + "__", 'inplace': False))
-    signatures.append({'torch': 'div', 'Tensor': "__i" + 'div' + "__", 'inplace': True))
+        signatures.append({'torch': pbf, 'Tensor':         pbf,        'inplace': False})
+        signatures.append({'torch': pbf, 'Tensor':         pbf + "_",  'inplace': True})
+        signatures.append({'torch': pbf, 'Tensor':  "__" + pbf + "__", 'inplace': False})
+        signatures.append({'torch': pbf, 'Tensor': "__i" + pbf + "__", 'inplace': True})
+    signatures.append({'torch': 'div', 'Tensor':         'div',        'inplace': False})
+    signatures.append({'torch': 'div', 'Tensor':         'div' + "_",  'inplace': True})
+    signatures.append({'torch': 'div', 'Tensor':  "__" + 'div' + "__", 'inplace': False})
+    signatures.append({'torch': 'div', 'Tensor': "__i" + 'div' + "__", 'inplace': True})
     return signatures
 
 
 def get_comparison_method_signatures():
     signatures = []
     for pbf in get_comparison_functions():
-        signatures.append({'torch': pbf, 'Tensor':         pbf,        'inplace': False))
-        signatures.append({'torch': pbf, 'Tensor':         pbf + "_",  'inplace': True))
-        signatures.append({'torch': pbf, 'Tensor':  "__" + pbf + "__", 'inplace': False))
+        signatures.append({'torch': pbf, 'Tensor':         pbf,        'inplace': False})
+        signatures.append({'torch': pbf, 'Tensor':         pbf + "_",  'inplace': True})
+        signatures.append({'torch': pbf, 'Tensor':  "__" + pbf + "__", 'inplace': False})
     return signatures
 
 
 def add_pointwise_unary_functions(module, cls, func):
     for function_name in get_unary_functions():
-        set_unary_function(module, cls, function_name, func)
+        set_function(module, cls, function_name, func)
     for signature in get_unary_method_signatures():
         set_unary_method(cls, signature['torch'], signature['Tensor'], signature['inplace'])
     return module, cls
@@ -183,10 +181,3 @@ def add_pointwise_comparison_functions(module, cls, func):
     for signature in get_comparison_method_signatures():
         set_binary_method(cls, signature['torch'], signature['Tensor'], signature['inplace'])
     return module, cls
-
-
-
-
-
-
-
