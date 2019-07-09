@@ -90,6 +90,20 @@ class NestedTensor():
             sizes.append(tensor.size())
         return tuple(sizes)
 
+    # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
+    def all(self):
+        ret = True
+        for tensor in self.tensors:
+            ret = ret and tensor.all()
+        return ret
+
+    # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
+    def any(self):
+        ret = False
+        for tensor in self.tensors:
+            ret = ret or tensor.any()
+        return ret
+
     # Tensor ops
     def detach(self):
         return self.__loop__apply(lambda x: x.detach())

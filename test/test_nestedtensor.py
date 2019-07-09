@@ -156,10 +156,10 @@ def test_equal():
     a3 = torch.nestedtensor([torch.tensor([3, 4]), 
                              torch.tensor([5, 6])])
     # Just exercising them until we have __bool__, all() etc.
-    print(a1 == a2)
-    print(a1 != a3)
-    print(a1 != a2)
-    print(a1 == a3)
+    assert (a1 == a2).all()
+    assert (a1 != a3).all()
+    assert not (a1 != a2).any()
+    assert not (a1 == a3).any()
 
 def test_float():
     a1 = torch.nestedtensor([torch.tensor([1, 2]), 

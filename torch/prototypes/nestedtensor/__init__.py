@@ -11,6 +11,7 @@ def _create_out(input1, out):
     assert len(out) == len(input1)
     return out
 
+
 def _unary(func, input1, out=None):
     out = _create_out(input1, out)
     for i in range(len(out)):
@@ -18,6 +19,7 @@ def _unary(func, input1, out=None):
         assert out.tensors[i].size() == input1.tensors[i].size()
         func(input1.tensors[i], out=out.tensors[i])
     return out
+
 
 # The contract is that func only works with torch.Tensor
 def _binary(func, input1, input2, out=None):
@@ -42,8 +44,6 @@ def _comparison(func, input1, input2, out=None):
         assert input2.tensors[i].size() == input1.tensors[i].size()
         func(input1.tensors[i], input2.tensors[i], out=out.tensors[i])
     return out
-
-
 
 
 torch, NestedTensor = tensorextension.add_pointwise_unary_functions(torch, NestedTensor, _unary)
