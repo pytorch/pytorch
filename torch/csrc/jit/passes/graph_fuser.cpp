@@ -195,9 +195,6 @@ struct GraphFuser {
         fusableDevice &= isFusableDevice(output);
       }
     }
-    for (const auto& input : node->inputs()) {
-      fusableDevice &= isFusableDevice(input);
-    }
     return fusableDevice && isFusableMap(node);
   }
 
