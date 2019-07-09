@@ -56,14 +56,14 @@ class _ConvNd(Module):
 
     def _is_padding_static(self, kernel_size, stride, dilation):
         def is_static(filter, stride, dilation):
-            return stride == 1 and ((filter-1) * dilation) % 2 == 0
+            return stride == 1 and ((filter - 1) * dilation) % 2 == 0
 
         return all([is_static(i[0], i[1], i[2]) for i in zip(kernel_size, stride, dilation)])
 
     def _compute_padding_same(self, input_size, dim):
         # type: (List[int], int) -> int
         # When calculating convolutions, we can examine each dimension independently
-        input_size = input_size[dim + 2] # Ignoring batch size + channel dims
+        input_size = input_size[dim + 2]  # Ignoring batch size + channel dims
         filter_size = self.weight.size(dim + 2)
         # Here we calculate the equivalent filter size factoring in dilation
         effective_filter_size = (filter_size - 1) * self.dilation[dim] + 1
@@ -218,7 +218,7 @@ class Conv1d(_ConvNd):
             False, _single(0), groups, bias, padding_mode, padding_is_static)
         if padding_is_static and padding == "same":
             self.padding = (
-                        self._compute_padding_same([0, 0, 0], dim=0) // 2,
+                self._compute_padding_same([0, 0, 0], dim=0) // 2,
             )
 
     @weak_script_method
@@ -373,8 +373,8 @@ class Conv2d(_ConvNd):
             False, _pair(0), groups, bias, padding_mode, padding_is_static)
         if padding_is_static and padding == "same":
             self.padding = (
-                        self._compute_padding_same([0, 0, 0, 0], dim=0) // 2,
-                        self._compute_padding_same([0, 0, 0, 0], dim=1) // 2,
+                self._compute_padding_same([0, 0, 0, 0], dim=0) // 2,
+                self._compute_padding_same([0, 0, 0, 0], dim=1) // 2,
             )
 
     @weak_script_method
@@ -526,9 +526,9 @@ class Conv3d(_ConvNd):
             False, _triple(0), groups, bias, padding_mode, padding_is_static)
         if self.padding_is_static and padding == "same":
             self.padding = (
-                        self._compute_padding_same([0] * 5, dim=0) // 2,
-                        self._compute_padding_same([0] * 5, dim=1) // 2,
-                        self._compute_padding_same([0] * 5, dim=2) // 2,
+                self._compute_padding_same([0] * 5, dim=0) // 2,
+                self._compute_padding_same([0] * 5, dim=1) // 2,
+                self._compute_padding_same([0] * 5, dim=2) // 2,
             )
 
     @weak_script_method
