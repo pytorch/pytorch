@@ -315,23 +315,24 @@ using t2var_type = std::unordered_map<PyObject *, THPVariable *>;
 
 // Bump the counters of all recorded dirty input tensors, adding each of them
 // into dirty_inputs.  Also does some sanity checking.
-static std::vector<at::TensorImpl*> _mark_dirty(THPFunction *self)
+static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction *self)
 {
   // Increase versions of modified tensors
-  std::vector<at::TensorImpl*> dirty_inputs;
+  std::unordered_set<at::TensorImpl*> dirty_inputs;
   if (!self->dirty_tensors) return dirty_inputs;
 
   THPFunction_assert(PyTuple_Check(self->dirty_tensors), "autograd "
       "internal error: dirty_tensors attribute is expected to be a tuple "
       "but is %s", THPUtils_typename(self->dirty_tensors));
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
+  dirty_inputs.reserve(num_dirty);
   for (int i = 0; i < num_dirty; i++) {
     PyObject *obj = PyTuple_GET_ITEM(self->dirty_tensors, i);
     THPFunction_assert(THPVariable_Check(obj), "mark_dirty can "
         "only accept variables, but argument %d is of type %s", i,
         THPUtils_typename(obj));
 
-    dirty_inputs.push_back(((THPVariable*)obj)->cdata.unsafeGetTensorImpl());
+    dirty_inputs.insert(((THPVariable*)obj)->cdata.unsafeGetTensorImpl());
     auto variable = (THPVariable*)obj;
     variable->cdata.bump_version();
   }
@@ -363,20 +364,21 @@ static void _wrap_outputs(THPFunction *self,
     self->output_info.reserve(num_outputs);
   }
 
-  auto as_variable = [&](PyObject* obj, TypeError err) -> Variable {
+  auto as_variable = [&](PyObject* obj, int i) -> Variable {
     if (THPVariable_Check(obj)) {
       return ((THPVariable*)obj)->cdata;
     }
-    throw err;
+    throw TypeError("%s.forward: expected Variable (got %s) for return value %d",
+        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
   };
 
   std::unordered_set<at::TensorImpl*> inputs;
   int num_inputs = PyTuple_GET_SIZE(inputs_tuple);
   for (int i = 0; i < num_inputs; i++) {
     PyObject* obj = PyTuple_GET_ITEM(inputs_tuple, i);
-    inputs.emplace(as_variable(obj,
-      TypeError("%s.forward: expected Variable (got %s) for input %d",
-        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i)).unsafeGetTensorImpl());
+    if (THPVariable_Check(obj)) {
+      inputs.emplace(((THPVariable*)obj)->cdata.unsafeGetTensorImpl());
+    }
   }
 
   auto non_differentiable = _parse_non_differentiable(self);
@@ -386,9 +388,7 @@ static void _wrap_outputs(THPFunction *self,
   raw_output_vars.reserve(num_outputs);
   for(int i = 0; i < num_outputs; ++i){
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
-    raw_output_vars.push_back(as_variable(obj,
-      TypeError("%s.forward: expected Variable (got %s) for return value %d",
-        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i)));
+    raw_output_vars.push_back(as_variable(obj,i));
   }
 
   auto wrapped_outputs = _wrap_outputs(inputs, non_differentiable, dirty_inputs, raw_output_vars, cdata);

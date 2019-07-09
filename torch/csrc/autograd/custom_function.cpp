@@ -5,7 +5,7 @@ namespace torch { namespace autograd {
 
 std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &inputs,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
-  const std::vector<at::TensorImpl*> &dirty_inputs,
+  const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const std::vector<Variable> &raw_outputs,
   std::shared_ptr<Function> cdata) {
   // Sets the grad_fn and output_nr of an output Variable.
