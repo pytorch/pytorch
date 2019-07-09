@@ -1949,22 +1949,22 @@ class _TestTorchMixin(object):
             _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
 
     @staticmethod
-    def _test_lu(self, cast):
+    def _test_lu(self, cast, pivot=True):
         from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
         def run_test(matrix_size, batches, cast):
             a = cast(fullrank(matrix_size, *batches))
-            a_LU_info, pivots_info, info_ = a.lu(get_infos=True)
+            a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
             self.assertEqual(a_LU_info.size(), torch.Size(batches + (matrix_size, matrix_size)))
             self.assertEqual(pivots_info.size(), torch.Size(batches + (matrix_size,)))
             self.assertEqual(info_.size(), torch.Size(batches))
             self.assertEqual(info_.abs().sum(), 0)
-            a_LU, pivots = a.lu()
+            a_LU, pivots = a.lu(pivot=pivot)
             self.assertEqual(a_LU, a_LU_info)
             self.assertEqual(pivots_info, pivots)
             if a.is_cuda:
                 a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
-                self.assertEqual(nopiv, cast(torch.zeros(a.shape[:-1], dtype=torch.int32)))
+                self.assertEqual(nopiv, cast(torch.arange(1, 1 + a.size(-1), dtype=torch.int32).expand(a.shape[:-1])))
                 self.assertEqual(info_, info_nopiv)
             P, L, U = torch.lu_unpack(a_LU, pivots)
             self.assertEqual(P.matmul(L.matmul(U)), a)
@@ -1974,7 +1974,7 @@ class _TestTorchMixin(object):
 
         # Info should be positive for rank deficient matrices
         a = cast(torch.ones(5, 3, 3))
-        self.assertGreater(a.lu(get_infos=True)[2][0], 0)
+        self.assertGreater(a.lu(pivot=pivot, get_infos=True)[2][0], 0)
 
         # Error checking, no pivoting variant on CPU
         with self.assertRaisesRegex(RuntimeError,
@@ -1983,10 +1983,10 @@ class _TestTorchMixin(object):
 
     @skipIfNoLapack
     def test_lu(self):
-        self._test_lu(self, lambda t: t)
+        self._test_lu(self, lambda t: t, pivot=True)
 
     @staticmethod
-    def _test_lu_solve(self, cast):
+    def _test_lu_solve(self, cast, pivot=True):
         a = torch.FloatTensor((((1.3722, -0.9020),
                                 (1.8849, 1.9169)),
                                ((0.7187, -1.1695),
@@ -1997,7 +1997,7 @@ class _TestTorchMixin(object):
                                (-1.56, 4.00),
                                (9.81, -4.09)))
         a, b = cast(a), cast(b)
-        LU_data, pivots, info = a.lu(get_infos=True)
+        LU_data, pivots, info = a.lu(get_infos=True, pivot=pivot)
         self.assertEqual(info.abs().sum(), 0)
         x = torch.lu_solve(b, LU_data, pivots)
         b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
@@ -2008,10 +2008,10 @@ class _TestTorchMixin(object):
         self._test_lu_solve(self, lambda t: t)
 
     @staticmethod
-    def _test_lu_unpack(self, cast):
+    def _test_lu_unpack(self, cast, pivot=True):
         def run_test(shape, cast):
             a = cast(torch.randn(*shape))
-            a_lu, p = torch.lu(a)
+            a_lu, p = torch.lu(a, pivot=pivot)
             p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
             self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
 
