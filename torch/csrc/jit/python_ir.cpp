@@ -665,6 +665,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &TensorType::get);
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);
+  py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
+      .def_static("get", &NoneType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
 

@@ -7,7 +7,7 @@ from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType
+    ListType, StringType, DictType, BoolType, OptionalType, NoneType
 from textwrap import dedent
 
 
@@ -37,25 +37,68 @@ _eval_env = {
 }
 
 
-def get_signature(fn):
+def name_param_types(fn, param_types):
+    # Extract the names from the fn and attach them to their types
+    arg_names = inspect.getfullargspec(fn).args
+    if inspect.ismethod(fn):
+        # ignore 'self' arg if this is a method
+        arg_names = arg_names[1:]
+    return list(zip(arg_names, param_types))
+
+
+def get_signature(fn, num_args, num_binders):
+    def get_default(binders):
+        if binders == 0:
+            return NoneType.get()
+        if binders == 1:
+            return TensorType.get()
+        return TupleType([TensorType.get()] * binders)
+
+    signature = None
+    if isinstance(fn, torch.nn.Module):
+        # TODO: fix this somewhere else
+        fn = fn.forward
+    if inspect.isclass(fn):
+        # If a non-module class is used, assume everything is a Tensor
+        params = [TensorType.get()] * num_args
+        return params, get_default(num_binders)
+
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     if PY35:
-        sig = try_real_annotations(fn)
-        if sig is not None:
-            return sig
+        signature = try_real_annotations(fn)
 
-    type_line, source = None, None
-    try:
-        source = dedent(inspect.getsource(fn))
-        type_line = get_type_line(source)
-    except TypeError:
-        pass
-    # This might happen both because we failed to get the source of fn, or
-    # because it didn't have any annotations.
-    if type_line is None:
-        return None
+    if signature is None:
+        # No type annotations or this is Python 2, fall back to the type line
+        type_line, source = None, None
+        try:
+            source = dedent(inspect.getsource(fn))
+            type_line = get_type_line(source)
+        except TypeError:
+            # This might happen both because we failed to get the source of fn, or
+            # because it didn't have any annotations.
+            pass
 
-    return parse_type_line(type_line)
+        if type_line is not None:
+            signature = parse_type_line(type_line)
+
+    if signature is None:
+        # No type line or annotations, assume everything is Tensor
+        num_params = len(inspect.getfullargspec(fn).args)
+        if inspect.ismethod(fn):
+            # Subtract 1 to account for 'self'
+            num_params -= 1
+        params = [TensorType.get()] * num_params
+        signature = params, get_default(num_binders)
+
+    param_types, return_type = signature
+    # Extract the names from the fn and attach them to their types
+    print(inspect.getfullargspec(fn))
+    arg_names = inspect.getfullargspec(fn).args
+    if inspect.ismethod(fn):
+        # Ignore 'self' arg if this is a method
+        arg_names = arg_names[1:]
+    named_param_types = list(zip(arg_names, param_types))
+    return named_param_types, return_type
 
 
 # This is essentially a weaker form of get_signature(), where we don't care if

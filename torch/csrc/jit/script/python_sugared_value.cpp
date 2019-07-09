@@ -35,51 +35,23 @@ FunctionSchema PythonValue::getSchema(
     const size_t n_args,
     const size_t n_binders) {
   auto annotations = py::module::import("torch.jit.annotations");
-  auto signature = annotations.attr("get_signature")(self);
+  auto signature = annotations.attr("get_signature")(self, n_args, n_binders);
   std::vector<Argument> args, rets;
-  // We may mutate this if we can determine the number of args from Python
-  // introspection.
-  size_t actual_n_args = n_args;
-  if (!signature.is_none()) {
-    std::vector<TypePtr> arg_types;
-    TypePtr ret_type;
-    std::tie(arg_types, ret_type) =
-        py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
-    args.reserve(arg_types.size());
-    size_t idx = 0; // Fake argument names by putting in the index
-    for (auto& arg_type : arg_types) {
-      args.push_back(
-          Argument(std::to_string(idx++), std::move(arg_type), {}, {}, false));
-    }
-    rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
-  } else {
-    // Create a default signature using what information we have
 
-    // First see if we can introspect the number of function parameters
-    // irrespective of the presence of explicit type annotations
-    auto num_params = annotations.attr("get_num_params")(self);
-    if (!num_params.is_none()) {
-      // Return a signature with the correct number of params according to the
-      // Python function. The error handling in call() will catch any mismatch
-      // later.
-      actual_n_args = py::cast<size_t>(num_params);
-    }
-    // Construct the default signature: all arguments and returns will be
-    // DynamicType
-    args.reserve(actual_n_args);
-    for (size_t i = 0; i < actual_n_args; ++i) {
-      args.push_back(
-          Argument(std::to_string(i), TensorType::get(), {}, {}, false));
-    }
-    TypePtr ret_type = TensorType::get();
-    if (n_binders == 0) {
-      ret_type = NoneType::get();
-    } else if (n_binders > 1) {
-      std::vector<TypePtr> tuple_values(n_binders, ret_type);
-      ret_type = TupleType::create(std::move(tuple_values));
-    }
-    rets.push_back(Argument("0", ret_type, {}, {}, false));
+  using NamedParamType = std::pair<std::string, TypePtr>;
+  std::vector<NamedParamType> arg_types;
+  TypePtr ret_type;
+  std::tie(arg_types, ret_type) =
+      py::cast<std::pair<std::vector<NamedParamType>, TypePtr>>(
+          signature);
+  args.reserve(arg_types.size());
+  for (auto& named_arg_type : arg_types) {
+    args.push_back(
+        Argument(named_arg_type.first, std::move(named_arg_type.second), {}, {}, false));
   }
+  std::cout << "RETURN " << ret_type->python_str() << "\n";
+  rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
+
   std::string name("");
   // Use the qualified name if possible
   if (py::hasattr(self, "__qualname__")) {
@@ -87,7 +59,7 @@ FunctionSchema PythonValue::getSchema(
   } else if (py::hasattr(self, "__name__")) {
     name = py::str(py::getattr(self, "__name__"));
   }
-  return FunctionSchema("", "", std::move(args), std::move(rets));
+  return FunctionSchema(name, "", std::move(args), std::move(rets));
 }
 
 std::shared_ptr<SugaredValue> PythonValue::call(
@@ -98,6 +70,8 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     size_t n_binders) {
   auto inputs = toValues(*m.graph(), inputs_);
   auto schema = getSchema(inputs.size(), n_binders);
+
+  std::cout << "Schema: " << schema << "\n";
 
   std::stringstream failure_messages;
   c10::optional<MatchedSchema> matched_schema = tryMatchSchema(

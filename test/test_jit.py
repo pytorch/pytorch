@@ -7842,7 +7842,7 @@ a")
             fn = get_fn('test_type_annotation_py3', script_path)
 
             with self.assertRaisesRegex(RuntimeError, r"Expected a value of type 'Tensor' for argument"
-                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
+                                                      r" 'x' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -7918,11 +7918,11 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Expected at most 1 arguments but found 2"):
             ModuleTooMany()
-        with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided"):
+        with self.assertRaisesRegex(RuntimeError, "Argument y not provided"):
             ModuleTooFew()
         with self.assertRaisesRegex(RuntimeError, "need 3 values .* found only 2"):
             ModuleTooManyAssign()
-        with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided."):
+        with self.assertRaisesRegex(RuntimeError, "Argument y not provided."):
             ModuleDefault()
 
     def test_script_define_order(self):
@@ -12771,6 +12771,22 @@ a")
             @torch.jit.script
             def fn():
                 return random.randint()
+
+    def test_python_op_args(self):
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super().__init__()
+
+            def bar(self, x, dim=0):
+                # type: (Tensor, int) -> None
+                return x
+
+            @torch.jit.script_method
+            def forward(self, x):
+                self.bar(x, dim='hi')
+
+        with self.assertRaisesRegex(RuntimeError, r"bar\(Tensor x, int dim\)"):
+            foo = Foo()
 
     def test_dir(self):
         class M(torch.jit.ScriptModule):
