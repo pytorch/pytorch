@@ -263,6 +263,8 @@ class CMake:
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
                                check_negative_env_flag('USE_FBGEMM')),
+            'USE_QNNPACK': not (check_env_flag('NO_QNNPACK') or
+                                check_negative_env_flag('USE_QNNPACK')),
             'USE_NCCL': USE_NCCL,
             'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
             'USE_NUMPY': USE_NUMPY,

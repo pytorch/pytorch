@@ -89,6 +89,8 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   }
 
   if (result.scalar_type() == at::ScalarType::Half) {  // Half in thrust is spotty. Avoid.
+    // This block should never be reached because when n >= 30000, check_supported_max_int_with_precision should have
+    // reported an error.
     auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)).dtype(kFloat));
     return result.copy_(randperm_out_cuda(result_float, n, generator));
   }
