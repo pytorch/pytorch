@@ -3,7 +3,6 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCBlas.h>
 #include <THC/THCTensorCopy.h>
-#include <THC/THCTensorRandom.h>
 #include <TH/THHalf.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCReduce.cuh>

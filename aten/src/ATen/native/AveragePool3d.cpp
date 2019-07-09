@@ -104,19 +104,18 @@ void avg_pool3d_out_cpu_template(
   bool ceil_mode,
   bool count_include_pad)
 {
-  // #20866 [JIT] stride.empty() is passed through
-  // #20866 [LIBTORCH] IntegrationTest.MNIST: padding.size() == 1
-  TORCH_INTERNAL_ASSERT(kernel_size.size() == 3 &&
-                        (stride.empty() || stride.size() == 3) &&
-                        (padding.size() == 1 || padding.size() == 3),
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 3) &&
+              (stride.empty() || stride.size() == 3) &&
+              (padding.size() == 1 || padding.size() == 3),
     "avg_pool3d: all IntArrayRef sizes must be 3");
 
   TORCH_CHECK((input_.ndimension() == 4 || input_.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[1]);
@@ -293,19 +292,18 @@ Tensor& avg_pool3d_backward_out_cpu_template(
   bool ceil_mode,
   bool count_include_pad)
 {
-  // #20866 [JIT] stride.empty() is passed through
-  // #20866 [LIBTORCH] IntegrationTest.MNIST: padding.size() == 1
-  TORCH_INTERNAL_ASSERT(kernel_size.size() == 3 &&
-                        (stride.empty() || stride.size() == 3) &&
-                        (padding.size() == 1 || padding.size() == 3),
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 3) &&
+              (stride.empty() || stride.size() == 3) &&
+              (padding.size() == 1 || padding.size() == 3),
     "avg_pool3d: all IntArrayRef sizes must be 3");
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[1]);

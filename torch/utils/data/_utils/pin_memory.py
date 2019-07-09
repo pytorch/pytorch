@@ -16,47 +16,39 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
 
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
-    while True:
+    while not done_event.is_set():
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
             continue
-        except Exception:
-            if done_event.is_set():
-                # Weird things can happen when shutting down, e.g., fd being
-                # closed when tensors are shared via fds.
-                break
-            raise
-        if r is None:
-            assert done_event.is_set()
-            return
-        elif done_event.is_set():
-            # Haven't seen the final signal yet. Keep getting until None.
-            continue
-        elif isinstance(r[1], ExceptionWrapper):
-            out_queue.put(r)
-        else:
-            idx, batch = r
+        idx, data = r
+        if not isinstance(data, ExceptionWrapper):
             try:
-                batch = pin_memory_batch(batch)
+                data = pin_memory(data)
             except Exception:
-                out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
-            else:
-                out_queue.put((idx, batch))
+                data = ExceptionWrapper(sys.exc_info())
+            r = (idx, data)
+        while not done_event.is_set():
+            try:
+                out_queue.put(r, timeout=MP_STATUS_CHECK_INTERVAL)
+                break
+            except queue.Full:
+                continue
+        del r  # save memory
 
 
-def pin_memory_batch(batch):
-    if isinstance(batch, torch.Tensor):
-        return batch.pin_memory()
-    elif isinstance(batch, string_classes):
-        return batch
-    elif isinstance(batch, container_abcs.Mapping):
-        return {k: pin_memory_batch(sample) for k, sample in batch.items()}
-    elif isinstance(batch, tuple) and hasattr(batch, '_fields'):  # namedtuple
-        return type(batch)(*(pin_memory_batch(sample) for sample in batch))
-    elif isinstance(batch, container_abcs.Sequence):
-        return [pin_memory_batch(sample) for sample in batch]
-    elif hasattr(batch, "pin_memory"):
-        return batch.pin_memory()
+def pin_memory(data):
+    if isinstance(data, torch.Tensor):
+        return data.pin_memory()
+    elif isinstance(data, string_classes):
+        return data
+    elif isinstance(data, container_abcs.Mapping):
+        return {k: pin_memory(sample) for k, sample in data.items()}
+    elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
+        return type(data)(*(pin_memory(sample) for sample in data))
+    elif isinstance(data, container_abcs.Sequence):
+        return [pin_memory(sample) for sample in data]
+    elif hasattr(data, "pin_memory"):
+        return data.pin_memory()
     else:
-        return batch
+        return data

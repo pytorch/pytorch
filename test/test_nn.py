@@ -495,7 +495,6 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def extra_args(self):
         return self._get_arg('extra_args', False)
 
-
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = False
@@ -570,6 +569,19 @@ class TestNN(NNTestCase):
         s = nn.Sequential(n, n)
 
         return l, n, s
+
+    def test_requires_grad_(self):
+        m = self._create_basic_net()[-1]
+        assert len(list(m.buffers())) > 0, 'invalid test'
+        assert all(not b.requires_grad for b in m.buffers()) > 0, 'invalid test'
+        assert len(list(m.parameters())) > 0, 'invalid test'
+        assert all(p.requires_grad for p in m.parameters()) > 0, 'invalid test'
+        for requires_grad in (False, True):
+            self.assertIs(m.requires_grad_(requires_grad), m)
+            for p in m.parameters():
+                self.assertEqual(p.requires_grad, requires_grad)
+            for b in m.buffers():
+                self.assertFalse(b.requires_grad)
 
     def test_module_backcompat(self):
         from torch.serialization import SourceChangeWarning
@@ -714,29 +726,11 @@ class TestNN(NNTestCase):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
 
-        def fw_fail1(self, input, output):
-            return output
-
-        def fw_fail2(self, input, output):
-            return input
-
         def bw_fail1(self, grad_input, grad_output):
             return grad_input[:-1]
 
         def bw_fail2(self, grad_input, grad_output):
             return grad_input + (torch.randn(2, 2),)
-
-        with module.register_forward_hook(fw_fail1):
-            with self.assertRaises(RuntimeError) as err:
-                module(input)
-            self.assertIn("fw_fail", err.exception.args[0])
-            self.assertIn("didn't return None", err.exception.args[0])
-
-        with module.register_forward_hook(fw_fail2):
-            with self.assertRaises(RuntimeError) as err:
-                module(input)
-            self.assertIn("fw_fail2", err.exception.args[0])
-            self.assertIn("didn't return None", err.exception.args[0])
 
         with module.register_backward_hook(bw_fail1):
             with self.assertRaises(RuntimeError) as err:
@@ -765,6 +759,28 @@ class TestNN(NNTestCase):
         module(input).backward(torch.ones(5, 5))
         expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
         self.assertEqual(input.grad.data, expected_grad)
+
+    def test_hook_mutations(self):
+        module = nn.Linear(5, 5)
+        input = torch.randn(5, 5, requires_grad=True)
+
+        def forward_pre_hook(m, input):
+            return torch.nn.functional.relu(input[0])
+
+        def forward_hook(m, input, output):
+            return -output
+
+        module.register_forward_pre_hook(forward_pre_hook)
+        module.register_forward_hook(forward_hook)
+        output = module(input)
+        expected_res = -torch.nn.functional.linear(torch.nn.functional.relu(input), module.weight, module.bias)
+        self.assertEqual(output, expected_res)
+        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        mask = (input > 0).double()
+        expected_grad = -torch.ones(5, 5).mm(module.weight.data) * 2 * mask
+        self.assertEqual(input.grad, expected_grad)
+
+
 
     def test_to(self):
         m = nn.Linear(3, 5)
@@ -1602,6 +1618,144 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pgm.backward(torch.randn(10, 20))
 
+    def test_overwrite_module_params_on_conversion(self):
+        # Test that if the conversion function passed to `module._apply()`
+        # changes the TensorImpl type of `module`'s parameters, the `module`'s
+        # parameters are always overwritten, regardless of the value of
+        # `torch.__future__.get_overwrite_module_params_on_conversion()`.
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20)
+        weight_ref = m.weight
+        weight_grad_ref = m.weight.grad
+        m = m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([2, 1]), torch.ones([1]), torch.Size([10, 20])))
+        self.assertNotEqual(weight_ref.layout, m.weight.layout)
+        self.assertNotEqual(weight_grad_ref.layout, m.weight.grad.layout)
+
+        # Test that under the current default settings
+        # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
+        # a view to a module's parameters is not pointing to the same storage as
+        # its base variable after converting the module to a different dtype.
+        m = nn.Linear(20, 10).float()
+        mw = m.weight[:]
+        m.double()
+        mw[0][0] = 5
+        with self.assertRaisesRegex(RuntimeError, "Expected object of scalar type Float but got scalar type Double"):
+            mw[0][0] == mw._base[0][0]
+
+        try:
+            torch.__future__.set_overwrite_module_params_on_conversion(True)
+
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # a view to a module's parameters is still pointing to the same storage as
+            # its base variable after converting the module to a different dtype.
+            m = nn.Linear(20, 10).float()
+            mw = m.weight[:]
+            m.double()
+            mw[0][0] = 5
+            self.assertTrue(mw[0][0] == mw._base[0][0])
+
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # `float_module.double()` doesn't preserve previous references to
+            # `float_module`'s parameters or gradients.
+            m = nn.Linear(20, 10).float()
+            m.weight.grad = torch.randn(10, 20).float()
+            weight_ref = m.weight
+            weight_grad_ref = m.weight.grad
+            m.double()
+            self.assertNotEqual(weight_ref.dtype, m.weight.dtype)
+            self.assertNotEqual(weight_grad_ref.dtype, m.weight.grad.dtype)
+
+            def add_one_inplace(t):
+                return t.add_(1.0)
+
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # applying an in-place operation to a module would bump the module's
+            # original parameters' version counter.
+            m = nn.Linear(20, 10)
+            pvm = m.weight.mul(m.weight)
+            weight_ref = m.weight
+            m_weight_version_saved = weight_ref._version
+            m = m._apply(add_one_inplace)
+            # Test that the in-place operation bumps the original parameter's version counter
+            self.assertGreater(weight_ref._version, m_weight_version_saved)
+            with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+                pvm.backward(torch.randn(10, 20))
+
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # applying an in-place operation to a module would bump the module's
+            # original parameters' gradients' version counter.
+            m = nn.Linear(20, 10)
+            m.weight.grad = torch.randn(10, 20).requires_grad_()
+            pgm = m.weight.grad.mul(m.weight.grad)
+            weight_grad_ref = m.weight.grad
+            m_weight_grad_version_saved = weight_grad_ref._version
+            m = m._apply(add_one_inplace)
+            self.assertGreater(weight_grad_ref._version, m_weight_grad_version_saved)
+            with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+                pgm.backward(torch.randn(10, 20))
+
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # applying an out-of-place operation to a module doesn't bump
+            # the module's original parameters' version counter.
+            m = nn.Linear(20, 10)
+            weight_ref = m.weight
+            m_weight_version_saved = weight_ref._version
+            m = m._apply(lambda t: torch.randn(t.shape))
+            self.assertEqual(weight_ref._version, m_weight_version_saved)
+
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # applying an out-of-place operation to a module doesn't bump
+            # the module's original parameters' gradients' version counter.
+            m = nn.Linear(20, 10)
+            m.weight.grad = torch.randn(10, 20).requires_grad_()
+            weight_grad_ref = m.weight.grad
+            m_weight_grad_version_saved = weight_grad_ref._version
+            m = m._apply(lambda t: torch.randn(t.shape))
+            self.assertEqual(weight_grad_ref._version, m_weight_grad_version_saved)
+        finally:
+            torch.__future__.set_overwrite_module_params_on_conversion(False)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_overwrite_module_params_on_conversion_cpu_cuda(self):
+        # Test that under the current default settings
+        # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
+        # a view to a module's parameters is not pointing to the same storage as
+        # its base variable after converting the module to a different device.
+        m = nn.Linear(20, 10)
+        mw = m.weight[:]
+        m.to('cuda')
+        with torch.no_grad():
+            # Without using `torch.no_grad()`, this will leak CUDA memory.
+            # (Issue is filed at https://github.com/pytorch/pytorch/issues/21875)
+            mw[0][0] = 5
+        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA"):
+            mw[0][0] == mw._base[0][0]
+
+        try:
+            torch.__future__.set_overwrite_module_params_on_conversion(True)
+
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # a view to a module's parameters is still pointing to the same storage as
+            # its base variable after converting the module to a different device.
+            m = nn.Linear(20, 10)
+            mw = m.weight[:]
+            m.to('cuda')
+            mw[0][0] = 5
+            self.assertTrue(mw[0][0] == mw._base[0][0])
+
+            # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+            # `cpu_module.to("cuda")` doesn't preserve previous references to
+            # `cpu_module`'s parameters or gradients.
+            m = nn.Linear(20, 10)
+            m.weight.grad = torch.randn(10, 20)
+            weight_ref = m.weight
+            weight_grad_ref = m.weight.grad
+            m.to('cuda')
+            self.assertNotEqual(weight_ref.device, m.weight.device)
+            self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
+        finally:
+            torch.__future__.set_overwrite_module_params_on_conversion(False)
+
     def test_type(self):
         l = nn.Linear(10, 20)
         net = nn.Module()
@@ -2000,47 +2154,91 @@ class TestNN(NNTestCase):
             for _ in range(activate_times):
                 snm(inp)
 
+            version_latest_ref_state_dict = deepcopy(snm.state_dict())
+            self.assertEqual({'weight_orig', 'bias', 'weight_u', 'weight_v'}, set(version_latest_ref_state_dict.keys()))
+
+            # test that non-strict loading works
+            non_strict_state_dict = deepcopy(version_latest_ref_state_dict)
+            non_strict_state_dict['nonsense'] = 'nonsense'
+            with self.assertRaisesRegex(RuntimeError, r'Unexpected key\(s\) in state_dict: "nonsense"'):
+                snm.load_state_dict(non_strict_state_dict, strict=True)
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['weight_orig']
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['weight_u']
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['weight_v']
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            non_strict_state_dict['weight'] = snm.weight.detach().clone()  # set W as a buffer
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict._metadata['']['spectral_norm']       # remove metadata info
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['weight']                            # remove W buffer
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['bias']
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+
             # craft a version None state_dict
-            version_none_state_dict = deepcopy(snm.state_dict())
-            self.assertEqual({'weight_orig', 'bias', 'weight_u', 'weight_v'}, set(version_none_state_dict.keys()))
+            version_none_state_dict = deepcopy(version_latest_ref_state_dict)
             self.assertIn('spectral_norm', version_none_state_dict._metadata[''])
             del version_none_state_dict._metadata['']['spectral_norm']       # remove metadata info
             del version_none_state_dict['weight_v']                          # remove v vector
             version_none_state_dict['weight'] = snm.weight.detach().clone()  # set W as a buffer
 
             # normal state_dict
-            version_latest_state_dict = deepcopy(snm.state_dict())
+            for version_latest_with_metadata in [True, False]:
+                version_latest_state_dict = deepcopy(version_latest_ref_state_dict)
 
-            snm.eval()
-            out0_eval = snm(inp)
-            snm.train()
-            out1_train = snm(inp)
-            out2_train = snm(inp)
-            snm.eval()
-            out3_eval = snm(inp)
+                if not version_latest_with_metadata:
+                    # We want to still load a user-crafted state_dict, one without metadata
+                    del version_latest_state_dict._metadata['']['spectral_norm']
 
-            snm.load_state_dict(version_none_state_dict)
-            if activate_times > 0:
-                # since in loading version None state dict, we assume that the
-                # values in the state dict have gone through at lease one
-                # forward, we only test for equivalence when activate_times > 0.
-                snm.eval()
-                self.assertEqual(out0_eval, snm(inp))
-                snm.train()
-                self.assertEqual(out1_train, snm(inp))
-                self.assertEqual(out2_train, snm(inp))
-                snm.eval()
-                self.assertEqual(out3_eval, snm(inp))
+                # test that re-wrapping does not matter
+                m = torch.nn.utils.remove_spectral_norm(snm)
+                snm = torch.nn.utils.spectral_norm(m)
 
-            # Test normal loading
-            snm.load_state_dict(version_latest_state_dict)
-            snm.eval()
-            self.assertEqual(out0_eval, snm(inp))
-            snm.train()
-            self.assertEqual(out1_train, snm(inp))
-            self.assertEqual(out2_train, snm(inp))
-            snm.eval()
-            self.assertEqual(out3_eval, snm(inp))
+                snm.load_state_dict(version_latest_ref_state_dict)
+                with torch.no_grad():
+                    snm.eval()
+                    out0_eval = snm(inp)
+                    snm.train()
+                    out1_train = snm(inp)
+                    out2_train = snm(inp)
+                    snm.eval()
+                    out3_eval = snm(inp)
+
+                # test that re-wrapping does not matter
+                m = torch.nn.utils.remove_spectral_norm(snm)
+                snm = torch.nn.utils.spectral_norm(m)
+
+                snm.load_state_dict(version_none_state_dict)
+                if activate_times > 0:
+                    # since in loading version None state dict, we assume that the
+                    # values in the state dict have gone through at lease one
+                    # forward, we only test for equivalence when activate_times > 0.
+                    with torch.no_grad():
+                        snm.eval()
+                        self.assertEqual(out0_eval, snm(inp))
+                        snm.train()
+                        self.assertEqual(out1_train, snm(inp))
+                        self.assertEqual(out2_train, snm(inp))
+                        snm.eval()
+                        self.assertEqual(out3_eval, snm(inp))
+
+                # test that re-wrapping does not matter
+                m = torch.nn.utils.remove_spectral_norm(snm)
+                snm = torch.nn.utils.spectral_norm(m)
+
+                # Test normal loading
+                snm.load_state_dict(version_latest_state_dict)
+                with torch.no_grad():
+                    snm.eval()
+                    self.assertEqual(out0_eval, snm(inp))
+                    snm.train()
+                    self.assertEqual(out1_train, snm(inp))
+                    self.assertEqual(out2_train, snm(inp))
+                    snm.eval()
+                    self.assertEqual(out3_eval, snm(inp))
 
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
@@ -3307,8 +3505,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     def test_multihead_attention(self):
-        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, src_lengths=None,
-                                 attn_mask=None, add_zero_attn=False):
+        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None):
             """ Numpy-based reference implementation of scaled dot attention
             for testing"""
 
@@ -3324,9 +3521,9 @@ class TestNN(NNTestCase):
                     for j in range(b2):
                         for m in range(s1):
                             for n in range(s2):
-                                if unseen_mask[m][n] == 0:
+                                if unseen_mask is not None and unseen_mask[m][n] == 0:
                                     QKT[i, j, m, n] = -np.inf
-                                if src_lengths is not None and n >= src_lengths[i]:
+                                if key_padding_mask is not None and key_padding_mask[i][n]:
                                     QKT[i, j, m, n] = -np.inf
 
             reference = _softmax(QKT)
@@ -3359,17 +3556,6 @@ class TestNN(NNTestCase):
                         output[i, j, k, :] = e_x / np.sum(e_x)
             return output
 
-        def _generate_src_lengths(batch_size, seq_len):
-            src_lengths = np.array([random.randint(1, seq_len) for i in range(batch_size)])
-
-            # max source length has to equal seq_len, so randomly choose
-            # one example to have source length = seq_len
-            max_len_example_i = random.randint(0, batch_size - 1)
-            src_lengths[max_len_example_i] = seq_len
-
-            src_lengths_tensor = torch.from_numpy(src_lengths).int()
-            return src_lengths, src_lengths_tensor
-
         def _split_heads_ref(X, dims, nheads, d_head):
             X_split = np.reshape(X, dims[:2] + [nheads, d_head])
             X_split_transposed = np.transpose(X_split, [0, 2, 1, 3])
@@ -3381,18 +3567,9 @@ class TestNN(NNTestCase):
             reference = np.reshape(X_transposed, dims[:2] + [nheads * d_head])
             return reference
 
-        def _fc(X, X_name, module, start=None, end=None):
-            X_fc_b = None
-            X_fc_w = None
-            for name, param in module.named_parameters():
-                if X_name + "weight" in name:
-                    if X_fc_w is not None:
-                        raise Exception("Duplicate FC name found")
-                    X_fc_w = param[start:end, :].detach().numpy()
-                elif X_name + "bias" in name:
-                    if X_fc_b is not None:
-                        raise Exception("Duplicate FC name found")
-                    X_fc_b = param[start:end].detach().numpy()
+        def _fc(X, X_weight, X_bias):
+            X_fc_b = X_bias.detach().numpy()
+            X_fc_w = X_weight.detach().numpy()
             return np.matmul(X, np.transpose(X_fc_w)) + X_fc_b
 
         def _create_src_lengths_mask(batch_size, src_lengths):
@@ -3413,20 +3590,35 @@ class TestNN(NNTestCase):
             # returns [batch_size, max_seq_len]
             return (src_indices < src_lengths).int().detach()
 
-        def _multihead_attn_test_helper(add_key_padding_mask, add_bias_kv=False, add_zero_attn=False):
+        def _multihead_attn_test_helper(add_key_padding_mask=False, add_bias_kv=False, add_zero_attn=False,
+                                        saved_kv=False, same_embed_dim=False):
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
                 d_head = random.randint(3, 10)
                 nheads = random.randint(3, 10)
                 d_model = d_head * nheads
-                dims = [batch_sz, seq_len, d_model]
+                if same_embed_dim:
+                    kv_dim = d_model
+                else:
+                    kv_dim = random.randint(5, 20)
+                dims = [batch_sz, seq_len, kv_dim]
 
-                src_lengths = None
-                src_lengths_tensor = None
+                saved_k = None
+                saved_k_tensor = None
+                saved_v = None
+                saved_v_tensor = None
+                if saved_kv:
+                    saved_k = np.random.rand(batch_sz * nheads, seq_len, d_head)
+                    saved_k_tensor = torch.from_numpy(saved_k)
+                    saved_v = np.random.rand(batch_sz * nheads, seq_len, d_head)
+                    saved_v_tensor = torch.from_numpy(saved_v)
+
+                key_padding_mask = None
+                key_padding_mask_tensor = None
                 if add_key_padding_mask:
-                    src_lengths, src_lengths_tensor = _generate_src_lengths(
-                        batch_size=batch_sz, seq_len=seq_len
-                    )
+                    seq_mask = np.random.randint(0, 2, (1, seq_len))
+                    key_padding_mask = (np.repeat(seq_mask, batch_sz, axis=0) == 1)
+                    key_padding_mask_tensor = torch.from_numpy(key_padding_mask)
 
                 decoder_state = np.random.rand(batch_sz, d_model).astype(np.float64)
                 K = np.random.rand(*dims).astype(np.float64)
@@ -3443,7 +3635,8 @@ class TestNN(NNTestCase):
 
                 multihead_attn_module = MultiheadAttention(d_model, nheads,
                                                            add_bias_kv=add_bias_kv,
-                                                           add_zero_attn=add_zero_attn)
+                                                           add_zero_attn=add_zero_attn,
+                                                           kdim=kv_dim, vdim=kv_dim)
 
                 if add_bias_kv:
                     bias_k = multihead_attn_module.bias_k.detach().numpy()
@@ -3456,63 +3649,89 @@ class TestNN(NNTestCase):
                 _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1)
                 _V = source_hid_tensor
                 _K = source_hid_tensor
-                src_len_mask = None
-                if src_lengths is not None and add_key_padding_mask:
-                    # [batch_size, 1, seq_len]
-                    src_len_mask_int = _create_src_lengths_mask(
-                        batch_size=_batch_size, src_lengths=src_lengths_tensor
-                    )
-                    src_len_mask = src_len_mask_int != 1
 
-                result, result_weight = torch.nn.functional.multi_head_attention_forward(
-                    _Q, _K, _V,
-                    d_model, nheads,
-                    multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
-                    multihead_attn_module.bias_k, multihead_attn_module.bias_v,
-                    multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
-                    multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
-                    multihead_attn_module.training, src_len_mask, True, attn_mask_tensor)
+                if multihead_attn_module._qkv_same_embed_dim:
+                    result, result_weight = torch.nn.functional.multi_head_attention_forward(
+                        _Q, _K, _V,
+                        d_model, nheads,
+                        multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
+                        multihead_attn_module.bias_k, multihead_attn_module.bias_v,
+                        multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
+                        multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
+                        multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
+                        static_k=saved_k_tensor, static_v=saved_v_tensor)
+                else:
+                    result, result_weight = torch.nn.functional.multi_head_attention_forward(
+                        _Q, _K, _V,
+                        d_model, nheads,
+                        multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
+                        multihead_attn_module.bias_k, multihead_attn_module.bias_v,
+                        multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
+                        multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
+                        multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
+                        True, multihead_attn_module.q_proj_weight,
+                        multihead_attn_module.k_proj_weight, multihead_attn_module.v_proj_weight,
+                        static_k=saved_k_tensor, static_v=saved_v_tensor)
 
                 result = result.squeeze(0).detach().numpy()
 
-                Q_fc = _fc(Q, "in_proj_", multihead_attn_module, end=d_model)
-                K_fc = _fc(
-                    K, "in_proj_", multihead_attn_module, start=d_model, end=2 * d_model
-                )
-                V_fc = _fc(V, "in_proj_", multihead_attn_module, start=2 * d_model)
+                q_proj_weight = multihead_attn_module.in_proj_weight[:d_model]
+                k_proj_weight = multihead_attn_module.in_proj_weight[d_model:(d_model * 2)]
+                v_proj_weight = multihead_attn_module.in_proj_weight[(d_model * 2):]
+                if not multihead_attn_module._qkv_same_embed_dim:
+                    q_proj_weight = multihead_attn_module.q_proj_weight
+                    k_proj_weight = multihead_attn_module.k_proj_weight
+                    v_proj_weight = multihead_attn_module.v_proj_weight
+
+                Q_fc = _fc(Q, q_proj_weight, multihead_attn_module.in_proj_bias[:d_model])
+                K_fc = _fc(K, k_proj_weight, multihead_attn_module.in_proj_bias[d_model:(d_model * 2)])
+                V_fc = _fc(V, v_proj_weight, multihead_attn_module.in_proj_bias[(d_model * 2):])
 
                 if add_bias_kv:
                     K_fc = np.concatenate((K_fc, np.repeat(bias_k, K_fc.shape[0], axis=0)), axis=1)
                     V_fc = np.concatenate((V_fc, np.repeat(bias_v, V_fc.shape[0], axis=0)), axis=1)
-                    attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+                    if attn_mask is not None:
+                        attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+                    if key_padding_mask is not None:
+                        key_padding_mask = np.concatenate((key_padding_mask, np.full((batch_sz, 1), False, dtype=bool)), axis=1)
                     dims[1] += 1
                 Q_split = _split_heads_ref(
                     Q_fc, [batch_sz, 1, d_model], nheads, d_head
                 )
-                K_split = _split_heads_ref(K_fc, dims, nheads, d_head)
-                V_split = _split_heads_ref(V_fc, dims, nheads, d_head)
+
+                if saved_k is not None:
+                    K_split = np.reshape(saved_k, [dims[0], nheads, dims[1], d_head])
+                else:
+                    K_split = _split_heads_ref(K_fc, dims, nheads, d_head)
+
+                if saved_k is not None:
+                    V_split = np.reshape(saved_v, [dims[0], nheads, dims[1], d_head])
+                else:
+                    V_split = _split_heads_ref(V_fc, dims, nheads, d_head)
 
                 if add_zero_attn:
                     dims[1] += 1
                     K_split = np.concatenate((K_split, np.zeros([K_split.shape[0], K_split.shape[1], 1, K_split.shape[3]])), axis=2)
                     V_split = np.concatenate((V_split, np.zeros([V_split.shape[0], V_split.shape[1], 1, V_split.shape[3]])), axis=2)
-                    attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
 
+                    if attn_mask is not None:
+                        attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+
+                    if key_padding_mask is not None:
+                        key_padding_mask = np.concatenate((key_padding_mask, np.full((batch_sz, 1), False, dtype=bool)), axis=1)
                 attn_heads, ref_attn_weight = _scaled_dot_attn_ref(
                     Q=Q_split,
                     K=K_split,
                     V=V_split,
                     dims=Q_split.shape,
                     unseen_mask=attn_mask,
-                    src_lengths=src_lengths
+                    key_padding_mask=key_padding_mask
                 )
                 combined_attn_heads = _combine_heads_ref(
                     X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
                 )
 
-                reference = _fc(
-                    combined_attn_heads, "out_proj.", multihead_attn_module
-                )
+                reference = _fc(combined_attn_heads, multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias)
                 reference = np.squeeze(reference, axis=1)
 
                 # result = reference
@@ -3525,21 +3744,45 @@ class TestNN(NNTestCase):
                 np.testing.assert_allclose(result_weight, ref_attn_weight, atol=1e-5)
 
         def test_multihead_attn_add_bias_kv():
-            _multihead_attn_test_helper(add_key_padding_mask=None, add_bias_kv=True)
+            _multihead_attn_test_helper(add_bias_kv=True)
 
         def test_multihead_attn_add_zero_attn():
-            _multihead_attn_test_helper(add_key_padding_mask=None, add_zero_attn=True)
+            _multihead_attn_test_helper(add_zero_attn=True)
 
         def test_multihead_attn_no_masking():
-            _multihead_attn_test_helper(add_key_padding_mask=None)
+            _multihead_attn_test_helper()
 
         def test_multihead_attn_key_padding_mask():
             _multihead_attn_test_helper(add_key_padding_mask=True)
+
+        def test_multihead_attn_saved_kv():
+            _multihead_attn_test_helper(saved_kv=True)
+
+        def test_multihead_attn_add_bias_kv_zero_attn():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
+                                        add_zero_attn=True)
+
+        def test_multihead_attn_all_arguments1():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True, saved_kv=True)
+
+        def test_multihead_attn_all_arguments2():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
+                                        add_zero_attn=True, saved_kv=True)
+
+        def test_multihead_attn_all_arguments3():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
+                                        saved_kv=True, same_embed_dim=True)
 
         test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
         test_multihead_attn_add_bias_kv()  # Test MultiheadAttention with add_bias_kv
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
         test_multihead_attn_key_padding_mask()  # Test MultiheadAttention with src lengths
+        test_multihead_attn_saved_kv()  # Test MultiheadAttention with static kv.
+        test_multihead_attn_add_bias_kv_zero_attn()  # Test MultiheadAttention with bias_kv and zero_attn.
+        test_multihead_attn_all_arguments1()  # Test MultiheadAttention with all the argument.
+        with self.assertRaisesRegex(AssertionError, "bias cannot be added to static key."):
+            test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
+        test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
 
     @repeat_test_for_types(ALL_TENSORTYPES)
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -4443,6 +4686,8 @@ class TestNN(NNTestCase):
         incompatible_keys = net.load_state_dict(state_dict)
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
+        self.assertNotIn('Incompatible', str(incompatible_keys))
+        self.assertNotIn('Incompatible', repr(incompatible_keys))
         self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
         self.assertEqual(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
@@ -4454,6 +4699,8 @@ class TestNN(NNTestCase):
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
         self.assertIn('extra', incompatible_keys.unexpected_keys)
+        self.assertIn('Incompatible', str(incompatible_keys))
+        self.assertIn('Incompatible', repr(incompatible_keys))
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
@@ -4530,6 +4777,38 @@ class TestNN(NNTestCase):
         refcycles = gc.collect()
 
         self.assertEqual(refcycles, 0)
+
+    def test_load_state_dict_custom(self):
+
+        class CustomState(nn.Module):
+            def __init__(self):
+                super(CustomState, self).__init__()
+                self.param = torch.nn.Parameter(torch.ones(1))
+                self.sub = torch.nn.Linear(5, 5)
+
+            def _save_to_state_dict(self, destination, prefix, keep_vars):
+                destination[prefix + "serialized"] = self.param.data + 1
+
+            def _load_from_state_dict(self, state_dict, prefix, local_metadata,
+                                      strict, missing_keys, unexpected_keys,
+                                      error_msgs):
+                # skip some of the error handling
+                self.param.data.copy_(state_dict[prefix + "serialized"] - 1)
+
+        # use sequential to verify nesting
+        m = nn.Sequential(CustomState())
+        m[0].param[0] = 10
+        m[0].sub.weight[0, 0] = 555
+        state_dict = m.state_dict()
+        self.assertEqual(state_dict["0.serialized"].item(), 11)
+        self.assertIn("0.sub.weight", state_dict)
+        self.assertNotIn("0.param", state_dict)
+        del m
+        mm = nn.Sequential(CustomState())
+        self.assertEqual(mm[0].param[0].item(), 1)
+        mm.load_state_dict(state_dict)
+        self.assertEqual(mm[0].param[0].item(), 10)
+        self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
@@ -5135,6 +5414,21 @@ class TestNN(NNTestCase):
         log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
         with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+    def test_CTCLoss_empty_target_cpu(self):
+        target_lengths = [0, 0, 0]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (0,), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+        self.assertTrue((loss >= 0).all().item())
+
+        target_lengths = [0, 9, 0]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (9,), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+        self.assertTrue((loss >= 0).all().item())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -5847,11 +6141,11 @@ class TestNN(NNTestCase):
         wrong_d_model = 63
         wrong_nhead = 5
 
-        def test(encoder_input_shape, decoder_input_shape, 
+        def test(encoder_input_shape, decoder_input_shape,
                  src_mask_len=None, tgt_mask_len=None, memory_mask_size=None):
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
-            model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, 
+            model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
                                             num_decoder_layers, dim_feedforward, dropout)
 
             if src_mask_len is not None:
@@ -5870,7 +6164,7 @@ class TestNN(NNTestCase):
                 memory_task = None
 
             with self.assertRaises(RuntimeError):
-                model(encoder_input, decoder_input, 
+                model(encoder_input, decoder_input,
                       src_mask=src_mask, tgt_mask=tgt_mask, memory_mask=memory_task)
 
         correct_encoder_input_shape = (seq_len, bsz, d_model)
@@ -5905,7 +6199,7 @@ class TestNN(NNTestCase):
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         with self.assertRaises(AssertionError):
-            model = getattr(nn, model_name)(d_model, wrong_nhead, num_encoder_layers, 
+            model = getattr(nn, model_name)(d_model, wrong_nhead, num_encoder_layers,
                                             num_decoder_layers, dim_feedforward, dropout)
 
         # Incorrect src_mask
@@ -5924,8 +6218,8 @@ class TestNN(NNTestCase):
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
-        test(encoder_input_shape, decoder_input_shape, 
-             tgt_mask_len=wrong_tgt_mask_size, 
+        test(encoder_input_shape, decoder_input_shape,
+             tgt_mask_len=wrong_tgt_mask_size,
              memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size))
 
     def test_rnn_args_check(self):
@@ -7165,7 +7459,7 @@ class TestNN(NNTestCase):
                             [[3.4500, 6.0000000000, 5.0000, 4.8340, 9.0000],
                              [2.2500, 6.3332500450, 5.0000, 5.1000, 7.7500]]).view(1, 1, 2, 5)
                     else:
-                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                        raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
                 elif mode == 'nearest':
                     if padding_mode == 'zeros':
                         groundtruth = torch.tensor(
@@ -7180,9 +7474,9 @@ class TestNN(NNTestCase):
                             [[1., 8., 5., 7., 9.],
                              [1., 8., 5., 8., 9.]]).view(1, 1, 2, 5)
                     else:
-                        assert False, "missing groundtruth test for padding mode '{}'".format(padding_mode)
+                        raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
                 else:
-                    assert False, "missing groundtruth test for interpolation mode '{}'".format(mode)
+                    raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
                 output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode)
                 self.assertEqual(output, groundtruth,
                                  "groundtruth comparison failed for mode={}, "
@@ -8900,6 +9194,54 @@ for test_params in module_tests + new_module_tests:
 
         test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
         test = NewModuleTest(**test_params)
+        add_test(test, decorator)
+    if 'check_with_long_tensor' in test_params:
+        fullname = test_params.get('fullname', None)
+        if fullname:
+            test_params['fullname'] = fullname + '_with_long_tensor'
+        else:
+            desc = test_params.get('desc', None)
+            test_params['desc'] = 'with_long_tensor' if desc is None else desc + '_with_long_tensor'
+
+        def double_equivalent_of_long_tensor(size):
+            return torch.randint(-1000, 1000, size=size).double()
+
+        def apply_to_cons(t):
+            if t.is_floating_point():
+                if isinstance(t, Parameter):
+                    return Parameter(double_equivalent_of_long_tensor(t.size()))
+                elif isinstance(t, torch.Tensor):
+                    return double_equivalent_of_long_tensor(t.size())
+            else:
+                return t
+
+        def gen_long_tensor_constructor(constructor):
+            def long_tensor_constructor(*args, **kwargs):
+                cons = constructor(*args, **kwargs)
+                cons._apply(apply_to_cons)
+                return cons
+            long_tensor_constructor.__name__ = constructor.__name__
+            return long_tensor_constructor
+
+        def gen_long_tensor_input(input_size):
+            def input_func():
+                return double_equivalent_of_long_tensor(input_size)
+            return input_func
+
+        def reference_fn(i, p, m):
+            m._apply(lambda t: t.long())
+            input = i.long()
+            out = m.forward(input)
+            return out
+
+        test_params['constructor'] = gen_long_tensor_constructor(test_params['constructor'])
+        test_params['input_fn'] = gen_long_tensor_input(test_params['input_size'])
+        test_params['reference_fn'] = reference_fn
+        test_params['check_forward_only'] = True
+        # Currently we don't support conv2d/conv3d for LongTensor in CUDA
+        test_params['test_cuda'] = False
+        test = NewModuleTest(**test_params)
+
         add_test(test, decorator)
 
 for test_params in criterion_tests + new_criterion_tests:

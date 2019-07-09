@@ -143,7 +143,15 @@ template<class scalar_t>
 void magmaOrgqr(
     magma_int_t m, magma_int_t n, magma_int_t k, scalar_t* dA,
     magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info) {
-  AT_ERROR("orgqr only takes float or doule Tensors");
+  AT_ERROR("orgqr only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void magmaSymeig(
+    magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, scalar_t* dA, magma_int_t ldda,
+    scalar_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork,
+    magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
+  AT_ERROR("symeig only takes float or double Tensors");
 }
 
 template<>
@@ -404,6 +412,22 @@ void magmaOrgqr<float>(
     magma_int_t m, magma_int_t n, magma_int_t k, float* dA, magma_int_t ldda,
     float* tau, float* dT, magma_int_t nb, magma_int_t* info) {
   magma_sorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
+}
+
+template<>
+void magmaSymeig<double>(
+    magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, double* dA, magma_int_t ldda,
+    double* w, double* wA, magma_int_t ldwa, double* work, magma_int_t lwork,
+    magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
+  magma_dsyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
+}
+
+template<>
+void magmaSymeig<float>(
+    magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, float* dA, magma_int_t ldda,
+    float* w, float* wA, magma_int_t ldwa, float* work, magma_int_t lwork,
+    magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
+  magma_ssyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
 }
 #endif
 
@@ -1121,6 +1145,93 @@ std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
 
   return std::make_tuple(q_working_copy.narrow_copy(-1, 0, n_columns_q),
                          r_working_copy.narrow_copy(-2, 0, n_columns_q).triu_());
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("symeig: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  auto self_data = self.data<scalar_t>();
+  auto eigvals_data = eigvals.data<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto eigvals_stride = eigvals.size(-1);
+  int64_t batch_size = batchCount(self);
+  magma_int_t n = magma_int_cast(self.size(-1), "n");
+
+  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
+  magma_vec_t jobz = eigenvectors ? MagmaVec : MagmaNoVec;
+
+  scalar_t* wA;
+  ALLOCATE_ARRAY(wA, scalar_t, n * n, self);
+
+  magma_int_t info;
+  // Run once, first to get the optimum work sizes.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
+  magma_int_t lwork = -1;
+  scalar_t wkopt;
+  magma_int_t liwork = -1;
+  magma_int_t iwkopt;
+  magmaSymeig<scalar_t>(jobz, uplo, n, self_data, n, eigvals_data, wA, n, &wkopt, lwork, &iwkopt, liwork, &info);
+  
+  scalar_t* work;
+  magma_int_t* iwork;
+  lwork = magma_int_cast(wkopt, "work_size");
+  liwork = magma_int_cast(iwkopt, "iwork_size");
+  ALLOCATE_ARRAY(work, scalar_t, lwork, self);
+  ALLOCATE_ARRAY(iwork, magma_int_t, liwork, self);
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    scalar_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
+    magmaSymeig<scalar_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr,
+                          wA, n, work, lwork, iwork, liwork, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+
+  auto self_sizes = self.sizes().vec();
+  self_sizes.pop_back();
+
+  // We create temporary tensors on the CPU, because tensors on the GPU
+  // cause segfault when passed to magmaSymeig. The data is later
+  // moved to the appropriate device.
+  // In the case where self.numel() == 0, we just return an empty tensor of
+  // dimensions on the CUDA (to avoid the unnecessary "to(at::kCUDA)")
+  auto eigvals_working_copy = self.numel() == 0
+                              ? at::empty(self_sizes, self.options())
+                              : at::empty(self_sizes, self.options().device(at::kCPU));
+
+  if (self.numel() == 0) {
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self));
+  }
+
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "symeig_cuda", [&]{
+    apply_symeig<scalar_t>(self_working_copy, eigvals_working_copy, eigenvectors, upper, infos);
+  });
+
+  if (!eigenvectors) {
+    self_working_copy.zero_();
+  }
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "symeig_cuda");
+  } else {
+    singleCheckErrors(infos[0], "symeig_cuda");
+  }
+  return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
 }
 
 }}  // namespace at::native
