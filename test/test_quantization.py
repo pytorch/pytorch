@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import torch.nn.quantized as nnq
-import torch.quantization as tq
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_eval_fn, QConfig, default_qconfig, default_observer, quantize, \
     prepare, convert
