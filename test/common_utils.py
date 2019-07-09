@@ -103,6 +103,7 @@ def run_tests(argv=UNITTEST_ARGS):
             else:
                 for element in suite_or_case:
                     add_to_test_cases(element)
+
         add_to_test_cases(suite)
         failed_tests = []
         for case in test_cases:
@@ -110,6 +111,7 @@ def run_tests(argv=UNITTEST_ARGS):
             exitcode = shell([sys.executable] + argv + [test_case_full_name])
             if exitcode != 0:
                 failed_tests.append(test_case_full_name)
+
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     else:
