@@ -15,6 +15,14 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
   return detail::f32_from_bits(x);
 }
 
+// CUDA intrinsics
+
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)
+inline __device__ BFloat16 __ldg(const BFloat16* ptr) {
+    return __ldg(reinterpret_cast<const BFloat16*>(ptr));
+}
+#endif
+
 /// Arithmetic
 
 inline C10_HOST_DEVICE BFloat16 operator+(const BFloat16& a, const BFloat16& b) {

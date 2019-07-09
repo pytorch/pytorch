@@ -65,6 +65,12 @@ def is_half(t):
     assert t != torch.autograd.Variable
     return t in [torch.HalfTensor, torch.cuda.HalfTensor]
 
+def is_bfloat16(t):
+    if isinstance(t, torch.Tensor):
+        return t.dtype == torch.bfloat16
+    assert isinstance(t, type)
+    assert t != torch.autograd.Variable
+    return t in [torch.BFloat16Tensor, torch.cuda.BFloat16Tensor]
 
 types = [
     torch.FloatTensor,
@@ -75,6 +81,7 @@ types = [
     torch.CharTensor,
     torch.ByteTensor,
     torch.HalfTensor,
+    torch.BFloat16Tensor,
 ]
 
 signed_types = [
@@ -94,6 +101,7 @@ float_types = [
     torch.FloatTensor,
     torch.DoubleTensor,
     torch.HalfTensor,
+    torch.BFloat16Tensor,
 ]
 
 float_types_no_half = [
@@ -117,6 +125,8 @@ G = 275000000
 def make_tensor(t, *sizes):
     if 'Half' in t.__name__:
         return t(*sizes).copy_(torch.randn(*sizes))
+    if 'BFloat16' in t.__name__:
+        return t(*sizes).copy_(torch.randn(*sizes))
     else:
         tensor = t(*sizes)
         if tensor.is_floating_point():
@@ -139,6 +149,8 @@ def make_sparse_tensor(t, n, *sizes):
 def tensor_clamp(t, min, max):
     if is_half(t):
         return t.float().clamp(min, max).half()
+    if is_bfloat16(t):
+        return t.float().clamp(min, max).bfloat16()
     else:
         return t.clamp(min, max)
 
@@ -146,6 +158,8 @@ def tensor_clamp(t, min, max):
 def tensor_mul(t, scale):
     if is_half(t):
         return t.float().mul(scale).half()
+    if is_bfloat16(t):
+        return t.float().mul(scale).bfloat16()
     else:
         return t.mul(scale)
 
@@ -153,6 +167,8 @@ def tensor_mul(t, scale):
 def tensor_abs_(t):
     if is_half(t):
         return t.float().abs_().half()
+    if is_bfloat16(t):
+        return t.float().abs_().bfloat16()
     else:
         return t.abs_()
 
@@ -162,6 +178,8 @@ def constant_tensor_sub(a, b):
     # have resize_as()
     if is_half(b):
         return (a - b.float()).half()
+    if is_bfloat16(b):
+        return (a - b.float()).bfloat16()
     else:
         return a - b
 
@@ -171,6 +189,8 @@ def constant_tensor_add(a, b):
     # have add()
     if is_half(b):
         return (a + b.float()).half()
+    if is_bfloat16(b):
+        return (a + b.float()).bfloat16()
     else:
         return a + b
 
@@ -220,7 +240,7 @@ def small_3d_ones(t):
 
 def small_3d_positive(t):
     # In div_tensor(), half cannot achieve float precision
-    min_val = 1e-3 if is_floating(t) and not is_half(t) else 2
+    min_val = 1e-3 if is_floating(t) and not is_half(t) and not is_bfloat16(t) else 2
     return tensor_clamp(make_tensor(t, S, S, S), min_val, 120)
 
 
@@ -629,9 +649,9 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_tensor = to_gpu(cpu_tensor)
         cpu_args = arg_constructor(t)
         gpu_args = [to_gpu(arg) for arg in cpu_args]
-        if is_half(t):
+        if is_half(t) or is_bfloat16(t):
             cpu_tensor = cpu_tensor.float()
-            cpu_args = [arg.float() if isinstance(arg, torch.Tensor) and is_half(arg) else arg for arg in cpu_args]
+            cpu_args = [arg.float() if isinstance(arg, torch.Tensor) and (is_half(arg) or is_bfloat16(arg)) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
         try:
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
@@ -1341,7 +1361,7 @@ class TestCuda(TestCase):
 
         # Bool test case
         t = torch.tensor([[False, True], [True, True]], device='cuda')
-        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')), 
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')),
                          torch.tensor([[False, False], [True, True]], device='cuda'))
 
     def test_gather(self):

@@ -996,6 +996,7 @@
 ]]
 [[
   name: _th_topk
+  cuda_bfloat16: True
   cname: topk
   variants:
     - function

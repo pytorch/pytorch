@@ -140,6 +140,19 @@ struct TopKTypeConfig<at::Half> {
   }
 };
 
+template <>
+struct TopKTypeConfig<at::BFloat16> {
+  typedef uint32_t RadixType;
+
+  static inline __device__ RadixType convert(at::BFloat16 v) {
+    return 0u;
+  }
+
+  static inline __device__ at::BFloat16 deconvert(RadixType v) {
+    return ScalarConvert<int, at::BFloat16>::to(0);
+  }
+};
+
 // This function counts the distribution of all input values in a
 // slice we are selecting by radix digit at `radixDigitPos`, but only
 // those that pass the filter `((v & desiredMask) == desired)`.
