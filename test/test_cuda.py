@@ -48,7 +48,8 @@ if TEST_CUDA:
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
-                torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
+                torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor,
+                torch.BFloat16Tensor, torch.cuda.BFloat16Tensor}
 
 
 def is_floating(t):
@@ -672,7 +673,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         self.assertEqual(cpu_tensor, gpu_tensor, precision)
         self.assertEqual(cpu_args, gpu_args, precision)
         # Compare results
-        if fn == 'element_size' and t.__name__ == 'HalfTensor':
+        if fn == 'element_size' and (t.__name__ == 'HalfTensor' or t.__name__ == 'BFloat16Tensor'):
             # Workaround since cpu_result is float
             self.assertEqual(2, gpu_result)
         else:
@@ -1543,7 +1544,7 @@ class TestCuda(TestCase):
         x = torch.randn(4, 4, device='cuda:1').storage()
         y = x.clone()
         self.assertEqual(x.get_device(), y.get_device())
-        for t in ['byte', 'char', 'short', 'int', 'long', 'half', 'double']:
+        for t in ['byte', 'char', 'short', 'int', 'long', 'half', 'double', 'bfloat16']:
             self.assertEqual(getattr(x, t)().get_device(), x.get_device())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
@@ -2527,15 +2528,18 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu(self):
-        _TestTorchMixin._test_lu(self, lambda t: t.cuda())
+        _TestTorchMixin._test_lu(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu(self, lambda t: t.cuda(), pivot=True)
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_solve(self):
-        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda())
+        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=True)
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_unpack(self):
-        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda())
+        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda(), pivot=True)
 
     def test_dim_reduction(self):
         _TestTorchMixin._test_dim_reduction(self, lambda t: t.cuda())
@@ -2964,6 +2968,7 @@ def generate_tests():
                             or (("HalfTensor" in skip_type_list) and tensor_type_name == "HalfTensor") \
                             or (("IntTensor" in skip_type_list) and tensor_type_name == "IntTensor") \
                             or (("LongTensor" in skip_type_list) and tensor_type_name == "LongTensor") \
+                            or (("BFloat16Tensor" in skip_type_list) and tensor_type_name == "BFloat16Tensor") \
                             or (("ShortTensor" in skip_type_list) and tensor_type_name == "ShortTensor"):
                         decorator = skipIfRocm
                     else:
@@ -2973,7 +2978,7 @@ def generate_tests():
                     decorator = None
 
             precision = custom_precision.get(name, TestCuda.precision)
-            if is_half(t):
+            if is_half(t) or is_bfloat16(t):
                 precision = custom_half_precision.get(name, precision)
 
             for inplace in (True, False):
@@ -2984,7 +2989,7 @@ def generate_tests():
                 else:
                     name_inner = name
 
-                if t != torch.HalfTensor and not hasattr(tensor, name_inner):
+                if t != torch.HalfTensor and t != torch.BFloat16Tensor and not hasattr(tensor, name_inner):
                     # torch.HalfTensor doesn't support most operations,
                     # but we use torch.FloatTensor as cpu baseline
                     continue

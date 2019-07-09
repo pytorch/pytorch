@@ -16,7 +16,7 @@ namespace detail {
     tmp <<= 16;
 
 #ifdef __HIP_PLATFORM_HCC__
-    float* tempRes = 0;
+    float* tempRes;
 
     // We should be using memcpy in order to respect the strict aliasing rule
     // but it fails in the HIP environment.

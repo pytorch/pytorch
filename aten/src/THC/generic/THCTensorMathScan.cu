@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathScan.cu"
 #else
 
-#ifndef THC_REAL_IS_HALF
+#if !defined(THC_REAL_IS_HALF) && !defined(THC_REAL_IS_BFLOAT16)
 template<class BinaryFunction>
 __host__ void THCTensor_(scanThrust)(
     THCState *state,
@@ -88,7 +88,7 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
   src = THCTensor_(newContiguous)(state, src);
 
   if (!self->is_empty()) {
-  #ifndef THC_REAL_IS_HALF
+  #if !defined(THC_REAL_IS_HALF) && !defined(THC_REAL_IS_BFLOAT16)
     if (ndim == 1) {
       // thrust does not take an "init"
       THCTensor_(scanThrust)(state, self, src, binary_op);

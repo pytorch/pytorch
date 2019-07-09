@@ -320,7 +320,4 @@ struct TensorBitXorConstantOp {
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensorMathPairwise.cu>
-#include <THC/THCGenerateBFloat16Type.h>
-
-#include <THC/generic/THCTensorMathPairwise.cu>
 #include <THC/THCGenerateBoolType.h>

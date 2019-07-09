@@ -10,9 +10,6 @@
 #include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateBoolType.h>
 
-#include <THC/generic/THCTensor.cpp>
-#include <THC/THCGenerateBFloat16Type.h>
-
 #include <THC/THCTensorInfo.cuh>
 
 #include <ATen/native/cuda/Resize.cuh>

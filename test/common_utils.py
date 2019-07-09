@@ -988,7 +988,7 @@ def do_test_empty_full(self, dtypes, layout, device):
             check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                         int64_dtype, layout, device, None, False)
 
-            if dtype is not torch.float16 and layout != torch.sparse_coo:
+            if dtype is not torch.float16 and dtype is not torch.bfloat16 and layout != torch.sparse_coo:
                 fv = 3
                 v = torch.full(shape, fv, dtype=dtype, layout=layout, device=device, requires_grad=rg)
                 check_value(v, dtype, layout, device, fv, rg)

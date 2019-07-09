@@ -12,7 +12,4 @@
 #include <THC/generic/THCTensorCopy.h>
 #include <THC/THCGenerateBoolType.h>
 
-#include <THC/generic/THCTensorCopy.h>
-#include <THC/THCGenerateBFloat16Type.h>
-
 #endif

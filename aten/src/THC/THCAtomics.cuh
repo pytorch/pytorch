@@ -5,6 +5,7 @@
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
 #include <ATen/ATen.h>
+#include <c10/util/BFloat16.h>
 
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
@@ -118,6 +119,10 @@ static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
     atomicAdd(reinterpret_cast<__half*>(address), val);
   #endif
 
+}
+
+static inline  __device__ void atomicAdd(at::BFloat16 *address, at::BFloat16 val) {
+    atomicAdd(reinterpret_cast<at::BFloat16*>(address), val);
 }
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
