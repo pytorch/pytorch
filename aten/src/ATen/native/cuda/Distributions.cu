@@ -711,30 +711,40 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generato
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
   auto mean_tensor = at::full({1}, mean, output.options());
-  at::native::legacy::cuda::_th_addcmul_out(output, mean_tensor, output, std, 1);
+  // NB: addcmul_out copies the tensor to be added into the output.
+  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
+  // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
+  // The third argument is not a constant reference and hence the samples in output are overwritten.
+  // Consequently, the computation performed is mean_tensor + mean_tensor * std instead of mean_tensor + output * std
+  output.mul_(std).add_(mean_tensor);
   return output;
 }
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  at::native::legacy::cuda::_th_addcmul_out(output, mean, output, std, 1);
+  // NB: addcmul_out copies the tensor to be added into the output.
+  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
+  // The previous function here was addcmul_out(output, mean, output, std, 1);
+  // The third argument is not a constant reference and hence the samples in output are overwritten.
+  // Consequently, the computation performed is mean + mean * std instead of mean + output * std
+  output.mul_(std).add_(mean);
   return output;
 }
 
 Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {
-  Tensor ret = at::empty(mean.sizes(), mean.options());
+  Tensor ret = at::empty_like(mean);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty(std.sizes(), std.options());
+  Tensor ret = at::empty_like(std);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty(mean.sizes(), mean.options());
+  Tensor ret = at::empty_like(mean);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
