@@ -12852,6 +12852,71 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M(), (torch.randn(2, 2),))
 
+    def test_error_stack(self):
+        def d(x):
+            # type: (int) -> int
+            return x + 10
+
+        def c(x):
+            return d("hello") + d(x)
+
+        def b(x):
+            return c(x)
+
+        def a(x):
+            return b(x)
+
+        try:
+            scripted = torch.jit.script(a)
+        except RuntimeError as e:
+            checker = FileCheck()
+            checker.check("Expected a value of type 'int'")
+            checker.check("def c(x)")
+            checker.check("def b(x)")
+            checker.check("def a(x)")
+            checker.run(str(e))
+
+    def test_error_stack_module(self):
+        def d(x):
+            # type: (int) -> int
+            return x + 10
+
+        def c(x):
+            return d("hello") + d(x)
+
+        def b(x):
+            return c(x)
+
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super(Submodule, self).__init__()
+
+            def forward(self, x):
+                return b(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.submodule = Submodule()
+
+            def some_method(self, y):
+                return y + self.submodule(y)
+
+            def forward(self, x):
+                return self.some_method(x)
+
+        try:
+            scripted = torch.jit.script(M())
+        except RuntimeError as e:
+            checker = FileCheck()
+            checker.check("Expected a value of type 'int'")
+            checker.check("return d(\"hello\")")
+            checker.check("return c(x)")
+            checker.check("return b(x)")
+            checker.check("return y + self.submodule(y)")
+            checker.check("return self.some_method(x)")
+            checker.run(str(e))
+
     def test_script_basic(self):
         def a_python_fn(a, b, c):
             return a + b + c
