@@ -2688,6 +2688,11 @@ class TestCuda(TestCase):
         b = torch.logspace(1, 10, 10, 2)
         self.assertEqual(a, b.cuda())
 
+    def test_upsample_nearest(self):
+        in_t = torch.ones(1, 128, 1, 1, device='cuda')
+        out_t = torch.nn.functional.upsample(in_t, size=2, mode='nearest')
+        self.assertEqual(torch.ones(1, 128, 2, 2), out_t)
+
     def test_lerp(self):
         _TestTorchMixin._test_lerp(self, lambda t: t.cuda())
 

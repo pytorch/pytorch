@@ -148,11 +148,16 @@ static void upsample_nearest2d_out_cuda_template(
   const int max_threads = std::min<int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS);
 
+  int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+
   // upsample_2d_shape_check makes sure input/output tensor is not empty;
-  int block_x = std::min<int>(lastPow2(output_width), max_threads);
-  int block_y = std::min<int>(lastPow2(output_height), max_threads / block_x);
-  int block_z =
-      std::min<int>(64, std::min<int>(nc, max_threads / block_x / block_y));
+  int block_x = std::min<int>(
+      maxThreadsDim[0], std::min<int>(lastPow2(output_width), max_threads));
+  int block_y = std::min<int>(
+      maxThreadsDim[1],
+      std::min<int>(lastPow2(output_height), max_threads / block_x));
+  int block_z = std::min<int>(
+      maxThreadsDim[2], std::min<int>(nc, max_threads / block_x / block_y));
   const dim3 block(block_x, block_y, block_z);
 
   int grid_x = cuda::ATenCeilDiv(output_width, block_x);
