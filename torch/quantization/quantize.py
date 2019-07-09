@@ -25,6 +25,7 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
             module.qconfig = qconfig_dict[prefix]
         else:
             module.qconfig = qconfig_parent
+        print('prefix:', prefix, 'qconfig: ', module.qconfig)
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
@@ -44,6 +45,8 @@ def propagate_qconfig(module, qconfig_dict=None):
     Return:
         None, module is modified inplace with qconfig attached
     """
+    if qconfig_dict is None:
+        qconfig_dict = {}
     propagate_qconfig_helper(module, qconfig_dict)
 
 def _observer_forward_hook(self, input, output):
@@ -135,9 +138,9 @@ def prepare(module, qconfig_dict=None):
         quant modules attached, a module that is ready for calibration or
         training
     """
-    if qconfig_dict is None:
-        qconfig_dict = {}
     propagate_qconfig(module, qconfig_dict)
+    if qconfig_dict:
+        module = add_quant_dequant(module)
     add_observer(module)
     return module
 
@@ -167,7 +170,7 @@ class DeQuantStub(nn.Module):
     def forward(self, x):
         return x
 
-def quantize(module, qconfig_dict, eval_fn, eval_args):
+def quantize(module, eval_fn, eval_args, qconfig_dict=None):
     r"""Converts a float module to quantized module.
 
     First it will prepare the module for calibration or training, then it calls
@@ -175,15 +178,21 @@ def quantize(module, qconfig_dict, eval_fn, eval_args):
     after that we will call `convert` which will convert the module to a
     quantized module.
 
+    When `qconfig_dict` is None or empty dictionary, we will assume user will
+    insert quant/dequant stubs and add qconfig in approporiate places.
+    When `qconfig_dict` is not None or empty dictionary, we will add quant/dequant
+    stubs using QuantWrapper for all the leaf modules.
+
     Args:
         module: input module
+        eval_fn: a function for evaluating the prepared module, can be a
+            function that simply runs the prepared module or a training loop
+        eval_args: positional arguments for `eval_fn`
         qconfig_dict: dictionary that maps from name of submodule to quantization
             configuration, qconfig applies to all submodules of a given
             module unless qconfig for the submodules are specified(when the
             submodule already has qconfig attribute)
-        eval_fn: a function for evaluating the prepared module, can be a
-            function that simply runs the prepared module or a training loop
-        eval_args: positional arguments for `eval_fn`
+
 
     Return:
         A quantized module
@@ -235,6 +244,7 @@ def swap_module(mod, mapping):
         The corresponding quantized module of `mod`
     """
     new_mod = mod
+    print('swapping:', mod)
     if hasattr(mod, 'observer'):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)

@@ -42,16 +42,22 @@ class Observer(nn.Module):
         else:
             qmin, qmax = 0, 255
         n_levels = 255.0
+        if self.max_val is None or self.min_val is None:
+            raise Exception('must run observer before calling calculate_qparams!')
         max_val, min_val = self.max_val.item(), self.min_val.item()
-        if self.qscheme == torch.per_tensor_symmetric:
-            max_val = max(-min_val, max_val)
-            scale = max_val / 127.0
-            zero_point = 0 if self.dtype == torch.qint8 else 128
+        if max_val == min_val:
+            scale = 1.0
+            zero_point = 0
         else:
-            scale = (max_val - min_val) / n_levels
-            zero_point = qmin - round(min_val / scale)
-            zero_point = max(qmin, zero_point)
-            zero_point = min(qmax, zero_point)
+            if self.qscheme == torch.per_tensor_symmetric:
+                max_val = max(-min_val, max_val)
+                scale = max_val / 127.0
+                zero_point = 0 if self.dtype == torch.qint8 else 128
+            else:
+                scale = (max_val - min_val) / n_levels
+                zero_point = qmin - round(min_val / scale)
+                zero_point = max(qmin, zero_point)
+                zero_point = min(qmax, zero_point)
 
         return torch.tensor([scale, zero_point])
 
