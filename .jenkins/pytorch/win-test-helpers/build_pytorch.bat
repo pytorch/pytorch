@@ -74,8 +74,12 @@ set CMAKE_GENERATOR=Ninja
 
 if not "%USE_CUDA%"=="1" (
   if "%REBUILD%"=="" (
-    set NO_CUDA=1
+    :: Must save and restore the original value of USE_CUDA, otherwise the
+    :: `if not "%USE_CUDA%"=="0"` line can be messed up.
+    set OLD_USE_CUDA=%USE_CUDA%
+    set USE_CUDA=0
     python setup.py install
+    set USE_CUDA=%OLD_USE_CUDA%
   )
   if errorlevel 1 exit /b 1
   if not errorlevel 0 exit /b 1
@@ -99,7 +103,7 @@ if not "%USE_CUDA%"=="0" (
 
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc
 
-  if "%REBUILD%"=="" set NO_CUDA=0
+  if "%REBUILD%"=="" set USE_CUDA=1
 
   python setup.py install --cmake && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (
