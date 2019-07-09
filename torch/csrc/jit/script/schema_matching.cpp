@@ -517,7 +517,7 @@ Value* emitBuiltinCall(
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
     }
-    for (const std::shared_ptr<Function>& method : builtin_functions) {
+    for (const auto method : builtin_functions) {
       method->ensure_defined();
       if (auto result = tryMatchSchema(
               method->getSchema(),

@@ -2,9 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
-from ...._jit_internal import weak_module
 
-@weak_module
 class Quantize(Module):
     r"""Quantizes an incoming tensor
     Args:
@@ -39,7 +37,6 @@ class Quantize(Module):
     def from_float(mod):
         return Quantize(mod.qparams[0].item(), mod.qparams[1].item(), torch.quint8)
 
-@weak_module
 class DeQuantize(Module):
     r"""Dequantizes an incoming tensor
 
@@ -65,7 +62,6 @@ class DeQuantize(Module):
     def from_float(mod):
         return DeQuantize()
 
-@weak_module
 class Linear(NNLinear):
     r"""
     A quantized linear module with quantized tensor as inputs
@@ -95,18 +91,18 @@ class Linear(NNLinear):
     __constants__ = ['bias', 'in_features', 'out_features']
 
     def __init__(self, in_features, out_features, bias=True):
-        # assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
         del self.weight
-        del self.bias
+        if self.bias is not None:
+            del self.bias
+            qbias = torch._empty_affine_quantized(
+                [out_features], scale=1, zero_point=0, dtype=torch.qint32)
+            self.register_buffer('bias', qbias)
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0,
             dtype=torch.qint8)
-        qbias = torch._empty_affine_quantized(
-            [out_features], scale=1, zero_point=0, dtype=torch.qint32)
         self.register_buffer('_packed_weight',
                              torch.ops.quantized.fbgemm_linear_prepack(qweight))
-        self.register_buffer('bias', qbias)
         self.register_buffer('out_scale', torch.Tensor([1]))
         self.register_buffer('out_zero_point', torch.Tensor([0]))
 
@@ -119,6 +115,7 @@ class Linear(NNLinear):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
     def forward(self, x):
+        # Note that we can handle self.bias == None case.
         Y_q = torch.ops.quantized.fbgemm_linear(
             x, self._packed_weight,
             self.bias,
