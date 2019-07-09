@@ -7,7 +7,6 @@ from __future__ import unicode_literals
 import numpy as np
 
 import torch
-from torch._jit_internal import weak_module, weak_script_method
 from torch.nn.modules.utils import _pair
 from torch.nn.quantized import functional as qF
 
@@ -20,7 +19,6 @@ def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                     * (dilation - 1)) / stride) + 2 * output_padding + 1
 
 
-@weak_module
 class Conv2d(_ConvNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -91,7 +89,6 @@ class Conv2d(_ConvNd):
         else:
             self._zero_point = torch.Tensor([zp]).to(torch.int)
 
-    @weak_script_method
     def forward(self, input):
         return qF.conv2d(input=input,
                          weight=self._packed_weight,
