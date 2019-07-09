@@ -116,6 +116,6 @@ docker build \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION}" \
-	   --build-arg "BUILD_PYTORCH=${BUILD_PYTORCH}" \
+       --build-arg "BUILD_PYTORCH=${BUILD_PYTORCH}" \
        "$@" \
        "$(dirname ${DOCKERFILE})"
