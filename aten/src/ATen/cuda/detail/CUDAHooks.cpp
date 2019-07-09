@@ -116,8 +116,8 @@ int64_t CUDAHooks::current_device() const {
 }
 
 bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
-  AT_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-           "hasPrimaryContext expects valid device index, but got device_index=", device_index);
+  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
+              "hasPrimaryContext expects valid device index, but got device_index=", device_index);
   unsigned int ctx_flags;
   int ctx_is_active;
   AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
