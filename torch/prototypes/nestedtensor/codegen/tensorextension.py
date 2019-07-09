@@ -1,106 +1,10 @@
 import torch
 
 
-def set_binary_method(cls, tfunc, pbf, func, inplace):
-    def _gen_func(pbf):
-        def _func(self: cls, other: cls):
-            def _t_func(output: torch.Tensor,
-                        input1: torch.Tensor,
-                        input2: torch.Tensor):
-                getattr(torch, tfunc)(input1, input2, out=output)
-            if inplace:
-                return func(_t_func, self, self, other)
-            else:
-                output = self.clone()
-                return func(_t_func, output, self, other)
-        return _func
-    setattr(cls, pbf, _gen_func(pbf))
 
 
-def set_binary_function(module, cls, tfunc, pbf, func):
-    def _gen_func(pbf):
-        orig_tfunc = getattr(torch, tfunc)
-        def _func(*args, **kwargs):
-            if isinstance(args[0], cls):
-                def _t_func(output: torch.Tensor,
-                            input1: torch.Tensor,
-                            input2: torch.Tensor):
-                    orig_tfunc(input1, input2, out=output)
-                assert len(args) == 2
-                if len(kwargs):
-                    assert list(kwargs.keys()) == ['out']
-                    output = kwargs['out']
-                else:
-                    output = args[0].clone()
-                return func(_t_func, output, args[0], args[1])
-            else:
-                return orig_tfunc(*args, **kwargs)
-        return _func
-    setattr(module, pbf, _gen_func(pbf))
-
-
-def add_pointwise_binary_functions(module, cls, func):
-    funcs = [
-        'add',
-        'mul',
-        'sub',
-    ]
-    for pbf in funcs:
-        set_binary_method(cls, pbf, pbf, func, False)
-        set_binary_method(cls, pbf, pbf + "_", func, True)
-        set_binary_method(cls, pbf, "__" + pbf + "__", func, False)
-        set_binary_method(cls, pbf, "__i" + pbf + "__", func, True)
-        set_binary_function(module, cls, pbf, pbf, func)
-    set_binary_method(cls, "div", "div", func, False)
-    set_binary_method(cls, "div", "div_", func, True)
-    set_binary_method(cls, "div", "__truediv__", func, False)
-    set_binary_method(cls, "div", "__itruediv__", func, True)
-    set_binary_function(module, cls, "div", "div", func)
-    return module, cls
-
-
-# It's up to the user to make sure that output is of type torch.uint8
-def add_pointwise_comparison_functions(cls, func):
-    funcs = [
-        'eq',
-        'ge',
-        'gt',
-        'le',
-        'ne',
-        'ge'
-    ]
-    for pbf in funcs:
-        set_binary_method(cls, pbf, pbf, func, False)
-        set_binary_method(cls, pbf, pbf + "_", func, True)
-        set_binary_method(cls, pbf, "__" + pbf + "__", func, False)
-    return cls
-
-
-def set_unary_method(cls, tfunc, pbf, func, inplace):
-    def _gen_func(pbf):
-        def _func(self: cls):
-            assert isinstance(self, cls)
-
-            def _t_func(output: torch.Tensor,
-                        input1: torch.Tensor):
-                # NOTE: We are disabling broadcasting for now
-                output.size() == input1.size()
-                getattr(torch, tfunc)(input1, out=output)
-            if inplace:
-                func(_t_func, self, self)
-                return self
-            else:
-                output = self.clone()
-                func(_t_func, output, self)
-                return output
-        return _func
-    if getattr(cls, pbf, False):
-        print("WARNING: " + pbf + " already exists")
-    setattr(cls, pbf, _gen_func(pbf))
-
-
-def add_pointwise_unary_functions(cls, func):
-    funcs = [
+def get_unary_functions():
+    return [
         'abs',
         'acos',
         'asin',
@@ -163,7 +67,126 @@ def add_pointwise_unary_functions(cls, func):
         'tril',
         'triu',
         'trunc']
-    for pbf in funcs:
-        set_unary_method(cls, pbf, pbf, func, False)
-        set_unary_method(cls, pbf, pbf + '_', func, True)
-    return cls
+
+
+def get_binary_functions():
+    funcs = [
+        'add',
+        'mul',
+        'sub',
+        'div',
+    ]
+    return funcs
+
+
+def get_comparison_functions():
+    funcs = [
+        'eq',
+        'ge',
+        'gt',
+        'le',
+        'ne',
+        'ge'
+    ]
+    return funcs
+
+
+def set_function(module, cls, tfunc, func):
+    def _gen_func(tfunc):
+        orig_tfunc = getattr(torch, tfunc)
+        def _func(*args, **kwargs):
+            if isinstance(args[0], cls):
+                return func(*(orig_tfunc + args), **kwargs)
+            else:
+                return orig_tfunc(*args, **kwargs)
+        return _func
+    setattr(module, tfunc, _gen_func(pbf))
+
+
+def set_unary_method(cls, tfunc, pbf, func, inplace):
+    def _gen_func(pbf):
+        def _func(self: cls):
+            assert isinstance(self, cls)
+            if inplace:
+                return getattr(torch, tfunc)(self, out=self)
+            else:
+                return getattr(torch, tfunc)(self)
+        return _func
+    if getattr(cls, pbf, False):
+        print("WARNING: " + pbf + " already exists")
+    setattr(cls, pbf, _gen_func(pbf))
+
+
+def set_binary_method(cls, tfunc, pbf, inplace):
+    def _gen_func(tfunc):
+        def _func(self: cls, other: cls):
+            if inplace:
+                return getattr(torch, tfunc)(self, other, out=self)
+            else:
+                return getattr(torch, tfunc)(self, other)
+        return _func
+    setattr(cls, pbf, _gen_func(tfunc))
+
+
+
+
+def get_unary_method_signatures():
+    signatures = []
+    for pbf in get_unary_functions():
+        signatures.append({'torch': pbf, 'Tensor': pbf,       'inplace': False))
+        signatures.append({'torch': pbf, 'Tensor': pbf + "_", 'inplace': True))
+
+
+def get_binary_method_signatures():
+    signatures = []
+    for pbf in ['add', 'mul', 'sub']:
+        signatures.append({'torch': pbf, 'Tensor':         pbf,        'inplace': False))
+        signatures.append({'torch': pbf, 'Tensor':         pbf + "_",  'inplace': True))
+        signatures.append({'torch': pbf, 'Tensor':  "__" + pbf + "__", 'inplace': False))
+        signatures.append({'torch': pbf, 'Tensor': "__i" + pbf + "__", 'inplace': True))
+    signatures.append({'torch': 'div', 'Tensor':         'div',        'inplace': False))
+    signatures.append({'torch': 'div', 'Tensor':         'div' + "_",  'inplace': True))
+    signatures.append({'torch': 'div', 'Tensor':  "__" + 'div' + "__", 'inplace': False))
+    signatures.append({'torch': 'div', 'Tensor': "__i" + 'div' + "__", 'inplace': True))
+    return signatures
+
+
+def get_comparison_method_signatures():
+    signatures = []
+    for pbf in get_comparison_functions():
+        signatures.append({'torch': pbf, 'Tensor':         pbf,        'inplace': False))
+        signatures.append({'torch': pbf, 'Tensor':         pbf + "_",  'inplace': True))
+        signatures.append({'torch': pbf, 'Tensor':  "__" + pbf + "__", 'inplace': False))
+    return signatures
+
+
+def add_pointwise_unary_functions(module, cls, func):
+    for function_name in get_unary_functions():
+        set_unary_function(module, cls, function_name, func)
+    for signature in get_unary_method_signatures():
+        set_unary_method(cls, signature['torch'], signature['Tensor'], signature['inplace'])
+    return module, cls
+
+
+def add_pointwise_binary_functions(module, cls, func):
+    for function_name in get_binary_functions():
+        set_function(module, cls, function_name, func)
+    for signature in get_binary_method_signatures():
+        set_binary_method(cls, signature['torch'], signature['Tensor'], signature['inplace'])
+    return module, cls
+
+
+# It's up to the user to make sure that output is of type torch.uint8
+def add_pointwise_comparison_functions(module, cls, func):
+    for function_name in get_comparison_functions():
+        set_function(module, cls, function_name, func)
+    for signature in get_comparison_method_signatures():
+        set_binary_method(cls, signature['torch'], signature['Tensor'], signature['inplace'])
+    return module, cls
+
+
+
+
+
+
+
