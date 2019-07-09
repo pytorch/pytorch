@@ -1225,6 +1225,26 @@ new_module_tests = [
         cudnn=True,
     ),
     dict(
+        fullname='Conv1d_padding_same_static',
+        constructor=lambda: nn.Conv1d(4, 4, 1, padding="same"),
+        input_size=(2, 4, 8),
+    ),
+    dict(
+        fullname='Conv1d_padding_same_offset',
+        constructor=lambda: nn.Conv1d(4, 4, 2, padding="same"),
+        input_size=(2, 4, 8),
+    ),
+    dict(
+        fullname='Conv1d_padding_same_dynamic',
+        constructor=lambda: nn.Conv1d(4, 4, 5, 3, padding="same"),
+        input_size=(2, 4, 10),
+    ),
+    dict(
+        fullname='Conv1d_padding_same_all_params1',
+        constructor=lambda: nn.Conv1d(4, 4, 3, stride=2, dilation=3, padding="same"),
+        input_size=(2, 4, 20),
+    ),
+    dict(
         fullname='ConvTranspose1d',
         constructor=lambda: nn.ConvTranspose1d(3, 4, kernel_size=3, stride=(3,), padding=1, output_padding=(1,)),
         cudnn=True,
@@ -1362,6 +1382,31 @@ new_module_tests = [
         fullname='Conv2d_depthwise_dilated',
         constructor=lambda: nn.Conv2d(4, 4, (2, 2), dilation=(2, 2), groups=4),
         input_size=(2, 4, 5, 5),
+    ),
+    dict(
+        fullname='Conv2d_padding_same_static',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), padding="same"),
+        input_size=(2, 4, 8, 8),
+    ),
+    dict(
+        fullname='Conv2d_padding_same_offset',
+        constructor=lambda: nn.Conv2d(4, 4, (2, 2), padding="same"),
+        input_size=(2, 4, 8, 8),
+    ),
+    dict(
+        fullname='Conv2d_padding_same_dynamic',
+        constructor=lambda: nn.Conv2d(4, 4, (5, 5), 3, padding="same"),
+        input_size=(2, 4, 10, 10),
+    ),
+    dict(
+        fullname='Conv2d_padding_same_all_params1',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 2), stride=(2, 3), dilation=(3, 5), padding="same"),
+        input_size=(2, 4, 20, 15),
+    ),
+    dict(
+        fullname='Conv2d_padding_same_all_params2',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 2), stride=(2, 3), dilation=(3, 5), padding="same"),
+        input_size=(2, 4, 20, 20),
     ),
     dict(
         module_name='MaxPool2d',
@@ -1535,6 +1580,31 @@ new_module_tests = [
         fullname='Conv3d_dilated_strided',
         constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, stride=2),
         input_size=(2, 3, 5, 5, 5),
+    ),
+    dict(
+        fullname='Conv3d_padding_same_static',
+        constructor=lambda: nn.Conv3d(4, 4, (3, 3, 3), padding="same"),
+        input_size=(2, 4, 8, 8, 8),
+    ),
+    dict(
+        fullname='Conv3d_padding_same_offset',
+        constructor=lambda: nn.Conv3d(4, 4, (2, 2, 2), padding="same"),
+        input_size=(2, 4, 8, 8, 8),
+    ),
+    dict(
+        fullname='Conv3d_padding_same_dynamic',
+        constructor=lambda: nn.Conv3d(4, 4, (5, 5, 5), 3, padding="same"),
+        input_size=(2, 4, 10, 10, 10),
+    ),
+    dict(
+        fullname='Conv3d_padding_same_all_params1',
+        constructor=lambda: nn.Conv3d(1, 1, (3, 2, 1), stride=(2, 3, 1), dilation=(3, 5, 3), padding="same"),
+        input_size=(1, 1, 20, 15, 13),
+    ),
+    dict(
+        fullname='Conv3d_padding_same_all_params2',
+        constructor=lambda: nn.Conv3d(1, 1, (3, 2, 3), stride=(2, 3, 1), dilation=(3, 5, 2), padding="same"),
+        input_size=(1, 1, 20, 20, 20),
     ),
     dict(
         module_name='ConvTranspose3d',
