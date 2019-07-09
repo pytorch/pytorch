@@ -12,12 +12,16 @@
 namespace torch {
 namespace jit {
 
+class Node;
+
 enum class JitLoggingLevels {
   OFF,
   GRAPH_DUMP,
   GRAPH_UPDATE,
   GRAPH_DEBUG,
 };
+
+std::string debugValueOrDefault(const Node* n);
 
 JitLoggingLevels jit_log_level();
 
