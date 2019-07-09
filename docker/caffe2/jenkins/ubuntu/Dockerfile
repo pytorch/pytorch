@@ -54,6 +54,12 @@ ADD ./install_cmake.sh install_cmake.sh
 RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
 RUN rm install_cmake.sh
 
+# (optional) Install a steady version of PyTorch
+ARG BUILD_PYTORCH
+ADD ./install_pytorch.sh install_pytorch.sh
+RUN if [ -n "${BUILD_PYTORCH}" ]; then bash ./install_pytorch.sh; fi
+RUN rm install_pytorch.sh
+
 # (optional) Add Jenkins user
 ARG JENKINS
 ARG JENKINS_UID

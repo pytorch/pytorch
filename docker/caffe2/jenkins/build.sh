@@ -81,6 +81,10 @@ if [[ "$image" == *-glibc* ]]; then
   GLIBC_VERSION="$(echo "${image}" | perl -n -e'/glibc(\d+(\.\d+)?)/ && print $1')"
 fi
 
+if [[ "$image" == *-build_pytorch* ]]; then
+  BUILD_PYTORCH=yes
+fi
+
 # Copy over common scripts to directory containing the Dockerfile to build
 cp -a common/* "$(dirname ${DOCKERFILE})"
 
@@ -112,5 +116,6 @@ docker build \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION}" \
+	   --build-arg "BUILD_PYTORCH=${BUILD_PYTORCH}" \
        "$@" \
        "$(dirname ${DOCKERFILE})"
