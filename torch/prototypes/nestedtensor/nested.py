@@ -1,24 +1,10 @@
 import torch
 import torch.nn.functional as F
 
-orig_embedding = torch.nn.functional.embedding
-
-def embedding_monkey(input, weight, padding_idx=None, max_norm=None,
-                     norm_type=2., scale_grad_by_freq=False, sparse=False):
-    if isinstance(input, NestedTensor):
-        ret_tensors = []
-        for tensor in input.tensors:
-            ret_tensors.append(orig_embedding(tensor, weight, padding_idx,
-                                        max_norm, norm_type, scale_grad_by_freq,
-                                        sparse))
-        return NestedTensor(ret_tensors)
-    else:
-        return orig_embedding(input, weight, padding_idx, max_norm, norm_type,
-                             scale_grad_by_freq, sparse)
-    return ret
 
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
+
 
 def make_nested_tensor(obj):
     if is_nested_tensor(obj):

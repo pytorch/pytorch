@@ -2,8 +2,6 @@ import torch
 from . import nested
 from .codegen import tensorextension
 
-torch.nn.functional.embedding = nested.embedding_monkey
-
 torch.nestedtensor = nested.make_nested_tensor
 NestedTensor = nested.NestedTensor
 
