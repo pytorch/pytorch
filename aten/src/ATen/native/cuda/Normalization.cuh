@@ -673,28 +673,28 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   return std::make_tuple(mean_, invstd_);
 }
 
-template<typename scalar_t, typename index_t>
+template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 Tensor batch_norm_elemt_cuda_template(const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
                                                                   const Tensor& mean_, const Tensor& invstd_,
                                                                   double epsilon) {
 
-  using accscalar_t = at::acc_type<scalar_t, true>;
+  using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
   auto output_reshaped = at::empty_like(input_reshaped);
 
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
-  auto input = input_reshaped.packed_accessor<scalar_t, 3, RestrictPtrTraits, index_t>();
+  auto input = input_reshaped.packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto input_options = input_.options();
   if (input_.scalar_type() == at::ScalarType::Half) {
     input_options = input_options.dtype(ScalarType::Float);
   }
-  auto output = output_reshaped.packed_accessor<scalar_t, 3, RestrictPtrTraits, index_t>();
-  auto weight = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits, index_t>(weight_);
-  auto bias = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits, index_t>(bias_);
-  auto mean = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(mean_);
-  auto invstd = packed_accessor_or_dummy<accscalar_t, 1, RestrictPtrTraits, index_t>(invstd_);
+  auto output = output_reshaped.packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
+  auto weight = packed_accessor_or_dummy<input_scalar_t, 1, RestrictPtrTraits, index_t>(weight_);
+  auto bias = packed_accessor_or_dummy<input_scalar_t, 1, RestrictPtrTraits, index_t>(bias_);
+  auto mean = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(mean_);
+  auto invstd = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(invstd_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
   // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
@@ -707,7 +707,7 @@ Tensor batch_norm_elemt_cuda_template(const Tensor& input_, const Tensor& weight
   dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>((256*1024)/input.size(1),
                                                                   (input.size(0)+tb-1)/tb)));
   dim3 threads_trans(tf, tb);
-  batch_norm_transform_input_kernel<scalar_t, scalar_t, accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
+  batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
     (input, output, mean, invstd, weight, bias, epsilon);
   THCudaCheck(cudaGetLastError());
   return output_reshaped.view(input_.sizes());
