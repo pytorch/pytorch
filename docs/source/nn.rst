@@ -876,6 +876,12 @@ Utilities
 
 .. autofunction:: torch.nn.utils.rnn.pack_sequence
 
+:hidden:`Flatten`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Flatten
+    :members:
+
 
 
 

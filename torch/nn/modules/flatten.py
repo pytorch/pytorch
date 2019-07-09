@@ -12,7 +12,7 @@ class Flatten(Module):
 
     Shape:
         - Input: :math:`(N, *dims)
-        - Output: :math:`(N, product of dims)`. Output is of the same shape as input
+        - Output: :math:`(N, product of dims)`
 
     Examples::
         >>> m = nn.Sequential(
