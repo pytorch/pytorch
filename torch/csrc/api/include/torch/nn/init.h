@@ -70,6 +70,16 @@ TORCH_API Tensor sparse_(Tensor tensor, double sparsity, double std = 0.01);
 TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
 
 /// Fills the input `Tensor` with values according to the method
+/// described in "Scaling Laws for the Principled Design,
+/// Initialization and Preconditioning of ReLU Networks" -
+/// Defazio A., Bottou L. (2019).
+/// No gradient will be recorded for this operation.
+TORCH_API Tensor geometric_(
+    Tensor tensor,
+    double a = 0,
+    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
+
+/// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
 /// performance on ImageNet classification" - He, K. et al. (2015), using a
 /// normal distribution. Also known as He initialization.

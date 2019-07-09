@@ -218,6 +218,37 @@ def _calculate_fan_in_and_fan_out(tensor):
 
     return fan_in, fan_out
 
+def geometric_(tensor, a=0, nonlinearity='leaky_relu'):
+    r"""
+    An initialization that attempts to balanced the diagonal blocks of
+    the Hessian resulting in a better conditioned network.
+    Described in `Scaling Laws for the Principled Design,
+    Initialization and Preconditioning of ReLU Networks` -
+    Defazio A., Bottou L. (2019).
+    The nonlinearity correction factor follows the Kaiming scheme.
+    The resulting tensor will have values sampled from
+    :math:`\mathcal{N}(0, \text{std})` where
+
+    .. math::
+        \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \sqrt{\text{fan\_in} \times \text{fan\_out}}}}
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        a: the negative slope of the rectifier used after this layer (0 for ReLU
+            by default)
+        nonlinearity: the non-linear function (`nn.functional` name),
+            recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
+
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.geometric_(w, nonlinearity='relu')
+    """
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    gain = calculate_gain(nonlinearity, a)
+    std = gain / math.pow(fan_in * fan_out, 0.25)
+    with torch.no_grad():
+        return tensor.normal_(0, std)
+
 
 def xavier_uniform_(tensor, gain=1.):
     # type: (Tensor, float) -> Tensor

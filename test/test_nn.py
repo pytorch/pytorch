@@ -8877,6 +8877,29 @@ class TestNNInit(TestCase):
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
                     assert self._is_normal(input_tensor, 0, expected_std)
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_geometric(self):
+        for use_a in [True, False]:
+            for dims in [2, 4]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
+                if use_a:
+                    a = self._random_float(0.1, 2)
+                    init.geometric_(input_tensor, a=a)
+                else:
+                    a = 0
+                    init.geometric_(input_tensor)
+
+                fan_in = input_tensor.size(1)
+                fan_out = input_tensor.size(0)
+                if input_tensor.dim() > 2:
+                    fan_in *= input_tensor[0, 0].numel()
+                    fan_out *= input_tensor[0, 0].numel()
+
+                n = math.sqrt(fan_in * fan_out)
+
+                expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
+                assert self._is_normal(input_tensor, 0, expected_std)
+
     def test_sparse_only_works_on_2d_inputs(self):
         for dims in [1, 3]:
             with self.assertRaises(ValueError):

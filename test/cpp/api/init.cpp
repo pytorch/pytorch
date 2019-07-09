@@ -83,6 +83,14 @@ TEST(InitTest, ProducesPyTorchValues_XavierNormal) {
   check_initializer_against_baseline(initializer, expected);
 }
 
+TEST(InitTest, ProducesPyTorchValues_Geometric) {
+  auto expected = expected_parameters::Geometric();
+  auto initializer = [](torch::Tensor tensor) {
+    torch::nn::init::geometric_(tensor);
+  };
+  check_initializer_against_baseline(initializer, expected);
+}
+
 TEST(InitTest, ProducesPyTorchValues_KaimingNormal) {
   auto expected = expected_parameters::Kaiming_Normal();
   auto initializer = [](torch::Tensor tensor) {

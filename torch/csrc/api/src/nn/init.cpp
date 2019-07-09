@@ -175,6 +175,17 @@ Tensor uniform_(Tensor tensor, double low, double high) {
   return tensor.uniform_(low, high);
 }
 
+Tensor geometric_(
+    Tensor tensor,
+    double a,
+    Nonlinearity nonlinearity) {
+  NoGradGuard guard;
+  Fan fan(tensor);
+  const auto gain = calculate_gain(nonlinearity, a);
+  double std = gain / std::pow(fan.in * fan.out, 0.25);
+  return tensor.normal_(0, std);
+}
+
 Tensor kaiming_uniform_(
     Tensor tensor,
     double a,

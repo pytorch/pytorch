@@ -16,6 +16,7 @@ FOOTER = "} // namespace expected_parameters"
 PARAMETERS = "inline std::vector<std::vector<torch::Tensor>> {}() {{"
 
 INITIALIZERS = {
+    "Geometric": lambda w: torch.nn.init.geometric_(w),
     "Xavier_Uniform": lambda w: torch.nn.init.xavier_uniform(w),
     "Xavier_Normal": lambda w: torch.nn.init.xavier_normal(w),
     "Kaiming_Normal": lambda w: torch.nn.init.kaiming_normal(w),
