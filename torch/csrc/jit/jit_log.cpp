@@ -15,7 +15,7 @@ JitLoggingLevels jit_log_level() {
   return log_level;
 }
 
-std::string debugValueOrDefault(Node* n) {
+std::string debugValueOrDefault(const Node* n) {
   return n->outputs().size() > 0 ? n->outputs().at(0)->debugName() : "n/a";
 }
 
