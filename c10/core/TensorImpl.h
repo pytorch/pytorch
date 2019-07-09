@@ -144,7 +144,7 @@ struct C10_API NonVariableTypeMode {
   static void set_enabled(bool enabled);
 };
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface();
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const;
@@ -187,23 +187,27 @@ struct C10_API NamedTensorMetaInterface {
 // pass in multi-thread scenarios, thus making the forward pass not thread-safe anymore,
 // which breaks the invariant.
 struct C10_API VariableVersion {
+ private:
+  struct VersionCounter : intrusive_ptr_target {
+    VersionCounter(uint32_t version) : version_(version) {}
+    std::atomic<uint32_t> version_;
+  };
+  c10::intrusive_ptr<VersionCounter> version_counter_;
+
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version = 0)
-      : version_block_(std::make_shared<std::atomic<uint32_t>>(version)) {}
+      : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
 
   void bump() noexcept {
-    version_block_->fetch_add(1);
+    ++version_counter_->version_;
   }
 
   uint32_t current_version() const noexcept {
-    return version_block_->load();
+    return version_counter_->version_;
   }
-
- private:
-  std::shared_ptr<std::atomic<uint32_t>> version_block_;
 };
 
 /**
@@ -849,7 +853,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   /**
    * Set the pointer to named tensor metadata.
    */
@@ -1498,7 +1502,7 @@ protected:
     dest_impl->reserved_ = src_impl->reserved_;
     dest_impl->set_version_counter(version_counter);
     dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
     if (src_impl->named_tensor_meta_ != nullptr) {
       dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
     }
@@ -1513,7 +1517,7 @@ protected:
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 #endif
 
@@ -1614,8 +1618,7 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
-//    version counter (word 0)
-//    version counter (word 1)
+//    version counter pointer
 //    PyObject pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
@@ -1639,10 +1642,10 @@ protected:
 //    (optional) device
 //    miscellaneous bitfield
 //
-#ifdef NAMEDTENSOR_ENABLED
-#define NWORDS 30
-#else
+#ifdef BUILD_NAMEDTENSOR
 #define NWORDS 29
+#else
+#define NWORDS 28
 #endif
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               sizeof(TensorImpl) == sizeof(int64_t) * NWORDS,

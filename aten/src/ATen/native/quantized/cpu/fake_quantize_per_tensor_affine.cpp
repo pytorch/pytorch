@@ -32,13 +32,15 @@ Tensor fake_quantize_per_tensor_affine_cpu(
       int64_t quant_max
     ) {
     TORCH_CHECK(self.scalar_type() == ScalarType::Float);
-    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or equal to `quant_max`.");
-    TORCH_CHECK(zero_point >= 0, "`zero_point` must be a positive integer.");
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or \
+        equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= quant_min && zero_point <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
 
     auto Y = at::empty_like(self);
 
     double inv_scale = 1.0f / scale;
-    Y = (((self * inv_scale + 0.5f).floor() + zero_point)
+    Y = ((self * inv_scale + zero_point).round()
       .clamp_min(quant_min).clamp_max(quant_max) - zero_point) * scale;
     return Y;
 }
@@ -73,20 +75,20 @@ Tensor fake_quantize_per_tensor_affine_backward_cpu(
     TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
     TORCH_CHECK(X.scalar_type() == ScalarType::Float);
     TORCH_CHECK(X.numel() == dY.numel(), "`X` and `dY` are not the same size");
-    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or equal to `quant_max`.");
-    TORCH_CHECK(zero_point >= 0, "`zero_point` must be a positive integer.");
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or \
+        equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= quant_min && zero_point <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
     if (X.numel() <= 0) {
       return X;
     }
 
-    auto dX = at::zeros_like(dY);
-
     double inv_scale = 1.0f / scale;
-    at::Tensor Xq = (X * inv_scale + 0.5).floor() + zero_point;
-    at::Tensor mask_min = (Xq >= quant_min);
-    at::Tensor mask_max = (Xq <= quant_max);
-    at::Tensor mask = mask_min * mask_max;
-    dX = mask.type_as(dY) * dY;
+    Tensor Xq = (X * inv_scale + zero_point).round();
+    Tensor mask_min = (Xq >= quant_min);
+    Tensor mask_max = (Xq <= quant_max);
+    Tensor mask = mask_min * mask_max;
+    Tensor dX = mask.type_as(dY) * dY;
     return dX;
 }
 }}  // namespace at::native

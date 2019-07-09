@@ -34,9 +34,10 @@ at::Tensor fake_quantize_per_tensor_affine_cuda(
     ) {
     TORCH_CHECK(self.is_cuda());
     TORCH_CHECK(self.scalar_type() == ScalarType::Float);
-    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or equal to `quant_max`.");
-    TORCH_CHECK(zero_point >= 0, "`zero_point` must be a positive integer.");
-
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or \
+        equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= quant_min && zero_point <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
     auto Y = at::empty_like(self);
 
     float inv_scale = 1.0f / scale;
@@ -46,7 +47,9 @@ at::Tensor fake_quantize_per_tensor_affine_cuda(
         [=] __device__ (
             const float& input_val,
             float& result_val) {
-          result_val = (fminf(quant_max, fmaxf(quant_min, (std::round(input_val * inv_scale + zero_point)))) - zero_point) * scale;
+          result_val = (fminf(quant_max, fmaxf(quant_min,
+              (std::round(input_val * inv_scale + zero_point))))
+                - zero_point) * scale;
         });
     return Y;
 }
@@ -83,26 +86,26 @@ at::Tensor fake_quantize_per_tensor_affine_backward_cuda(
     TORCH_CHECK(X.is_cuda());
     TORCH_CHECK(X.scalar_type() == ScalarType::Float);
     TORCH_CHECK(X.numel() == dY.numel(), "`X` and `dY` are not the same size");
-    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or equal to `quant_max`.");
-    TORCH_CHECK(zero_point >= 0, "`zero_point` must be a positive integer.");
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or \
+        equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= quant_min && zero_point <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
     if (X.numel() <= 0) {
       return X;
     }
 
-    auto dX = at::zeros_like(dY);
+    auto dX = dY.clone();
 
     float inv_scale = 1.0f / scale;
-    auto mask = at::empty_like(dY);
     at::cuda::CUDA_tensor_apply2<float, float>(
         X,
-        mask,
+        dX,
         [=] __device__ (
-            const float& input_val,
-            float& result_val) {
-          float Xq = std::round(input_val * inv_scale + zero_point);
-          result_val = float(Xq >= quant_min && Xq <= quant_max);
+            const float& input,
+            float& result) {
+          float Xq = std::round(input * inv_scale + zero_point);
+          result = float(Xq >= quant_min && Xq <= quant_max) *  result;
         });
-    dX = mask * dY;
     return dX;
 }
 

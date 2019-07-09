@@ -72,9 +72,12 @@ def qtensor(draw, shapes, dtypes=None, float_min=-1e6, float_max=1e6):
     # Resolve scale
     scale = draw(st.floats(min_value=np.finfo(np.float32).resolution,
                            max_value=(np.finfo(np.float32).max)))
+    _float_type_info = torch.finfo(torch.float)
+    float_min = _float_type_info.min
+    float_max = _float_type_info.max
     # Resolve the tensor
     Xhy = draw(stnp.arrays(dtype=np.float32,
-                           elements=st.floats(float_min, float_max),
+                           elements=st.floats(min_value=float_min, max_value=float_max),
                            shape=shape))
     return Xhy, (scale, zero_point), (qmin, qmax), (torch_type, np_type)
 

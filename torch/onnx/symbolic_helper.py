@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 from torch._C import ListType
 import warnings
@@ -240,6 +242,10 @@ def _set_opset_version(opset_version):
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
 
+_operator_export_type = None
+def _set_operator_export_type(operator_export_type):
+    global _operator_export_type
+    _operator_export_type = operator_export_type
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an

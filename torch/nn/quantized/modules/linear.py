@@ -2,9 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
-from ...._jit_internal import weak_module
 
-@weak_module
 class Quantize(Module):
     r"""Quantizes an incoming tensor
     Args:
@@ -41,7 +39,6 @@ class Quantize(Module):
         qparams = mod.observer.calculate_qparams()
         return Quantize(qparams[0].item(), qparams[1].item(), mod.observer.dtype)
 
-@weak_module
 class DeQuantize(Module):
     r"""Dequantizes an incoming tensor
 
@@ -67,7 +64,6 @@ class DeQuantize(Module):
     def from_float(mod):
         return DeQuantize()
 
-@weak_module
 class Linear(NNLinear):
     r"""
     A quantized linear module with quantized tensor as inputs
@@ -161,7 +157,7 @@ class Linear(NNLinear):
         weight_observer(mod.weight)
         wt_qparams = weight_observer.calculate_qparams()
         bias_scale = (wt_qparams[0] * act_qparams[0]).float()
-        qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long(), torch.qint8)
+        qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long().item(), torch.qint8)
         qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)

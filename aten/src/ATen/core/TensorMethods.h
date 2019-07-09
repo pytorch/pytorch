@@ -8,7 +8,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
 
@@ -478,7 +478,7 @@ inline Tensor Tensor::logdet() const {
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::log_softmax(int64_t dim, c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
 }
 inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
@@ -657,7 +657,7 @@ inline Tensor & Tensor::rsqrt_() {
     static auto table = globalATenDispatch().getOpTable("aten::rsqrt_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::select(Dimname dim, int64_t index) const {
     static auto table = globalATenDispatch().getOpTable("aten::select(Tensor(a) self, Dimname dim, int index) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, Dimname, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, index);
@@ -1722,7 +1722,7 @@ inline bool Tensor::is_cuda() const {
   return impl_->is_cuda();
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }

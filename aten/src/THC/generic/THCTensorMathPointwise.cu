@@ -3,7 +3,7 @@
 #else
 
 #include <ATen/MemoryOverlap.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
@@ -176,7 +176,7 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
 #if !defined(THC_REAL_IS_BOOL)
 
 static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor* src) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
 #endif
 }
@@ -321,7 +321,7 @@ void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(self_, src);
 #endif
 }
@@ -336,7 +336,7 @@ void THCTensor_(digamma)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(self_, src);
 #endif
 }
@@ -362,7 +362,7 @@ void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTens
   }
 
   THCudaCheck(cudaGetLastError());
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(self_, src);
 #endif
 }

@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from .convert_modules import *  # noqa: F401
+from .quantize import *  # noqa: F401
 from .observer import *  # noqa: F401
 from .QConfig import *  # noqa: F401
 from .fake_quantize import *  # noqa: F401
@@ -20,5 +20,10 @@ _all__ = [
     'prepare', 'convert',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig', 'add_quant_dequant', 'add_observer', 'swap_module',
-    'default_eval_fn'
+    'default_eval_fn',
+    # Observers
+    'Observer', 'WeightObserver', 'observer', 'default_observer',
+    'default_weight_observer',
+    # QConfig
+    'QConfig', 'default_qconfig'
 ]

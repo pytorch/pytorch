@@ -5,24 +5,22 @@ import torch.cuda
 import torch.jit
 import numpy as np
 import unittest
-from hypothesis import assume, given
+from hypothesis import given
 from hypothesis import strategies as st
+from hypothesis_utils import qtensor, array_shapes
 from common_utils import run_tests
 from torch.quantization import FakeQuantize
-from torch.quantization import default_qconfig
 
-
-# Reference method for quantizing a tensor.
+# Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
-    res = (torch.clamp(torch.round(X / scale) + zero_point, quant_min, quant_max) - zero_point) * scale
-    res = res.reshape(X.shape)
+    res = (torch.clamp(torch.round(X * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
     return res
 
 
-# Reference method for the gradient of the quantizer.
+# Reference method for the gradient of the fake quantize operator
 def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max):
-    Xq = torch.round(X / scale) + zero_point
-    mask = (Xq >= quant_min) & (Xq <= quant_max)
+    Xq = torch.round(X * (1.0 / scale) + zero_point)
+    mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
     res[mask] = dY[mask]
     return res
@@ -34,73 +32,74 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
     def to_tensor(self, X, device):
         return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
 
-    """Tests the forward path of the FakeQuantizePerTensorAffine op."""
-    @given(device = st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
-    def test_forward(self, device):
+    # Note:
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           Q=qtensor(shapes=array_shapes(1, 10,), dtypes=((torch.quint8, np.uint8, None),)))
+    def test_forward(self, device, Q):
+        r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
+        """
         np.random.seed(NP_RANDOM_SEED)
-
-        scale = 3
-        zero_point = 2
-        quant_min, quant_max = 0, 255
-        X = self.to_tensor(np.random.rand(20, 20) * 125, device)
+        X, (scale, zero_point), (quant_min, quant_max), (torch_type, np_type) = Q
+        X = torch.tensor(X).to(dtype=torch.float, device=device)
         Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
         Y_prime = torch.fake_quantize_per_tensor_affine(
             X, scale, zero_point, quant_min, quant_max)
-        np.testing.assert_allclose(Y, Y_prime, rtol=tolerance, atol=tolerance)
+        np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
-    """Tests the backward method. Note that this runs the reference quantization
-    and thus the errors might be originating there."""
-    @given(device = st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
-    def test_backward(self, device):
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+        Q=qtensor(shapes=array_shapes(1, 10,), dtypes=((torch.quint8, np.uint8, None),)))
+    def test_backward(self, device, Q):
+        r"""Tests the backward method. Note that this runs the reference quantization
+        and thus the errors might be originating there.
+        """
         np.random.seed(NP_RANDOM_SEED)
-
-        scale = 3
-        zero_point = 2
-        quant_min, quant_max = 0, 255
-        X = self.to_tensor(np.random.rand(20, 20) * 125, device)
-        X.requires_grad_(True)
+        X, (scale, zero_point), (quant_min, quant_max), (torch_type, np_type) = Q
+        X = torch.tensor(X).to(dtype=torch.float, device=device)
+        X.requires_grad_()
         Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
         Y_prime = torch.fake_quantize_per_tensor_affine(
             X, scale, zero_point, quant_min, quant_max)
-        dY = X  # Fake gradient
+        dout = torch.rand(X.shape, dtype=torch.float).to(device)
         dX = _fake_quantize_per_tensor_affine_grad_reference(
-            dY, X, scale, zero_point, quant_min, quant_max)
-        Y_prime.backward(X)
-        np.testing.assert_allclose(dX.detach().numpy(), X.grad.detach().numpy(), rtol=tolerance, atol=tolerance)
+            dout, X, scale, zero_point, quant_min, quant_max)
+        Y_prime.backward(dout)
+        np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    @given(device = st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
-    def test_numerical_consistency(self, device):
-        '''
-        Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
-        '''
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           Q=qtensor(shapes=array_shapes(1, 10,), dtypes=((torch.quint8, np.uint8, None),)))
+    def test_numerical_consistency(self, device, Q):
+        r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
+        """
         np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point), (quant_min, quant_max), (torch_type, np_type) = Q
+        X = torch.tensor(X).to(dtype=torch.float, device=device)
 
-        scale = 3
-        zero_point = 2
-        quant_min, quant_max = 0, 255
-        X = self.to_tensor(np.random.rand(20, 20) * 125, device)
-        Y = torch.dequantize(torch.quantize_linear(X, scale, zero_point, torch.qint8))
+        # quantize_linear and dequantize are only implemented in CPU
+        Y = torch.dequantize(torch.quantize_linear(X.cpu(), scale, zero_point, torch_type))
         Y_prime = torch.fake_quantize_per_tensor_affine(
             X, scale, zero_point, quant_min, quant_max)
-        np.testing.assert_allclose(Y, Y_prime, rtol=tolerance, atol=tolerance)
+        np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
-    @given(device = st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
-    def test_fq_module(self, device):
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           Q=qtensor(shapes=array_shapes(1, 10,), dtypes=((torch.quint8, np.uint8, None),)))
+    def test_fq_module(self, device, Q):
         np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point), (quant_min, quant_max), (torch_type, np_type) = Q
+        X = torch.tensor(X).to(dtype=torch.float, device=device)
 
-        quant_min, quant_max = 0, 255
-        X = self.to_tensor(np.random.rand(20, 20) * 125, device)
-        X.requires_grad_(True)
-        fq_module = FakeQuantize(default_qconfig, quant_min, quant_max)
+        X.requires_grad_()
+        fq_module = FakeQuantize(torch_type, torch.per_tensor_affine, quant_min, quant_max)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
-        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), fq_module.scale, fq_module.zero_point, quant_min, quant_max)
-        np.testing.assert_allclose(Y.detach().numpy(), Y_prime.detach().numpy(), rtol=tolerance, atol=tolerance)
-        Y_prime.backward(X.float())
-        dY = X
-        dX = _fake_quantize_per_tensor_affine_grad_reference(dY, X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
-        np.testing.assert_allclose(dX.detach().numpy(), X.grad.detach().numpy(), rtol=tolerance, atol=tolerance)
+        Y = _fake_quantize_per_tensor_affine_reference(X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
+        np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+        # Test backward
+        dout = torch.rand(X.shape, dtype=torch.float, device=device)
+        Y_prime.backward(dout)
+        dX = _fake_quantize_per_tensor_affine_grad_reference(dout, X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
+        np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
 
 if __name__ == '__main__':

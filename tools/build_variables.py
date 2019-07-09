@@ -43,7 +43,6 @@ libtorch_sources = [
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
-    "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/profiler.cpp",
     "torch/csrc/autograd/record_function.cpp",
@@ -64,6 +63,7 @@ libtorch_sources = [
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/irparser.cpp",
+    "torch/csrc/jit/jit_log.cpp",
     "torch/csrc/jit/netdef_converter.cpp",
     "torch/csrc/jit/register_c10_ops.cpp",
     "torch/csrc/jit/subgraph_matcher.cpp",
@@ -109,7 +109,6 @@ libtorch_sources = [
     "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/register_string_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
-    "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/api/src/jit.cpp",
@@ -123,6 +122,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/class_type.cpp",
     "torch/csrc/jit/script/parser.cpp",
     "torch/csrc/jit/script/jit_exception.cpp",
+    "torch/csrc/jit/source_range_serialization.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
@@ -137,7 +137,6 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/codegen.cpp",
     "torch/csrc/jit/fuser/fallback.cpp",
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
-    "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
     "test/cpp/jit/test.cpp",
@@ -147,7 +146,6 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
-    "torch/csrc/jit/fuser/cuda/thnvrtc.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp"
 ]
@@ -350,7 +348,6 @@ def add_torch_libs():
         # TODO: putting USE_CUDA in propagated_pp_flags is error-prone
         propagated_pp_flags=propagated_pp_flags + [
             "-DUSE_CUDA",
-            "-DUSE_DIRECT_NVRTC",
         ],
         deps=[
             ":generated-autograd-headers",
