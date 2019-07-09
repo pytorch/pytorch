@@ -348,6 +348,58 @@ def test_float():
     print(a2)
     import pdb; pdb.set_trace()
 
+
+def test_unary():
+    a1 = torch.nestedtensor([torch.tensor([1, 2]), 
+                             torch.tensor([7, 8])])
+    a2 = a1.to(torch.float)
+
+    print("a2")
+    print(a2)
+    print("--- torch.exp")
+    print(torch.exp(a2))
+    print(a2)
+    print("--- exp")
+    print(a2.exp())
+    print(a2)
+    print("--- exp_")
+    print(a2.exp_())
+    print(a2)
+    print("---")
+
+def test_binary():
+    a1 = torch.nestedtensor([torch.tensor([1, 2]), 
+                             torch.tensor([7, 8])])
+    a2 = a1.to(torch.float)
+    a3 = torch.nestedtensor([torch.tensor([3, 4]), 
+                             torch.tensor([5, 6])])
+    a4 = a3.to(torch.float)
+
+    print("--- binary")
+    print("a2")
+    print(a2)
+    print("a4")
+    print(a4)
+    print("--- torch.add")
+    print(torch.add(a2, a4))
+    print("a2")
+    print(a2)
+    print("a4")
+    print(a4)
+    print("--- add")
+    print(a2.add(a4))
+    print("a2")
+    print(a2)
+    print("a4")
+    print(a4)
+    print("--- add_")
+    print(a2.add_(a4))
+    print("a2")
+    print(a2)
+    print("a4")
+    print(a4)
+    print("--- binary end")
+
 # TODO: Carefully test reference passing vs. value passing for each function
 # TODO: Add more tests for variable length examples
 if __name__ == "__main__":
@@ -359,4 +411,6 @@ if __name__ == "__main__":
     # test_nested_cross_entropy_loss()
     # test_nested_linear()
     test_len()
+    test_unary()
+    test_binary()
     # test_nested_lstm()

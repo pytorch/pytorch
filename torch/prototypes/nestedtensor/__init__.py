@@ -13,8 +13,16 @@ def _create_out(input1, out):
     assert len(out) == len(input1)
     return out
 
+def _unary(func, input1, out=None):
+    out = _create_out(input1, out)
+    for i in range(len(out)):
+        # NOTE: We are disabling broadcasting for now
+        assert out.tensors[i].size() == input1.tensors[i].size()
+        func(input1.tensors[i], out=out.tensors[i])
+    return out
+
 # The contract is that func only works with torch.Tensor
-def f(func, input1, input2, out=None):
+def _binary(func, input1, input2, out=None):
     out = _create_out(input1, out)
     assert len(input1) == len(input2)
     for i in range(len(out)):
@@ -25,7 +33,7 @@ def f(func, input1, input2, out=None):
     return out
 
 
-def f1(func, input1, input2, out=None):
+def _comparison(func, input1, input2, out=None):
     out = _create_out(input1, out)
     assert len(input1) == len(input2)
     for i in range(len(out)):
@@ -38,16 +46,10 @@ def f1(func, input1, input2, out=None):
     return out
 
 
-def f2(func, input1, out=None):
-    out = _create_out(input1, out)
-    for i in range(len(out)):
-        # NOTE: We are disabling broadcasting for now
-        assert out.tensors[i].size() == input1.tensors[i].size()
-        func(out.tensors[i], input1.tensors[i])
 
 
-torch, NestedTensor = tensorextension.add_pointwise_unary_functions(torch, NestedTensor, f2)
-torch, NestedTensor = tensorextension.add_pointwise_binary_functions(torch, NestedTensor, f)
-torch, NestedTensor = tensorextension.add_pointwise_comparison_functions(torch, NestedTensor, f1)
+torch, NestedTensor = tensorextension.add_pointwise_unary_functions(torch, NestedTensor, _unary)
+torch, NestedTensor = tensorextension.add_pointwise_binary_functions(torch, NestedTensor, _binary)
+torch, NestedTensor = tensorextension.add_pointwise_comparison_functions(torch, NestedTensor, _comparison)
 
 __all__ = ["NestedTensor"]
