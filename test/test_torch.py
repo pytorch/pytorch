@@ -3422,7 +3422,7 @@ class _TestTorchMixin(object):
                     self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                    if (dt == torch.half or dt == torch.bfloat16 ) and device == "cpu":
+                    if (dt == torch.half or dt == torch.bfloat16) and device == "cpu":
                         # update once random is implemented for half and/or bfloat16 on CPU
                         self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                     else:
