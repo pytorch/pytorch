@@ -2,9 +2,11 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
+#include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
@@ -75,6 +77,32 @@ bool CUDAHooks::hasMAGMA() const {
 
 bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
+}
+
+#ifdef USE_DIRECT_NVRTC
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+  return std::make_pair(nullptr, at::cuda::load_nvrtc());
+}
+#else
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+#if defined(_WIN32)
+  std::string libcaffe2_nvrtc = "caffe2_nvrtc.dll";
+#elif defined(__APPLE__)
+  std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dylib";
+#else
+  std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.so";
+#endif
+  std::unique_ptr<at::DynamicLibrary> libnvrtc_stub(
+      new at::DynamicLibrary(libcaffe2_nvrtc.c_str()));
+  auto fn = (at::cuda::NVRTC * (*)()) libnvrtc_stub->sym("load_nvrtc");
+  return std::make_pair(std::move(libnvrtc_stub), fn());
+}
+#endif
+
+const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
+  // must hold onto DynamicLibrary otherwise it will unload
+  static auto handle = load_nvrtc();
+  return *handle.second;
 }
 
 int64_t CUDAHooks::current_device() const {
