@@ -43,16 +43,8 @@ void inlineLoopCondition(Node* n) {
   n->insertInput(/*start_condition_index*/ 1, temp_block->outputs().at(0));
   n->eraseBlock(2);
 
-  Node* exit_n = nullptr;
-  for (Node* n : body_block->nodes().reverse()) {
-    if (n->kind() == prim::BlockExit) {
-      exit_n = n;
-      break;
-    }
-  }
-  TORCH_INTERNAL_ASSERT(exit_n);
-  inlineBlockBeforeNode(exit_n, pre_header);
-  exit_n->insertInput(0, pre_header->outputs().at(0));
+  inlineBlockBeforeNode(body_block->return_node(), pre_header);
+  body_block->return_node()->insertInput(0, pre_header->outputs().at(0));
   n->eraseBlock(1);
 }
 

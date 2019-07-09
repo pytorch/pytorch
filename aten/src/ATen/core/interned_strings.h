@@ -109,8 +109,7 @@ namespace c10 {
   _(prim, TimePoint)               \
   _(prim, CallFunction)            \
   _(prim, CallMethod)              \
-  _(prim, LoopExit)                \
-  _(prim, BlockExit)               \
+  _(prim, LoopContinuation)        \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \

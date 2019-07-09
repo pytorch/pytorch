@@ -58,8 +58,8 @@ struct ExitPair : public std::pair<Value*, std::vector<Value*>> {
 /**
  * This pass currently transforms the Graph so that all exit nodes targeting
  * a block location are removed from the graph and unified.
- * The exit node for breaks/continues is LoopExit, and there will be a separate
- * exit node for returns (nyi).
+ * The exit node for breaks/continues is LoopContinuation, and there will be a
+ * separate exit node for returns (nyi).
  *
  * Once we hit an Exit Node, we do not execute any further instructions
  * until the exit target has been reached.
@@ -223,7 +223,7 @@ struct ExitTransformer {
       block->registerOutput(out);
     }
 
-    graph->create(prim::LoopExit, {exit_pair.exitValues()}, 0)
+    graph->create(prim::LoopContinuation, {exit_pair.exitValues()}, 0)
         ->insertBefore(exit_block->return_node());
     return transformIf(new_if);
   }
@@ -265,7 +265,7 @@ struct ExitTransformer {
       Node* node = *it;
       it++;
       switch (node->kind()) {
-        case prim::LoopExit: {
+        case prim::LoopContinuation: {
           exit_pair = ExitPair(true_val, node->inputs());
           node->destroy();
         } break;
@@ -313,56 +313,38 @@ struct ExitTransformer {
   std::shared_ptr<Graph> graph;
 };
 
-// The Logic for the loop transform simplifies if the BlockExits
-// are converted to LoopExits before running.
+// The Logic for the loop transform simplifies if the blcok outputs
+// are converted to LoopContinuations before running.
 void convertLoopBlockExits(Block* block) {
-  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
-    Node* n = *it;
-    it++;
+  for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
       convertLoopBlockExits(b);
     }
-    if (n->kind() == prim::BlockExit && owningNodeKind(block) == prim::Loop) {
-      auto loop_exit =
-          n->owningGraph()->create(prim::LoopExit, 0)->insertAfter(n);
-      for (auto inp : n->inputs()) {
-        loop_exit->addInput(inp);
-      }
-      n->destroy();
+  }
+  if (owningNodeKind(block) == prim::Loop) {
+    auto ret_node = block->return_node();
+    auto loop_exit = block->owningGraph()
+                         ->create(prim::LoopContinuation, 0)
+                         ->insertBefore(ret_node);
+    for (auto inp : ret_node->inputs()) {
+      loop_exit->addInput(inp);
+    }
+    for (; ret_node->inputs().size() > 0;) {
+      ret_node->removeInput(0);
     }
   }
 }
 
-// If Node Blocks will only ever have just the one BlockExit,
-// so we can trivially remove them.
-void removeIfNodeExits(Block* block) {
-  for (auto it = block->nodes().begin(), end = block->nodes().end();
-       it != end;) {
-    auto n = *it;
-    it++;
-    for (Block* b : n->blocks()) {
-      removeIfNodeExits(b);
-    }
-    if (n->kind() == prim::BlockExit && owningNodeKind(block) == prim::If) {
-      registerBlockOutputs(block, n->inputs());
-      n->destroy();
-    }
-  }
-}
-
-// This pass takes in a graph where BlockExit & LoopExit exist in the graph
+// This pass takes in a graph where LoopContinuation exist in the graph
 // and erases them in the graph, correctly setting block outputs.
-// A prim::BlockExit(*vals) denotes that the values are targeting the
-// block the Exit is contained on, and a prim::LoopExit(*vals) denotes that
-// the values are targeting the most recent loop block. FunctionExits are NYI.
-// Once we hit an exit node, we do not execute any further instructions
-// until the block exit reaches its destination. If a node may hit an exit
-// node that pauses execution, we use a boolean value to indicate if the exit
-// has been hit or not, and conditionalize further execution.
-// First we remove block exits of if nodes, then we replace Loop Block exits
-// with LoopExits. Then we remove LoopExits.
-// Python example:
-// while i < 5:
+// prim::LoopContinuation(*vals) denotes that the values are targeting the most
+// recent loop block. FunctionExits are NYI. Once we hit an exit node, we do not
+// execute any further instructions until the block exit reaches its
+// destination. If a node may hit an exit node that pauses execution, we use a
+// boolean value to indicate if the exit has been hit or not, and conditionalize
+// further execution. First we  replace Loop Block outputs with
+// LoopContinuations. Then we remove LoopContinuations. Python example: while i
+// < 5:
 //   if i == 3:
 //     i += 1
 //     continue
@@ -387,16 +369,13 @@ void removeIfNodeExits(Block* block) {
 //       block0():
 //         %i.6 : int = aten::add(%i.17, %11)
 //         %33 : bool = aten::lt(%i.6, %3)
-//          = prim::LoopExit(%33, %i.6)
-//          = prim::BlockExit(%i.6)
-//         -> ()
+//          = prim::LoopContinuation(%33, %i.6)
+//         -> (%i.6)
 //       block1():
-//          = prim::BlockExit(%i.17)
-//         -> ()
+//         -> (%i.17)
 //     %i.13 : int = aten::add(%i.16, %19)
 //     %4 : bool = aten::lt(%i.13, %3)
-//      = prim::BlockExit(%4, %i.13)
-//     -> ()
+//     -> (%4, %i.13)
 // return (%i)
 //   -> becomes
 // %38 : bool = prim::Constant[value=0]()
@@ -425,7 +404,6 @@ void removeIfNodeExits(Block* block) {
 //     -> (%44, %i)
 
 void TransformExits(std::shared_ptr<Graph>& graph) {
-  removeIfNodeExits(graph->block());
   convertLoopBlockExits(graph->block());
   ExitTransformer e(graph);
   e.run();

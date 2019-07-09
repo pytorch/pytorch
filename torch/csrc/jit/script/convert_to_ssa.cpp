@@ -37,14 +37,14 @@ struct ControlFlowLoadStores {
         ->insertAfter(b->param_node());
   }
 
-  static void addBlockExitInput(
-      Node* exit_node,
+  static void addBlockOutput(
+      Block* exit_block,
       const TypePtr& type,
       const std::string& name) {
-    WithInsertPoint insert(exit_node);
-    auto g = exit_node->owningGraph();
+    WithInsertPoint insert(exit_block);
+    auto g = exit_block->owningGraph();
     auto block_exit = g->insertNode(g->createLoad(name, type))->output();
-    exit_node->addInput(block_exit);
+    exit_block->registerOutput(block_exit);
   }
 
   static void addNodeOutput(
@@ -87,13 +87,6 @@ struct ControlFlowLoadStores {
       }
     }
 
-    auto true_block_exit = n->owningGraph()
-                               ->create(prim::BlockExit, 0)
-                               ->insertBefore(true_block->return_node());
-    auto false_block_exit = n->owningGraph()
-                                ->create(prim::BlockExit, 0)
-                                ->insertBefore(false_block->return_node());
-
     // Following the same logic as emitIfElseBlocks in compiler.cpp,
     // we emit a node output if the variable is defined in each block
     // and the types of each block can be unified
@@ -105,8 +98,8 @@ struct ControlFlowLoadStores {
         continue;
       }
 
-      addBlockExitInput(true_block_exit, true_type, x);
-      addBlockExitInput(false_block_exit, false_type, x);
+      addBlockOutput(true_block, true_type, x);
+      addBlockOutput(false_block, false_type, x);
       addNodeOutput(n, *unified, x);
     }
   }
@@ -124,8 +117,6 @@ struct ControlFlowLoadStores {
     auto body_block = n->blocks().at(0);
     auto loop_vars = addControlFlowLoadStores(body_block);
 
-    auto block_exit = n->owningGraph()->create(prim::BlockExit, 0);
-    block_exit->insertBefore(body_block->return_node());
     for (const auto& name : loop_vars->definedVariables()) {
       // we require that the variable is defined outside the loop to be emitted,
       // and we do not refine the type of the parent variable since the loop may
@@ -139,7 +130,7 @@ struct ControlFlowLoadStores {
       // loads of the variable will use the loop carried value
       addNodeInput(n, parent_type, name);
       addBlockInput(body_block, parent_type, name);
-      addBlockExitInput(block_exit, parent_type, name);
+      addBlockOutput(body_block, parent_type, name);
       addNodeOutput(n, parent_type, name);
     }
   }
@@ -234,15 +225,15 @@ struct EraseLoadStores {
   std::shared_ptr<ValueEnvironment> environment_stack = nullptr;
 };
 
-// This pass transforms Breaks & Continues to be LoopExit continuations,
-// of the form LoopExit(%loop_continue_condition, *loop_carried_vars)
+// This pass transforms Breaks & Continues to be LoopContinuations,
+// of the form LoopContinuations(%loop_continue_condition, *loop_carried_vars)
 // Break Statements have the condition set to false, and Continue statements
 // inline the loop condition as the first input.
-struct LoopExitContinuations {
+struct LoopContinuations {
   void addLoopCarriedOutputs(Node* n) {
     auto g = n->owningGraph();
     WithInsertPoint insert(n);
-    auto continuation = curr_loop_exit;
+    auto continuation = curr_loop_->blocks().at(0)->return_node();
     for (auto out : continuation->inputs()) {
       auto load_node = out->node();
       TORCH_INTERNAL_ASSERT(load_node->kind() == prim::Load);
@@ -250,11 +241,6 @@ struct LoopExitContinuations {
           g->insertNode(g->createClone(load_node, [](Value* v) { return v; }));
       n->addInput(new_load->output());
     }
-  }
-
-  void setCurrLoopExit(Block* loop_block) {
-    curr_loop_exit = loop_block->return_node()->prev();
-    TORCH_INTERNAL_ASSERT(curr_loop_exit->kind() == prim::BlockExit);
   }
 
   void assignExitContinuations(Block* block) {
@@ -267,29 +253,30 @@ struct LoopExitContinuations {
           assignExitContinuations(n->blocks().at(1));
         } break;
         case prim::Function: {
-          LoopExitContinuations closure_block;
+          LoopContinuations closure_block;
           closure_block.run(n->blocks().at(0));
         } break;
         case prim::Loop: {
-          Node* prev_exit = curr_loop_exit;
-          setCurrLoopExit(n->blocks().at(0));
+          Node* prev_loop = curr_loop_;
+          curr_loop_ = n;
           assignExitContinuations(n->blocks().at(0));
-          curr_loop_exit = prev_exit;
+          curr_loop_ = prev_loop;
         } break;
         case prim::ContinueStmt: {
-          auto loop_exit = graph->create(prim::LoopExit, 0)->insertAfter(n);
-          auto header_block = loop_exit->addBlock();
-          auto cur_loop = curr_loop_exit->owningBlock()->owningNode();
-          auto pre_header = cur_loop->blocks().at(1);
+          auto loop_continuation =
+              graph->create(prim::LoopContinuation, 0)->insertAfter(n);
+          auto header_block = loop_continuation->addBlock();
+          auto pre_header = curr_loop_->blocks().at(1);
           header_block->cloneFrom(pre_header, [](Value* v) { return v; });
           inlineBlockBeforeNode(n, header_block);
-          loop_exit->addInput(header_block->outputs().at(0));
-          loop_exit->eraseBlock(0);
-          addLoopCarriedOutputs(loop_exit);
+          loop_continuation->addInput(header_block->outputs().at(0));
+          loop_continuation->eraseBlock(0);
+          addLoopCarriedOutputs(loop_continuation);
           n->destroy();
         } break;
         case prim::BreakStmt: {
-          auto loop_exit = graph->create(prim::LoopExit, 0)->insertAfter(n);
+          auto loop_exit =
+              graph->create(prim::LoopContinuation, 0)->insertAfter(n);
           // first input is the loop continue condition - break sets false
           loop_exit->addInput(false_val);
           addLoopCarriedOutputs(loop_exit);
@@ -314,29 +301,19 @@ struct LoopExitContinuations {
 
   Graph* graph;
   Value* false_val;
-  Node* curr_loop_exit = nullptr;
+  Node* curr_loop_ = nullptr;
 };
 
 // Converting to SSA works in multiple parts. First, we add control flow
 // loads and stores to the graph. Now that control flow outputs are set,
 // we can set remove Break & Continue to have the correct continuations to the
-// end of the block (LoopExit). Then we inline the loop condition into the
-// graph. Then, we erase Loads & Stores.
-// If & Loop block outputs have a prim::BlockExit node that designates the input
-//  values to be outputs of the block it is contained.
-// if cond:
-//    x = 1
-// ->
-// prim::If(%cond)
-//    x.1% = 1
-//    prim::BlockExit(%x.1)
-//
-// Finally, we unify LoopExit and BlockExit nodes to assign the correct
-// outputs to each block.
+// end of the block (LoopContinuation). Then we inline the loop condition into
+// the graph. Then, we erase Loads & Stores. Finally, we remove
+// LoopContinuations from the graph.
 void ConvertToSSA(std::shared_ptr<Graph>& graph) {
   ControlFlowLoadStores ctrl;
   ctrl.run(graph);
-  LoopExitContinuations exit_vars;
+  LoopContinuations exit_vars;
   exit_vars.run(graph);
   InlineLoopCondition(graph);
   EraseLoadStores erase_loads_stores;
