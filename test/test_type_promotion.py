@@ -10,7 +10,7 @@ load_tests = load_tests
 class TestTypePromotion(TestCase):
 
     def setUp(self):
-        super().setUp()
+        super(TestTypePromotion, self).setUp()
         torch.set_default_dtype(torch.float32)
         self.device = 'cpu'
 
@@ -142,13 +142,13 @@ class TestTypePromotion(TestCase):
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):
-        super().setUp()
+        super(TestTypePromotionCuda, self).setUp()
         self.device = 'cuda'
 
 # ensure type promotion logic properly handles an alternate default dtype.
 class TestTypePromotionDefaultDouble(TestTypePromotion):
     def setUp(self):
-        super().setUp()
+        super(TestTypePromotionDefaultDouble, self).setUp()
         torch.set_default_dtype(torch.double)
 
 
