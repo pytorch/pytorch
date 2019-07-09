@@ -268,7 +268,7 @@ class TestONNXRuntime(unittest.TestCase):
         class ArangeScript(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
-                return torch.arange(2, a.size(0)+2, dtype=torch.float).view(-1, 1) + a
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
 
         x = torch.randn(3, 4, requires_grad=True)
         outputs = ArangeScript()(x)
@@ -276,7 +276,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class ArangeModel(torch.nn.Module):
             def forward(self, a):
-                return torch.arange(2, a.size(0)+2, dtype=torch.float).view(-1, 1) + a
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
 
         self.run_test(ArangeModel(), x)
 
@@ -285,7 +285,7 @@ class TestONNXRuntime(unittest.TestCase):
         class ArangeScript(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
-                return torch.arange(2, a.size(0)*a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
 
         x = torch.randn(3, 4, requires_grad=True)
         outputs = ArangeScript()(x)
@@ -293,7 +293,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class ArangeModel(torch.nn.Module):
             def forward(self, a):
-                return torch.arange(2, a.size(0)*a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
 
         self.run_test(ArangeModel(), x)
 
