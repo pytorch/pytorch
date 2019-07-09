@@ -19,7 +19,7 @@ enum class JitLoggingLevels {
   GRAPH_DEBUG,
 };
 
-std::string debugValueOrDefault(class Node* n);
+std::string debugValueOrDefault(const class Node* n);
 
 JitLoggingLevels jit_log_level();
 
