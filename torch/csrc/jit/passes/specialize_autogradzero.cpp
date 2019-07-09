@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 
 namespace torch {
@@ -40,6 +41,11 @@ void specializeAutogradZero(Graph& g) {
         if (all_zeros) {
           auto zero = g.createAutogradZero()->insertAfter(n)->output();
           for (auto o : n->outputs()) {
+            GRAPH_UPDATE(
+                "Replacing output ",
+                o->debugName(),
+                " with AutogradZero ",
+                zero);
             o->replaceAllUsesWith(zero);
           }
         } else {
@@ -58,14 +64,22 @@ void specializeAutogradZero(Graph& g) {
             AT_ASSERT(state[input] != State::Unknown);
           }
           // hoist the nodes in the GradOf body to be before the linear block
+          GRAPH_UPDATE("Hoisting out prim::GradOf ", debugValueOrDefault(*it));
           for (auto it = body->nodes().begin(); it != body->nodes().end();) {
             auto block_node = *it++;
             block_node->moveBefore(n);
           }
 
-          for (size_t i = 0; i < n->outputs().size(); ++i)
+          for (size_t i = 0; i < n->outputs().size(); ++i) {
+            GRAPH_UPDATE(
+                "Replacing prim::GradOf's use ",
+                n->outputs().at(i)->debugName(),
+                " with hoisted value ",
+                body->outputs().at(i)->debugName());
             n->outputs().at(i)->replaceAllUsesWith(body->outputs().at(i));
+          }
         }
+        GRAPH_UPDATE("Destroying node ", debugValueOrDefault(*it));
         it.destroyCurrent();
       } break;
       case prim::AutogradAdd: {
@@ -75,9 +89,19 @@ void specializeAutogradZero(Graph& g) {
         if (state[a] == State::Zero) {
           // Zero + b == b
           n->output()->replaceAllUsesWith(b);
+          GRAPH_UPDATE(
+              "Simplifying prim::AutogradAdd(prim::AutogradZero, X) ",
+              n->output(),
+              " to ",
+              b);
           it.destroyCurrent();
         } else if (state[b] == State::Zero) {
           // a + Zero == a
+          GRAPH_UPDATE(
+              "Simplifying prim::AutogradAdd(prim::AutogradZero, X) ",
+              n->output(),
+              " to ",
+              b);
           n->output()->replaceAllUsesWith(a);
           it.destroyCurrent();
         } else if (state[a] == State::Nonzero && state[b] == State::Nonzero) {
@@ -86,6 +110,11 @@ void specializeAutogradZero(Graph& g) {
           WithInsertPoint guard(n);
           Value* new_add = toVar(a) + toVar(b);
           state[new_add] = State::Nonzero;
+          GRAPH_UPDATE(
+              "Simplifying prim::AutogradAdd ",
+              n->output(),
+              " to prim::Add ",
+              new_add);
           n->output()->replaceAllUsesWith(new_add);
           it.destroyCurrent();
         } else {
