@@ -158,6 +158,7 @@ class _TestTorchMixin(object):
         self.assertEqual(x.float().dtype, torch.float32)
         self.assertEqual(x.half().dtype, torch.float16)
         self.assertEqual(x.int().dtype, torch.int32)
+        self.assertEqual(x.bfloat16().dtype, torch.bfloat16)
 
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
