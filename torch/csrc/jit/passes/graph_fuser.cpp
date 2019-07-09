@@ -172,6 +172,9 @@ struct GraphFuser {
   bool isFusableDevice(Value *v) {
     auto tensor_type = v->type()->cast<DimensionedTensorType>();
     if (!tensor_type) {
+      if (v->type()->cast<TensorType>()) {
+        return canFuseOnCPU() || canFuseOnGPU();
+      }
       return true;
     }
     if (tensor_type->device().is_cpu()) {
@@ -191,6 +194,9 @@ struct GraphFuser {
       if (output->uses().size() > 0) {
         fusableDevice &= isFusableDevice(output);
       }
+    }
+    for (const auto& input : node->inputs()) {
+      fusableDevice &= isFusableDevice(input);
     }
     return fusableDevice && isFusableMap(node);
   }

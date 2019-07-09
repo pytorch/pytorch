@@ -895,6 +895,28 @@ class TestFuser(JitTestCase):
             self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
             self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "prim::Param"]), 3 - i)
 
+    def test_fuser_logic(self):
+        @torch.jit.script
+        def rotgen(a_in, b_in):
+            a_out = ((a_in / 2.0)**2 + (b_in / 2.0)**2)**0.5
+            b_out = torch.zeros_like(a_out)
+            return a_out, b_out, torch.ones_like(a_out), torch.zeros_like(a_out)
+
+        @torch.jit.script
+        def cholupdate_no_print(R_in, v_in):
+            R_out = R_in.clone()
+            v_out = v_in.clone()
+
+            p = 2
+            for k in range(2):
+                R_out[k, k], v_out[k], c, s = rotgen(R_out[k, k], v_out[k])
+                R_out[k, k+1:p], v_out[k+1:p] = R_out[k, k+1:], v_out[k+1:]*2
+            return R_out
+
+        R_in = torch.ones(2, 2)
+        v_in = torch.ones(2)
+        g_str = str(cholupdate_no_print.graph_for(R_in, v_in))
+        assert "prim::FusionGroup" not in g_str
 
 if __name__ == '__main__':
     run_tests()
