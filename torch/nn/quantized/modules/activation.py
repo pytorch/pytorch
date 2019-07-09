@@ -4,9 +4,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from .. import functional as F
-from ...modules.module import Module
+from ...modules.activation import ReLU as NNReLU
 
-class ReLU(Module):
+class ReLU(NNReLU):
     r"""Applies quantized rectified linear unit function element-wise:
 
     :math:`\text{ReLU}(x)= \max(x_0, x)`, where :math:`x_0` is the zero point.
