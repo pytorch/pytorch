@@ -66,12 +66,4 @@ namespace {
 
     EXPECT_FLOAT_EQ(in, out);
   }
-
-  TEST(BFloat16Conversion, BiggestDenormal) {
-    float in =  float_from_bytes(0, 0, 0x7FFFFF); // The largest subnormal number
-    c10::BFloat16 a = c10::BFloat16(in);
-    float out = c10::detail::f32_from_bits(a.x);
-
-    EXPECT_FLOAT_EQ(1.1663108e-38, out);
-  }
 } // namespace

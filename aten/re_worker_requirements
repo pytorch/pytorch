@@ -6,5 +6,9 @@
     "ATen-cu#compile-pic-Unique.cu.o199e1a23,platform007-clang": {
         "workerSize": "MEDIUM",
         "platformType": "LINUX"
+    },
+    "ATen-cu#platform007-clang,shared": {
+        "workerSize": "MEDIUM",
+        "platformType": "LINUX"
     }
 }
