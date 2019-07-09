@@ -107,6 +107,10 @@ struct CAFFE2_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool supportsDepthwiseConvolutionWithCuDNN() const {
+    return false;
+  }
+
   virtual long versionCuDNN() const {
     AT_ERROR("Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
