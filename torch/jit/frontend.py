@@ -94,10 +94,7 @@ class FrontendError(Exception):
         self.msg = msg
 
     def __str__(self):
-        result = self.msg
-        if self.source_range is not None:
-            result += '\n' + self.source_range.highlight()
-        return result
+        return self.msg + torch._C.ErrorReport(self.source_range).what()
 
 
 class NotSupportedError(FrontendError):
