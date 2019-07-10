@@ -14,6 +14,12 @@ def _shape_prod(shape_):
 
 
 class _TestNestedTensor(unittest.TestCase):
+    def gen_float_tensor(self, seed, shape):
+        data = []
+        for data_i in range(_shape_prod(shape)):
+            data.append(data_i + seed)
+        ret = torch.tensor(data)
+        return ret.reshape(shape).float().cuda()
 
     def test_nested_size(self):
         a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
@@ -92,22 +98,6 @@ class _TestNestedTensor(unittest.TestCase):
         assert not (a3 == a2).any()
         assert (a3 == a1.add_(a2)).all()
         assert (a3 == a1).all()
-
-class TestNestedTensor(_TestNestedTensor):
-    def gen_float_tensor(seed, shape):
-        data = []
-        for data_i in range(_shape_prod(shape)):
-            data.append(data_i + seed)
-        ret = torch.tensor(data)
-        return ret.reshape(shape).float()
-
-class TestNestedTensorCUDA(_TestNestedTensor):
-    def gen_float_tensor(seed, shape):
-        data = []
-        for data_i in range(_shape_prod(shape)):
-            data.append(data_i + seed)
-        ret = torch.tensor(data)
-        return ret.reshape(shape).float().cuda()
 
 # TODO: Carefully test reference passing vs. value passing for each function
 # TODO: Add more tests for variable length examples
