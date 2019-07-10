@@ -2790,8 +2790,8 @@ class TestCuda(TestCase):
         self.assertEqual(res1, res2, 0)
 
         with torch.random.fork_rng(devices=[0]):
-            res1 = torch.randperm(50000, dtype=torch.half, device=cuda)
-        res2 = torch.cuda.HalfTensor()
+            res1 = torch.randperm(50000, dtype=torch.float, device=cuda)
+        res2 = torch.cuda.FloatTensor()
         torch.randperm(50000, out=res2, device=cuda)
         self.assertEqual(res1, res2, 0)
 
@@ -2801,6 +2801,14 @@ class TestCuda(TestCase):
         torch.randperm(0, out=res2, device=cuda)
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
+
+        # Test exceptions when n is too large for a floating point type
+        for res, small_n, large_n in ((torch.cuda.HalfTensor(), 2**11 + 1, 2**11 + 2),
+                                      (torch.cuda.FloatTensor(), 2**24 + 1, 2**24 + 2),
+                                      (torch.cuda.DoubleTensor(), 2**25,  # 2**53 + 1 is too large to run
+                                       2**53 + 2)):
+            torch.randperm(small_n, out=res)  # No exception expected
+            self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res))
 
     def test_random_neg_values(self):
         _TestTorchMixin._test_random_neg_values(self, use_cuda=True)
