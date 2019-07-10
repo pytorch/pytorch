@@ -16,10 +16,16 @@ from hypothesis.searchstrategy import SearchStrategy
 # element is enforced zero_point. If None, any zero_point point within the
 # range of the data type is OK.
 ALL_QINT_TYPES = (
-    (torch.quint8, torch.uint8, None),
-    (torch.qint8, torch.int8, None),
-    (torch.qint32, torch.int32, 0),  # We enforce zero_point = 0 for this case.
+    (torch.quint8, None),
+    (torch.qint8, None),
+    (torch.qint32, 0),  # We enforce zero_point = 0 for this case.
 )
+
+UNDERLYING_TYPE = {
+    torch.quint8: torch.uint8,
+    torch.qint8: torch.int8,
+    torch.qint32: torch.int32
+}
 
 """Strategy for generating test cases for quantized tensors.
 The resulting tensor is in float32 format.
@@ -32,16 +38,13 @@ Generates:
     Xhy: Tensor of type `float32` and shape drawn from the `shapes`.
     (scale, zero_point): Drawn from valid ranges derived from the dtypes
     (qmin, qmax): Valid quantization ranges derived from the dtypes.
-    (quantized_type, underlying_type): Data types (torch and numpy) for conversion in test.
+    (quantized_type, underlying_type): Data types for conversion in test.
 Note:
     - The `dtypes` argument is used to infer the ranges. The elements should be
-    of length 1, 2, or 3:
-        If the length is 1 -- the quantized_type is assumed to be the same as
-            underlying_type. The zero_point is not enforced.
-        If the length is 2 -- the quantized_type and underlying_type are set, while the
-            zero_point is not enforced.
-        If the length is 3 -- zero_point is forced to be the fixed at element 3
-            of the tuple.
+    of length 1 or 2:
+        If the length is 1 -- The zero_point is not enforced.
+        If the length is 2 -- Argument 0 is torch dtype,
+            the zero_point is also enforced by argument 1
 """
 @st.composite
 def qtensor(draw, shapes, dtypes=None, float_min=None, float_max=None):
@@ -55,13 +58,11 @@ def qtensor(draw, shapes, dtypes=None, float_min=None, float_max=None):
         dtypes = ALL_QINT_TYPES
     _dtypes = draw(st.sampled_from(dtypes))
     if len(_dtypes) == 1:
-        quantized_type = underlying_type = _dtypes[0]
+        quantized_type = _dtypes[0]
         _zp_enforce = None
     elif len(_dtypes) == 2:
-        quantized_type, underlying_type = _dtypes
-        _zp_enforce = None
-    else:
-        quantized_type, underlying_type, _zp_enforce = _dtypes[:3]
+        quantized_type, _zp_enforce = _dtypes[:2]
+    underlying_type = UNDERLYING_TYPE[quantized_type]
     _type_info = torch.iinfo(underlying_type)
     qmin, qmax = _type_info.min, _type_info.max
     # Resolve zero_point
