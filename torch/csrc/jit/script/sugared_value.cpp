@@ -252,10 +252,13 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
         m.graph()
             ->insertNode(m.graph()->createTuple(context->node()->inputs()))
             ->output();
-    auto fn = CompilationUnit().create_function("anon", graph);
+    auto cu = std::make_shared<CompilationUnit>();
+    auto fn = cu->create_function("anon", graph);
+    auto ret = StrongFunctionPtr(std::move(cu), fn);
+
     std::vector<NamedValue> ctx_inputs = {close_context};
     ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
-    return FunctionValue(fn).call(loc, m, ctx_inputs, attributes, n_binders);
+    return FunctionValue(ret).call(loc, m, ctx_inputs, attributes, n_binders);
   }
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }

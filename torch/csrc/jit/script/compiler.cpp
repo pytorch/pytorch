@@ -838,6 +838,7 @@ struct to_ir {
       List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
+      ErrorReport::CallStack::update_pending_range(stmt.range());
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -2169,6 +2170,9 @@ struct to_ir {
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
+    // Push the source range of a call in case compiling this function
+    // triggers an error
+    ErrorReport::CallStack::update_pending_range(tree.range());
     return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
   }
 
@@ -2877,7 +2881,7 @@ struct to_ir {
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      const std::unordered_map<std::string, Function*>&
           functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
@@ -2898,20 +2902,21 @@ struct FunctionResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, std::shared_ptr<Function>>&
+  const std::unordered_map<std::string, Function*>&
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source) {
+CompilationUnit::CompilationUnit(const std::string& source)
+    : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
   define(source, nativeResolver(), nullptr);
 }
 
-std::shared_ptr<Function> CompilationUnit::define(
+std::unique_ptr<Function> CompilationUnit::define(
     const Def& def,
     const ResolverPtr& resolver,
     const Self& self,
-    const std::unordered_map<std::string, std::shared_ptr<Function>>&
+    const std::unordered_map<std::string, Function*>&
         function_table) const {
   const std::string& name = def.name().name();
   TORCH_INTERNAL_ASSERT(resolver);
@@ -2924,9 +2929,14 @@ std::shared_ptr<Function> CompilationUnit::define(
         std::make_shared<FunctionResolver>(resolver.get(), function_table);
   }
   auto creator = [def, _resolver, self](Function& method) {
+    // Store the function name so that it can be referenced if there is an error
+    // while compiling this function
+    ErrorReport::CallStack::push_function(def.name().name());
     to_ir(def, _resolver, self, method);
+    // Compilation was successful, so remove the function def info
+    ErrorReport::CallStack::pop_function();
   };
-  return std::make_shared<Function>(
+  return torch::make_unique<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);
 }
 
@@ -2947,13 +2957,13 @@ void CompilationUnit::define(
   }
 
   std::vector<Function*> methods;
-  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
+  std::unordered_map<std::string, Function*> function_table;
   if (init_idx.has_value()) {
     // if we have an init, do it first.
     auto fn = define(
         definitions[*init_idx], resolvers[*init_idx], self, function_table);
     const auto& name = fn->name();
-    function_table[name] = fn;
+    function_table[name] = fn.get();
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }
@@ -2966,7 +2976,7 @@ void CompilationUnit::define(
 
     auto fn = define(definitions[i], resolvers[i], self, function_table);
     const auto& name = fn->name();
-    function_table[name] = fn;
+    function_table[name] = fn.get();
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }

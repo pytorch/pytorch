@@ -92,6 +92,12 @@ def main():
     )
 
     parser.add_argument(
+        "--use_jit",
+        help="Run operators with PyTorch JIT mode",
+        action='store_true'
+    )
+
+    parser.add_argument(
         "--forward_only",
         help="Only run the forward path of operators",
         action='store_true'
