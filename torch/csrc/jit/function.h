@@ -47,7 +47,7 @@ struct TORCH_API Function {
     return name_;
   }
 
-  std::string name() const {
+  const std::string& name() const {
     return name_.name();
   }
 

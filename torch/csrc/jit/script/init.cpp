@@ -389,13 +389,9 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            std::vector<QualifiedName> names;
-            for (const auto& def : defs) {
-              auto method_name = QualifiedName(m.name(), def.name().name());
-              names.emplace_back(std::move(method_name));
-            }
+            const auto prefix = QualifiedName(m.name());
             const auto self = ModuleSelf(m, py_m);
-            m.class_compilation_unit()->define(names, defs, resolvers, &self);
+            m.class_compilation_unit()->define(prefix, defs, resolvers, &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
@@ -695,8 +691,13 @@ void initJitScriptBindings(PyObject* module) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         // TODO this should be the global python CU
         const auto name = c10::QualifiedName(qualname);
+        TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
         auto cu = std::make_shared<CompilationUnit>();
-        cu->define({name}, {def}, {pythonResolver(std::move(rcb))}, nullptr);
+        cu->define(
+            QualifiedName(name.prefix()),
+            {def},
+            {pythonResolver(std::move(rcb))},
+            nullptr);
         auto defined = cu->get_functions().at(0);
         defined->setSchema(getSchemaWithNameAndDefaults(
             def.range(), defined->getSchema(), def.name().name(), defaults));
@@ -736,15 +737,13 @@ void initJitScriptBindings(PyObject* module) {
         cu->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
-        std::vector<c10::QualifiedName> names;
         for (const auto& def : classDef.defs()) {
-          names.push_back(QualifiedName(classname, def.name().name()));
           methodDefs.push_back(def);
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
         const auto self = SimpleSelf(classType);
-        cu->define(names, methodDefs, rcbs, &self);
+        cu->define(classname, methodDefs, rcbs, &self);
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {

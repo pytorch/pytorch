@@ -78,7 +78,7 @@ struct TORCH_API CompilationUnit {
 
   // for historic reasons, these are defined in compiler.cpp
   void define(
-      const std::vector<c10::QualifiedName>& names,
+      const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Def>& definitions,
       const std::vector<ResolverPtr>&
           resolvers, /* determines how we handle free
@@ -89,7 +89,6 @@ struct TORCH_API CompilationUnit {
   // same as above but parse the definitions from source
   void define(
       // prefix namespace to put all the defined functions into
-      // If null,
       const c10::optional<c10::QualifiedName>& prefix,
       const std::string& source,
       const ResolverPtr& resolver,
@@ -191,7 +190,7 @@ struct TORCH_API CompilationUnit {
 
  private:
   std::unique_ptr<Function> define(
-      const c10::QualifiedName& name,
+      const c10::optional<c10::QualifiedName>& prefix,
       const Def& def,
       const ResolverPtr& resolver,
       const Self* self,

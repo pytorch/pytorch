@@ -856,7 +856,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
   squareCheckInputs(self);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
-  Tensor pivots_tensor = at::zeros(req_size, self.options().dtype(at::kInt));
+  Tensor pivots_tensor = at::arange(1, self.size(-1) + 1, self.options().dtype(at::kInt)).expand(req_size).clone();
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(at::kInt));
 

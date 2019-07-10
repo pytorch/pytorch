@@ -184,6 +184,10 @@ public:
   }
 };
 
+inline std::string toString(TypePtr typePtr) {
+  return typePtr->str();
+}
+
 inline bool operator!=(const Type & lhs, const Type & rhs) {
   return !(lhs == rhs);
 }

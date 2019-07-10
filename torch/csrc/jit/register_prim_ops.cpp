@@ -1009,7 +1009,7 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::impl::GenericDict vals;
+             auto vals = c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
