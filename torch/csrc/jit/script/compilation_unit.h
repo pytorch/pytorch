@@ -77,8 +77,7 @@ struct TORCH_API CompilationUnit {
   }
 
   // for historic reasons, these are defined in compiler.cpp
-  // Returns the list of Function's just defined.
-  std::vector<Function*> define(
+  void define(
       const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Def>& definitions,
       const std::vector<ResolverPtr>&
@@ -88,8 +87,7 @@ struct TORCH_API CompilationUnit {
       const Self* self);
 
   // same as above but parse the definitions from source
-  // Returns the list of Function's just defined.
-  std::vector<Function*> define(
+  void define(
       // prefix namespace to put all the defined functions into
       const c10::optional<c10::QualifiedName>& prefix,
       const std::string& source,

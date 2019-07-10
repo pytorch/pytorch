@@ -2941,7 +2941,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
 }
 
-std::vector<Function*> CompilationUnit::define(
+void CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
@@ -2958,7 +2958,7 @@ std::vector<Function*> CompilationUnit::define(
     }
   }
 
-  std::vector<Function*> functions;
+  std::vector<Function*> methods;
   std::unordered_map<std::string, Function*> function_table;
   if (init_idx.has_value()) {
     // if we have an init, do it first.
@@ -2970,7 +2970,7 @@ std::vector<Function*> CompilationUnit::define(
         function_table);
     const auto& name = fn->name();
     function_table[name] = fn.get();
-    functions.push_back(fn.get());
+    methods.push_back(fn.get());
     register_function(std::move(fn));
   }
 
@@ -2984,17 +2984,16 @@ std::vector<Function*> CompilationUnit::define(
         define(prefix, definitions[i], resolvers[i], self, function_table);
     const auto& name = fn->name();
     function_table[name] = fn.get();
-    functions.push_back(fn.get());
+    methods.push_back(fn.get());
     register_function(std::move(fn));
   }
 
-  for (Function* function : functions) {
-    function->ensure_defined();
+  for (Function* method : methods) {
+    method->ensure_defined();
   }
-  return functions;
 }
 
-std::vector<Function*> CompilationUnit::define(
+void CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
@@ -3007,7 +3006,7 @@ std::vector<Function*> CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  return define(prefix, definitions, resolvers, self);
+  define(prefix, definitions, resolvers, self);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
