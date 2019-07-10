@@ -7,7 +7,7 @@
 
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
-#ifndef TH_REAL_IS_HALF
+#if !defined(TH_REAL_IS_HALF) && !defined(TH_REAL_IS_BFLOAT16)
 
 TH_API void THTensor_(ltValue)(THByteTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(leValue)(THByteTensor *r_, THTensor* t, scalar_t value);

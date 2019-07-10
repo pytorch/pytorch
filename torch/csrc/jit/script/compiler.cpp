@@ -838,6 +838,7 @@ struct to_ir {
       List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
+      ErrorReport::CallStack::update_pending_range(stmt.range());
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -2169,6 +2170,9 @@ struct to_ir {
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
+    // Push the source range of a call in case compiling this function
+    // triggers an error
+    ErrorReport::CallStack::update_pending_range(tree.range());
     return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
   }
 
@@ -2973,7 +2977,12 @@ std::unique_ptr<Function> CompilationUnit::define(
         std::make_shared<FunctionResolver>(resolver.get(), function_table);
   }
   auto creator = [def, _resolver, self](Function& method) {
+    // Store the function name so that it can be referenced if there is an error
+    // while compiling this function
+    ErrorReport::CallStack::push_function(def.name().name());
     to_ir(def, _resolver, self, method);
+    // Compilation was successful, so remove the function def info
+    ErrorReport::CallStack::pop_function();
   };
   return torch::make_unique<Function>(
       name, is_optimized(), std::make_shared<Graph>(), creator);

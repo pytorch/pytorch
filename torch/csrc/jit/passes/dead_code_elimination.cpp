@@ -89,9 +89,11 @@ class DeadCodeEliminator {
   // We want to be able to DCE all the %b stuff. So when processing block
   // returns, we only mark producers for values that "live" (i.e. used outside
   // the block).
-  void markReturnNode(Node* node) {
+  //
+  // Returns true iff this marked something we haven't marked before.
+  bool markReturnNode(Node* node) {
     if (marked_.count(node)) {
-      return;
+      return false;
     }
 
     AT_ASSERT(node->owningBlock()->return_node() == node);
@@ -100,8 +102,7 @@ class DeadCodeEliminator {
       // If there's no outer node, we're looking at the graph's top-level
       // return block. We consider all graph outputs to be "used", so just mark
       // this node normally.
-      mark(node);
-      return;
+      return mark(node);
     }
 
     // Collect all inputs that are actually live
@@ -133,6 +134,7 @@ class DeadCodeEliminator {
     }
 
     marked_.insert(node);
+    return true;
   }
 
   // Loops are special, because we need to run them to convergence.
@@ -145,7 +147,8 @@ class DeadCodeEliminator {
   //
   // If we only process the loop block once, we will conclude that `b[0]` and
   // `b` are dead, even though `b[0] += 1` mutates a live memory location (since
-  // `b[0]` is an alias of `a`).
+  // `b[0]` is an alias of `a`). i.e. `a` is used to compute `tot` in the next
+  // iteration
   //
   // We need to mark the loop again with the information that `a` is live, and
   // repeat until we're not marking new stuff anymore.
@@ -155,14 +158,13 @@ class DeadCodeEliminator {
     TORCH_INTERNAL_ASSERT(node->kind() == prim::Loop);
     // Did a single iteration over the loop block mark anything new?
     // If this is false, we've converged.
-    bool innerMarked = false;
+    bool marked = false;
     // Did we ever mark anything new?
     bool anyMarked = false;
     do {
-      bool marked = mark(node->blocks().at(0));
-      innerMarked = marked;
+      marked = mark(node->blocks().at(0));
       anyMarked |= marked;
-    } while (innerMarked);
+    } while (marked);
     return anyMarked;
   }
 
@@ -179,7 +181,7 @@ class DeadCodeEliminator {
     }
 
     // Initialize by marking the return node
-    markReturnNode(block->return_node());
+    anyMarked |= markReturnNode(block->return_node());
 
     for (auto it = block->nodes().rbegin(); it != block->nodes().rend(); ++it) {
       auto node = *it;
