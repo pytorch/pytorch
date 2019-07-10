@@ -38,7 +38,7 @@ Generates:
     Xhy: Tensor of type `float32` and shape drawn from the `shapes`.
     (scale, zero_point): Drawn from valid ranges derived from the dtypes
     (qmin, qmax): Valid quantization ranges derived from the dtypes.
-    (quantized_type, underlying_type): Data types for conversion in test.
+    (quantized_type): Data types for conversion in test.
 Note:
     - The `dtypes` argument is used to infer the ranges. The elements should be
     of length 1 or 2:
@@ -84,7 +84,7 @@ def qtensor(draw, shapes, dtypes=None, float_min=None, float_max=None):
     Xhy = draw(stnp.arrays(dtype=np.float32,
                            elements=st.floats(min_value=float_min, max_value=float_max),
                            shape=shape))
-    return Xhy, (scale, zero_point), (qmin, qmax), (quantized_type, underlying_type)
+    return Xhy, (scale, zero_point), (qmin, qmax), quantized_type
 
 """Strategy to create different shapes.
 
