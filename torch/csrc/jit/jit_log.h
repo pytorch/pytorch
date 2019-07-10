@@ -12,6 +12,8 @@
 namespace torch {
 namespace jit {
 
+class Node;
+
 enum class JitLoggingLevels {
   OFF,
   GRAPH_DUMP,
@@ -19,15 +21,22 @@ enum class JitLoggingLevels {
   GRAPH_DEBUG,
 };
 
+std::string debugValueOrDefault(const Node* n);
+
 JitLoggingLevels jit_log_level();
 
-std::string jit_log_prefix(JitLoggingLevels level, const std::string& in_str);
+std::string jit_log_prefix(
+    JitLoggingLevels level,
+    const char* fn,
+    int l,
+    const std::string& in_str);
 
 std::ostream& operator<<(std::ostream& out, JitLoggingLevels level);
 
 #define JIT_LOG(level, ...)                                                   \
   if (jit_log_level() != JitLoggingLevels::OFF && jit_log_level() >= level) { \
-    std::cerr << jit_log_prefix(level, ::c10::str(__VA_ARGS__));              \
+    std::cerr << jit_log_prefix(                                              \
+        level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__));                  \
   }
 
 // use GRAPH_DUMP for dumping graphs after optimization passes
