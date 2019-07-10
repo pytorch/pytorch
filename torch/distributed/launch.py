@@ -16,7 +16,7 @@ aggregated communication bandwidth.
 In both cases of single-node distributed training or multi-node distributed
 training, this utility will launch the given number of processes per node
 (``--nproc_per_node``). If used for GPU training, this number needs to be less
-or euqal to the number of GPUs on the current system (``nproc_per_node``),
+or equal to the number of GPUs on the current system (``nproc_per_node``),
 and each process will be operating on a single GPU from *GPU 0 to
 GPU (nproc_per_node - 1)*.
 

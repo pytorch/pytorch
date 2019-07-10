@@ -2631,13 +2631,22 @@ graph(%Ra, %Rb):
         self.assertExpected(cu.foo.code)
 
     def test_import_method(self):
-        @torch.jit.script
-        def foo(x, y):
-            return 2 * x + y
+        with torch.jit._disable_emit_hooks():
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
 
-        r, _ = _jit_python_print(foo)
-        cu = torch.jit.CompilationUnit()._import(r, [])
-        self.assertExpected(cu.foo.code)
+                @torch.jit.script_method
+                def forward(self, x, y):
+                    return 2 * x + y
+
+            foo = Foo()
+            buffer = io.BytesIO()
+            torch.jit.save(foo, buffer)
+
+            buffer.seek(0)
+            foo_loaded = torch.jit.load(buffer)
+            self.assertExpected(foo_loaded.forward.code)
 
     def test_import_way_too_new(self):
         @torch.jit.script
@@ -3133,14 +3142,23 @@ def foo(x):
         mod.nan = float("nan")
 
         with torch.jit._disable_emit_hooks():
-            @torch.jit.script
-            def foo():
-                return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
 
-            pp, table = _jit_python_print(foo)
-            sm = torch.jit.CompilationUnit()._import(pp, table)
+                @torch.jit.script_method
+                def forward(self):
+                    return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
+
+            foo = Foo()
+            buffer = io.BytesIO()
+            torch.jit.save(foo, buffer)
+
+            buffer.seek(0)
+            foo_loaded = torch.jit.load(buffer)
+
             r = foo()
-            r2 = sm.foo()
+            r2 = foo_loaded()
             # use precise assert, we are checking floating point details
             self.assertTrue(r[:-1] == r2[:-1])
             self.assertTrue(math.isnan(r[-1]) and math.isnan(r2[-1]))
@@ -12841,6 +12859,71 @@ class TestRecursiveScript(JitTestCase):
                 return z + 20 + y
 
         self.checkModule(M(), (torch.randn(2, 2),))
+
+    def test_error_stack(self):
+        def d(x):
+            # type: (int) -> int
+            return x + 10
+
+        def c(x):
+            return d("hello") + d(x)
+
+        def b(x):
+            return c(x)
+
+        def a(x):
+            return b(x)
+
+        try:
+            scripted = torch.jit.script(a)
+        except RuntimeError as e:
+            checker = FileCheck()
+            checker.check("Expected a value of type 'int'")
+            checker.check("def c(x)")
+            checker.check("def b(x)")
+            checker.check("def a(x)")
+            checker.run(str(e))
+
+    def test_error_stack_module(self):
+        def d(x):
+            # type: (int) -> int
+            return x + 10
+
+        def c(x):
+            return d("hello") + d(x)
+
+        def b(x):
+            return c(x)
+
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super(Submodule, self).__init__()
+
+            def forward(self, x):
+                return b(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.submodule = Submodule()
+
+            def some_method(self, y):
+                return y + self.submodule(y)
+
+            def forward(self, x):
+                return self.some_method(x)
+
+        try:
+            scripted = torch.jit.script(M())
+        except RuntimeError as e:
+            checker = FileCheck()
+            checker.check("Expected a value of type 'int'")
+            checker.check("return d(\"hello\")")
+            checker.check("return c(x)")
+            checker.check("return b(x)")
+            checker.check("return y + self.submodule(y)")
+            checker.check("return self.some_method(x)")
+            checker.run(str(e))
 
     def test_script_basic(self):
         def a_python_fn(a, b, c):

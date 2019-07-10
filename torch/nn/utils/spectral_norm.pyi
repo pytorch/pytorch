@@ -1,6 +1,6 @@
 from typing import Any, Optional, TypeVar
 from ... import Tensor
-from .. import Module
+from ..modules import Module
 
 
 class SpectralNorm:

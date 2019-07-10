@@ -35,7 +35,9 @@ class Quantize(Module):
 
     @staticmethod
     def from_float(mod):
-        return Quantize(mod.qparams[0].item(), mod.qparams[1].item(), torch.quint8)
+        assert hasattr(mod, 'observer')
+        qparams = mod.observer.calculate_qparams()
+        return Quantize(qparams[0].item(), qparams[1].item(), mod.observer.dtype)
 
 class DeQuantize(Module):
     r"""Dequantizes an incoming tensor
@@ -136,3 +138,30 @@ class Linear(NNLinear):
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
+
+    # TODO: support initializing from quantization parameters when Quantizer is
+    # exposed in python
+    @staticmethod
+    def from_float(mod):
+        r"""Create a quantized module from a float module or qparams_dict
+
+            Args: `mod` a float module, either produced by torch.quantization utilities
+            or directly from user
+        """
+        assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
+        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+        assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+        activation_observer = mod.observer
+        act_qparams = activation_observer.calculate_qparams()
+        weight_observer = mod.qconfig.weight()
+        weight_observer(mod.weight)
+        wt_qparams = weight_observer.calculate_qparams()
+        bias_scale = (wt_qparams[0] * act_qparams[0]).float()
+        qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long().item(), torch.qint8)
+        qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
+        qlinear = Linear(mod.in_features, mod.out_features)
+        qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
+        qlinear.bias = qbias
+        qlinear.out_scale = torch.tensor([act_qparams[0]])
+        qlinear.out_zero_point = torch.tensor([act_qparams[1]])
+        return qlinear

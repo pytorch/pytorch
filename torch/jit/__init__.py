@@ -57,6 +57,11 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_class_compile = torch._C._jit_script_class_compile
 
+# The Python CompilationUnit. All functions and modules defined in Python will
+# live in here. It's defined in Python because doing in cpp creates static
+# destruction order issues.
+_python_cu = torch._C.CompilationUnit()
+
 Future = torch._C.Future
 _fork = torch._C.fork
 _wait = torch._C.wait
@@ -771,7 +776,7 @@ def trace(func,
         raise AttributeError("trace doesn't support compiling individual module's functions.\n"
                              "Please use trace_module")
 
-    name = getattr(func, '__name__', 'forward')
+    name = _qualified_name(func)
     if name == '<lambda>':
         name = '_lambda'  # make name a valid identifier
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
@@ -967,7 +972,7 @@ def _make_strong_submodule(field, module, parent):
     return new_strong_submodule
 
 
-def _try_compile_fn(fn):
+def _try_compile_fn(fn, loc):
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
@@ -1035,6 +1040,10 @@ def whichmodule(obj):
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
+    # short-circuit in cases where the object already has a known qualified name
+    if isinstance(obj, torch._C.Function):
+        return obj.qualified_name
+
     name = obj.__name__
     module_name = obj.__module__
 
@@ -1525,9 +1534,6 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if isinstance(value, Module) and _is_recursive_script_enabled(value):
-                    # Compile weak script module
-                    value = _convert_to_script_module(value)
                 if attr == 'training':
                     if self._c._has_attribute('training'):
                         self.__dict__['training'] = value

@@ -1,5 +1,4 @@
 # Torch
-from torch._C import _jit_python_print
 from torch._six import PY2
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map
