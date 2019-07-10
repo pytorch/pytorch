@@ -6,8 +6,8 @@ namespace torch { namespace autograd {
 std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &inputs,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
-  const std::vector<Variable> &raw_outputs,
-  std::shared_ptr<Function> cdata) {
+  const at::ArrayRef<Variable> raw_outputs,
+  const std::shared_ptr<Function> &cdata) {
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {
@@ -61,7 +61,7 @@ std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &i
   for (auto i = 0; i < num_outputs; ++i) {
     auto out_tensor_impl = raw_outputs[i].unsafeGetTensorImpl();
     bool is_input = inputs.count(out_tensor_impl) > 0;
-    bool is_modified = std::find(dirty_inputs.begin(), dirty_inputs.end(), out_tensor_impl) != dirty_inputs.end();
+    bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
     bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0;
 
     Variable var = raw_outputs[i];
