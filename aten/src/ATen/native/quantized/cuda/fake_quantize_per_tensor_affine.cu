@@ -105,8 +105,8 @@ at::Tensor fake_quantize_per_tensor_affine_backward_cuda(
             const float& dy,
             const float& x,
             float& dx) {
-          float Xq = std::nearbyint(x * inv_scale + zero_point);
-          dx = float(Xq >= quant_min && Xq <= quant_max) *  dy;
+          double Xq = std::nearbyint(x * inv_scale + zero_point);
+          dx = double(Xq >= quant_min && Xq <= quant_max) *  dy;
         });
     return dX;
 }
