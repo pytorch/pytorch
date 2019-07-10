@@ -27,6 +27,8 @@ std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
 
+ProfilerConfig::~ProfilerConfig() = default;
+
 RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_mutex);
@@ -61,9 +63,29 @@ void pushRangeImpl(
     return;
   }
   if (state == ProfilerState::NVTX) {
-    if(sequence_nr >= 0) {
+    if(sequence_nr >= 0 || shapes.size() > 0) {
       std::stringstream s;
-      s << name.str() << msg << sequence_nr;
+      if(sequence_nr >= 0)
+        s << name.str() << msg << sequence_nr;
+      if(shapes.size() > 0) {
+        s << ", sizes = [";
+        for(int i = 0; i < shapes.size(); i++) {
+          if(shapes[i].size() > 0) {
+            s << "[";
+            for(int dim = 0; dim < shapes[i].size(); dim++) {
+              s << shapes[i][dim];
+              if(dim < shapes[i].size() - 1)
+                s << ", ";
+            }
+            s << "]";
+          }
+          else
+            s << "[]";
+          if(i < shapes.size() - 1)
+            s << ", ";
+        }
+        s << "]";
+      }
       cuda_stubs->nvtxRangePushA(s.str().c_str());
     } else {
       cuda_stubs->nvtxRangePushA(name.str());
@@ -246,7 +268,7 @@ RecordProfile::~RecordProfile() {
 }
 
 void RecordProfile::processEvents(const std::vector<Event*>& events) {
-  AT_CHECK(out_, "could not open file");
+  TORCH_CHECK(out_, "could not open file");
   Event* start = nullptr;
   for (Event* e : events) {
     if(0 == strcmp(e->name(), "__start_profile")) {
@@ -254,7 +276,7 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
       break;
     }
   }
-  AT_CHECK(start, "could not find start?");
+  TORCH_CHECK(start, "could not find start?");
   std::vector<Event*> stack;
   out_ << "[\n";
   bool first = true;

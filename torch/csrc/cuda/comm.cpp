@@ -16,18 +16,6 @@
 #include <cstddef>
 #include <vector>
 
-
-// The following code is used to ensure torch is linked against caffe2_gpu.
-#ifdef _MSC_VER
-namespace {
-#pragma optimize("", off)
-  int warp_size() {
-    return at::cuda::warp_size();
-  }
-#pragma optimize("", on)
-}
-#endif
-
 namespace torch { namespace cuda {
 using namespace at;
 using namespace torch::autograd;
@@ -144,7 +132,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
           Variable var = t;
-          device_outputs.push_back(make_variable(var.data(), false));
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     } else {
@@ -157,7 +145,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
           Variable var = t;
-          device_outputs.push_back(make_variable(var.data(), false));
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     }
@@ -181,7 +169,7 @@ std::vector<at::Tensor> scatter(
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
         std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), int64_t{0});
-    AT_CHECK(
+    TORCH_CHECK(
       chunk_size_sum == tensor.size(dim),
       "given chunk sizes don't sum up to the tensor's size ",
       "(sum(chunk_sizes) == ", chunk_size_sum,
@@ -190,7 +178,7 @@ std::vector<at::Tensor> scatter(
     int64_t chunk_start = 0;
     for (size_t chunk = 0; chunk < chunk_sizes->size(); ++chunk) {
       const int64_t chunk_size = (*chunk_sizes)[chunk];
-      AT_CHECK(chunk_size > 0, "Chunk size must be positive");
+      TORCH_CHECK(chunk_size > 0, "Chunk size must be positive");
       chunks.push_back(tensor.narrow(dim, chunk_start, chunk_size));
       chunk_start += chunk_size;
     }
@@ -202,7 +190,7 @@ std::vector<at::Tensor> scatter(
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int16_t>(devices[chunk]);
     if (streams && (*streams)[chunk]) {
-      AT_CHECK(
+      TORCH_CHECK(
           (*streams)[chunk]->device_index() == device_index,
           "Expected the device associated with the stream at index ",
           chunk, " (was ", (*streams)[chunk]->device_index(), ") ",
@@ -220,19 +208,19 @@ at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
     c10::optional<int32_t> destination_index) {
-  AT_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
+  TORCH_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   at::Tensor result;
   int64_t total_size = 0;
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   for (const auto& tensor : tensors) {
-    AT_CHECK(
+    TORCH_CHECK(
         tensor.is_cuda(), "Gather expects all inputs to have CUDA type");
     AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
-      AT_CHECK(
+      TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Gather got an input of invalid size: got ",
           tensor.sizes(), ", but expected ", at::IntArrayRef(expected_size));

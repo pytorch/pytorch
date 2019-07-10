@@ -49,9 +49,9 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  AT_CHECK((0 <= BLANK) && (BLANK < num_labels), "blank must be in label range");
-  AT_CHECK((int64_t) input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
-  AT_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
+  TORCH_CHECK((0 <= BLANK) && (BLANK < num_labels), "blank must be in label range");
+  TORCH_CHECK((int64_t) input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
+  TORCH_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
   size_t tg_target_stride;
   int64_t max_target_length = 0;
@@ -77,13 +77,13 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
     }
     tg_target_stride = targets.stride(1);
     checkSize(c, targets_arg, 0, batch_size);
-    AT_CHECK(targets.size(1) >= max_target_length,
+    TORCH_CHECK(targets.size(1) >= max_target_length,
              "Expected tensor to have size at least ", max_target_length, " at dimension 1, but got size ", targets.size(1), " for ", targets_arg,
              " (while checking arguments for ", c, ")");
   }
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
-    AT_CHECK(input_lengths[b] <= max_input_length,
+    TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", input_lengths[b], " for ", log_probs_arg,
              " (while checking arguments for ", c, ")");
   }
@@ -147,12 +147,17 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
         }
       }
       // the likelihood is the the sum of the last two alphas, eq (8), the loss is the negative log likelihood
-      scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
-      scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
-      scalar_t m = std::max(l1, l2);
-      m = ((m == neginf) ? 0 : m);
-      scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
-      neg_log_likelihood_a[b] = -log_likelihood;
+      if (target_length == 0) {
+        // if the target is empty then there is no preceding BLANK state and hence there is no path to merge
+        neg_log_likelihood_a[b] = -log_alpha_a[input_length-1][0];
+      } else {
+        scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
+        scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
+        scalar_t m = std::max(l1, l2);
+        m = ((m == neginf) ? 0 : m);
+        scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
+        neg_log_likelihood_a[b] = -log_likelihood;
+      }
     }
   });
 
@@ -377,8 +382,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  AT_CHECK(isIntegralType(input_lengths.scalar_type()), "input_lenghts must be integral");
-  AT_CHECK(isIntegralType(target_lengths.scalar_type()), "target_lenghts must be integral");
+  TORCH_CHECK(isIntegralType(input_lengths.scalar_type()), "input_lenghts must be integral");
+  TORCH_CHECK(isIntegralType(target_lengths.scalar_type()), "target_lenghts must be integral");
 
   Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
   Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();

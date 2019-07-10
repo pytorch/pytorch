@@ -32,7 +32,7 @@ def find_cuda_windows_lib():
     # Override the default search process
     # Fixes https://github.com/pytorch/pytorch/issues/20202
     # The libary selection will be done in these directories one by one
-    # 1. [Package Root]\Lib 
+    # 1. [Package Root]\Lib
     #    That's where our libraries are in, which should be loaded first.
     # 2. [Python Root]\Library\bin
     #    That's where `cudatoolkit` store the cuda libraries.
@@ -110,8 +110,8 @@ of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 def _check_capability():
     incorrect_binary_warn = """
-    Found GPU%d %s which requires CUDA_VERSION >= %d for
-     optimal performance and fast startup time, but your PyTorch was compiled
+    Found GPU%d %s which requires CUDA_VERSION >= %d to
+     work properly, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
      using instructions from https://pytorch.org
     """
@@ -126,9 +126,12 @@ def _check_capability():
     for d in range(device_count()):
         capability = get_device_capability(d)
         major = capability[0]
+        minor = capability[1]
         name = get_device_name(d)
         if capability == (3, 0) or major < 3:
             warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
+        elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
+            warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 
 def _lazy_call(callable):
@@ -593,7 +596,7 @@ def _dummy_type(name):
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
@@ -658,6 +661,10 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
 class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
     pass
 
+
+class BFloat16Storage(_CudaBase, torch._C.CudaBFloat16StorageBase, _StorageBase):
+    pass
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -667,6 +674,7 @@ torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
 torch._storage_classes.add(BoolStorage)
+torch._storage_classes.add(BFloat16Storage)
 
 from . import sparse  # noqa: F401
 from . import profiler  # noqa: F401

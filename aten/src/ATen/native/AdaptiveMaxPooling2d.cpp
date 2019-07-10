@@ -134,16 +134,16 @@ void adaptive_max_pool2d_out_cpu_template(
   int64_t istrideB = 0;
 
   for (int64_t i = 0; i < input.ndimension(); i++) {
-    AT_CHECK(input.size(i) > 0,
+    TORCH_CHECK(input.size(i) > 0,
       "adaptive_max_pool2d: expected input to have non-empty spatial dimensions, "
       "but input has sizes ", input.sizes(), " with dimension ", i, " being "
       "empty");
   }
 
-  AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
-  AT_CHECK(output_size.size() == 2,
+  TORCH_CHECK(output_size.size() == 2,
     "adaptive_max_pool2d: internal error: output_size.size() must be 2");
 
   if (input.ndimension() == 4)

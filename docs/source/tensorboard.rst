@@ -86,6 +86,7 @@ Expected result:
    .. automethod:: add_scalar
    .. automethod:: add_scalars
    .. automethod:: add_histogram
+   .. automethod:: add_histogram_raw
    .. automethod:: add_image
    .. automethod:: add_images
    .. automethod:: add_figure
@@ -96,3 +97,4 @@ Expected result:
    .. automethod:: add_embedding
    .. automethod:: add_pr_curve
    .. automethod:: add_custom_scalars
+   .. automethod:: add_mesh

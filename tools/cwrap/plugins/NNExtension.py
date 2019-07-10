@@ -50,7 +50,7 @@ class NNExtension(CWrapPlugin):
         'long': Template('THPUtils_unpackLong($arg)'),
         'int64_t': Template('THPUtils_unpackLong($arg)'),
         'void*': Template('(void*)THPUtils_unpackLong($arg)'),
-        'THGenerator*': Template('THPGenerator_TH_CData((THPGenerator*)$arg)'),
+        'at::Generator*': Template('((THPGenerator*)$arg)->cdata'),
     }
 
     TYPE_CHECK = {
@@ -70,7 +70,7 @@ class NNExtension(CWrapPlugin):
         'long': Template('THPUtils_checkLong($arg)'),
         'int64_t': Template('THPUtils_checkLong($arg)'),
         'void*': Template('THPUtils_checkLong($arg)'),
-        'THGenerator*': Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
+        'at::Generator*': Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
     }
 
     WRAPPER_TEMPLATE = Template("""
@@ -88,7 +88,7 @@ PyObject * $name(PyObject *_unused, PyObject *args)
     """)
 
     TYPE_NAMES = {
-        'THGenerator*': 'Generator',
+        'at::Generator*': 'Generator',
         'THCudaHalfTensor*': 'torch.cuda.HalfTensor',
         'THCudaTensor*': 'torch.cuda.FloatTensor',
         'THCudaDoubleTensor*': 'torch.cuda.DoubleTensor',

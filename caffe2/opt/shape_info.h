@@ -5,12 +5,24 @@
 namespace caffe2 {
 
 struct CAFFE2_API QShapeInfo {
-  QShapeInfo(float o = 0, float s = 1) : offset(o), scale(s) {}
-  float offset;
-  float scale;
-  // TODO zrphercule
-  // Add multi offset/scale support here
+  QShapeInfo(float o = 0, float s = 1, uint32_t a = 1) {
+    offset.clear();
+    scale.clear();
+    offset.push_back(o);
+    scale.push_back(s);
+    axis = a;
+  }
+
+  uint32_t axis;
+  vector<float> offset;
+  vector<float> scale;
 };
+
+CAFFE2_API void LoadInt8FCDNNLowPPackedWeightBlobInfoOfBlob(
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis,
+    const Blob* b);
 
 struct CAFFE2_API ShapeInfo {
   enum DimType : int8_t { UNKNOWN = 0, CONSTANT = 1, BATCH = 2, SEQ = 3 };

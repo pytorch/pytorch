@@ -3,8 +3,8 @@
 #include <memory>
 #include <vector>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
 class Tensor;
@@ -27,7 +27,6 @@ struct Graph;
 struct Node;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
-using c10::ivalue::Tuple;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
@@ -39,6 +38,8 @@ struct TORCH_API Code {
   explicit operator bool() const {
     return pImpl != nullptr;
   }
+  size_t num_inputs() const;
+  size_t num_outputs() const;
 
  private:
   std::shared_ptr<CodeImpl> pImpl;
@@ -75,8 +76,13 @@ struct Suspend : public std::exception {
 };
 
 struct InterpreterContinuation {
-  InterpreterContinuation(InterpreterState state_, Stack stack_, bool grad_mode_enabled_)
-      : state(state_), stack(std::move(stack_)), grad_mode_enabled(grad_mode_enabled_) {}
+  InterpreterContinuation(
+      InterpreterState state_,
+      Stack stack_,
+      bool grad_mode_enabled_)
+      : state(state_),
+        stack(std::move(stack_)),
+        grad_mode_enabled(grad_mode_enabled_) {}
 
   void operator()();
 
@@ -85,5 +91,6 @@ struct InterpreterContinuation {
   Stack stack;
   bool grad_mode_enabled;
 };
+
 } // namespace jit
 } // namespace torch

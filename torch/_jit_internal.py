@@ -4,32 +4,13 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
-import weakref
 import inspect
+import weakref
 from torch._six import builtins
-
-# Tracks standalone weak script functions
-compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Tracks which methods should be converted to strong methods
-weak_script_methods = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Converted modules and their corresponding WeakScriptModuleProxy objects
-weak_modules = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Types that have been declared as weak modules
-weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Python Op functions that should be ignored by the compiler. These will be replaced
-# with an operator that always throws an error
-ignored_fns = weakref.WeakSet()  # noqa: T484
-
-COMPILATION_PENDING = object()
-COMPILED = object()
 
 
 def createResolutionCallback(frames_up=0):
@@ -75,51 +56,41 @@ def createResolutionCallback(frames_up=0):
             return f_globals[key]
         elif hasattr(builtins, key):
             return getattr(builtins, key)
-        else:
-            return None
 
     return env
 
 
-def weak_script(fn, _frames_up=0):
+def createResolutionCallbackFromClosure(fn):
     """
-    Marks a function as a weak script function. When used in a script function
-    or ScriptModule, the weak script function will be lazily compiled and
-    inlined in the graph. When not used in a script function, the weak script
-    annotation has no effect.
+    Create a resolutionCallback by introspecting the function instead of
+    looking up the stack for the enclosing scope
     """
-    compiled_weak_fns[fn] = {
-        "status": COMPILATION_PENDING,
-        "compiled_fn": None,
-        "rcb": createResolutionCallback(_frames_up + 1)
-    }
-    return fn
+    var_names = fn.__code__.co_freevars
 
+    # map of captured name -> value
+    free_vars = {}
 
-def weak_module(cls):
-    weak_types[cls] = {
-        "method_stubs": None
-    }
-    return cls
+    for index, name in enumerate(var_names):
+        free_vars[name] = fn.__closure__[index].cell_contents
+    f_globals = fn.__globals__
 
+    def env(key):
+        if key in free_vars:
+            return free_vars[key]
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
+        else:
+            return f_globals.get(key)
 
-def weak_script_method(fn):
-    weak_script_methods[fn] = {
-        "rcb": createResolutionCallback(frames_up=2),
-        "original_method": fn
-    }
-    return fn
+    return env
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
     """
-    Dispatches to either of 2 weak script functions based on a boolean argument.
+    Dispatches to either of 2 script functions based on a boolean argument.
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
-    if compiled_weak_fns.get(if_true) is None or compiled_weak_fns.get(if_false) is None:
-        raise RuntimeError("both functions must be weak script")
-
     def fn(*args, **kwargs):
         dispatch_flag = False
         if arg_name in kwargs:
@@ -160,9 +131,84 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     return fn
 
 
-def ignore(fn):
-    ignored_fns.add(fn)
+
+class FunctionModifiers(object):
+    """
+    Used to denote the behavior of a function in TorchScript. See export() and
+    ignore() for details.
+    """
+    IGNORE_AND_DROP = "ignore (leave as a call to Python, replace with a 'raise' on torch.jit.save)"
+    IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
+    EXPORT = "export (compile this function even if nothing calls it)"
+    DEFAULT = "default (compile if called from a exported function / forward)"
+
+
+def export(fn):
+    """
+    This decorator indicates that a method is used as an entry point into a
+    ScriptModule. `forward` implicitly is used as an entry point, so it does
+    not need this decorator.
+
+    Methods are added to a ScriptModule as they are called in Python. If a
+    method is never called, it will not be included in the ScriptModule when
+    saving. This decorator explicitly marks that a method should be included
+    even if it is not called from Python.
+    """
+    fn._torchscript_modifier = FunctionModifiers.EXPORT
     return fn
+
+
+def ignore(drop_on_export=False):
+    """
+    This decorator indicates to the compiler that a function or method should
+    be ignored and left as a Python function.
+
+    With `drop_on_export=False` (the default), calls to this function will
+    prevent saving a TorchScript model.
+
+    With `drop_on_export=True`, any calls to this function from other
+    TorchScript code will be replaced with a `raise`. This allows you to leave
+    code in your TorchScript model that is only ever run when the Python
+    interpreter is present.
+    """
+    if callable(drop_on_export):
+        # used without any args, so drop_on_export is actually a function
+        #   @torch.jit.ignore
+        #   def fn(...):
+        fn = drop_on_export
+        fn._torchscript_modifier = FunctionModifiers.IGNORE
+        return fn
+
+    if isinstance(drop_on_export, bool):
+        def decorator(fn):
+            if drop_on_export:
+                fn._torchscript_modifier = FunctionModifiers.IGNORE_AND_DROP
+            else:
+                fn._torchscript_modifier = FunctionModifiers.IGNORE
+            return fn
+        return decorator
+    raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
+                       "a function but got {}".format(drop_on_export))
+
+
+def should_drop_on_export(fn):
+    attr = get_torchscript_modifier(fn)
+    if attr is None:
+        return False
+    return attr is FunctionModifiers.IGNORE_AND_DROP
+
+
+def is_ignored_fn(fn):
+    mod = get_torchscript_modifier(fn)
+    return mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
+
+
+def get_torchscript_modifier(fn):
+    if not callable(fn):
+        return None
+    if hasattr(fn, '__func__'):
+        fn = fn.__func__
+    return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
 
 def _parameter_list(parameter_names_fn):
@@ -274,6 +320,31 @@ except ImportError:
 
     def is_optional(ann):
         return isinstance(ann, OptionalInstance)
+
+
+try:
+    import typing_extensions
+    from typing_extensions import Final
+
+    def is_final(ann):
+        return ann.__module__ == 'typing_extensions' and \
+            (getattr(ann, '__origin__', None) is typing_extensions.Final)
+except ImportError:
+    # Same as above, this polyfill is only for `typing_extensions`
+    class FinalInstance(object):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    class FinalCls(object):
+        def __getitem__(self, types):
+            return FinalInstance(types)
+
+    Final = FinalCls()  # noqa: T484
+
+    def is_final(ann):
+        return isinstance(ann, FinalInstance)
 
 
 # allows BroadcastingList instance to be subscriptable

@@ -9,6 +9,8 @@
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
 
+#include <ATen/core/grad_mode.h>
+
 namespace caffe2 {
 
 using at::UndefinedTensorImpl;
@@ -189,7 +191,8 @@ class CAFFE2_API Tensor final {
    * 'async' parameter triggers async copy for CUDA tensors
    */
   void CopyFrom(const Tensor& src, bool async = false) {
-    AT_ASSERT(!impl_->is_variable());  // TODO: remove this when Variable and Tensor are merged
+    // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
+    AT_ASSERT(!impl_->is_variable() || !(impl_->requires_grad() && at::GradMode::is_enabled()));
     AT_ASSERTM(
         src.impl_->is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
@@ -519,8 +522,8 @@ class CAFFE2_API Tensor final {
     return impl_.get()->strides();
   }
 
-  inline bool is_contiguous() const {
-    return impl_.get()->is_contiguous();
+  inline bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    return impl_.get()->is_contiguous(memory_format);
   }
 
   /**
@@ -648,6 +651,9 @@ Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
       r.dtype(), values.size(), values.data(), r.mutable_data<T>());
   return r;
 }
+
+vector<int64_t>
+GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device);
 
 class CAFFE2_API TensorPrinter {
  public:

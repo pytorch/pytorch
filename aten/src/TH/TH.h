@@ -10,7 +10,6 @@
 
 #include <TH/THVector.h>
 #include <TH/THLogAdd.h>
-#include <TH/THRandom.h>
 #include <TH/THSize.h>
 #include <TH/THStorageFunctions.h>
 #include <TH/THTensor.h>

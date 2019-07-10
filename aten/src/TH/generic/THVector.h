@@ -2,8 +2,8 @@
 #define TH_GENERIC_FILE "TH/generic/THVector.h"
 #else
 
-// Opaque C++ struct
-struct THGenerator;
+#include <ATen/core/Generator.h>
+#include <ATen/core/DistributionsHelper.h>
 
 TH_API void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n);
 
@@ -18,7 +18,7 @@ TH_API void THVector_(divs)(scalar_t *y, const scalar_t *x, const scalar_t c, co
 TH_API void THVector_(neg)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(normal_fill)(scalar_t *data,
                                                                    const int64_t size,
-                                                                   struct THGenerator *generator,
+                                                                   struct at::Generator *generator,
                                                                    const scalar_t mean,
                                                                    const scalar_t stddev);
 

@@ -41,8 +41,18 @@ void testClassImport() {
   CompilationUnit cu2;
   std::vector<at::Tensor> constantTable;
   // Import different versions of FooTest into two namespaces.
-  import_libs(cu1, "__torch__", classSrcs1, constantTable, nullptr);
-  import_libs(cu2, "__torch__", classSrcs2, constantTable, nullptr);
+  import_libs(
+      cu1,
+      "__torch__",
+      std::make_shared<Source>(classSrcs1),
+      constantTable,
+      nullptr);
+  import_libs(
+      cu2,
+      "__torch__",
+      std::make_shared<Source>(classSrcs2),
+      constantTable,
+      nullptr);
 
   // We should get the correct version of `FooTest` for whichever namespace we
   // are referencing
@@ -64,19 +74,19 @@ void testClassImport() {
 }
 
 void testScriptObject() {
-  Module m1;
-  Module m2;
+  Module m1("m1");
+  Module m2("m2");
   std::vector<at::Tensor> constantTable;
   import_libs(
-      m1.class_compilation_unit(),
+      *m1.class_compilation_unit(),
       "__torch__",
-      classSrcs1,
+      std::make_shared<Source>(classSrcs1),
       constantTable,
       nullptr);
   import_libs(
-      m2.class_compilation_unit(),
+      *m2.class_compilation_unit(),
       "__torch__",
-      classSrcs2,
+      std::make_shared<Source>(classSrcs2),
       constantTable,
       nullptr);
 

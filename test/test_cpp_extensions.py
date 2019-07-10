@@ -622,6 +622,18 @@ class TestCppExtension(common.TestCase):
         finally:
             torch.set_default_dtype(initial_default)
 
+    def test_compilation_error_formatting(self):
+        # Test that the missing-semicolon error message has linebreaks in it. 
+        # This'll fail if the message has been munged into a single line.
+        # It's hard to write anything more specific as every compiler has it's own
+        # error formatting.
+        with self.assertRaises(RuntimeError) as e:
+            torch.utils.cpp_extension.load_inline(
+                name="test_compilation_error_formatting",
+                cpp_sources="int main() { return 0 }") 
+        pattern = r'.*(\\n|\\r).*'
+        self.assertNotRegex(str(e), pattern)
+
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod
@@ -670,7 +682,7 @@ class TestMSNPUTensor(common.TestCase):
         d = c.sum()
         self.assertEqual(msnpu_extension.get_test_int(), 2)
 
-        d.backward()
+        d.backward(torch.zeros(0, device='msnpu'))
         self.assertEqual(msnpu_extension.get_test_int(), 4)
 
 

@@ -2,17 +2,11 @@
 
 #include <ATen/Parallel.h>
 #include <torch/csrc/autograd/grad_mode.h>
-
 #include <cstdint>
 
 namespace torch {
-using autograd::AutoGradMode;
 
-// A RAII, thread local (!) guard that stops future operations from building
-// gradients.
-struct TORCH_API NoGradGuard : public AutoGradMode {
-  NoGradGuard() : AutoGradMode(/*enabled=*/false) {}
-};
+using NoGradGuard = at::NoGradGuard;
 
 /// Sets the global random seed for all newly created CPU and CUDA tensors.
 using at::manual_seed;
@@ -25,5 +19,11 @@ using at::get_num_threads;
 
 // Sets the number of threads to be used in parallel region.
 using at::set_num_threads;
+
+// Returns the number of threads used for inter-op parallelism.
+using at::get_num_interop_threads;
+
+// Sets the number of threads to be used for inter-op parallelism.
+using at::set_num_interop_threads;
 
 } // namespace torch

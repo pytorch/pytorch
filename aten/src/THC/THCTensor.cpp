@@ -10,6 +10,9 @@
 #include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateBoolType.h>
 
+#include <THC/generic/THCTensor.cpp>
+#include <THC/THCGenerateBFloat16Type.h>
+
 #include <THC/THCTensorInfo.cuh>
 
 #include <ATen/native/cuda/Resize.cuh>
@@ -66,6 +69,8 @@ THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
       return THCudaDoubleTensor_new(state);
     case at::ScalarType::Bool:
       return THCudaBoolTensor_new(state);
+    case at::ScalarType::BFloat16:
+      return THCudaBFloat16Tensor_new(state);
     default:
       AT_ERROR("unexpected ScalarType: ", toString(scalar_type));
   }
@@ -104,7 +109,7 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+  TORCH_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
   at::IntArrayRef sizes(size, nDimension);
   at::optional<at::IntArrayRef> strides;
   if (stride) {
