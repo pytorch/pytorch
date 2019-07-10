@@ -53,15 +53,14 @@ class Conv2d(_ConvNd):
                                               scale=1, zero_point=0,
                                               dtype=torch.qint32)
         self.register_buffer('_packed_weight',
-                             torch.ops.quantized.fbgemm_conv_prepack(qweight, self.groups))
+            torch.ops.quantized.fbgemm_conv_prepack(qweight, self.groups))
         self.register_buffer('bias', qbias)
-        self.register_buffer('_scale', torch.Tensor([1]))
-        self.register_buffer('_zero_point', torch.Tensor([0]).to(torch.int))
+        self.register_buffer('_scale', torch.tensor([1.0], dtype=torch.double))
+        self.register_buffer('_zero_point', torch.tensor([0], dtype=torch.long))
 
     @property
     def weight(self):
         return self._packed_weight
-        # return torch.ops.quantized.fbgemm_conv_unpack(self._packed_weight)
 
     @weight.setter
     def weight(self, w):
@@ -88,6 +87,13 @@ class Conv2d(_ConvNd):
             self._zero_point = zp
         else:
             self._zero_point = torch.Tensor([zp]).to(torch.int)
+
+    @staticmethod
+    def from_float(mod):
+        assert hasattr(mod, 'observer'), "No observer in module."
+        qparams = mod.observer.calculate_qparams()
+        return Quantize(qparams[0].item(), qparams[1].item(),
+                        mod.observer.dtype)
 
     def forward(self, input):
         return qF.conv2d(input=input,

@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 
 import torch
 import torch.nn.quantized as nnq
-import torch.nn.quantized.functional as F
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from common_utils import TestCase, run_tests, tempfile
@@ -24,7 +23,7 @@ class FunctionalAPITest(TestCase):
         zero_point = 1
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
         qY = torch.ops.quantized.relu(qX)
-        qY_hat = F.relu(qX)
+        qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
 
 
