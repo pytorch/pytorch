@@ -972,7 +972,7 @@ def _make_strong_submodule(field, module, parent):
     return new_strong_submodule
 
 
-def _try_compile_fn(fn):
+def _try_compile_fn(fn, loc):
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
@@ -1530,9 +1530,6 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if isinstance(value, Module) and _is_recursive_script_enabled(value):
-                    # Compile weak script module
-                    value = _convert_to_script_module(value)
                 if attr == 'training':
                     if self._c._has_attribute('training'):
                         self.__dict__['training'] = value
