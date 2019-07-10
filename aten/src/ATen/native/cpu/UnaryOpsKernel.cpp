@@ -51,6 +51,26 @@ static void abs_kernel(TensorIterator& iter) {
   });
 }
 
+static void bitwise_not_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    // Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not wraps this operation for both Boolean and
+    // integral types.
+    cpu_kernel(
+          iter,
+          [](bool a) {
+            return !a;
+          });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_cpu", [&]() {
+      cpu_kernel(
+          iter,
+          [](scalar_t a) -> scalar_t {
+            return ~a;
+      });
+    });
+  }
+}
+
 static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
   if (iter.dtype() == ScalarType::Half) {
     auto value = value_scalar.to<at::Half>().x;
@@ -229,6 +249,7 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
+REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
