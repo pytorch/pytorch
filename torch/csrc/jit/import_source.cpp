@@ -323,7 +323,6 @@ void import_methods(
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
-
   auto self = SimpleSelf(mod.type());
   import_functions(
       mod.name(),

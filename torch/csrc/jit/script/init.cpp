@@ -213,7 +213,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
       schema.is_varret());
 }
 
-struct ModuleSelf : public Self {
+struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   ModuleSelf(const Module& m, py::object& py_m)
       : Self(), module_(m), pyModule_(py_m) {}
 
