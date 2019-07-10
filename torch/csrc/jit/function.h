@@ -27,6 +27,12 @@ struct TORCH_API Function {
     get_executor().run(stack);
   }
 
+  Function(const Function& other)
+      : name_(other.name_),
+        graph_(other.graph_->copy()),
+        optimize_(other.optimize_),
+        function_creator_(other.function_creator_) {}
+
   void run(Stack&& stack) {
     run(stack);
   }

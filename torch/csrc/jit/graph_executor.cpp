@@ -310,15 +310,19 @@ struct DifferentiableGraphBackward : public autograd::Function {
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
       : grad(std::move(grad)),
-        fwd_grad_executor(this->grad.f, /*optimize=*/false),
-        bwd_grad_executor(this->grad.df),
+        fwd_function(
+            "DifferentiableGraphOp",
+            /*optimize=*/false,
+            this->grad.f,
+            nullptr),
+        grad_executor(this->grad.df),
         num_inputs(this->grad.f->inputs().size()),
         num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   int operator()(Stack& stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
-        bwd_grad_executor,
+        grad_executor,
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
             grad.df_input_captured_outputs.size());
@@ -333,9 +337,7 @@ struct DifferentiableGraphOp {
       captureInputs(*grad_fn, inputs);
     }
     detachVariables(stack);
-
-    auto plan = fwd_grad_executor.getPlanFor(stack);
-    InterpreterState(plan.code).run(stack);
+    fwd_function.run(stack);
     {
       auto outputs = last(stack, num_outputs);
       // hookup the gradients for the output tensors that require gradients
@@ -406,8 +408,8 @@ struct DifferentiableGraphOp {
   }
 
   Gradient grad;
-  mutable GraphExecutor fwd_grad_executor;
-  GraphExecutor bwd_grad_executor;
+  mutable Function fwd_function;
+  GraphExecutor grad_executor;
 
   const size_t num_inputs;
   const size_t num_outputs;
@@ -438,7 +440,7 @@ namespace detail {
 
 GraphExecutor* getGradExecutor(Operation& op) {
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
-    return &diff_op->bwd_grad_executor;
+    return &diff_op->grad_executor;
   }
   return nullptr;
 }
