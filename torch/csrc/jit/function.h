@@ -14,7 +14,7 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 // underlying Function that also provides a `self` object.
 struct TORCH_API Function {
   Function(
-      c10::QualifiedName name,
+      std::string name,
       bool optimize,
       std::shared_ptr<Graph> graph,
       std::function<void(Function&)> function_creator)
@@ -43,12 +43,8 @@ struct TORCH_API Function {
     return graph_;
   }
 
-  const c10::QualifiedName& qualname() const {
-    return name_;
-  }
-
   const std::string& name() const {
-    return name_.name();
+    return name_;
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -118,7 +114,7 @@ struct TORCH_API Function {
     return {function.name(), "", std::move(args), std::move(returns)};
   }
 
-  c10::QualifiedName name_;
+  std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize_;
 
