@@ -681,8 +681,13 @@ void initJitScriptBindings(PyObject* module) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         // TODO this should be the global python CU
         const auto name = c10::QualifiedName(qualname);
+        TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
         auto cu = std::make_shared<CompilationUnit>();
-        cu->define({name}, {def}, {pythonResolver(std::move(rcb))}, nullptr);
+        cu->define(
+            QualifiedName(name.prefix()),
+            {def},
+            {pythonResolver(std::move(rcb))},
+            nullptr);
         auto defined = cu->get_functions().at(0);
         defined->setSchema(getSchemaWithNameAndDefaults(
             def.range(), defined->getSchema(), def.name().name(), defaults));
