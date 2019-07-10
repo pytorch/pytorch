@@ -1,6 +1,7 @@
 import torch
 from . import nested
 from .codegen import tensorextension
+from .codegen import tensor_list
 
 torch.nestedtensor = nested.make_nested_tensor
 NestedTensor = nested.NestedTensor

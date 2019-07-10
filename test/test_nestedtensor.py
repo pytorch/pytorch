@@ -98,6 +98,9 @@ def test_binary():
 # TODO: Carefully test reference passing vs. value passing for each function
 # TODO: Add more tests for variable length examples
 if __name__ == "__main__":
+    a = [torch.tensor([3.0])]
+    b = [torch.tensor([4.0])]
+    import pdb; pdb.set_trace()
     # TODO: Need constructor tests
     test_nested_size()
     test_equal()
