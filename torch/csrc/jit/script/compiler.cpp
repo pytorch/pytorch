@@ -1313,7 +1313,7 @@ struct to_ir {
 
       // if the FOR iters and targets are present, emit FOR target assignments
       if (iter_val != nullptr && targets) {
-        Value* cur_elem = iter_val->getelem(range, method, trip_count);
+        Value* cur_elem = iter_val->getitem(range, method, trip_count);
         SugaredValuePtr sv = std::make_shared<SimpleValue>(cur_elem);
         List<Expr> target_exprs = targets.value();
         validateAssignLhsExpr(target_exprs, range);
@@ -1652,7 +1652,7 @@ struct to_ir {
           NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
 
       const auto getItem =
-          graph->insert(aten::select, {listArg, idxArg}, {}, stmt.range());
+          graph->insert(aten::__getitem__, {listArg, idxArg}, {}, stmt.range());
       const auto augmentedItem = graph->insert(
           getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
       graph->insert(
@@ -2812,24 +2812,6 @@ struct to_ir {
         ->output();
   }
 
-  Value* emitDictIndex(
-      const SourceRange& loc,
-      Value* dict_val,
-      Value* key_val) {
-    auto dict_type = dict_val->type()->cast<DictType>();
-
-    if (!key_val->type()->isSubtypeOf(dict_type->getKeyType())) {
-      throw ErrorReport(loc)
-          << "Expected key type '" << key_val->type()->python_str()
-          << "' to subtype the key type '"
-          << dict_type->getKeyType()->python_str() << "' of the dict '"
-          << dict_type->python_str() << "'";
-    }
-
-    return graph->insertNode(graph->createDictIndex(dict_val, key_val))
-        ->output();
-  }
-
   int64_t getSliceInd(Value* idx_val, const SourceRange& loc) {
     auto ivalue = toIValue(idx_val);
     if (ivalue && ivalue->isInt()) {
@@ -2868,60 +2850,30 @@ struct to_ir {
   }
 
   Value* emitSubscript(const Subscript& subscript) {
-    return emitSubscript(
-        subscript.range(),
-        emitExpr(subscript.value()),
-        subscript.subscript_exprs());
-  }
-
-  Value* emitSubscript(
-      const SourceRange& loc,
-      Value* sliceable,
-      const List<Expr>& subscript_exprs) {
+    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+    const SourceRange& range = subscript.range();
+    const SourceRange& val_range = subscript.value().range();
     if (subscript_exprs.size() != 1) {
-      return emitMultidimSlicing(loc, sliceable, subscript_exprs);
+      return emitMultidimSlicing(
+          range, sv->asValue(val_range, method), subscript_exprs);
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return emitBasicSlice(loc, sliceable, subscript_exprs);
+      return emitBasicSlice(
+          range, sv->asValue(val_range, method), subscript_exprs);
     } else {
-      return emitBasicGather(loc, sliceable, subscript_exprs);
-    }
-  }
+      // Desugars gather syntactic sugar foo[i]
+      Value* idx = emitExpr(subscript_exprs[0]);
+      Value* val = sv->asValue(val_range, method);
+      AT_ASSERT(subscript_exprs.size() == 1);
 
-  // Desugars gather syntactic sugar foo[i]
-  Value* emitBasicGather(
-      const SourceRange& loc,
-      Value* gatherable,
-      const List<Expr>& subscript_exprs) {
-    AT_ASSERT(subscript_exprs.size() == 1);
-
-    if (gatherable->type()->kind() == TypeKind::ListType) {
-      // if it's a list, emit a regular index selection op
-      auto* idx = emitExpr(subscript_exprs[0]);
-      return emitBuiltinCall(
-          loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
-    } else if (gatherable->type()->isSubtypeOf(TensorType::get())) {
-      return emitMultidimSlicing(loc, gatherable, subscript_exprs);
-    } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
-      auto* idx = emitExpr(subscript_exprs[0]);
-      return emitTupleIndex(loc, gatherable, idx);
-    } else if (auto dict_type = gatherable->type()->cast<DictType>()) {
-      auto* idx = emitExpr(subscript_exprs[0]);
-      return emitDictIndex(loc, gatherable, idx);
-    } else if (auto string_type = gatherable->type()->cast<StringType>()) {
-      auto* idx = emitExpr(subscript_exprs[0]);
-      return emitBuiltinCall(
-          loc,
-          *graph,
-          prim::StringIndex,
-          c10::nullopt,
-          {gatherable, idx},
-          {},
-          true);
-    } else {
-      throw ErrorReport(loc) << "Indexing only supported on List, Dict, "
-                                "Tensor, Tuple, and str but got type '"
-                             << gatherable->type()->python_str() << "'";
+      if (val->type()->cast<TupleType>()) {
+        return emitTupleIndex(range, sv->asValue(val_range, method), idx);
+      } else if (val->type()->isSubtypeOf(TensorType::get())) {
+        return emitMultidimSlicing(range, val, subscript_exprs);
+      } else {
+        return sv->getitem(range, method, idx);
+      }
     }
   }
 };

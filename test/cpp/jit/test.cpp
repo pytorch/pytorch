@@ -19,6 +19,7 @@
 #include <test/cpp/jit/test_constant_propagation.h>
 #include <test/cpp/jit/test_create_autodiff_subgraphs.h>
 #include <test/cpp/jit/test_custom_operators.h>
+#include <test/cpp/jit/test_dce.h>
 #include <test/cpp/jit/test_dynamic_dag.h>
 #include <test/cpp/jit/test_fuser.h>
 #include <test/cpp/jit/test_graph_executor.h>
@@ -88,7 +89,8 @@ namespace jit {
   _(QualifiedName)                     \
   _(ClassImport)                       \
   _(ScriptObject)                      \
-  _(SaveExtraFilesHook)
+  _(SaveExtraFilesHook)                \
+  _(DCE)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
