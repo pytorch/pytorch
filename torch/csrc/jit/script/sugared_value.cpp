@@ -183,7 +183,6 @@ void SimpleValue::setAttr(
     // We are initializing if:
     const auto isInitializing =
         // 1. The method we're currently inserting into is an init method
-        // TODO this can be a qualified name check
         m.name() == "__init__" &&
         // 2. The `self` arg matches this value's type (i.e. we are in the init
         // method for this class, not some other class)
@@ -253,9 +252,8 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
         m.graph()
             ->insertNode(m.graph()->createTuple(context->node()->inputs()))
             ->output();
-    // TODO this needs to go in `m`s compilation unit
     auto cu = std::make_shared<CompilationUnit>();
-    auto fn = cu->create_function(QualifiedName("anon"), graph);
+    auto fn = cu->create_function("anon", graph);
     auto ret = StrongFunctionPtr(std::move(cu), fn);
 
     std::vector<NamedValue> ctx_inputs = {close_context};
