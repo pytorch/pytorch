@@ -5,7 +5,8 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_eval_fn, QConfig, default_qconfig, default_observer, quantize, \
     prepare, convert
 
-from common_utils import TestCase, run_tests
+from common_utils import run_tests
+from common_quantization import QuantizationTestCase
 
 class SingleLayerLinearModel(torch.nn.Module):
     def __init__(self):
@@ -89,42 +90,7 @@ class ManualQuantModel(torch.nn.Module):
 
 calib_data = [torch.rand(20, 5, dtype=torch.float) for _ in range(20)]
 
-class ModelQuantizeAPITest(TestCase):
-
-    def checkNoPrepModules(self, module):
-        r"""Checks the module does not contain child
-            modules for quantization prepration, e.g.
-            quant, dequant and observer
-        """
-        self.assertFalse(hasattr(module, 'quant'))
-        self.assertFalse(hasattr(module, 'dequant'))
-
-    def checkHasPrepModules(self, module):
-        r"""Checks the module contains child
-            modules for quantization prepration, e.g.
-            quant, dequant and observer
-        """
-        self.assertTrue(hasattr(module, 'module'))
-        self.assertTrue(hasattr(module, 'quant'))
-        self.assertTrue(hasattr(module, 'dequant'))
-
-    def checkObservers(self, module):
-        if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
-            self.assertTrue(hasattr(module, 'observer'))
-        for child in module.children():
-            self.checkObservers(child)
-
-    def checkQuantDequant(self, mod):
-        self.assertEqual(type(mod.quant), nnq.Quantize)
-        self.assertEqual(type(mod.dequant), nnq.DeQuantize)
-
-    def checkQuantizedLinear(self, mod):
-        self.assertEqual(type(mod.module), nnq.Linear)
-        self.assertEqual(mod.module.bias.dtype, torch.qint32)
-        self.checkQuantDequant(mod)
-
-    def checkLinear(self, mod):
-        self.assertEqual(type(mod), torch.nn.Linear)
+class ModelQuantizeAPITest(QuantizationTestCase):
 
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
