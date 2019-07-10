@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/passes/lower_grad_of.h>
-#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -27,11 +26,6 @@ void LowerGradOf(Graph& g) {
         else_block->registerOutput(undef);
         if_stat->outputs().at(i)->copyMetadata(it->outputs().at(i));
       }
-      GRAPH_UPDATE(
-          "Replacing node prim::GradOf w/ output ",
-          debugValueOrDefault(*it),
-          " with ",
-          debugValueOrDefault(if_stat));
       it->replaceAllUsesWith(if_stat);
       it.destroyCurrent();
     }
