@@ -1088,6 +1088,9 @@ class TestCuda(TestCase):
     def test_neg(self):
         _TestTorchMixin._test_neg(self, lambda t: t.cuda())
 
+    def test_bitwise_not(self):
+        _TestTorchMixin._test_bitwise_not(self, 'cuda')
+
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
 
