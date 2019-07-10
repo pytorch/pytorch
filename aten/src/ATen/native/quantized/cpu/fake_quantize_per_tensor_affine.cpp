@@ -1,4 +1,6 @@
 #include <ATen/ATen.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 #include <ATen/NativeFunctions.h>
 
 /* FakeQuantize Op for PerTensorAffine quantization scheme */
@@ -38,10 +40,13 @@ Tensor fake_quantize_per_tensor_affine_cpu(
         "`zero_point` must be between `quant_min` and `quant_max`.");
 
     auto Y = at::empty_like(self);
-
     double inv_scale = 1.0f / scale;
-    Y = ((self * inv_scale + zero_point).round()
-      .clamp_min(quant_min).clamp_max(quant_max) - zero_point) * scale;
+    auto iter = TensorIterator::unary_op(Y, self);
+    cpu_kernel(*iter, [&](float self) -> float {
+      return (std::clamp<double>(std::nearbyint(self * inv_scale + zero_point),
+              quant_min, quant_max) - zero_point) * scale;
+    });
+
     return Y;
 }
 
@@ -83,12 +88,13 @@ Tensor fake_quantize_per_tensor_affine_backward_cpu(
       return X;
     }
 
+    Tensor dX = at::zeros_like(X);
+    auto iter = TensorIterator::binary_op(dX, X, dY);
     double inv_scale = 1.0f / scale;
-    Tensor Xq = (X * inv_scale + zero_point).round();
-    Tensor mask_min = (Xq >= quant_min);
-    Tensor mask_max = (Xq <= quant_max);
-    Tensor mask = mask_min * mask_max;
-    Tensor dX = mask.type_as(dY) * dY;
+    cpu_kernel(*iter, [&](float x, float dy) -> float {
+      double xq = std::nearbyint(x * inv_scale + zero_point);
+      return dy * (xq >= quant_min && xq <= quant_max);
+    });
     return dX;
 }
 }}  // namespace at::native

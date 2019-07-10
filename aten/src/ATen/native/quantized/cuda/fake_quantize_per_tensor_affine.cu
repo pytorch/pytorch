@@ -48,7 +48,7 @@ at::Tensor fake_quantize_per_tensor_affine_cuda(
             const float& input_val,
             float& result_val) {
           result_val = (fminf(quant_max, fmaxf(quant_min,
-              (std::round(input_val * inv_scale + zero_point))))
+              (std::nearbyint(input_val * inv_scale + zero_point))))
                 - zero_point) * scale;
         });
     return Y;
@@ -97,14 +97,16 @@ at::Tensor fake_quantize_per_tensor_affine_backward_cuda(
     auto dX = dY.clone();
 
     float inv_scale = 1.0f / scale;
-    at::cuda::CUDA_tensor_apply2<float, float>(
+    at::cuda::CUDA_tensor_apply3<float, float, float>(
+        dY,
         X,
         dX,
         [=] __device__ (
-            const float& input,
-            float& result) {
-          float Xq = std::round(input * inv_scale + zero_point);
-          result = float(Xq >= quant_min && Xq <= quant_max) *  result;
+            const float& dy,
+            const float& x,
+            float& dx) {
+          float Xq = std::nearbyint(x * inv_scale + zero_point);
+          dx = float(Xq >= quant_min && Xq <= quant_max) *  dy;
         });
     return dX;
 }
