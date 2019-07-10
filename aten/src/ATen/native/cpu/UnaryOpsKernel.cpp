@@ -52,8 +52,15 @@ static void abs_kernel(TensorIterator& iter) {
 }
 
 static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
-  if( iter.dtype() == ScalarType::Half ) {
+  if (iter.dtype() == ScalarType::Half) {
     auto value = value_scalar.to<at::Half>().x;
+    using H = decltype(value);
+    cpu_kernel_vec(
+        iter,
+        [=]() -> H { return value; },
+        [=]() { return Vec256<H>(value); });
+  } else if (iter.dtype() == ScalarType::BFloat16) {
+    auto value = value_scalar.to<at::BFloat16>().x;
     using H = decltype(value);
     cpu_kernel_vec(
         iter,

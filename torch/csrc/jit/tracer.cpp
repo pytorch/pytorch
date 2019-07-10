@@ -482,7 +482,7 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::ScalarType>& value) {
-  if (value) {
+  if (value.has_value()) {
     detail::genericAddInput(n, static_cast<int64_t>(*value));
   } else {
     Graph* g = n->owningGraph();
