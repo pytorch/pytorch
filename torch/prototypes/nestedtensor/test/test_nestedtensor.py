@@ -12,14 +12,8 @@ def _shape_prod(shape_):
         start = start  * s
     return start
 
-def gen_float_tensor(seed, shape):
-    data = []
-    for data_i in range(_shape_prod(shape)):
-        data.append(data_i + seed)
-    ret = torch.tensor(data)
-    return ret.reshape(shape).float()
 
-class NestedTensorTest(unittest.TestCase):
+class _TestNestedTensor(unittest.TestCase):
 
     def test_nested_size(self):
         a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
@@ -44,9 +38,9 @@ class NestedTensorTest(unittest.TestCase):
     
     
     def test_unbind(self):
-        data = [gen_float_tensor(1, (2, 2)),
-                gen_float_tensor(2, (2, 2)),
-                gen_float_tensor(3, (2, 2))]
+        data = [self.gen_float_tensor(1, (2, 2)),
+                self.gen_float_tensor(2, (2, 2)),
+                self.gen_float_tensor(3, (2, 2))]
         a = torch.nestedtensor(data)
         b = a.unbind()
         c = torch.nestedtensor([data_i + 1 for data_i in data])
@@ -70,10 +64,10 @@ class NestedTensorTest(unittest.TestCase):
     
     
     def test_unary(self):
-        a1 = torch.nestedtensor([gen_float_tensor(1, (2,)),
-                                 gen_float_tensor(2, (2,))])
-        a2 = torch.nestedtensor([gen_float_tensor(1, (2,)).exp_(),
-                                 gen_float_tensor(2, (2,)).exp_()])
+        a1 = torch.nestedtensor([self.gen_float_tensor(1, (2,)),
+                                 self.gen_float_tensor(2, (2,))])
+        a2 = torch.nestedtensor([self.gen_float_tensor(1, (2,)).exp_(),
+                                 self.gen_float_tensor(2, (2,)).exp_()])
     
         assert (torch.exp(a1) == a2).all()
         assert not (a1 == a2).any()
@@ -83,9 +77,9 @@ class NestedTensorTest(unittest.TestCase):
         assert (a1 == a2).all()
     
     def test_binary(self):
-        a = gen_float_tensor(1, (2,))
-        b = gen_float_tensor(2, (2,))
-        c = gen_float_tensor(3, (2,))
+        a = self.gen_float_tensor(1, (2,))
+        b = self.gen_float_tensor(2, (2,))
+        c = self.gen_float_tensor(3, (2,))
         # The constructor is suppoed to copy!
         a1 = torch.nestedtensor([a, b])
         a2 = torch.nestedtensor([b, c])
@@ -99,14 +93,24 @@ class NestedTensorTest(unittest.TestCase):
         assert (a3 == a1.add_(a2)).all()
         assert (a3 == a1).all()
 
+class TestNestedTensor(_TestNestedTensor):
+    def gen_float_tensor(seed, shape):
+        data = []
+        for data_i in range(_shape_prod(shape)):
+            data.append(data_i + seed)
+        ret = torch.tensor(data)
+        return ret.reshape(shape).float()
+
+class TestNestedTensorCUDA(_TestNestedTensor):
+    def gen_float_tensor(seed, shape):
+        data = []
+        for data_i in range(_shape_prod(shape)):
+            data.append(data_i + seed)
+        ret = torch.tensor(data)
+        return ret.reshape(shape).float().cuda()
+
 # TODO: Carefully test reference passing vs. value passing for each function
 # TODO: Add more tests for variable length examples
+# TODO: Need constructor tests
 if __name__ == "__main__":
     unittest.main()
-    # # TODO: Need constructor tests
-    # test_nested_size()
-    # test_equal()
-    # test_unbind()
-    # test_len()
-    # test_unary()
-    # test_binary()
