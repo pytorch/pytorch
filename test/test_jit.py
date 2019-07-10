@@ -8325,6 +8325,32 @@ a")
         # constants not baked in
         self.assertEqual(g(x), f(x))
 
+    def test_trace_optional(self):
+        @torch.jit.script
+        def test(x):
+            # type: (Optional[Tensor])
+            if x is None:
+                return torch.zeros(1)
+            else:
+                return x
+
+        def test_none():
+            return test(None)
+
+        def test_tensor():
+            return test(torch.zeros(2))
+
+        f_none = torch.jit.trace(test_none, ())
+        self.assertEqual(f_none(), torch.zeros(1))
+
+        f_tensor = torch.jit.trace(test_tensor, ())
+        self.assertEqual(f_tensor(), torch.zeros(2))
+
+        graph = f_tensor.graph
+        f = str(graph)
+        # tensor type correctly set as graph input
+        FileCheck().check("Double(2) = prim:").run(f)
+
     def test_trace_nested_datatypes(self):
         @torch.jit.script
         def foo(x):
