@@ -59,50 +59,6 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
     at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)).is_variable(true));
 }
 
-auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
-  AutoGIL gil;
-
-  THPObjectPtr pyInputs(PyTuple_New(inputs.size()));
-  if (!pyInputs) throw python_error();
-
-  for (size_t i = 0; i != inputs.size(); ++i) {
-    PyTuple_SET_ITEM(pyInputs.get(), i, THPVariable_Wrap(inputs[i]));
-  }
-
-  THPObjectPtr r(PyObject_CallMethod(
-      obj, "_do_backward", "OO", pyInputs.get(), Py_True));
-  if (!r) throw python_error();
-
-  auto num_outputs = PyTuple_GET_SIZE(r.get());
-  tensor_list tensor_results(num_outputs);
-  for (int i = 0; i != num_outputs; ++i) {
-    PyObject* obj = PyTuple_GET_ITEM(r.get(), i);
-    if (obj != Py_None) {
-      if (!THPVariable_Check(obj)) {
-        std::string msg("expected Variable (got '");
-        msg += THPUtils_typename(obj);
-        msg += "')'";
-        throw std::runtime_error(msg);
-      }
-      tensor_results[i] = ((THPVariable*)obj)->cdata.tensor_data();
-    }
-  }
-
-  // XXX: this might get requires_grad wrong - there's no way to figure out
-  // if _do_backward didn't use ctx.saved_tensors and as a result some
-  // Variables might require grad, even if no args do. Unfortunately, this
-  // leads to unexpected error messages ("no nodes require computing gradients"),
-  // but I don't have a better idea. These functions would raise an error
-  // in backward anyway.
-  return wrap_outputs(
-      inputs,
-      std::move(tensor_results),
-      [this](edge_list&& next_edges) {
-        return std::make_shared<Error>(
-            name() + " is not differentiable twice", std::move(next_edges));
-      });
-}
-
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from
 // C++'s Function::apply to a Python method "apply".
@@ -110,11 +66,6 @@ auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
-
-  THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
-  if (_legacy == Py_True) {
-    return legacy_apply(inputs);
-  }
 
   // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
@@ -221,10 +172,6 @@ auto PyFunction::name() const -> std::string {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
-  THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
-  if (_legacy == Py_True) {
-    name += "LegacyBackward";
-  }
   return name;
 }
 

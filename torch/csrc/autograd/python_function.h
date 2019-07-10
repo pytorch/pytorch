@@ -36,7 +36,6 @@ struct PyFunction : public Function {
   PyFunction(PyObject* obj) : obj(obj) {}
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list legacy_apply(const variable_list& inputs);
 
   void release_variables() override;
   std::string name() const override;

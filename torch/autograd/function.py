@@ -71,7 +71,6 @@ class _HookMixin(object):
 
 
 class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
-    _is_legacy = False
 
     def apply(self, *args):
         return self._forward_cls.backward(self, *args)
@@ -81,7 +80,6 @@ class FunctionMeta(type):
     """Function metaclass.
 
     This metaclass sets up the following properties:
-        _is_legacy: True if forward is not defined as a static method.
         _backward_cls: The Function class corresponding to the differentiated
             version of this function (which is generated on the fly by this
             metaclass).
@@ -94,11 +92,9 @@ class FunctionMeta(type):
                 has_static_forward = isinstance(forward, staticmethod) or isinstance(forward, classmethod)
                 break
 
-        cls._is_legacy = not has_static_forward
-
-        # old-style functions
+        # old-style functions are not supported anymore
         if not has_static_forward:
-            return super(FunctionMeta, cls).__init__(name, bases, attrs)
+            raise RuntimeError('Legacy function with non-static forward method is not supported anymore.')
 
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
         cls._backward_cls = backward_fn
