@@ -2507,11 +2507,13 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu(self):
-        _TestTorchMixin._test_lu(self, lambda t: t.cuda())
+        _TestTorchMixin._test_lu(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu(self, lambda t: t.cuda(), pivot=True)
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_solve(self):
-        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda())
+        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=True)
 
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
@@ -2520,7 +2522,8 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_unpack(self):
-        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda())
+        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda(), pivot=True)
 
     def test_dim_reduction(self):
         _TestTorchMixin._test_dim_reduction(self, lambda t: t.cuda())
