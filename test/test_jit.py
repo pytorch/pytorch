@@ -11443,8 +11443,7 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
-    @unittest.skipIf(hasattr(torch.jit, 'WeakScriptModuleProxy'), "# TODO: re-enable"
-                                                                  "this when WeakScriptModuleProxy has been deleted")
+    @unittest.skipIf(torch._C._jit_recursive_script, "# TODO: re-enable this when recursive script is the default")
     def test_weak_module_isinstance(self):
         tester = self
 
@@ -12797,7 +12796,7 @@ class TestRecursiveScript(JitTestCase):
     Tests in this class are all run under `with torch.jit._enable_recursive_script()`
     """
     def run(self, result=None):
-        with torch.jit._enable_recursive_script():
+        with torch.jit._recursive.enable_recursive_script():
             super(TestRecursiveScript, self).run(result)
 
     def checkModule(self, nn_module, args):

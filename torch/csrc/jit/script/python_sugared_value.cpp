@@ -245,8 +245,8 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
 }
 
 bool should_recurse(py::object obj) {
-  return py::cast<bool>(py::module::import("torch.jit")
-                            .attr("_is_recursive_script_enabled")(obj));
+  return py::cast<bool>(py::module::import("torch.jit._recursive")
+                            .attr("is_recursive_script_enabled")(obj));
 }
 
 std::shared_ptr<SugaredValue> ModuleValue::attr(
@@ -318,13 +318,13 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       // ScriptModule and add it as a submodule to the script::Module. This
       // enables lazy strong-ification of modules.
       auto result =
-          py::module::import("torch.jit")
-              .attr("_make_strong_submodule")(field, attr, py_module_);
+          py::module::import("torch.jit._recursive")
+              .attr("make_strong_submodule")(field, attr, py_module_);
       if (!result.is_none()) {
         auto submodule = as_module(result);
         TORCH_CHECK(
             submodule,
-            "Result of torch.jit._make_strong_submodule "
+            "Result of torch.jit._recursive.make_strong_submodule "
             "was not a ScriptModule");
         // The module was a submodule of the nn.Module, so register it here
         // and return the submodule.
@@ -334,8 +334,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
             m.graph()->insertGetAttr(self_, field), *v, result);
       }
     } else if (py::isinstance<py::function>(attr)) {
-      auto stub = py::module::import("torch.jit")
-                      .attr("_create_method_from_fn")(py_module_, attr);
+      auto stub = py::module::import("torch.jit._recursive")
+                      .attr("create_method_from_fn")(py_module_, attr);
       if (!stub.is_none()) {
         return SimpleValue(self_).attr(loc, m, field);
       }
@@ -507,7 +507,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   py::object dispatched_fn =
-      py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
+      py::module::import("torch.jit._recursive").attr("try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
@@ -524,7 +524,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   if (should_recurse(obj) && py::isinstance<py::function>(obj)) {
     auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_fn")(obj);
+        py::module::import("torch.jit._recursive").attr("try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
