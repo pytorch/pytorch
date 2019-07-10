@@ -958,7 +958,7 @@ def _build_extension_module(name, build_directory, verbose):
         # error.output contains the stdout and stderr of the build attempt.
         message = "Error building extension '{}'".format(name)
         if hasattr(error, 'output') and error.output:
-            message += ": {}".format(str(error.output))
+            message += ": {}".format(error.output.decode())
         raise RuntimeError(message)
 
 
