@@ -30,11 +30,7 @@ struct SugaredValue;
 struct Resolver;
 
 using ResolverPtr = std::shared_ptr<Resolver>;
-struct Self {
-  virtual ~Self() {}
-  virtual std::shared_ptr<SugaredValue> makeSugared(Value* v) const = 0;
-  virtual ClassTypePtr getClassType() const = 0;
-};
+using Self = std::function<std::shared_ptr<SugaredValue>(Value*)>;
 
 // A CompilationUnit is a list of named Functions
 // with helper methods to iterate the list, or invoke the function.
@@ -84,7 +80,7 @@ struct TORCH_API CompilationUnit {
           resolvers, /* determines how we handle free
                      variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
-      const Self* self);
+      const Self& self);
 
   // same as above but parse the definitions from source
   void define(
@@ -92,7 +88,7 @@ struct TORCH_API CompilationUnit {
       const c10::optional<c10::QualifiedName>& prefix,
       const std::string& source,
       const ResolverPtr& resolver,
-      const Self* self);
+      const Self& self);
 
   Function* create_function(
       c10::QualifiedName name,
@@ -193,7 +189,7 @@ struct TORCH_API CompilationUnit {
       const c10::optional<c10::QualifiedName>& prefix,
       const Def& def,
       const ResolverPtr& resolver,
-      const Self* self,
+      const Self& self,
       const std::unordered_map<std::string, Function*>& function_table) const;
 
   Function& register_function(std::unique_ptr<Function> fn) {
