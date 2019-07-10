@@ -63,7 +63,6 @@ namespace at { namespace cuda {
 // list above.
 //
 // HIP doesn't have
-//   nvrtc*
 //   cuOccupancyMaxActiveBlocksPerMultiprocessor
 //   cuGetErrorString  (maps to non-functional hipGetErrorString___)
 
