@@ -57,6 +57,7 @@ def qtensor(draw, shapes, dtypes=None, float_min=None, float_max=None):
     if dtypes is None:
         dtypes = ALL_QINT_TYPES
     _dtypes = draw(st.sampled_from(dtypes))
+    assert len(_dtypes) in [1, 2]
     if len(_dtypes) == 1:
         quantized_type = _dtypes[0]
         _zp_enforce = None
@@ -174,6 +175,7 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
     if dtypes is None:
         dtypes = ALL_QINT_TYPES
     _dtypes = draw(st.sampled_from(dtypes))
+    assert len(_dtypes) in [1, 2]
     if len(_dtypes) == 1:
         quantized_type = _dtypes[0]
         _zp_enforce = None
