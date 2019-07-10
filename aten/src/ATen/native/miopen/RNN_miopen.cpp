@@ -13,14 +13,6 @@
 
 namespace at { namespace native {
 
-    Tensor miopen_rnn_flatten_weight(
-            TensorList weight_arr, int64_t weight_stride0, int64_t input_size,
-            int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
-            bool batch_first, bool fn_bidirectional
-            ) {
-        AT_ERROR("miopen_flatten_weight: ATen not compiled with MIOpen support.");
-    }
-
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
             const Tensor& input_r, TensorList weight, int64_t weight_stride0,
             const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
@@ -415,60 +407,6 @@ std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDe
 	} else {
 		return {tensors.seq_length, tensors.mini_batch, rnn.hidden_size * rnn.num_directions()};
 	}
-}
-
-Tensor miopen_rnn_flatten_weight(
-        TensorList weight_arr, int64_t weight_stride0, int64_t input_size,
-        miopenRNNMode_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
-        bool batch_first, bool fn_bidirectional
-        ) {
-    AT_ERROR("miopen_flatten_weight: not implemented yet.");
-
-    AT_CHECK(weight_arr.size() > 0, "miopen_rnn_flatten_weight : cannot flatten empty weight list.");
-
-    auto any_param = weight_arr[0];
-    auto handle = getMiopenHandle();
-    auto datatype = getMiopenDataType(any_param);
-
-    RNNDescriptorParams rnn;
-    miopenRNNBiasMode_t bias_mode = (weight_stride0 == 4) ? miopenRNNwithBias : miopenRNNNoBias;
-    rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, bias_mode);
-
-    RNNDescriptor rnn_desc = rnn.descriptor();
-
-    TensorGeometry x_geom({1, input_size});
-    TensorDescriptor x_desc;
-    x_desc.set(getMiopenDataType(any_param), x_geom.sizes(), x_geom.strides(), 5);
-
-    auto num_weights = get_num_weights(handle, rnn_desc, x_desc, datatype);
-    auto weight_buf = at::zeros(num_weights, any_param.options());
-
-    FilterDescriptor w_desc;
-    w_desc.set(weight_buf, 3);
-
-    //Slice off views into weight_buf.
-    std::vector<Tensor> params_arr;
-    size_t params_stride0;
-    std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf);
-
-    MatrixRef<Tensor> weight {weight_arr, static_cast<size_t>(weight_stride0)},
-        params {params_arr, params_stride0};
-
-    //Copy weights.
-    _copyParams(weight, params);
-
-    // Update the storage
-    for (size_t i = 0; i < weight.size(0); i++) {
-        for (auto orig_param_it = weight[i].begin(), new_param_it = params[i].begin();
-                orig_param_it != weight[i].end() && new_param_it != params[i].end();
-                orig_param_it++, new_param_it++) {
-            auto orig_param = *orig_param_it, new_param = *new_param_it;
-            orig_param.set_(new_param.view_as(orig_param));
-        }
-    }
-
-    return weight_buf;
-
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
