@@ -2770,30 +2770,23 @@ class TestCuda(TestCase):
     def test_randperm_cuda(self):
         cuda = torch.device('cuda:0')
 
-        # For small inputs, randperm is offloaded to CPU instead
-        with torch.random.fork_rng(devices=[0]):
-            res1 = torch.randperm(100, device=cuda)
-        res2 = torch.cuda.LongTensor()
-        torch.randperm(100, out=res2, device=cuda)
-        self.assertEqual(res1, res2, 0)
+        # Test core functionality. For small n, randperm is offloaded to CPU instead. For large n, randperm is executed
+        # on GPU.
+        for n in (100, 50000, 100000):
+            # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
+            # different from others on cuda.
+            for dtype in (torch.long, torch.half, torch.float):
+                if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
+                    continue
+                with torch.random.fork_rng(devices=[0]):
+                    res1 = torch.randperm(n, dtype=dtype, device=cuda)
+                res2 = torch.empty(0, dtype=dtype, device=cuda)
+                torch.randperm(n, out=res2, dtype=dtype, device=cuda)
+                self.assertEqual(res1, res2, 0)
 
-        with torch.random.fork_rng(devices=[0]):
-            res1 = torch.randperm(100000, device=cuda)
-        res2 = torch.cuda.LongTensor()
-        torch.randperm(100000, out=res2, device=cuda)
-        self.assertEqual(res1, res2, 0)
-
-        with torch.random.fork_rng(devices=[0]):
-            res1 = torch.randperm(100, dtype=torch.half, device=cuda)
-        res2 = torch.cuda.HalfTensor()
-        torch.randperm(100, out=res2, device=cuda)
-        self.assertEqual(res1, res2, 0)
-
-        with torch.random.fork_rng(devices=[0]):
-            res1 = torch.randperm(50000, dtype=torch.float, device=cuda)
-        res2 = torch.cuda.FloatTensor()
-        torch.randperm(50000, out=res2, device=cuda)
-        self.assertEqual(res1, res2, 0)
+        # Default type is long
+        for n in (100, 50000):
+            self.assertIsInstance(torch.randperm(n, device=cuda), torch.cuda.LongTensor)
 
         # randperm of 0 elements is an empty tensor
         res1 = torch.randperm(0, device=cuda)
