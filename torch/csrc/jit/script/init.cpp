@@ -148,11 +148,11 @@ struct PythonResolver : public Resolver {
           annotations,
           qualifiedName,
           TupleType::namedTupleSchemaFromNamesAndTypes(qualifiedName, fields, annotations));
-      CompilationUnit::_get_python_cu()->register_class(tt);
+      get_python_cu()->register_class(tt);
       return tt;
     }
 
-    return CompilationUnit::_get_python_cu()->get_class(qualifiedName);
+    return get_python_cu()->get_class(qualifiedName);
   }
 
  private:
@@ -389,13 +389,9 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            std::vector<QualifiedName> names;
-            for (const auto& def : defs) {
-              auto method_name = QualifiedName(m.name(), def.name().name());
-              names.emplace_back(std::move(method_name));
-            }
+            const auto prefix = QualifiedName(m.name());
             const auto self = ModuleSelf(m, py_m);
-            m.class_compilation_unit()->define(names, defs, resolvers, &self);
+            m.class_compilation_unit()->define(prefix, defs, resolvers, &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
@@ -694,12 +690,19 @@ void initJitScriptBindings(PyObject* module) {
          FunctionDefaults defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         const auto name = c10::QualifiedName(qualname);
-        auto cu = CompilationUnit::_get_python_cu();
-        cu->define({name}, {def}, {pythonResolver(std::move(rcb))}, nullptr);
-        auto& defined = cu->get_function(name);
-        defined.setSchema(getSchemaWithNameAndDefaults(
-            def.range(), defined.getSchema(), def.name().name(), defaults));
-        StrongFunctionPtr ret(std::move(cu), &defined);
+        TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
+        auto cu = get_python_cu();
+        auto defined_functions = cu->define(
+            QualifiedName(name.prefix()),
+            {def},
+            {pythonResolver(std::move(rcb))},
+            nullptr,
+            true);
+        TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
+        auto& defined = defined_functions[0];
+        defined->setSchema(getSchemaWithNameAndDefaults(
+            def.range(), defined->getSchema(), def.name().name(), defaults));
+        StrongFunctionPtr ret(std::move(cu), defined);
         didFinishEmitFunction(ret);
         return ret;
       });
@@ -729,21 +732,19 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
-        auto cu = CompilationUnit::_get_python_cu();
+        auto cu = get_python_cu();
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
         cu->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
-        std::vector<c10::QualifiedName> names;
         for (const auto& def : classDef.defs()) {
-          names.push_back(QualifiedName(classname, def.name().name()));
           methodDefs.push_back(def);
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
         const auto self = SimpleSelf(classType);
-        cu->define(names, methodDefs, rcbs, &self);
+        cu->define(classname, methodDefs, rcbs, &self);
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
@@ -789,7 +790,7 @@ void initJitScriptBindings(PyObject* module) {
          const std::vector<at::Tensor>& constant_table) {
         import_functions(
             c10::nullopt,
-            *CompilationUnit::_get_python_cu_const(),
+            *get_python_cu(),
             cu,
             std::make_shared<Source>(src),
             constant_table,
@@ -799,7 +800,9 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
-  m.def("_jit_clear_class_registry", CompilationUnit::_clear_python_cu);
+  m.def("_jit_clear_class_registry", []() {
+    get_python_cu()->_clear_python_cu();
+  });
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);

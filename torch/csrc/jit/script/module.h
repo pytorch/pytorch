@@ -75,7 +75,7 @@ struct TORCH_API Method {
     return function_->graph();
   }
 
-  std::string name() const {
+  const std::string& name() const {
     return function_->name();
   }
 

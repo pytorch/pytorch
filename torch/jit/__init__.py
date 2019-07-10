@@ -57,6 +57,11 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_class_compile = torch._C._jit_script_class_compile
 
+# The Python CompilationUnit. All functions and modules defined in Python will
+# live in here. It's defined in Python because doing in cpp creates static
+# destruction order issues.
+_python_cu = torch._C.CompilationUnit()
+
 Future = torch._C.Future
 _fork = torch._C.fork
 _wait = torch._C.wait

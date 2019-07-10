@@ -591,10 +591,9 @@ struct to_ir {
     CompilationUnit cu;
     // set optimize to false since we don't need to run it in optimize mode
     cu.set_optimized(false);
-    const auto qualname = QualifiedName("<anon>.defaults");
-    cu.define({qualname}, {def}, {resolver}, nullptr);
+    cu.define(c10::nullopt, {def}, {resolver}, nullptr);
     Stack stack;
-    cu.get_function(qualname).run(stack);
+    cu.get_function(def.name().name()).run(stack);
     return stack.at(0).toTuple()->elements();
   }
 
@@ -2957,12 +2956,31 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
+// Mangle a qualified name so that it is globally unique.
+std::string CompilationUnit::mangle(const std::string& name) const {
+  static const std::string manglePrefix = "___torch_mangle_";
+
+  std::string mangledName;
+  auto pos = name.find(manglePrefix);
+  if (pos != std::string::npos) {
+    // If the name is already mangled, avoid re-appending the prefix.
+    mangledName.reserve(name.size());
+    // Append the part of the name up to the end of the prefix
+    mangledName.append(name, 0, pos);
+    mangledName.append(std::to_string(mangleIndex_++));
+  } else {
+    mangledName = c10::str(name, manglePrefix, std::to_string(mangleIndex_++));
+  }
+  return mangledName;
+}
+
 std::unique_ptr<Function> CompilationUnit::define(
-    const QualifiedName& name,
+    const c10::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
     const Self* self,
-    const std::unordered_map<std::string, Function*>& function_table) const {
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -2975,22 +2993,32 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     to_ir(def, _resolver, self, method);
   };
+  auto name = prefix ? QualifiedName(*prefix, def.name().name())
+                     : QualifiedName(def.name().name());
+  if (shouldMangle) {
+    // If `shouldMangle` is set, we should generate a unique name for this
+    // function if there is already an existing one.
+    if (auto fn = find_function(name)) {
+      auto newBase = mangle(name.name());
+      name = QualifiedName(name.prefix(), newBase);
+    }
+  }
   auto fn = torch::make_unique<Function>(
-      name, is_optimized(), std::make_shared<Graph>(), creator);
+      std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
-    self->getClassType()->registerMethod(fn.get());
+    self->getClassType()->addMethod(fn.get());
   }
   return fn;
 }
 
-void CompilationUnit::define(
-    const std::vector<QualifiedName>& names,
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
-    const Self* self) {
+    const Self* self,
+    bool shouldMangle) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
-  TORCH_INTERNAL_ASSERT(definitions.size() == names.size());
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
   c10::optional<size_t> init_idx;
@@ -3002,19 +3030,20 @@ void CompilationUnit::define(
     }
   }
 
-  std::vector<Function*> methods;
+  std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
   if (init_idx.has_value()) {
     // if we have an init, do it first.
     auto fn = define(
-        names[*init_idx],
+        prefix,
         definitions[*init_idx],
         resolvers[*init_idx],
         self,
-        function_table);
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
-    methods.push_back(fn.get());
+    functions.push_back(fn.get());
     register_function(std::move(fn));
   }
 
@@ -3024,37 +3053,39 @@ void CompilationUnit::define(
       continue;
     }
 
-    auto fn =
-        define(names[i], definitions[i], resolvers[i], self, function_table);
+    auto fn = define(
+        prefix,
+        definitions[i],
+        resolvers[i],
+        self,
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
-    methods.push_back(fn.get());
+    functions.push_back(fn.get());
     register_function(std::move(fn));
   }
 
-  for (Function* method : methods) {
-    method->ensure_defined();
+  for (Function* function : functions) {
+    function->ensure_defined();
   }
+  return functions;
 }
 
-void CompilationUnit::define(
+std::vector<Function*> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
     const Self* self) {
   Parser p(std::make_shared<Source>(source, "<string>", 1));
-  std::vector<QualifiedName> names;
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
-    auto name = prefix ? QualifiedName(*prefix, def.name().name())
-                       : QualifiedName(def.name().name());
-    names.push_back(std::move(name));
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  define(names, definitions, resolvers, self);
+  return define(prefix, definitions, resolvers, self);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
