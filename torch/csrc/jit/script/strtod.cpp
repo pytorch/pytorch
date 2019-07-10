@@ -28,6 +28,7 @@
 #define D_PNAN ((double)+NAN)
 #define D_PINF ((double)+INFINITY)
 
+#ifdef _MSC_VER
 namespace {
 int case_insensitive_match(const char *s, const char *t)
 {
@@ -69,8 +70,8 @@ double parse_inf_or_nan(const char *p, char **endptr)
     *endptr = (char *)s;
     return retval;
 }
-
 }
+#endif
 
 namespace torch {
 namespace jit {

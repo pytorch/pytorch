@@ -11,16 +11,19 @@ bool& getProfilingMode() {
   return profiling_mode;
 }
 
-static std::shared_ptr<Graph> prepareGraph(const std::shared_ptr<Graph>& graph) {
+std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
+    const std::shared_ptr<Graph>& graph) {
   auto g = graph->copy();
   runRequiredPasses(g);
   return g;
 }
 
-ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(const std::shared_ptr<Graph>& graph, bool optimize)
-: GraphExecutorImplBase(graph, optimize),
-  pr_(ProfilingRecord::instrumentGraph(prepareGraph(graph))),
-  profiling_plan_(pr_->graph()) {}
+ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
+    const std::shared_ptr<Graph>& graph,
+    bool optimize)
+    : GraphExecutorImplBase(graph, optimize),
+      pr_(ProfilingRecord::instrumentGraph(prepareGraph(graph))),
+      profiling_plan_(pr_->graph()) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   if (optimized_plan_) {
@@ -37,7 +40,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   optimized_plan_ = ExecutionPlan(copy);
   return *optimized_plan_;
 }
-
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   AT_ERROR("not supported");

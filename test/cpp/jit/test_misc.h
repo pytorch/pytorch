@@ -382,6 +382,7 @@ void testCustomFusion() {
   auto hits = 0;
   // two multiplications
   for (const auto& n : subgraph->nodes()) {
+    (void)n;
     hits++;
   }
   AT_ASSERT(hits == 2);

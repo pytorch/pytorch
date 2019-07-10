@@ -36,13 +36,6 @@ namespace jit {
 // situation. GraphExecutor is completely unaware of tracing or module
 // parameters to keep the tracing concerns separated.
 struct GraphExecutorImplBase {
-  static std::shared_ptr<Graph> prepareGraph(
-      const std::shared_ptr<Graph>& graph) {
-    auto copy = graph->copy();
-    EraseShapeInformation(copy);
-    return copy;
-  }
-
   GraphExecutorImplBase(const std::shared_ptr<Graph>& graph, bool optimize)
       : graph(prepareGraph(graph)),
         // until we have correct alias analysis any use of mutable operators
@@ -110,6 +103,14 @@ struct GraphExecutorImplBase {
   // GraphExecutors can be accessed from multiple threads, so this thread needs
   // to be held every time we access the fallback or plan_cache.
   std::mutex compile_mutex;
+
+ private:
+  static std::shared_ptr<Graph> prepareGraph(
+      const std::shared_ptr<Graph>& graph) {
+    auto copy = graph->copy();
+    EraseShapeInformation(copy);
+    return copy;
+  }
 };
 
 } // namespace jit

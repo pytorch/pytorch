@@ -15,6 +15,8 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   std::unique_ptr<ProfilingRecord> pr_;
   ExecutionPlan profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
+
+  std::shared_ptr<Graph> prepareGraph(const std::shared_ptr<Graph>& graph);
 };
 
 } // namespace jit
