@@ -492,7 +492,7 @@ struct to_ir {
   to_ir(
       const Def& def,
       ResolverPtr resolver_,
-      const Self* self,
+      const Self& self,
       Function& method) // method being constructed
       : method(method),
         graph(method.graph()),
@@ -542,7 +542,7 @@ struct to_ir {
     return old_frame;
   }
 
-  FunctionSchema emitDef(const Def& def, const Self* self, Block* block) {
+  FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
@@ -597,7 +597,7 @@ struct to_ir {
     return stack.at(0).toTuple()->elements();
   }
 
-  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self* self) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -678,7 +678,7 @@ struct to_ir {
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false)};
   }
-  FunctionSchema extractSchemaFromDef(const Def& def, const Self* self) {
+  FunctionSchema extractSchemaFromDef(const Def& def, const Self& self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -688,7 +688,7 @@ struct to_ir {
 
   std::vector<Argument> emitFormalArguments(
       const Def& def,
-      const Self* self,
+      const Self& self,
       const FunctionSchema& schema,
       Block* block) {
     std::vector<Argument> arguments; // for schema
@@ -712,7 +712,7 @@ struct to_ir {
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
-          (*it).ident().range(), name, self->makeSugared(new_input));
+          (*it).ident().range(), name, self(new_input));
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
@@ -2916,7 +2916,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
-    const Self* self,
+    const Self& self,
     const std::unordered_map<std::string, Function*>& function_table) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
@@ -2945,7 +2945,7 @@ void CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
-    const Self* self) {
+    const Self& self) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
@@ -2997,7 +2997,7 @@ void CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
-    const Self* self) {
+    const Self& self) {
   Parser p(std::make_shared<Source>(source, "<string>", 1));
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
