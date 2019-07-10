@@ -30,6 +30,16 @@ class SyncBatchNorm(Function):
         mean_all_reduce.wait()
         invstd_all_reduce.wait()
 
+        #FIXME
+        print('before batch_norm_gather_stats_with_counts')
+        #print('input ', input.type(), input.shape)
+        #print('mean_all ', mean_all.type(), mean_all.shape)
+        #print('invstd_all ', invstd_all.type(), invstd_all.shape)
+        #print('running_mean ', running_mean.type(), running_mean.shape)
+        #print('running_var ', running_var.type(), running_var.shape)
+        #print('momentum ', momentum)
+        #print('eps ', eps)
+        #print('count_all ', count_all.type(), count_all.shape)
         # calcualte global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
@@ -42,12 +52,17 @@ class SyncBatchNorm(Function):
             count_all.view(-1).long().tolist()
         )
 
+        print('after')
+        print('before save_for_backward')
         self.save_for_backward(input, weight, mean, invstd)
         self.process_group = process_group
         self.world_size = world_size
 
+        print('after')
+        print('before batch_norm_elemt')
         # apply element-wise normalization
         out = torch.batch_norm_elemt(input, weight, bias, mean, invstd, eps)
+        print('after')
         return out
 
     @staticmethod
