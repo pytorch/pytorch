@@ -29,10 +29,10 @@ Symbol owningNodeKind(Block* block) {
 enum ExitStatus { WILL, MIGHT, WONT };
 
 // hasExited() indicates whether or not an exit has been hit.
-// if hasExited() == true_val then we have exited, if == false_val we have not,
-// otherwise we might have exited.
-// exitValues() are the values that we are propagating to a destination block.
-// currently this is limited to block outputs of loops
+// if hasExited() == true_val_ then we have exited, if == false_val_ we have
+// not, otherwise we might have exited. exitValues() are the values that we are
+// propagating to a destination block. currently this is limited to block
+// outputs of loops
 struct ExitPair : public std::pair<Value*, std::vector<Value*>> {
   using pair::pair;
 
@@ -69,14 +69,14 @@ struct ExitPair : public std::pair<Value*, std::vector<Value*>> {
  * indicates whether we have hit the exit, hasExited().
  */
 struct ExitTransformer {
-  ExitTransformer(std::shared_ptr<Graph> graph_) : graph(std::move(graph_)) {
-    WithInsertPoint guard(graph->block()->nodes().front());
-    true_val = graph->insertConstant(true);
-    false_val = graph->insertConstant(false);
+  ExitTransformer(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
+    WithInsertPoint guard(graph_->block()->nodes().front());
+    true_val_ = graph_->insertConstant(true);
+    false_val_ = graph_->insertConstant(false);
   };
 
   void run() {
-    transformExits(graph->block());
+    transformExits(graph_->block());
   }
 
  private:
@@ -135,7 +135,7 @@ struct ExitTransformer {
     auto false_status = getExitStatus(false_pair);
 
     if (true_status == WONT && false_status == WONT) {
-      return ExitPair(false_val, std::vector<Value*>({}));
+      return ExitPair(false_val_, std::vector<Value*>({}));
     }
 
     {
@@ -146,19 +146,19 @@ struct ExitTransformer {
         WithInsertPoint insert(true_block);
         std::vector<Value*> exit_vals =
             matchValuesWithUnitialized(false_pair.exitValues());
-        true_pair = ExitPair(false_val, exit_vals);
+        true_pair = ExitPair(false_val_, exit_vals);
       } else if (false_status == WONT) {
         WithInsertPoint insert(false_block);
         std::vector<Value*> exit_vals =
             matchValuesWithUnitialized(true_pair.exitValues());
-        false_pair = ExitPair(false_val, exit_vals);
+        false_pair = ExitPair(false_val_, exit_vals);
       }
     }
     Value* has_exited;
     if (true_status == WILL && false_status == WILL) {
       // Need to maintain the invariant that
-      // true_val == WILL, false_val == WONT, else MIGHT
-      has_exited = true_val;
+      // true_val_ == WILL, false_val_ == WONT, else MIGHT
+      has_exited = true_val_;
     } else {
       addIfOutputs(node, {true_pair.hasExited()}, {false_pair.hasExited()});
       has_exited = node->outputs().at(node->outputs().size() - 1);
@@ -172,9 +172,9 @@ struct ExitTransformer {
 
   ExitStatus getExitStatus(ExitPair& exit_pair) {
     Value* exit_v = exit_pair.hasExited();
-    if (exit_v == true_val) {
+    if (exit_v == true_val_) {
       return WILL;
-    } else if (exit_v == false_val) {
+    } else if (exit_v == false_val_) {
       return WONT;
     } else {
       return MIGHT;
@@ -187,7 +187,7 @@ struct ExitTransformer {
       Block* block,
       const ExitPair& exit_pair,
       graph_node_list_iterator& iter) {
-    auto new_if = graph->create(prim::If, 0)->insertBefore(*iter);
+    auto new_if = graph_->create(prim::If, 0)->insertBefore(*iter);
     new_if->addInput(exit_pair.hasExited());
 
     auto exit_block = new_if->addBlock();
@@ -223,7 +223,7 @@ struct ExitTransformer {
       block->registerOutput(out);
     }
 
-    graph->create(prim::LoopContinuation, {exit_pair.exitValues()}, 0)
+    graph_->create(prim::LoopContinuation, {exit_pair.exitValues()}, 0)
         ->insertBefore(exit_block->return_node());
     return transformIf(new_if);
   }
@@ -260,13 +260,13 @@ struct ExitTransformer {
   }
 
   ExitPair transformExits(Block* block) {
-    ExitPair exit_pair = ExitPair(false_val, std::vector<Value*>({}));
+    ExitPair exit_pair = ExitPair(false_val_, std::vector<Value*>({}));
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       Node* node = *it;
       it++;
       switch (node->kind()) {
         case prim::LoopContinuation: {
-          exit_pair = ExitPair(true_val, node->inputs());
+          exit_pair = ExitPair(true_val_, node->inputs());
           node->destroy();
         } break;
         case prim::If: {
@@ -295,22 +295,22 @@ struct ExitTransformer {
   }
 
   Value* getUnitValue(const TypePtr& type) {
-    auto maybe_val = unit_values.find(type);
-    if (maybe_val != unit_values.end()) {
+    auto maybe_val = unit_values_.find(type);
+    if (maybe_val != unit_values_.end()) {
       return maybe_val->second;
     }
-    auto unit = graph->createUninitialized(type)
-                    ->insertAfter(graph->param_node())
+    auto unit = graph_->createUninitialized(type)
+                    ->insertAfter(graph_->param_node())
                     ->output();
-    unit_values[type] = unit;
+    unit_values_[type] = unit;
     return unit;
   }
 
-  std::unordered_map<TypePtr, Value*> unit_values;
-  Value* true_val;
-  Value* false_val;
+  std::unordered_map<TypePtr, Value*> unit_values_;
+  Value* true_val_;
+  Value* false_val_;
 
-  std::shared_ptr<Graph> graph;
+  std::shared_ptr<Graph> graph_;
 };
 
 // The Logic for the loop transform simplifies if the blcok outputs
@@ -394,9 +394,9 @@ void convertLoopBlockExits(Block* block) {
 //         -> (%37, %33, %i.6, %i.6)
 //       block1():
 //         -> (%38, %39, %40, %i.17)
-//     %44 : bool, %i : int = prim::If(%41)
+//     %44 : bool, %i : int = prim::If(%did_exit)
 //       block0():
-//         -> (%42, %43)
+//         -> (%continue_loop, %43)
 //       block1():
 //         %i.13 : int = aten::add(%i.16, %19)
 //         %4 : bool = aten::lt(%i.13, %3)

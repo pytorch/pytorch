@@ -230,6 +230,12 @@ struct EraseLoadStores {
 // Break Statements have the condition set to false, and Continue statements
 // inline the loop condition as the first input.
 struct LoopContinuations {
+ public:
+  void run(std::shared_ptr<Graph>& graph) {
+    run(graph->block());
+  }
+
+ private:
   void addLoopCarriedOutputs(Node* n) {
     auto g = n->owningGraph();
     WithInsertPoint insert(n);
@@ -264,7 +270,7 @@ struct LoopContinuations {
         } break;
         case prim::ContinueStmt: {
           auto loop_continuation =
-              graph->create(prim::LoopContinuation, 0)->insertAfter(n);
+              graph_->create(prim::LoopContinuation, 0)->insertAfter(n);
           auto header_block = loop_continuation->addBlock();
           auto pre_header = curr_loop_->blocks().at(1);
           header_block->cloneFrom(pre_header, [](Value* v) { return v; });
@@ -276,9 +282,9 @@ struct LoopContinuations {
         } break;
         case prim::BreakStmt: {
           auto loop_exit =
-              graph->create(prim::LoopContinuation, 0)->insertAfter(n);
+              graph_->create(prim::LoopContinuation, 0)->insertAfter(n);
           // first input is the loop continue condition - break sets false
-          loop_exit->addInput(false_val);
+          loop_exit->addInput(false_val_);
           addLoopCarriedOutputs(loop_exit);
           n->destroy();
         } break;
@@ -288,19 +294,15 @@ struct LoopContinuations {
 
   void run(Block* b) {
     {
-      graph = b->owningGraph();
-      WithInsertPoint guard(graph->block()->nodes().front());
-      false_val = graph->insertConstant(false);
+      graph_ = b->owningGraph();
+      WithInsertPoint guard(graph_->block()->nodes().front());
+      false_val_ = graph_->insertConstant(false);
     }
     assignExitContinuations(b);
   }
 
-  void run(std::shared_ptr<Graph>& graph) {
-    run(graph->block());
-  }
-
-  Graph* graph;
-  Value* false_val;
+  Graph* graph_;
+  Value* false_val_;
   Node* curr_loop_ = nullptr;
 };
 
