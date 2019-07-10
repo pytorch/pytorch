@@ -1191,6 +1191,7 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
+# log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
@@ -1840,6 +1841,7 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
+# softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
