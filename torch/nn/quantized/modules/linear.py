@@ -92,12 +92,14 @@ class Linear(NNLinear):
 
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__(in_features, out_features, bias)
-        del self.weight
-        if self.bias is not None:
+        if bias:
             del self.bias
             qbias = torch._empty_affine_quantized(
                 [out_features], scale=1, zero_point=0, dtype=torch.qint32)
             self.register_buffer('bias', qbias)
+        else:
+            self.register_buffer('bias', None)
+        del self.weight
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0,
             dtype=torch.qint8)
@@ -131,9 +133,10 @@ class Linear(NNLinear):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
-        self.bias.copy_(state_dict[prefix + 'bias'])
+        if prefix + 'bias' in state_dict:
+            self.bias.copy_(state_dict[prefix + 'bias'])
+            state_dict.pop(prefix + 'bias')
         state_dict.pop(prefix + 'weight')
-        state_dict.pop(prefix + 'bias')
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
