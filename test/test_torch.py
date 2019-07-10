@@ -1748,6 +1748,40 @@ class _TestTorchMixin(object):
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
+    def test_bitwise_not(self):
+        res = 0xffff - torch.arange(127, dtype=torch.int8)
+        for t in (torch.BoolTensor,
+                  torch.ByteTensor, torch.LongTensor, torch.IntTensor, torch.ShortTensor, torch.CharTensor):
+            if t == torch.BoolTensor:
+                a = torch.tensor([True, False])
+                expected_res = torch.tensor([False, True])
+            else:
+                a = torch.arange(127, dtype=t.dtype)
+                expected_res = res.type(t)
+            # new tensor
+            self.assertEqual(expected_res, a.bitwise_not())
+            # out
+            b = t()
+            torch.bitwise_not(a, out=b)
+            self.assertEqual(expected_res, b)
+            # in-place
+            a.bitwise_not_()
+            self.assertEqual(expected_res, a)
+
+        # test exceptions
+        for t in(torch.HalfTensor, torch.FloatTensor, torch.DoubleTensor):
+            a = torch.zeros(10, dtype=t.dtype)
+            # new tensor
+            with self.assertRaises(RuntimeError):
+                a.bitwise_not()
+            # out
+            b = t()
+            with self.assertRaises(RuntimeError):
+                torch.bitwise_not(a, out=b)
+            # in-place
+            with self.assertRaises(RuntimeError):
+                a.bitwise_not_()
+
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
             if dtype != torch.uint8 and dtype != torch.float16:
