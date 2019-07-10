@@ -13,7 +13,7 @@ from hypothesis_utils import qtensor, array_shapes
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS
 from common_utils import skipIfNotRegistered
-from common_utils import _quantize, _dequantize, _requantize
+from common_quantized import _quantize, _dequantize, _requantize
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
