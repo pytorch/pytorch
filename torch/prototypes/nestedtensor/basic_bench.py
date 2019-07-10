@@ -2,20 +2,24 @@ import torch.prototypes.nestedtensor as nestedtensor
 import torch
 import time
 
-num_tensors = 100
+def gen_rand_tensor(size):
+    return torch.rand(size).cuda()
 
-def bench(num_tensors, trials=10, size=(16, 128, 128)):
-    print("num_tensors: " + str(num_tensors))
+def gen_float_tensors(num_tensors, size):
     print("size: " + str(size))
+    print("num_tensors: " + str(num_tensors))
     list_tensors = []
-    
     for _ in range(num_tensors):
-        list_tensors.append(torch.rand(*size))
+        list_tensors.append(gen_rand_tensor(size))
     
     nt = torch.nestedtensor(list_tensors)
-
-    tt = torch.rand(*((num_tensors,) + size))
+    tt = gen_rand_tensor((num_tensors,) + size)
     print(tt.size())
+    return list_tensors, nt, tt
+
+def bench(num_tensors, trials=10, size=(32, 3, 128, 128)):
+
+    list_tensors, nt, tt = gen_float_tensors(num_tensors, size)
     
     t1 = time.time()
     for i in range(trials):
@@ -43,5 +47,7 @@ def bench(num_tensors, trials=10, size=(16, 128, 128)):
     print("3: t2: " + str(t2))
         
     
-bench(100)
-bench(200)
+bench(100,    trials=20, size=(16, 128))
+bench(1000,   trials=20, size=(16, 128))
+bench(10000,  trials=20, size=(16, 128))
+bench(100000, trials=5,  size=(16, 128))
