@@ -4498,12 +4498,17 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
     def test_randperm(self):
-        _RNGState = torch.get_rng_state()
-        res1 = torch.randperm(100)
-        res2 = torch.LongTensor()
-        torch.set_rng_state(_RNGState)
-        torch.randperm(100, out=res2)
-        self.assertEqual(res1, res2, 0)
+        # Test core functionality. Ensure both integer and floating-point numbers are tested.
+        for dtype in (torch.long, torch.half):
+            _RNGState = torch.get_rng_state()
+            res1 = torch.randperm(100)
+            res2 = torch.empty(0, dtype=dtype)
+            torch.set_rng_state(_RNGState)
+            torch.randperm(100, out=res2)
+            self.assertEqual(res1, res2)
+
+        # Default type is long
+        self.assertIsInstance(torch.randperm(100), torch.LongTensor)
 
         # randperm of 0 elements is an empty tensor
         res1 = torch.randperm(0)
