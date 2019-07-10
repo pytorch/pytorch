@@ -1748,20 +1748,20 @@ class _TestTorchMixin(object):
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
-    def test_bitwise_not(self):
-        res = 0xffff - torch.arange(127, dtype=torch.int8)
-        for t in (torch.BoolTensor,
-                  torch.ByteTensor, torch.LongTensor, torch.IntTensor, torch.ShortTensor, torch.CharTensor):
-            if t == torch.BoolTensor:
-                a = torch.tensor([True, False])
-                expected_res = torch.tensor([False, True])
+    @staticmethod
+    def _test_bitwise_not(self, device):
+        res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
+        for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            if dtype == torch.bool:
+                a = torch.tensor([True, False], device=device)
+                expected_res = torch.tensor([False, True], device=device)
             else:
-                a = torch.arange(127, dtype=t.dtype)
-                expected_res = res.type(t)
+                a = torch.arange(127, dtype=dtype, device=device)
+                expected_res = res.type(dtype)
             # new tensor
             self.assertEqual(expected_res, a.bitwise_not())
             # out
-            b = t()
+            b = torch.empty(0, dtype=dtype, device=device)
             torch.bitwise_not(a, out=b)
             self.assertEqual(expected_res, b)
             # in-place
@@ -1769,18 +1769,21 @@ class _TestTorchMixin(object):
             self.assertEqual(expected_res, a)
 
         # test exceptions
-        for t in(torch.HalfTensor, torch.FloatTensor, torch.DoubleTensor):
-            a = torch.zeros(10, dtype=t.dtype)
+        for dtype in(torch.half, torch.float, torch.double):
+            a = torch.zeros(10, dtype=dtype, device=device)
             # new tensor
             with self.assertRaises(RuntimeError):
                 a.bitwise_not()
             # out
-            b = t()
+            b = torch.empty(0, dtype=dtype, device=device)
             with self.assertRaises(RuntimeError):
                 torch.bitwise_not(a, out=b)
             # in-place
             with self.assertRaises(RuntimeError):
                 a.bitwise_not_()
+
+    def test_bitwise_not(self):
+        self._test_bitwise_not(self, 'cpu')
 
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
