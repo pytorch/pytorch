@@ -1748,6 +1748,43 @@ class _TestTorchMixin(object):
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
+    @staticmethod
+    def _test_bitwise_not(self, device):
+        res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
+        for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            if dtype == torch.bool:
+                a = torch.tensor([True, False], device=device)
+                expected_res = torch.tensor([False, True], device=device)
+            else:
+                a = torch.arange(127, dtype=dtype, device=device)
+                expected_res = res.type(dtype)
+            # new tensor
+            self.assertEqual(expected_res, a.bitwise_not())
+            # out
+            b = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_not(a, out=b)
+            self.assertEqual(expected_res, b)
+            # in-place
+            a.bitwise_not_()
+            self.assertEqual(expected_res, a)
+
+        # test exceptions
+        for dtype in(torch.half, torch.float, torch.double):
+            a = torch.zeros(10, dtype=dtype, device=device)
+            # new tensor
+            with self.assertRaises(RuntimeError):
+                a.bitwise_not()
+            # out
+            b = torch.empty(0, dtype=dtype, device=device)
+            with self.assertRaises(RuntimeError):
+                torch.bitwise_not(a, out=b)
+            # in-place
+            with self.assertRaises(RuntimeError):
+                a.bitwise_not_()
+
+    def test_bitwise_not(self):
+        self._test_bitwise_not(self, 'cpu')
+
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
             if dtype != torch.uint8 and dtype != torch.float16:
@@ -3444,7 +3481,7 @@ class _TestTorchMixin(object):
                         self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device=device, dtype=dt).shape)
                         self.assertRaises(RuntimeError, lambda: torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                         self.assertRaises(RuntimeError, lambda: torch.full(shape, 3, device=device, dtype=dt).shape)
-                        self.assertRaises(RuntimeError, lambda: torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
+                        self.assertRaises(RuntimeError, lambda: torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3))
                         self.assertRaises(RuntimeError, lambda: torch.ones(shape, device=device, dtype=dt).shape)
                         self.assertRaises(RuntimeError, lambda: torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                         self.assertRaises(RuntimeError, lambda: torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
@@ -4461,12 +4498,17 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
     def test_randperm(self):
-        _RNGState = torch.get_rng_state()
-        res1 = torch.randperm(100)
-        res2 = torch.LongTensor()
-        torch.set_rng_state(_RNGState)
-        torch.randperm(100, out=res2)
-        self.assertEqual(res1, res2, 0)
+        # Test core functionality. Ensure both integer and floating-point numbers are tested.
+        for dtype in (torch.long, torch.half):
+            _RNGState = torch.get_rng_state()
+            res1 = torch.randperm(100)
+            res2 = torch.empty(0, dtype=dtype)
+            torch.set_rng_state(_RNGState)
+            torch.randperm(100, out=res2)
+            self.assertEqual(res1, res2)
+
+        # Default type is long
+        self.assertIsInstance(torch.randperm(100), torch.LongTensor)
 
         # randperm of 0 elements is an empty tensor
         res1 = torch.randperm(0)
@@ -4474,6 +4516,14 @@ class _TestTorchMixin(object):
         torch.randperm(0, out=res2)
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
+
+        # Test exceptions when n is too large for a floating point type
+        for res, small_n, large_n in ((torch.HalfTensor(), 2**11 + 1, 2**11 + 2),
+                                      (torch.FloatTensor(), 2**24 + 1, 2**24 + 2),
+                                      (torch.DoubleTensor(), 2**25,  # 2**53 + 1 is too large to run
+                                       2**53 + 2)):
+            torch.randperm(small_n, out=res)  # No exception expected
+            self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res))
 
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
@@ -11297,10 +11347,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             else:
                 self.assertFalse(x[idx] ^ y[idx])
 
-        invert_result = ~x
-        for idx in iter_indices(x):
-            self.assertEqual(1 - x[idx], invert_result[idx])
-
         x_clone = x.clone()
         x_clone &= y
         self.assertEqual(x_clone, and_result)
@@ -11313,9 +11359,20 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x_clone ^= y
         self.assertEqual(x_clone, xor_result)
 
-    def test_invert(self):
-        x = torch.ByteTensor([0, 1, 1])
-        self.assertEqual((~x).tolist(), [1, 0, 0])
+    def test_op_invert(self):
+        res = 0xffff - torch.arange(127, dtype=torch.int8)
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.arange(127, dtype=dtype)
+            self.assertEqual(res.type(dtype), ~a)
+
+        self.assertEqual(torch.tensor([True, False]),
+                         ~torch.tensor([False, True]))
+
+        # test exceptions
+        for dtype in(torch.half, torch.float, torch.double):
+            a = torch.zeros(10, dtype=dtype)
+            with self.assertRaises(TypeError):
+                b = ~a
 
     def test_apply(self):
         x = torch.arange(1, 6)
