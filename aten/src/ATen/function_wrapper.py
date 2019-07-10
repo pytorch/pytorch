@@ -515,6 +515,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'dispatch_scalar_type_declaration': str,
     'with_gil': bool,
     'cpu_half': bool,
+    'cpu_bfloat16': bool,
     'deprecated': bool,
     'cpu_bool': bool,
     'cuda_bool': bool,
