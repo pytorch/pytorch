@@ -94,4 +94,7 @@ cpp_source += '}'
 # TODO: Needs to happen in the build folder
 with open("/tmp/tensor_list.cpp", "w") as source_out:
     source_out.write(cpp_source)
-    tensor_list = load(name="tensor_list", sources=[source_out.name], verbose=True)
+    tensor_list = load(name="tensor_list",
+                       sources=[source_out.name],
+                       extra_cflags=["-O3", "-mavx2"],
+                       verbose=True)
