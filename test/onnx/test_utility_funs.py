@@ -13,8 +13,7 @@ import copy
 
 
 class TestUtilityFuns(TestCase):
-    from torch.onnx.symbolic_helper import _export_onnx_opset_version
-    opset_version = _export_onnx_opset_version
+    opset_version = 9
 
     def test_is_in_onnx_export(self):
         test_self = self
