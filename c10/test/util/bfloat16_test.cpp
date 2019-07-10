@@ -33,7 +33,7 @@ namespace {
       bfloats[i].x = c10::detail::bits_from_f32(in[i]);
       out[i] = c10::detail::f32_from_bits(bfloats[i].x);
 
-      // The relative error should be less than 1/(2^7) since bfloat16
+      // The relative error should be less than 1/(2^7) since BFloat16
       // has 7 bits mantissa.
       EXPECT_LE(fabs(out[i] - in[i]) / in[i], 1.0 / 128);
     }

@@ -53,11 +53,10 @@ struct alignas(2) BFloat16 {
   C10_HOST_DEVICE BFloat16() = default;
 #else
   BFloat16() = default;
-
 #endif
 
-  explicit inline C10_HOST_DEVICE BFloat16(float value);
-  explicit inline C10_HOST_DEVICE operator float() const;
+  inline C10_HOST_DEVICE BFloat16(float value);
+  inline C10_HOST_DEVICE operator float() const;
 };
 
 } // namespace c10
