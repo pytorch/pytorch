@@ -156,16 +156,16 @@ def create_constant_iterable_module(module):
     modules = OrderedDict()
 
     for key, submodule in module._modules.items():
-        if isinstance(submodule, (torch.nn.ModuleList, torch.nn.Sequential)):
+        if isinstance(submodule, (ModuleList, Sequential)):
             # Make each item in the module a constant
-            modules[key] = create_constant_iterable_module(submodule)
+            modules[key] = _create_constant_iterable_module(submodule)
         else:
-            modules[key] = recursive_script(submodule)
+            modules[key] = _convert_to_script_module(submodule)
 
-    if isinstance(module, torch.nn.Sequential):
-        return torch.jit._ConstSequential(torch.nn.Sequential(modules))
-    elif isinstance(module, torch.nn.ModuleList):
-        return torch.jit._ConstModuleList(modules)
+    if isinstance(module, Sequential):
+        return _ConstSequential(Sequential(modules))
+    elif isinstance(module, ModuleList):
+        return _ConstModuleList(modules)
     else:
         raise RuntimeError("Only nn.ModuleList and nn.Sequential can be made "
                            "into constant modules, found {}".format(module))
@@ -177,7 +177,7 @@ def make_strong_submodule(field, module, parent):
         return None
 
     # Convert the module to a ScriptModule
-    new_strong_submodule = recursive_script(module)
+    new_strong_submodule = _convert_to_script_module(module)
 
     # Install the ScriptModule on the python side
     parent._modules._python_modules[field] = new_strong_submodule
@@ -188,7 +188,7 @@ def make_strong_submodule(field, module, parent):
 # TODO: we are leaking these things because they don't have a distinct owner
 # right now.
 _delete_me_recursive_compile_holder = []
-def try_compile_fn(fn):
+def try_compile_fn(fn, loc):
     global _delete_me_recursive_compile_holder
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
