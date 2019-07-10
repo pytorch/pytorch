@@ -138,7 +138,12 @@ struct GraphFuser {
   FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
   Symbol kind_ = prim::FusionGroup;
 
-  // Default limit works for nvrtc limitations, change with setInputArgLimit
+  // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
+  // The specific limit is a function of constant memory size, amount available
+  // to pass arguments, and some implementation dependence. Select a safe
+  // limit here.
+  // This limit is also applied to other devices in the fuser by default.
+  // Change with setInputArgLimit
   size_t subgraph_arg_limit_ = 128;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
