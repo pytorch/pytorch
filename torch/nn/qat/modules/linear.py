@@ -1,8 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import torch
-from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
-from QConfig import default_qat_qconfig
+from torch.quantization.QConfig import default_qat_qconfig
 
 class Linear(NNLinear):
     # TODO: update docs
@@ -41,8 +39,7 @@ class Linear(NNLinear):
     def forward(self, x):
         return F.linear(input, self.weight_fake_qunat(self.weight), self.bias)
 
-    # TODO: support initializing from quantization parameters when Quantizer is
-    # exposed in python
+    # TODO: support initializing from qconfig
     @staticmethod
     def from_float(mod):
         r"""Create a qat module from a float module or qparams_dict
