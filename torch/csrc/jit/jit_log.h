@@ -19,8 +19,6 @@ enum class JitLoggingLevels {
   GRAPH_DEBUG,
 };
 
-std::string debugValueOrDefault(const class Node* n);
-
 JitLoggingLevels jit_log_level();
 
 std::string jit_log_prefix(JitLoggingLevels level, const std::string& in_str);

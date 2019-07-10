@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir.h>
 #include <cstdlib>
 #include <sstream>
 
@@ -13,10 +12,6 @@ JitLoggingLevels jit_log_level() {
       ? static_cast<JitLoggingLevels>(std::atoi(c_log_level))
       : JitLoggingLevels::OFF;
   return log_level;
-}
-
-std::string debugValueOrDefault(const Node* n) {
-  return n->outputs().size() > 0 ? n->outputs().at(0)->debugName() : "n/a";
 }
 
 std::string jit_log_prefix(JitLoggingLevels level, const std::string& in_str) {
