@@ -31,7 +31,8 @@ namespace c10 {
   _(bool, Bool, i) /* 11 */                          \
   _(c10::qint8, QInt8, i) /* 12 */                   \
   _(c10::quint8, QUInt8, i) /* 13 */                 \
-  _(c10::qint32, QInt32, i) /* 14 */
+  _(c10::qint32, QInt32, i) /* 14 */                 \
+  _(c10::BFloat16, BFloat16, d) /* 15 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But

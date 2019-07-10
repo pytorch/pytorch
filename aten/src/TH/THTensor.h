@@ -16,6 +16,9 @@
 #include <TH/generic/THTensor.h>
 #include <TH/THGenerateBoolType.h>
 
+#include <TH/generic/THTensor.h>
+#include <TH/THGenerateBFloat16Type.h>
+
 /* random numbers */
 #include <TH/generic/THTensorRandom.h>
 #include <TH/THGenerateAllTypes.h>

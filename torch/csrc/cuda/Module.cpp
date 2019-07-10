@@ -316,6 +316,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   THCPCharStorage_postInit(m);
   THCPByteStorage_postInit(m);
   THCPBoolStorage_postInit(m);
+  THCPBFloat16Storage_postInit(m);
 
   bool has_half = true;
 
