@@ -48,7 +48,7 @@ TORCH_API void import_functions(
     CompilationUnit& cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
-    const Self* self = nullptr,
+    const Self& self = nullptr,
     const std::function<void(const std::string&)>& import_callback = nullptr);
 
 } // namespace script

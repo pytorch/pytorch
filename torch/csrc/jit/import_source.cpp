@@ -204,8 +204,11 @@ struct SourceImporter {
         auto class_type =
             ClassType::create(c10::QualifiedName(qualified_classname), cu);
         owner.register_class(class_type);
-        const auto self = SimpleSelf(class_type);
-        cu->define(qualified_classname, definitions, resolvers, &self);
+        auto self = [&](Value* v) {
+          v->setType(class_type);
+          return std::make_shared<SimpleValue>(v);
+        };
+        cu->define(qualified_classname, definitions, resolvers, self);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
         auto named_tuple_def = NamedTupleDef(parsed_treeref);
 
@@ -246,7 +249,7 @@ struct SourceImporter {
   void importFunctions(
       const c10::optional<c10::QualifiedName>& prefix,
       CompilationUnit& cu,
-      const Self* self) {
+      const Self& self) {
     checkVersionNumber();
     parseImportsAndDoCallback();
 
@@ -315,7 +318,7 @@ void import_functions(
     CompilationUnit& cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
-    const Self* self,
+    const Self& self,
     const std::function<void(const std::string&)>& import_callback) {
   SourceImporter importer(lib_cu, src, constant_table, import_callback);
   importer.importFunctions(prefix, cu, self);
@@ -327,15 +330,17 @@ void import_methods(
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
-
-  auto self = SimpleSelf(mod.type());
+  auto self = [&](Value* v) {
+    v->setType(mod.module_object()->type());
+    return std::make_shared<SimpleValue>(v);
+  };
   import_functions(
       mod.name(),
       lib_cu,
       *mod.module_object()->type()->compilation_unit(),
       src,
       constant_table,
-      &self,
+      self,
       import_callback);
 }
 
