@@ -48,22 +48,33 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
  * Here batch contiguity is checked for tensors with greater than 4 dimensions.
  * Contiguous tensors and tensors with less than 3 dimensions pass this check
  */ 
-static inline bool checkTrilTriuBatchContiguous(const Tensor& tensor) {
+static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor& tensor) {
   // Complete contiguity is the most desired property, which is why
   // we return true if the tensor is contiguous
-  if (tensor.is_contiguous()) return true;
+  if (tensor.is_contiguous()) {
+    auto default_strides_for_size = at::detail::defaultStrides(tensor.sizes());
+    if (tensor.strides() == default_strides_for_size) {
+      return std::make_tuple(true, tensor);
+    } else {
+      return std::make_tuple(false, tensor.as_strided(tensor.sizes(), default_strides_for_size));
+    }
+  }
 
   int64_t dims = tensor.dim();
 
   // Tensors with dimension less than 4 are handled by default
-  if (dims <= 3) return true;
+  if (dims <= 3) {
+    return std::make_tuple(true, tensor);
+  }
 
   int64_t expected_stride = tensor.size(-1) * tensor.size(-2);
   for (int64_t i = dims - 3; i >= 0; i--) {
-    if (expected_stride != tensor.stride(i)) return false;
+    if (expected_stride != tensor.stride(i)) {
+      return std::make_tuple(false, tensor.contiguous());
+    }
     expected_stride *= tensor.size(i);
   }
-  return true;
+  return std::make_tuple(true, tensor);
 }
 
 // Returns the epsilon value for floating types except half
