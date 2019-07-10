@@ -379,7 +379,7 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
-    @given(Q=qtensor(shapes=array_shapes(2, 2,), dtypes=((torch.qint8, np.int8, None),)))
+    @given(Q=qtensor(shapes=array_shapes(2, 2,), dtypes=((torch.qint8, None),)))
     def test_qlinear_unpack(self, Q):
         W, (W_scale, W_zp), (qmin, qmax), (torch_type, np_type) = Q
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
@@ -543,7 +543,7 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
-    @given(Q=qtensor(shapes=array_shapes(4, 4,), dtypes=((torch.qint8, np.int8, 0),)))
+    @given(Q=qtensor(shapes=array_shapes(4, 4,), dtypes=((torch.qint8, 0),)))
     def test_qconv_unpack(self, Q):
         W, (W_scale, W_zp), (qmin, qmax), (torch_type, np_type) = Q
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
@@ -572,7 +572,7 @@ class TestQuantizedConv(unittest.TestCase):
 class TestQNNPackOps(TestCase):
 
     """Tests the correctness of the quantized::qnnpack_relu op."""
-    @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5), dtypes=((torch.quint8, np.uint8, 0),),))
+    @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5), dtypes=((torch.quint8, 0),),))
     def test_qnnpack_relu(self, Q):
         X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
         relu = torch.ops.quantized.qnnpack_relu
@@ -589,7 +589,7 @@ class TestQNNPackOps(TestCase):
 
     """Tests the correctness of the quantized::qnnpack_linear op."""
     @given(output_channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           Q=qtensor(shapes=array_shapes(2, 3, 8, 15), dtypes=((torch.quint8, np.uint8, 0),),))
+           Q=qtensor(shapes=array_shapes(2, 3, 8, 15), dtypes=((torch.quint8, 0),),))
     def test_qnnpack_linear(self, output_channels, Q):
         X, (X_scale, X_zp), (qmin, qmax), (torch_type, np_type) = Q
 
