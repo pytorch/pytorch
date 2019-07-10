@@ -129,13 +129,13 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             torch.jit.load('scriptmodule.pt', _extra_files = files)
             print (files['metadata.json'])
     """
-    m = ScriptModule()
+    m = ScriptModule(_compilation_unit=_python_cu)
 
     def module_lookup(names):
         curr = m
         for name in names:
             if not hasattr(curr, name):
-                setattr(curr, name, ScriptModule())
+                setattr(curr, name, ScriptModule(_compilation_unit=_python_cu))
             curr = getattr(curr, name)
         return curr._c
     if isinstance(f, string_classes):
@@ -1342,13 +1342,7 @@ if _enabled:
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         r"""
-        The core data structure in TorchScript is the ``ScriptModule``. It is an
-        analogue of torch's ``nn.Module`` and represents an entire model as a tree of
         submodules. Like normal modules, each individual module in a ``ScriptModule`` can
-        have submodules, parameters, and methods. In ``nn.Module``\s methods are implemented
-        as Python functions, but in ``ScriptModule``\s methods are implemented as
-        TorchScript functions,  a statically-typed subset of Python that contains all
-        of PyTorch's built-in Tensor operations. This difference allows your
         ScriptModules code to run without the need for a Python interpreter.
 
         ``ScriptModule``\s be created in two ways:
@@ -1487,8 +1481,12 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
+        def __init__(self, optimize=True, _compilation_unit=None):
+            if _compilation_unit:
+                self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__, _compilation_unit)
+            else:
+                self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
+
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
