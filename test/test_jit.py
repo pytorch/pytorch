@@ -8327,7 +8327,8 @@ a")
 
     def test_trace_optional(self):
         @torch.jit.script
-        def test(x: Optional[Tensor]):
+        def test(x):
+            # type: (Optional[Tensor])
             if x is None:
                 return torch.zeros(1)
             else:
