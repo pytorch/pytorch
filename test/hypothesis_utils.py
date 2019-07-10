@@ -12,7 +12,7 @@ from hypothesis.extra import numpy as stnp
 from hypothesis.searchstrategy import SearchStrategy
 
 # Setup for the hypothesis tests.
-# The tuples are (torch_type, np_type, zero_point_enforce), where the last
+# The tuples are (torch_quantized_dtype, zero_point_enforce), where the last
 # element is enforced zero_point. If None, any zero_point point within the
 # range of the data type is OK.
 ALL_QINT_TYPES = (
