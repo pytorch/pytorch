@@ -154,6 +154,8 @@ struct ATenDLMTensor {
 };
 
 void deleter(DLManagedTensor* arg) {
+  arg->manager_ctx = nullptr;
+  arg->dl_tensor.data = nullptr;
   delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
 }
 
