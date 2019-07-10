@@ -13696,9 +13696,6 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
     'test_nn_AdaptiveMaxPool3d_tuple_none',
-    'test_nn_AvgPool2d_divisor',
-    'test_nn_AvgPool2d_divisor_stride',
-    'test_nn_AvgPool2d_divisor_stride_pad',
 
     # Uses Module._backend, so this is not supported
     'test_nn_CrossMapLRN2d',
