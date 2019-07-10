@@ -30,7 +30,7 @@ DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
 DropoutImpl::DropoutImpl(DropoutOptions options_) : DropoutImplBase(options_) {}
 
 Tensor DropoutImpl::forward(const Tensor& input) {
-  return torch::dropout(input, options.rate_, this->is_training());
+  return torch::dropout(input, options.rate_, this->is_training(), input.sizes());
 }
 
 void DropoutImpl::pretty_print(std::ostream& stream) const {

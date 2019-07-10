@@ -6,16 +6,17 @@ from ..._jit_internal import weak_module, weak_script_method
 class _DropoutNd(Module):
     __constants__ = ['p', 'inplace']
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p=0.5, inplace=False, noise_shape=None):
         super(_DropoutNd, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
         self.p = p
         self.inplace = inplace
+        self.noise_shape = noise_shape
 
     def extra_repr(self):
-        return 'p={}, inplace={}'.format(self.p, self.inplace)
+        return 'p={}, inplace={}, noise_shape={}'.format(self.p, self.inplace, self.noise_shape)
 
 
 @weak_module
@@ -54,7 +55,7 @@ class Dropout(_DropoutNd):
 
     @weak_script_method
     def forward(self, input):
-        return F.dropout(input, self.p, self.training, self.inplace)
+        return F.dropout(input, self.p, self.training, self.inplace, self.noise_shape)
 
 
 @weak_module

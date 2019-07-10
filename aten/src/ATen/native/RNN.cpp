@@ -500,11 +500,11 @@ struct PackedBidirectionalLayer : Layer<PackedSequence, pair_of<dir_hidden_type>
 // hidden states produced at each level.
 
 Tensor dropout(const Tensor& input, double p) {
-  return at::dropout(input, p, /*train=*/true);
+  return at::dropout(input, p, /*train=*/true, input.sizes());
 }
 
 PackedSequence dropout(const PackedSequence& input, double p) {
-  return {at::dropout(input.data, p, /*train=*/true), input.batch_sizes};
+  return {at::dropout(input.data, p, /*train=*/true, input.data.sizes()), input.batch_sizes};
 }
 
 template<typename io_type, typename hidden_type, typename weight_type>

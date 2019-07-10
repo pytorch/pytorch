@@ -80,7 +80,7 @@
 
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
-- func: dropout(Tensor input, float p, bool train) -> Tensor
+- func: dropout(Tensor input, float p, bool train, int[] noise_shape) -> Tensor
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
 

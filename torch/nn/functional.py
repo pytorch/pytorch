@@ -805,8 +805,8 @@ def adaptive_avg_pool3d(input, output_size):
 
 # Activation functions
 @weak_script
-def dropout(input, p=0.5, training=True, inplace=False):
-    # type: (Tensor, float, bool, bool) -> Tensor
+def dropout(input, p=0.5, training=True, inplace=False, noise_shape=None):
+    # type: (Tensor, float, bool, bool, Size) -> Tensor
     r"""
     During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
@@ -818,13 +818,17 @@ def dropout(input, p=0.5, training=True, inplace=False):
         p: probability of an element to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+        noise_shape: A 1-D Tensor, representing the shape for randomly generated keep/drop flags.
     """
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.dropout_(input, p, training)
+
+    if noise_shape is None:
+        noise_shape = input.size()
+    return (_VF.dropout_(input, p, training, noise_shape)
             if inplace
-            else _VF.dropout(input, p, training))
+            else _VF.dropout(input, p, training, noise_shape))
 
 
 @weak_script

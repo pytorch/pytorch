@@ -38,9 +38,14 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
   return input.mul(noise);
 }
 
+
+
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
-Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
+Ctype<inplace> _dropout_impl(T& input, double p, bool train, IntArrayRef noise_shape) {
   TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
+  if (noise_shape.size() > 0) {
+    TORCH_CHECK(noise_shape.size() == input.dim(), "noise_shape dims must equal to input");
+  }
   if (p == 0 || !train || input.numel() == 0) {
     return input;
   }
@@ -51,6 +56,11 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
 
   at::Tensor b; // used for alpha_dropout only
   auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input);
+
+  if (noise_shape.size() > 0 ) {
+    noise = at::empty(noise_shape, input.options());
+  }
+
   noise.bernoulli_(1 - p);
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;
@@ -81,39 +91,46 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
 } // anomymous namepsace
 
-Tensor dropout(const Tensor& input, double p, bool train) {
+Tensor dropout(const Tensor& input, double p, bool train, IntArrayRef noise_shape) {
   if (train && is_fused_kernel_acceptable(input, p)) {
     return std::get<0>(at::_fused_dropout(input, 1 - p));
   }
-  return _dropout<false>(input, p, train);
+  return _dropout<false>(input, p, train, noise_shape);
 }
 
 Tensor& dropout_(Tensor& input, double p, bool train) {
-  return _dropout<true>(input, p, train);
+  auto noise_shape = input.sizes();
+  return _dropout<true>(input, p, train, noise_shape);
 }
 
 Tensor feature_dropout(const Tensor& input, double p, bool train) {
-  return _feature_dropout<false>(input, p, train);
+  auto noise_shape = input.sizes();
+  return _feature_dropout<false>(input, p, train, noise_shape);
 }
 
 Tensor& feature_dropout_(Tensor& input, double p, bool train) {
-  return _feature_dropout<true>(input, p, train);
+  auto noise_shape = input.sizes();
+  return _feature_dropout<true>(input, p, train, noise_shape);
 }
 
 Tensor alpha_dropout(const Tensor& input, double p, bool train) {
-  return _alpha_dropout<false>(input, p, train);
+  auto noise_shape = input.sizes();
+  return _alpha_dropout<false>(input, p, train, noise_shape);
 }
 
 Tensor& alpha_dropout_(Tensor& input, double p, bool train) {
-  return _alpha_dropout<true>(input, p, train);
+  auto noise_shape = input.sizes();
+  return _alpha_dropout<true>(input, p, train, noise_shape);
 }
 
 Tensor feature_alpha_dropout(const Tensor& input, double p, bool train) {
-  return _feature_alpha_dropout<false>(input, p, train);
+  auto noise_shape = input.sizes();
+  return _feature_alpha_dropout<false>(input, p, train, noise_shape);
 }
 
 Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
-  return _feature_alpha_dropout<true>(input, p, train);
+  auto noise_shape = input.sizes();
+  return _feature_alpha_dropout<true>(input, p, train, noise_shape);
 }
 
 }} // namespace at::native
