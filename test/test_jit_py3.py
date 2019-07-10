@@ -1,3 +1,4 @@
+import pickle
 import sys
 import torch
 from torch.testing import FileCheck
@@ -211,6 +212,22 @@ class TestScriptPy3(JitTestCase):
 
         for name in ['a', 'b', 'c']:
             self.assertEqual(getattr(out_loaded, name), getattr(out, name))
+
+    def test_named_tuple_pickle(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                return MyCoolNamedTuple(3, 3.5, [3, 4, 5])
+
+        mm = MyMod()
+        tup = mm()
+        ser_str = pickle.dumps(tup)
+        pickle.loads(ser_str)
 
 if __name__ == '__main__':
     run_tests()

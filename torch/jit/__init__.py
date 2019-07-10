@@ -4,6 +4,7 @@ from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, Parameter, Sequential
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
+import torch.jit._tuples
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
@@ -2059,7 +2060,10 @@ def _get_named_tuple_properties(obj):
 
 def _create_named_tuple(t, unqual_name, field_names):
     TupleType = collections.namedtuple(unqual_name, field_names)
-    return TupleType(*t)
+    setattr(torch.jit._tuples, unqual_name, TupleType)
+    rv = TupleType(*t)
+    rv.__class__.__module__ = 'torch.jit._tuples'
+    return rv
 
 class _disable_tracing(object):
     def __enter__(self):
