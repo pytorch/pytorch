@@ -78,8 +78,7 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOpti
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
-  TORCH_CHECK(at::scalar_tensor(n, result.options()).defined(),
-  "n is too large for result tensor type: '", result.type().toString(), "'");
+  check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
 
