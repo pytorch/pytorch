@@ -13,28 +13,30 @@ def _create_out(input1, out):
     return out
 
 
-def _unary(func, input1, out=None):
+def _unary(func_name, func, input1, out=None):
     out = _create_out(input1, out)
     for i in range(len(out)):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
-        func(input1.tensors[i], out=out.tensors[i])
+    list_func = getattr(tensor_list.tensor_list, 'unary_' + func_name)
+    list_func(input1.tensors, out.tensors)
     return out
 
 
 # The contract is that func only works with torch.Tensor
-def _binary(func, input1, input2, out=None):
+def _binary(func_name, func, input1, input2, out=None):
     out = _create_out(input1, out)
     assert len(input1) == len(input2)
     for i in range(len(out)):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
         assert input2.tensors[i].size() == input1.tensors[i].size()
-        func(input1.tensors[i], input2.tensors[i], out=out.tensors[i])
+    list_func = getattr(tensor_list.tensor_list, 'binary_' + func_name)
+    list_func(input1.tensors, input2.tensors, out.tensors)
     return out
 
 
-def _comparison(func, input1, input2, out=None):
+def _comparison(func_name, func, input1, input2, out=None):
     out = _create_out(input1, out)
     assert len(input1) == len(input2)
     for i in range(len(out)):
@@ -43,7 +45,8 @@ def _comparison(func, input1, input2, out=None):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
         assert input2.tensors[i].size() == input1.tensors[i].size()
-        func(input1.tensors[i], input2.tensors[i], out=out.tensors[i])
+    list_func = getattr(tensor_list.tensor_list, 'comparison_' + func_name)
+    list_func(input1.tensors, input2.tensors, out.tensors)
     return out
 
 

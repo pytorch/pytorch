@@ -69,25 +69,22 @@ def get_unary_functions():
 
 
 def get_binary_functions():
-    funcs = [
+    return [
         'add',
         'mul',
         'sub',
         'div',
     ]
-    return funcs
 
 
 def get_comparison_functions():
-    funcs = [
+    return [
         'eq',
         'ge',
         'gt',
         'le',
         'ne',
-        'ge'
     ]
-    return funcs
 
 
 def set_function(module, cls, tfunc, func):
@@ -95,7 +92,7 @@ def set_function(module, cls, tfunc, func):
         orig_tfunc = getattr(torch, tfunc)
         def _func(*args, **kwargs):
             if isinstance(args[0], cls):
-                return func(*((orig_tfunc,) + args), **kwargs)
+                return func(*((tfunc, orig_tfunc,) + args), **kwargs)
             else:
                 return orig_tfunc(*args, **kwargs)
         return _func
