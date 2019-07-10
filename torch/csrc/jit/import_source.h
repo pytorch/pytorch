@@ -40,8 +40,6 @@ TORCH_API void import_libs(
 // If present, it determines the SugaredValue for the first argument
 // and that argument is no longer expected to have type annotations.
 TORCH_API void import_functions(
-    // Prefix to use when importing these functions in to the CU
-    const c10::optional<c10::QualifiedName>& prefix,
     // CompilationUnit in which to look up any classes used
     const CompilationUnit& lib_cu,
     // CompilationoUnit to define the functions in.
