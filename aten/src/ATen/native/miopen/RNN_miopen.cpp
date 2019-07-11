@@ -292,100 +292,92 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
 					const RNNDescriptor& rnn_desc, const TensorDescriptor& x_desc, const FilterDescriptor& w_desc,
 					const Tensor& weight_buf)
 {
-	/*TODO:
-		1. implement _num_linear_layers method. [Done]
-		2. Find equivalent to cudnnGetLinearMatrixParams and cudnnGetRNNLinearLayerBiasParams. (mioepnGetLayerParams, miopenGetBiasParams.) [Done]
-		3. 
-	*/
 	std::vector<Tensor> params;
 	int64_t num_linear_layers = _num_linear_layers(rnn.rnn_mode);
 	int64_t num_layers = rnn.num_directions() * rnn.num_layers;
 	size_t cur_offset = 0;
 	size_t global_layer_params_count = 0;
+	auto elem_size = dataSize(getMiopenDataType(weight_buf));
+	auto bias_mode = rnn.bias_mode;
 
-	for (int64_t layer=0; layer < num_layers; layer++) {
+	for (int64_t layer = 0; layer < num_layers; layer++) {
 		size_t layer_params_count = 0;
-		//Get all the weight parameters.
-		for(int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
-			FilterDescriptor lin_linear_mat_desc;
-			void* matrix_pointer = nullptr;
+
+		// Get layer params
+		for (int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
+			FilterDescriptor lin_layer_mat_desc;
+			size_t offset;
+			MIOPEN_CHECK(miopenGetRNNLayerParamOffset(
+				rnn_desc.desc(),
+				layer,
+				x_desc.desc(),
+				linear_id,
+				lin_layer_mat_desc.mut_desc(),
+				&offset));
+
 			size_t param_size;
-			MIOPEN_CHECK(miopenGetRNNLayerParamSize(handle, rnn_desc.desc(), layer, x_desc.desc(), linear_id, &param_size));
-			MIOPEN_CHECK(miopenGetRNNLayerParam(handle, rnn_desc.desc(), layer, x_desc.desc(), w_desc.desc(), weight_buf.data_ptr(), 
-													linear_id, lin_linear_mat_desc.mut_desc(), matrix_pointer));
-			miopenDataType_t data_type;
-			int nb_dims;
-			constexpr int min_dim = 3;
-			//Tensor filter_dim_a = at::empty(min_dim, at::InitialTensorOptions().dtype(kInt));
-			//Tensor stride_dim_a = at::empty(min_dim, at::InitialTensorOptions().dtype(kInt));
-			std::array<int,3> matDims {1,1,1};
-			std::array<int,3> strideDims {1,1,1};
-			MIOPEN_CHECK(miopenGetTensorDescriptor(lin_linear_mat_desc.desc(), &data_type, matDims.data(), strideDims.data()));
+			MIOPEN_CHECK(miopenGetRNNLayerParamSize(
+				handle,
+				rnn_desc.desc(),
+				layer,
+				x_desc.desc(),
+				linear_id,
+				&param_size));
+			param_size /= elem_size;
 
-			auto elem_size = dataSize(getMiopenDataType(weight_buf));
-			auto offset_bytes = (char *) matrix_pointer - (char *) weight_buf.data_ptr();
-			AT_ASSERTM(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
-			size_t offset = offset_bytes / elem_size;
-
-			int mat_numel = matDims[0] * matDims[1] * matDims[2];
-			if (linear_id == 0 || linear_id == num_linear_layers / 2) {
-				std::initializer_list<int64_t> size = {mat_numel * num_linear_layers / 2, 1};
-
-				//Generate new parameter tensor which is a view into the weight_buf.
+			if(linear_id == 0 || linear_id == num_linear_layers / 2) {
+				std::initializer_list<int64_t> size = { param_size * num_linear_layers / 2, 1};
 				Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
 				params.emplace_back(std::move(param));
 				layer_params_count++;
 			} else {
 				AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, " ; offset = ", offset);
 			}
-
-			cur_offset = offset + mat_numel;
+			cur_offset = offset + param_size;
 		}
 
-		//Get all the bias parameters.
-		for(int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
-			FilterDescriptor lin_linear_mat_desc;
-			void* matrix_pointer = nullptr;
-			size_t param_size;
-			MIOPEN_CHECK(miopenGetRNNLayerBiasSize(handle, rnn_desc.desc(), layer, linear_id, &param_size));
-			MIOPEN_CHECK(miopenGetRNNLayerBias(handle, rnn_desc.desc(), layer, x_desc.desc(), w_desc.desc(), weight_buf.data_ptr(), 
-													linear_id, lin_linear_mat_desc.mut_desc(), matrix_pointer));
-			miopenDataType_t data_type;
-			int nb_dims;
-			constexpr int min_dim = 3;
-			//Tensor filter_dim_a = at::empty(min_dim, at::InitialTensorOptions().dtype(kInt));
-			//Tensor stride_dim_a = at::empty(min_dim, at::InitialTensorOptions().dtype(kInt));
-			std::array<int,3> matDims {1,1,1};
-			std::array<int,3> strideDims {1,1,1};
-			MIOPEN_CHECK(miopenGetTensorDescriptor(lin_linear_mat_desc.desc(), &data_type, matDims.data(), strideDims.data()));
+		// Get bias params
+		if (bias_mode == miopenRNNwithBias) {
+			for (int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
+				FilterDescriptor lin_layer_mat_desc;
+				size_t offset;
+				MIOPEN_CHECK(miopenGetRNNLayerBiasOffset(
+					rnn_desc.desc(),
+					layer,
+					x_desc.desc(),
+					linear_id,
+					lin_layer_mat_desc.mut_desc(),
+					&offset));
 
-			auto elem_size = dataSize(getMiopenDataType(weight_buf));
-			auto offset_bytes = (char *) matrix_pointer - (char *) weight_buf.data_ptr();
-			AT_ASSERTM(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
-			size_t offset = offset_bytes / elem_size;
+				size_t bias_size;
+				MIOPEN_CHECK(miopenGetRNNLayerBiasSize(
+					handle,
+					rnn_desc.desc(),
+					layer,
+					linear_id,
+					&bias_size));
+				bias_size /= elem_size;
 
-			int mat_numel = matDims[0] * matDims[1] * matDims[2];
-			if (linear_id == 0 || linear_id == num_linear_layers / 2) {
-				std::initializer_list<int64_t> size = {mat_numel * num_linear_layers / 2, 1};
-
-				//Generate new parameter tensor which is a view into the weight_buf.
-				Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
-				params.emplace_back(std::move(param));
-				layer_params_count++;
-			} else {
-				AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, " ; offset = ", offset);
+				if(linear_id == 0 || linear_id == num_linear_layers / 2) {
+					std::initializer_list<int64_t> size = { bias_size * num_linear_layers / 2, 1};
+					Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
+					params.emplace_back(std::move(param));
+					layer_params_count++;
+				} else {
+					AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, " ; offset = ", offset);
+				}
+				cur_offset = offset + bias_size;
 			}
-
-			cur_offset = offset + mat_numel;
 		}
 
 		if (layer == 0) {
 			global_layer_params_count = layer_params_count;
 		} else {
-			 AT_ASSERTM(global_layer_params_count == layer_params_count,  "global_layer_params_count = ", global_layer_params_count, "; layer_params_count = ", layer_params_count);
+			AT_ASSERTM(global_layer_params_count == layer_params_count,
+				"global_layer_params_count = ", global_layer_params_count,
+				"; layer_params_count = ", layer_params_count);
 		}
-	}
-
+	} // layer
 	return std::make_pair(params, global_layer_params_count);
 }
 
@@ -416,7 +408,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
         IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
         ) {
-    AT_ERROR("miopen_rnn : not implemented yet.");
 
     check_device(input_r, weight, {hx, cx});
     auto input = input_r;
