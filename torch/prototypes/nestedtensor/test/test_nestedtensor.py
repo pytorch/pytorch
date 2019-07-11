@@ -12,14 +12,51 @@ def _shape_prod(shape_):
         start = start  * s
     return start
 
+# From torchaudio by jamarshon
+def random_float_tensor(seed, size, a=22695477, c=1, m=2 ** 32):
+    """ Generates random tensors given a seed and size
+    https://en.wikipedia.org/wiki/Linear_congruential_generator
+    X_{n + 1} = (a * X_n + c) % m
+    Using Borland C/C++ values
+     The tensor will have values between [0,1)
+    Inputs:
+        seed (int): an int
+        size (Tuple[int]): the size of the output tensor
+        a (int): the multiplier constant to the generator
+        c (int): the additive constant to the generator
+        m (int): the modulus constant to the generator
+    """
+    num_elements = 1
+    for s in size:
+        num_elements *= s
+
+    arr = [(a * seed + c) % m]
+    for i in range(num_elements - 1):
+        arr.append((a * arr[i] + c) % m)
+
+    return torch.tensor(arr).float().view(size) / m
+
+
+def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 32):
+   """ Same as random_float_tensor but integers between [low, high)
+   """
+   return torch.floor(random_float_tensor(seed, size, a, c, m) * (high - low)) + low
+
 
 class _TestNestedTensor(unittest.TestCase):
+
     def gen_float_tensor(self, seed, shape):
-        data = []
-        for data_i in range(_shape_prod(shape)):
-            data.append(data_i + seed)
-        ret = torch.tensor(data)
-        return ret.reshape(shape).float().cuda()
+        return random_float_tensor(seed, shape)
+
+    def test_constructor(self):
+        tensors = []
+        for i in range(16):
+            tensors.append(self.gen_float_tensor(i, (16, 128, 128)))
+        nested_tensor = torch.nestedtensor(tensors)
+        for i in range(16):
+            tensors[i].mul_(i + 2)
+        for i in range(16):
+            assert (tensors[i] != nested_tensor.tensors[i]).all()
 
     def test_nested_size(self):
         a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
@@ -99,8 +136,5 @@ class _TestNestedTensor(unittest.TestCase):
         assert (a3 == a1.add_(a2)).all()
         assert (a3 == a1).all()
 
-# TODO: Carefully test reference passing vs. value passing for each function
-# TODO: Add more tests for variable length examples
-# TODO: Need constructor tests
 if __name__ == "__main__":
     unittest.main()
