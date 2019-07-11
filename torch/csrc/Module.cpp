@@ -57,9 +57,7 @@
 #endif
 #endif
 
-#ifdef USE_PROTOTYPES
 #include <torch/csrc/prototypes/prototypes.h>
-#endif
 
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -619,9 +617,8 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
 #endif
-#ifdef USE_PROTOTYPES
+
   THPUtils_addPyMethodDefs(methods, torch::prototypes::python_functions());
-#endif
 
 #if PY_MAJOR_VERSION == 2
   ASSERT_TRUE(module = Py_InitModule("torch._C", methods.data()));

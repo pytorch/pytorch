@@ -3,7 +3,7 @@ import torch
 import time
 
 def gen_rand_tensor(size):
-    return torch.rand(size).cuda()
+    return torch.rand(size)
 
 def gen_float_tensors(num_tensors, size):
     print("size: " + str(size))

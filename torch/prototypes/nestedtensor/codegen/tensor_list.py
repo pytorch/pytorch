@@ -5,15 +5,36 @@ import argparse
 
 def get_header():
     header = """
-#include <torch/extension.h>
+#include <torch/csrc/utils/pybind.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <ATen/ATen.h>
 
 #include <vector>
 #include <iostream>
+
+namespace torch {
+namespace prototypes {
     """
     return header
+
+
+def get_footer():
+    footer = """
+
+// prototypes methods on torch._C
+static PyMethodDef methods[] = {
+    {"_tensor_list_init", (PyCFunction)tensor_list_init, METH_NOARGS, nullptr},
+    {nullptr, nullptr, 0, nullptr}};
+
+PyMethodDef* python_functions() {
+  return methods;
+}
+
+} // namespace prototypes
+} // namespace torch
+    """
+    return footer
 
 
 def build_unary_functions():
@@ -64,16 +85,31 @@ void tensor_list_${op}(std::vector<at::Tensor>& input1,
     return cpp_source + "\n"
 
 def build_bindings():
+    cpp_source = """
+PyObject* tensor_list_init(PyObject* _unused) {
+  C10_LOG_API_USAGE_ONCE("tensor_list.python.import");
+  auto tensor_list_module = THPObjectPtr(PyImport_ImportModule("torch.prototypes"));
+  if (!tensor_list_module) {
+    throw python_error();
+  }
+
+  auto m = py::handle(tensor_list_module).cast<py::module>();
+    """
+
     pybind_template = '  m.def("${op}", &tensor_list_${op}, "${op}");'
     pybind_template = Template(pybind_template)
 
-    cpp_source = ""
     for op in codegen.get_unary_functions():
         cpp_source += pybind_template.substitute(op=op) + "\n"
     for op in codegen.get_binary_functions():
         cpp_source += pybind_template.substitute(op=op) + "\n"
     for op in codegen.get_comparison_functions():
         cpp_source += pybind_template.substitute(op=op) + "\n"
+    cpp_source += """
+
+  Py_RETURN_TRUE;
+}
+    """
     return cpp_source
 
 
@@ -91,9 +127,9 @@ if __name__ == "__main__":
     cpp_source += build_binary_functions()
     cpp_source += build_comparison_functions()
 
-    cpp_source += "PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n"
     cpp_source += build_bindings()
-    cpp_source += '}'
+
+    cpp_source += get_footer()
 
     # TODO: Needs to happen in the build folder
     with open(args.destination, 'w') as source_out:

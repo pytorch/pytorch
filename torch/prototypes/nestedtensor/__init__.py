@@ -11,6 +11,8 @@ def is_available():
 if is_available() and not torch._C._tensor_list_init():
     raise RuntimeError("Failed to initialize PyTorch distributed support")
 
+import torch.prototypes as tensor_list
+
 NestedTensor = nested.NestedTensor
 
 def _create_out(input1, out, dtype=None):

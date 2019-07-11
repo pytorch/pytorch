@@ -335,17 +335,17 @@ void tensor_list_ne(std::vector<at::Tensor>& input1,
     at::ne_out(out[i], input1[i], input2[i]);
   }
 }
+    
 
 PyObject* tensor_list_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("tensor_list.python.import");
-  auto tensor_list_module = THPObjectPtr(PyImport_ImportModule("torch.prototypes.tensor_list"));
+  auto tensor_list_module = THPObjectPtr(PyImport_ImportModule("torch.prototypes"));
   if (!tensor_list_module) {
     throw python_error();
   }
 
   auto m = py::handle(tensor_list_module).cast<py::module>();
-    
-  m.def("abs", &tensor_list_abs, "abs");
+      m.def("abs", &tensor_list_abs, "abs");
   m.def("acos", &tensor_list_acos, "acos");
   m.def("asin", &tensor_list_asin, "asin");
   m.def("atan", &tensor_list_atan, "atan");
@@ -391,10 +391,12 @@ PyObject* tensor_list_init(PyObject* _unused) {
   m.def("le", &tensor_list_le, "le");
   m.def("ne", &tensor_list_ne, "ne");
 
+
   Py_RETURN_TRUE;
 }
+    
 
-// c10d methods on torch._C
+// prototypes methods on torch._C
 static PyMethodDef methods[] = {
     {"_tensor_list_init", (PyCFunction)tensor_list_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
@@ -403,6 +405,6 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-
 } // namespace prototypes
 } // namespace torch
+    
