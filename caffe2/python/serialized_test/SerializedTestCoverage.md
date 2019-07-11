@@ -1,11 +1,11 @@
 # Serialized Test Coverage Report
 This is an automatically generated file. Please see `caffe2/python/serialized_test/README.md` for details. In the case of merge conflicts, please rebase and regenerate.
 ## Summary
-Serialized tests have covered 219/743 (29.4%) operators
+Serialized tests have covered 219/688 (31.8%) operators
 
 ## Not covered operators
 <details>
-<summary>There are 524 not covered operators</summary>
+<summary>There are 469 not covered operators</summary>
 
 * APMeter
 * ATen
@@ -17,6 +17,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Adam
 * Add
 * AddGradient
+* AdjustBatch
 * Alias
 * Allgather
 * Allreduce
@@ -42,10 +43,8 @@ Serialized tests have covered 219/743 (29.4%) operators
 * BitwiseAnd
 * BitwiseOr
 * BitwiseXor
-* BooleanMaskGradient
 * BooleanMaskLengths
 * Broadcast
-* Bucketize
 * ByteWeightDequant
 * Cast
 * Cbrt
@@ -58,10 +57,8 @@ Serialized tests have covered 219/743 (29.4%) operators
 * CloseBlobsQueue
 * CloseRebatchingQueue
 * Col2Im
-* CollectRpnProposals
 * CollectTensor
 * ComputeOffset
-* ConcatBatchMatMulBatchGatherOp
 * ConcatTensorVector
 * ConditionalSetAtomicBool
 * Conv1D
@@ -70,13 +67,10 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Conv2DGradient
 * Conv3D
 * Conv3DGradient
-* ConvRelu
 * ConvTranspose
 * ConvTransposeGradient
 * Copy
-* CopyCPUToGPU
 * CopyFromCPUInput
-* CopyGPUToCPU
 * CopyOnDeviceLike
 * Cos
 * CosGradient
@@ -84,7 +78,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * CosineSimilarityGradient
 * CountDown
 * CountUp
-* Crash
 * CreateAtomicBool
 * CreateBlobsQueue
 * CreateBlobsQueueDB
@@ -104,15 +97,12 @@ Serialized tests have covered 219/743 (29.4%) operators
 * CubeGradient
 * DBExists
 * DataCouple
-* DeformConv
-* DeformConvGradient
 * DenseVectorToIdList
 * DepthConcat
 * DepthSplit
 * DequeueBlobs
 * DequeueRebatchingQueue
 * DestroyCommonWorld
-* DistributeFpnProposals
 * Div
 * DivGradient
 * Do
@@ -127,37 +117,18 @@ Serialized tests have covered 219/743 (29.4%) operators
 * EnsureDense
 * Exp
 * ExpandDims
-* FCFp16X
-* FCGradient_Decomp
-* FCGradient_Prune
 * FCTransposed
 * FCTransposedGradient
-* FC_Decomp
-* FC_Prune
-* FC_Sparse
-* FP16MomentumSGDUpdate
-* FP32MomentumSGDUpdate
-* FP32ToFP16Fake
 * Fail
-* FbFCPacked
-* FbGemmPack
 * FeedBlob
-* FilterExampleIds
-* FilterSparseLabels
+* FileStoreHandlerCreate
 * Flatten
 * FlattenToVec
-* Float16ConstantFill
-* Float16UniformFill
 * FloatToFused8BitRowwiseQuantized
 * FloatToFusedRandRowwiseQuantized
-* FloatToHalf
 * FloatToRowwiseQuantized8Bits
-* Fp16FC
-* Fp16FCAcc16
 * Free
 * Ftrl
-* FunHash
-* FunHashGradient
 * Fused8BitRowwiseQuantizedToFloat
 * Fused8BitRowwiseQuantizedToHalfFloat
 * FusedRandRowwiseQuantizedToFloat
@@ -167,18 +138,14 @@ Serialized tests have covered 219/743 (29.4%) operators
 * GatherByKey
 * GatherFused8BitRowwise
 * GaussianFill
-* Gelu
-* GeluGradient
 * GenerateProposals
 * GenerateProposalsCPP
 * GetAllBlobNames
 * GetCursorOffset
-* GetGPUMemoryUsage
 * GivenTensorBoolFill
 * GivenTensorByteStringToUInt8Fill
 * GivenTensorDoubleFill
 * GivenTensorFill
-* GivenTensorInt16Fill
 * GivenTensorInt64Fill
 * GivenTensorIntFill
 * GivenTensorStringFill
@@ -186,7 +153,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * HSoftmaxGradient
 * HSoftmaxSearch
 * HalfFloatToFused8BitRowwiseQuantized
-* HalfToFloat
 * HardSigmoid
 * HardSigmoidGradient
 * HasElements
@@ -195,14 +161,12 @@ Serialized tests have covered 219/743 (29.4%) operators
 * HuffmanTreeHierarchy
 * If
 * Im2Col
-* ImageInput
 * IncrementPut
 * IndexFreeze
 * IndexGet
 * IndexLoad
 * IndexSize
 * IndexStore
-* InferenceLSTM
 * Int8Add
 * Int8AddRelu
 * Int8AveragePool
@@ -232,7 +196,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * Int8SumRelu
 * IntIndexCreate
 * IsEmpty
-* IsNaN
 * Iter
 * KeySplit
 * KeyValueToMap
@@ -292,10 +255,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * MaxPool3D
 * MaxPool3DGradient
 * MaxPoolGradient
-* MaxPoolWithIndex
-* MaxPoolWithIndexGradient
 * MergeDim
-* MergeExampleIds
 * MergeMultiListFeatureTensors
 * MergeMultiListFeatureTensorsGradient
 * MergeMultiMapFeatureTensors
@@ -339,7 +299,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * PythonGradient
 * QuantDecode
 * QuantDecodeGradient
-* QuantDecompZstd
 * RMACRegions
 * Range
 * RangeFill
@@ -374,7 +333,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * RoIAlign
 * RoIAlignGradient
 * RoIAlignRotated
-* RoIAlignRotatedGradient
 * RoIPool
 * RoIPoolGradient
 * RowMul
@@ -386,10 +344,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SafeEnqueueBlobs
 * Save
 * Scale
-* ScaleBlobs
-* Scatter
-* ScriptModule
-* ScriptModuleLoad
 * SegmentIdsToLengths
 * SegmentIdsToRanges
 * SendTensor
@@ -425,12 +379,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SpaceToBatch
 * SparseAdam
 * SparseFtrl
-* SparseFunHash
-* SparseFunHashGradient
-* SparseLabelSplit
-* SparseLabelSplitGradient
-* SparseLabelToBool
-* SparseLabelToDense
 * SparseLengthsIndicesInGradientMeanGradient
 * SparseLengthsIndicesInGradientSumGradient
 * SparseLengthsIndicesInGradientWeightedSumGradient
@@ -450,7 +398,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SparseLengthsWeightedSumFused8BitRowwise
 * SparseLengthsWeightedSumGradient
 * SparseLengthsWeightedSumWithMainInputGradient
-* SparseMatrixReshape
 * SparseNormalize
 * SparseSortedSegmentMean
 * SparseSortedSegmentMeanGradient
@@ -477,6 +424,10 @@ Serialized tests have covered 219/743 (29.4%) operators
 * StatRegistryUpdate
 * StdDevPut
 * StopGradient
+* StoreAdd
+* StoreGet
+* StoreSet
+* StoreWait
 * StringIndexCreate
 * StringJoin
 * StringPrefix
@@ -486,17 +437,12 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SubGradient
 * Sum
 * SumInt
-* SumRelu
 * Summarize
 * SwapBestPath
 * Swish
 * SwishGradient
 * TT
-* TTContraction
-* TTContractionGradient
 * TTLinearGradient
-* TTPad
-* TTPadGradient
 * TensorProtosDBInput
 * TensorVectorSize
 * TextFileReaderRead
@@ -518,7 +464,6 @@ Serialized tests have covered 219/743 (29.4%) operators
 * UnsortedSegmentWeightedSum
 * UnsortedSegmentWeightedSumGradient
 * VariableLengthSequencePadding
-* VideoInput
 * ViterbiPath
 * WallClockTime
 * WeightedMultiSampling
@@ -761,7 +706,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 ## Excluded from coverage statistics
 ### Schemaless operators
 <details>
-<summary>There are 23 schemaless operators</summary>
+<summary>There are 22 schemaless operators</summary>
 
 * C10Add_DontUseThisOpYet
 * C10AveragedLoss_DontUseThisOpYet
@@ -785,6 +730,5 @@ Serialized tests have covered 219/743 (29.4%) operators
 * C10SparseLengthsSum_DontUseThisOpYet
 * C10StopGradient_DontUseThisOpYet
 * C10UniformFill_DontUseThisOpYet
-* SparseLengthsMax
 </details>
 

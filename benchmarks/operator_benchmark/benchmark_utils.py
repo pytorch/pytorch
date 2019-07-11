@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 import numpy as np
 import itertools
 import random
-import os
 
 
 """Performance microbenchmarks's utils.
@@ -19,34 +18,12 @@ def shape_to_string(shape):
     return ', '.join([str(x) for x in shape])
 
 
-def numpy_random(dtype, *shapes):
-    """ Return a random numpy tensor of the provided dtype.
-        Args: 
-            shapes: int or a sequence of ints to defining the shapes of the tensor
-            dtype: use the dtypes from numpy 
-                (https://docs.scipy.org/doc/numpy/user/basics.types.html)
-        Return: 
-            numpy tensor of dtype 
+def numpy_random_fp32(*shape):
+    """Return a random numpy tensor of float32 type.
     """
     # TODO: consider more complex/custom dynamic ranges for
     # comprehensive test coverage.
-    return np.random.rand(*shapes).astype(dtype)
-
-
-def set_omp_threads(num_threads): 
-    existing_value = os.environ.get('OMP_NUM_THREADS', '')
-    if existing_value != '': 
-        print("Overwriting existing OMP_NUM_THREADS value: {}; Setting it to {}.".format(
-            existing_value, num_threads))
-    os.environ["OMP_NUM_THREADS"] = str(num_threads)
-
-
-def set_mkl_threads(num_threads):
-    existing_value = os.environ.get('MKL_NUM_THREADS', '')
-    if existing_value != '': 
-        print("Overwriting existing MKL_NUM_THREADS value: {}; Setting it to {}.".format(
-            existing_value, num_threads))
-    os.environ["MKL_NUM_THREADS"] = str(num_threads)
+    return np.random.rand(*shape).astype(np.float32)
 
 
 def cross_product(*inputs):

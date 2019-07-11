@@ -580,11 +580,6 @@
    }
 
    // Intersect our bitmap with the RHS and return true if ours changed.
-   bool operator-=(const SparseBitVector &RHS) {
-     return intersectWithComplement(RHS);
-   }
-
-   // Intersect our bitmap with the RHS and return true if ours changed.
    bool operator&=(const SparseBitVector &RHS) {
      if (this == &RHS)
        return false;
@@ -872,26 +867,5 @@
    return Result;
  }
 
- template <unsigned ElementSize>
- std::ostream& operator<<(std::ostream& stream, const SparseBitVector<ElementSize>& vec) {
 
-   bool first = true;
-   stream << "{";
-   for (auto el : vec)
-   {
-     if (first)
-     {
-       first = false;
-     }
-     else
-     {
-       stream << ", ";
-     }
-     stream << el;
-   }
-   stream << "}";
-   return stream;
- }
-
-
-} // end namespace c10
+ } // end namespace llvm

@@ -1,13 +1,17 @@
 #include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/fuser/compiler.h>
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <ATen/CUDAGenerator.h>
 #include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
+#include <torch/csrc/jit/fuser/cuda/thnvrtc.h>
 #include <torch/csrc/jit/resource_guard.h>
+
+// Note: unclear why this forward declaration is necessary
+#include <THC/THCGenerator.hpp>
+#include <THC/THCTensorRandom.h>
+THCGenerator* THCRandom_getGenerator(THCState* state);
 
 #include <cuda_runtime.h>
 
@@ -23,17 +27,69 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// See NOTE [ USE OF NVRTC AND DRIVER API ]
-const at::cuda::NVRTC& nvrtc() {
-  return at::globalContext().getNVRTC();
+// [USE OF NVRTC AND DRIVER API]
+// libtorch does not directly link to either libnvrtc or libcuda because
+// they require libcuda to be installed. Normal CUDA code in torch uses the cuda
+// runtime libraries which can be installed even if the driver is not installed,
+// but here we specifically need to use the driver API to load JIT compiled
+// code. To accomplish this, we lazily link libthnvrtc which provides a struct
+// THNVRTC that contains function pointers to all of the apis we need.
+//
+// IT IS AN ERROR TO TRY TO CALL ANY nvrtc* or cu* FUNCTION DIRECTLY.
+// INSTEAD USE, e.g. nvrtc().cuLoadModule(...)
+// If a function is missing add it to the list in thnvrtc.
+
+#ifdef USE_DIRECT_NVRTC
+std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
+  return std::make_pair(nullptr, torch_load_nvrtc());
 }
+#else
+std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
+#ifdef __APPLE__
+  std::string libthnvrtc = "libthnvrtc.dylib";
+#else
+  std::string libthnvrtc = "libthnvrtc.so";
+#endif
+  std::unique_ptr<cpu::DynamicLibrary> libnvrtc_stub(
+      new cpu::DynamicLibrary(libthnvrtc.c_str()));
+  auto fn = (THNVRTC * (*)()) libnvrtc_stub->sym("torch_load_nvrtc");
+  return std::make_pair(std::move(libnvrtc_stub), fn());
+}
+#endif
+
+const THNVRTC& nvrtc() {
+  // must hold onto DynamicLibrary otherwise it will unload
+  static auto handle = loadNVRTC();
+  return *handle.second;
+}
+
+// We're using three CUDA APIs, so define a few helpers for error handling
+static inline void nvrtcCheck(nvrtcResult result, const char* file, int line) {
+  if (result != NVRTC_SUCCESS) {
+    std::stringstream ss;
+    ss << file << ":" << line << ": " << nvrtc().nvrtcGetErrorString(result);
+    throw std::runtime_error(ss.str());
+  }
+}
+#define TORCH_NVRTC_CHECK(result) nvrtcCheck(result, __FILE__, __LINE__);
+
+static inline void cuCheck(CUresult result, const char* file, int line) {
+  if (result != CUDA_SUCCESS) {
+    const char* str;
+    nvrtc().cuGetErrorString(result, &str);
+    std::stringstream ss;
+    ss << file << ":" << line << ": " << str;
+    throw std::runtime_error(ss.str());
+  }
+}
+#define TORCH_CU_CHECK(result) cuCheck(result, __FILE__, __LINE__);
 
 static void getMajorMinor(
     const cudaDeviceProp* const prop,
     int& major,
     int& minor) {
   int nvrtc_major, nvrtc_minor;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
+  TORCH_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
   AT_ASSERT(nvrtc_major >= 6);
@@ -85,7 +141,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       device_(device) {
   // Initializes driver's API context (if necessary)
   CUcontext pctx = 0;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  TORCH_CU_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
@@ -105,7 +161,7 @@ FusedKernelCUDA::FusedKernelCUDA(
 
   // Creates the NVRTC program
   nvrtcProgram program;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
+  TORCH_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
   const std::string compute = "--gpu-architecture=compute_" +
@@ -124,19 +180,19 @@ FusedKernelCUDA::FusedKernelCUDA(
     throw std::runtime_error(cu.str());
   }
   ResourceGuard holdProgram(
-      [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
-  AT_CUDA_NVRTC_CHECK(result);
+      [&] { TORCH_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
+  TORCH_NVRTC_CHECK(result);
   size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
+  TORCH_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
   ptx_.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx_.data()));
+  TORCH_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx_.data()));
 
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module_, ptx_.data()));
-  AT_CUDA_DRIVER_CHECK(
+  TORCH_CU_CHECK(nvrtc().cuModuleLoadData(&module_, ptx_.data()));
+  TORCH_CU_CHECK(
       nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+  TORCH_CU_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
   maxBlocks_ *= prop_->multiProcessorCount;
 
@@ -159,24 +215,20 @@ void FusedKernelCUDA::launch_raw(
   const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
 
   // Adds random state to arguments if necessary
-  // Note: philox_engine_inputs defined here so its lifetime extends to the launch
-  std::pair<uint64_t, uint64_t> philox_engine_inputs;
+  // Note: offset defined here so its lifetime extends to the launch
+  uint64_t offset;
   if (has_random_) {
     const auto rand_offset =
         4 * (std::ceil(numel / (4.0 * kBlockSize * nBlocks)) + 1);
-    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(gen->mutex_);
-      philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
-    }
-    arguments.push_back(&philox_engine_inputs.first);
-    arguments.push_back(&philox_engine_inputs.second);
+    auto gen = THCRandom_getGenerator(at::globalContext().getTHCState());
+    offset = gen->state.philox_seed_offset.fetch_add(rand_offset);
+    arguments.push_back(&gen->state.initial_seed);
+    arguments.push_back(&offset);
   }
 
   // Launches kernel on current stream (device was set by executor)
   auto stream = at::cuda::getCurrentCUDAStream();
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+  TORCH_CU_CHECK(nvrtc().cuLaunchKernel(
       function_,
       nBlocks,
       1,

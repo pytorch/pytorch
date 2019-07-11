@@ -23,30 +23,18 @@ namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-SourceRange getPythonInterpreterSourceRange() {
-  c10::optional<std::string> source_filename;
-  size_t source_line = 0;
+std::string getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
-
   AutoGIL gil;
   PyFrameObject* frame = PyEval_GetFrame();
-
   while (nullptr != frame) {
     int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
     std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
     stack_trace << filename << "(" << line << "): " << funcname << "\n";
-    if (!source_filename) {
-      source_filename = filename;
-      source_line = line;
-    }
     frame = frame->f_back;
   }
-
-  auto stack_trace_text = stack_trace.str();
-  auto source =
-      std::make_shared<Source>(stack_trace_text, source_filename, source_line);
-  return SourceRange(source, 0, stack_trace_text.size());
+  return stack_trace.str();
 }
 
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
@@ -54,19 +42,19 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     TypedStack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    script::Module* self) {
+    const std::shared_ptr<script::Module>& self) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
-  try {
-    auto enter_info = tracer::enter(std::move(trace_inputs), self);
-    auto graph = enter_info.first->graph;
+  auto enter_info = tracer::enter(std::move(trace_inputs), self);
+  auto graph = enter_info.first->graph;
 
-    getTracingState()->lookup_var_name_fn =
-        [var_name_lookup_fn](const Variable& var) -> std::string {
-      AutoGIL ag;
-      return py::cast<std::string>(var_name_lookup_fn(var));
-    };
-    getTracingState()->force_outplace = force_outplace;
+  getTracingState()->lookup_var_name_fn =
+      [var_name_lookup_fn](const Variable& var) -> std::string {
+    AutoGIL ag;
+    return py::cast<std::string>(var_name_lookup_fn(var));
+  };
+  getTracingState()->force_outplace = force_outplace;
+  try {
     size_t num_func_inputs = enter_info.second.size();
     py::tuple py_inputs(num_func_inputs);
     for (size_t i = 0; i < num_func_inputs; ++i) {
@@ -79,9 +67,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
           "captured in traces, so it would be a no-op.");
     }
     tracer::exit({toIValue(out)});
-    if (script::getInlineEverythingMode()) {
-      Inline(*graph);
-    }
+    Inline(*graph);
     LowerSimpleTuples(graph);
     EliminateDeadCode(graph);
     return graph;
@@ -118,7 +104,7 @@ Node* preRecordPythonTrace(
 }
 
 void pythonRecordSourceLocation(Node* n) {
-  n->setSourceRange(getPythonInterpreterSourceRange());
+  n->setSourceRange(SourceRange(getPythonInterpreterStackTrace()));
 }
 
 void pythonWarn(const std::string& reason) {

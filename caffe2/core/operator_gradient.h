@@ -272,7 +272,8 @@ class CAFFE2_API NoGradient : public GradientMakerBase {
 struct ThrowInTheTowelIfGradientIsCalled : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   GradientOpsMeta Get() override {
-    CAFFE_THROW("One should not call gradient for operator ", def_.type(), ".");
+    CAFFE_ENFORCE(
+        false, "One should not call gradient for operator ", def_.type(), ".");
   }
 };
 
@@ -286,7 +287,8 @@ struct ThrowInTheTowelIfGradientIsCalled : public GradientMakerBase {
 struct GradientNotImplementedYet : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   GradientOpsMeta Get() override {
-    CAFFE_THROW(
+    CAFFE_ENFORCE(
+        false,
         "Operator ",
         def_.type(),
         " should have a gradient but is not implemented yet.");

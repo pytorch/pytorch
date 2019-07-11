@@ -77,16 +77,20 @@ class TORCH_API MemoryDAG {
   friend class AliasDB;
 };
 
+enum class BfsDirection {
+  POINTS_TO,
+  POINTED_FROM,
+};
+
 // `Element` represents the vertex in the points-to graph. It represents
 // anything that could have an aliasing relationship, mostly IR `Value`s, but
 // also the "inside of a list", or wildcards.
 struct Element {
-  Element(MemoryDAG& dag_, const Value* value_, unsigned index_);
-
-  // Reference to the owning DAG.
   MemoryDAG& dag;
-  // Index into the owning DAG's bit vector that represents this element.
-  unsigned index;
+
+  // The value that this element corresponds to. May be null if this element
+  // doesn't represent a first-class value.
+  const Value* value = nullptr;
 
   // All elements that this element *may* point to. It's possible to have
   // multiple elements that you might point to due to control flow/complex ops
@@ -94,30 +98,20 @@ struct Element {
   // Backreference for points-to.
   MemoryLocations pointedFrom;
 
-  // Elements can contain other elements (e.g. List[Tensor])
-  MemoryLocations containedElements;
+  MemoryLocations contained_elements;
+  unsigned index;
+  Element(MemoryDAG& dag_, const Value* value_, unsigned index_);
 
   // Return the unique memory locations that `Element` might represent.
   TORCH_API const MemoryLocations& getMemoryLocations() const;
-
-  // The value that this element corresponds to. May be null if this element
-  // doesn't represent a first-class value.
-  const Value* value = nullptr;
-
- private:
   // We do path compression to make repeated memory location queries faster.
   // An empty cache means it is invalidated (it can never be empty otherwise,
   // since every element must point to at least one memory location).
   mutable MemoryLocations cachedMemoryLocations_;
 
-  enum class BfsDirection {
-    POINTS_TO,
-    POINTED_FROM,
-  };
   // Do a breadth-first search over the graph, starting at `this` and
   // traversing in the direction `dir`.`fn` will be run on each element.
   void bfs(BfsDirection dir, MemoryLocations& res) const;
 };
-
 } // namespace jit
 } // namespace torch

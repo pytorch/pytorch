@@ -33,6 +33,10 @@ private:
   std::ios saved;
 };
 
+std::ostream& operator<<(std::ostream & out, const Type& t) {
+  return out << t.toString();
+}
+
 std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {
   return out << t.toString();
 }

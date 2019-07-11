@@ -12,7 +12,6 @@
 #include <memory>
 #include <sstream>
 #include <vector>
-#include <algorithm>
 
 
 namespace {
@@ -234,12 +233,12 @@ static Tensor apply_bag_size(const Tensor &offsets, const Tensor &indices,
                              const int64_t mode, Tensor &output,
                              const Tensor &bag_size) {
   if (mode == MODE_MEAN) {
-    // Avoid dividing by 0 for empty bags.
-    // Instead we want empty bags to return all 0s
     if (offsets.size(0) == 1) {
-      auto bag_size_ = std::max(indices.size(0), static_cast<int64_t>(1));
+      auto bag_size_ = indices.size(0);
       output /= bag_size_;
     } else {
+      // Avoid dividing by 0 for empty bags.
+      // Instead we want empty bags to return all 0s
       auto bag_size_ = at::max(bag_size, at::ones_like(bag_size))
                            .to(output.options())
                            .unsqueeze(1)

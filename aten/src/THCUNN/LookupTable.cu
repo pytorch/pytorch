@@ -3,7 +3,7 @@
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/unique.h>
 #include <TH/THHalf.h>
-#include <THC/THCNumerics.cuh>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCTensorMathReduce.cuh>
 

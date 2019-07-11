@@ -143,10 +143,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     }
   }
   ////////////////////////////////////////////////////////////
-  // We can use unsafe sparse tensor constructor because the indices do not
-  // need to be revalidated as we do not add or change indices, just remove
-  // duplicates.
-  SparseTensor dst = ::at::native::_sparse_coo_tensor_unsafe(newIndices, newValues, self.sizes())._coalesced_(true);
+
+  SparseTensor dst = ::at::native::sparse_coo_tensor(newIndices, newValues, self.sizes())._coalesced_(true);
 
   THCudaCheck(cudaGetLastError());
   return dst;

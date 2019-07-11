@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 
 
-from dataclasses import dataclass, field
-from typing import Optional, Dict
-
-
 def X(val):
     """
     Compact way to write a leaf node
@@ -12,28 +8,23 @@ def X(val):
     return val, []
 
 
-def XImportant(name):
-    """Compact way to write an important (run on PRs) leaf node"""
-    return (name, [("important", [X(True)])])
-
-
-@dataclass
-class Ver:
+class Ver(object):
     """
     Represents a product with a version number
     """
-    name: str
-    version: str = ""
+    def __init__(self, name, version=""):
+        self.name = name
+        self.version = version
 
     def __str__(self):
         return self.name + self.version
 
 
-@dataclass
-class ConfigNode:
-    parent: Optional['ConfigNode']
-    node_name: str
-    props: Dict[str, str] = field(default_factory=dict)
+class ConfigNode(object):
+    def __init__(self, parent, node_name):
+        self.parent = parent
+        self.node_name = node_name
+        self.props = {}
 
     def get_label(self):
         return self.node_name

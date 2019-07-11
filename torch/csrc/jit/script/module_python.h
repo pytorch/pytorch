@@ -9,12 +9,12 @@ namespace torch {
 namespace jit {
 namespace script {
 
-inline c10::optional<Module> as_module(const py::object& obj) {
+inline std::shared_ptr<Module> as_module(const py::object& obj) {
   if (py::isinstance(
           obj, py::module::import("torch.jit").attr("ScriptModule"))) {
-    return py::cast<Module>(obj.attr("_c"));
+    return py::cast<std::shared_ptr<Module>>(obj.attr("_c"));
   }
-  return c10::nullopt;
+  return nullptr;
 }
 
 } // namespace script

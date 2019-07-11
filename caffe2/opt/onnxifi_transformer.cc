@@ -910,12 +910,10 @@ void OnnxifiTransformer::transform(
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
 
-  pred_net->Swap(&net_opt);
-
-  addShapeToNet(*pred_net, shape_hints);
   if (opts_.debug) {
-    WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt");
+    dumpNet(*pred_net, shape_hints, "debug_full_opt_net.pb_txt");
   }
+  pred_net->Swap(&net_opt);
 }
 
 } // namespace caffe2

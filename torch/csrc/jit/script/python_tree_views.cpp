@@ -161,12 +161,7 @@ void initTreeViewBindings(PyObject* module) {
 
   py::class_<Assign, Stmt>(m, "Assign")
       .def(py::init([](const Expr& lhs, const Expr& rhs) {
-        return Assign::create(
-            lhs.range(), lhs, rhs, Maybe<Expr>::create(lhs.range()));
-      }))
-      .def(py::init([](const Expr& lhs, const Expr& rhs, Expr* type) {
-        return Assign::create(
-            lhs.range(), lhs, rhs, wrap_maybe(lhs.range(), type));
+        return Assign::create(lhs.range(), lhs, rhs);
       }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
       .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
@@ -301,9 +296,9 @@ void initTreeViewBindings(PyObject* module) {
             wrap_list(base.range(), std::move(subscript_exprs)));
       }));
   py::class_<SliceExpr, Expr>(m, "SliceExpr")
-      .def(py::init([](const SourceRange& range, Expr* lower, Expr* upper, Expr* step) {
+      .def(py::init([](const SourceRange& range, Expr* lower, Expr* upper) {
         return SliceExpr::create(
-            range, wrap_maybe(range, lower), wrap_maybe(range, upper), wrap_maybe(range, step));
+            range, wrap_maybe(range, lower), wrap_maybe(range, upper));
       }));
   py::class_<Starred, Expr>(m, "Starred")
       .def(py::init([](const SourceRange& range, Expr expr) {

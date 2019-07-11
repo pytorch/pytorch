@@ -16,11 +16,12 @@ const auto testSource = R"JIT(
 )JIT";
 
 void testClassParser() {
-  Parser p(std::make_shared<Source>(testSource));
+  auto cu = std::make_shared<Module>();
+  Parser p(testSource);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
 
-  const auto classDef = ClassDef(p.parseClassLike());
+  const auto classDef = ClassDef(p.parseClass());
   p.lexer().expect(TK_EOF);
 
   ASSERT_EQ(classDef.name().name(), "FooTest");

@@ -1,5 +1,3 @@
-#pragma once
-
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <torch/csrc/autograd/variable.h>
@@ -17,6 +15,8 @@
 
 #include <torch/csrc/utils/variadic.h>
 #include <torch/csrc/autograd/functions/utils.h>
+
+#include <ATen/core/VariableHooksInterface.h>
 
 #include <array>
 #include <cstddef>
@@ -39,6 +39,8 @@ using namespace at;
 using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
+
+extern std::vector<std::unique_ptr<Type>> type_to_variable_type;
 
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);

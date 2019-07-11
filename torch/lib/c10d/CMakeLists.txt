@@ -7,38 +7,47 @@ list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_CUDA_fix)
 
 if(USE_CUDA)
-  add_definitions(-DUSE_CUDA=1)
+  find_package(CUDA)
+  if(CUDA_FOUND)
+    set(C10D_USE_CUDA true)
+    message(STATUS "Building C10D with CUDA support")
+    add_definitions(-DUSE_CUDA=1)
+  else()
+    set(C10D_USE_CUDA false)
+    message(STATUS "CUDA not found, building C10D without CUDA support")
+  endif()
 elseif(USE_ROCM)
   add_definitions(-DUSE_ROCM=1)
   add_definitions(-D__HIP_PLATFORM_HCC__=1)
   add_definitions(-DHIP_VERSION=${HIP_VERSION_MAJOR})
+
+  set(C10D_USE_CUDA false)
+  set(C10D_USE_ROCM true)
 else()
-  message(STATUS "Building c10d without CUDA/ROCm support")
+  set(C10D_USE_CUDA false)
+  message(STATUS "Building C10D without CUDA support")
 endif()
 
-if(USE_GLOO)
-  option(USE_C10D_GLOO "USE C10D GLOO" ON)
-endif()
-
-if(USE_NCCL)
-  option(USE_C10D_NCCL "USE C10D NCCL" ON)
-endif()
-
-if(USE_MPI)
-  find_package(MPI)
-  if(MPI_FOUND)
-    message(STATUS "MPI_INCLUDE_PATH: ${MPI_INCLUDE_PATH}")
-    message(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
-    message(STATUS "MPIEXEC: ${MPIEXEC}")
-    option(USE_C10D_MPI "USE C10D MPI" ON)
-  else()
-    message(STATUS "Not able to find MPI, will compile c10d without MPI support")
-  endif()
+find_package(MPI)
+if(MPI_FOUND)
+  message(STATUS "MPI_INCLUDE_PATH: ${MPI_INCLUDE_PATH}")
+  message(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
+  message(STATUS "MPIEXEC: ${MPIEXEC}")
+else()
+  message(STATUS "Not able to find MPI, will compile c10d without MPI support")
 endif()
 
 function(copy_header file)
   configure_file(${file} ${CMAKE_BINARY_DIR}/include/c10d/${file} COPYONLY)
 endfunction()
+
+if(USE_NCCL)
+  option(USE_C10D_NCCL "USE C10D NCCL" ON)
+endif()
+
+if(MPI_FOUND)
+  option(USE_C10D_MPI "USE C10D MPI" ON)
+endif()
 
 set(C10D_SRCS
   FileStore.cpp
@@ -49,7 +58,20 @@ set(C10D_SRCS
   Utils.cpp
   )
 
-set(C10D_LIBS torch)
+if(C10D_USE_CUDA)
+  set(C10D_LIBS
+    caffe2_gpu
+    )
+elseif(C10D_USE_ROCM)
+  set(C10D_LIBS
+    caffe2_hip
+    )
+else()
+  set(C10D_LIBS
+    caffe2
+    )
+endif()
+
 
 if(USE_C10D_NCCL)
   list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
@@ -61,12 +83,8 @@ if(USE_C10D_MPI)
   list(APPEND C10D_LIBS ${MPI_LIBRARIES})
 endif()
 
-if(USE_C10D_GLOO)
+if (USE_GLOO)
   list(APPEND C10D_SRCS ProcessGroupGloo.cpp)
-  list(APPEND C10D_LIBS gloo)
-  if(USE_CUDA)
-    list(APPEND C10D_LIBS gloo_cuda)
-  endif()
 endif()
 
 add_library(c10d STATIC ${C10D_SRCS})
@@ -81,12 +99,14 @@ target_compile_options(c10d PUBLIC
   -Wno-unknown-pragmas
   )
 
-add_dependencies(c10d torch)
 
-if(USE_C10D_GLOO)
+add_dependencies(c10d caffe2)
+
+if (USE_GLOO)
   add_dependencies(c10d gloo)
-  if(USE_CUDA)
-    add_dependencies(c10d gloo_cuda)
+  target_link_libraries(c10d PUBLIC gloo)
+  if (USE_CUDA)
+    target_link_libraries(c10d PUBLIC gloo_cuda)
   endif()
 endif()
 
@@ -106,10 +126,6 @@ endif()
 
 if(USE_C10D_MPI)
   target_compile_definitions(c10d INTERFACE USE_C10D_MPI)
-endif()
-
-if(USE_C10D_GLOO)
-  target_compile_definitions(c10d INTERFACE USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)

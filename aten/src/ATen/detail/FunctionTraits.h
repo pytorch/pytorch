@@ -38,7 +38,6 @@ struct function_traits<ReturnType(Args...)> {
   // arity is the number of arguments.
   enum { arity = sizeof...(Args) };
 
-  typedef std::tuple<Args...> ArgsTuple;
   typedef ReturnType result_type;
 
   template <size_t i>

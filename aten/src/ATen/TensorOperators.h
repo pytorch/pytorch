@@ -2,6 +2,7 @@
 
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
+#include <ATen/Type.h>
 
 #include <string>
 #include <stdexcept>

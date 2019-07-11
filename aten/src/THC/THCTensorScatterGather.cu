@@ -194,6 +194,3 @@ __global__ void THCudaTensor_scatterFillKernel(
 
 #include <THC/generic/THCTensorScatterGather.cu>
 #include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensorScatterGather.cu>
-#include <THC/THCGenerateBoolType.h>

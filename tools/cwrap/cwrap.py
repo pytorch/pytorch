@@ -130,7 +130,7 @@ class cwrap(object):
                     del arg['arg']
                 new_args.append(arg)
             else:
-                raise AssertionError()
+                assert False
         return new_args
 
     def search_plugins(self, fnname, args, fallback):

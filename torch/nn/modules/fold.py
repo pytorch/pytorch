@@ -1,8 +1,10 @@
 # coding=utf-8
 from .module import Module
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
+@weak_module
 class Fold(Module):
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
@@ -99,6 +101,7 @@ class Fold(Module):
         self.padding = padding
         self.stride = stride
 
+    @weak_script_method
     def forward(self, input):
         return F.fold(input, self.output_size, self.kernel_size, self.dilation,
                       self.padding, self.stride)
@@ -110,6 +113,7 @@ class Fold(Module):
             )
 
 
+@weak_module
 class Unfold(Module):
     r"""Extracts sliding local blocks from a batched input tensor.
 
@@ -213,6 +217,7 @@ class Unfold(Module):
         self.padding = padding
         self.stride = stride
 
+    @weak_script_method
     def forward(self, input):
         return F.unfold(input, self.kernel_size, self.dilation,
                         self.padding, self.stride)

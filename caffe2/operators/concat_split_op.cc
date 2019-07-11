@@ -47,14 +47,7 @@ vector<TensorShape> TensorInferenceForSplit(
   auto split = helper.GetRepeatedArgument<int>("split");
   // Equally split the input into outputs
   const int output_size = def.output_size();
-  if (def.input_size() == caffe2::SplitOp<CPUContext>::kSplitOpInputSize) {
-    if (!split.empty()) {
-      LOG(WARNING) << "If you set split with an input blob, do not pass in "
-                      "split in the argument.";
-    }
-    // We cannot infer output shape until we see the value of split input
-    return ret_invalid_shape();
-  } else if (split.empty()) {
+  if (split.empty()) {
     if (!input_channels % output_size) {
       LOG(WARNING) << "Input channels (" << input_channels
                    << ") should be divisible by number of outputs ("
@@ -196,15 +189,13 @@ OpSchema::Cost CostInferenceForConcat(
       : GetDimFromOrderString(
             helper.GetSingleArgument<string>("order", "NCHW"));
   bool add_axis = helper.GetSingleArgument<int>("add_axis", 0) != 0;
-  int adj_size = in[0].dims_size() + (add_axis ? 1 : 0);
-  const int canonical_axis = canonical_axis_index_(axis, adj_size);
-  CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
+  const int canonical_axis = canonical_axis_index_(axis, in[0].dims_size());
   CAFFE_ENFORCE_GT(in.size(), 0);
   vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
   if (add_axis) {
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
-    for (size_t i = 1; i < in.size(); ++i) {
+    for (int i = 1; i < in.size(); ++i) {
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
   }
@@ -277,16 +268,15 @@ vector<TensorShape> TensorInferenceForConcat(
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
     for (int i = 1; i < in.size(); ++i) {
-      CAFFE_ENFORCE(
-          in[0].dims_size() == in[i].dims_size() ||
-              (canonical_axis == in[0].dims_size() - 1 &&
-               in[0].dims_size() == in[i].dims_size() + 1),
+      CAFFE_ENFORCE_EQ(
+          in[0].dims().size(),
+          in[i].dims().size(),
           "All inputs of Concat should have same dims except "
           "canonical_axis dim that is equal to ",
           canonical_axis,
           "Got different sizes for inputs 0 and ",
           i);
-      for (int j = 0; j < in[0].dims_size(); ++j) {
+      for (int j = 0; j < in[0].dims().size(); ++j) {
         if (j == canonical_axis) {
           continue;
         }

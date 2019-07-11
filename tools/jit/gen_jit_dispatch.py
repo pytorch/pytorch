@@ -41,8 +41,6 @@ TYPE_MAP = {
     'std::string': 'str',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
-    'MemoryFormat?': 'MemoryFormat?',
-    'QScheme': 'QScheme',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
     'Tensor?': 'Tensor?',
@@ -96,12 +94,10 @@ def jit_type_of(arg):
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
-    'IntArrayRef': '{}.toIntListRef()',
+    'IntArrayRef': '{}.toIntList()->elements()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
-    'MemoryFormat?': '{}.toOptional<c10::MemoryFormat>()',
-    'QScheme': '{}.toQScheme()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
@@ -109,17 +105,17 @@ FROM_IVALUE = {
     'Tensor': '{}.toTensor()',
     'Tensor?': 'toOptionalTensor({})',
     'Tensor?[]': 'toListOfOptionalTensor({})',
-    'TensorList': '{}.toTensorListRef()',
+    'TensorList': '{}.toTensorList()->elements()',
     'bool': '{}.toBool()',
     'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
-    'std::string': '{}.toStringRef()',
+    'std::string': '{}.toString()->string()',
     'Generator': 'nullptr',
-    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
-    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
-    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolList())',
+    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolListRef())',
+    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolListRef())',
+    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolListRef())',
 }
 
 
@@ -173,13 +169,7 @@ Operator(
 """)
 
 
-blacklisted_types = {
-    'Storage',
-    'DimnameList?',
-    'ConstQuantizerPtr',
-    'Dimname',
-}
-
+blacklisted_types = {'Storage'}
 default_only_types = {'Generator'}
 
 
@@ -496,7 +486,6 @@ def signature(decl, should_match_schema=True):
                 .replace('false', 'False') \
                 .replace('Reduction::Mean', 'Mean') \
                 .replace('MemoryFormat::Contiguous', 'contiguous_format') \
-                .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
                 .replace('}', ']')

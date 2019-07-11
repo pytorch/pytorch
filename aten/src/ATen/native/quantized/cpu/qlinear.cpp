@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <algorithm>
 
@@ -10,7 +12,7 @@ namespace native {
 namespace {
 
 template <bool ReluFused>
-class QLinearInt8 final : public c10::OperatorKernel {
+class QFCInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   at::Tensor operator()(
@@ -24,7 +26,7 @@ class QLinearInt8 final : public c10::OperatorKernel {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    TORCH_CHECK(
+    AT_ASSERTM(
         fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
     // TODO: contiguous is called for further jit optimizations.
@@ -41,10 +43,9 @@ class QLinearInt8 final : public c10::OperatorKernel {
     }
 
     // Pull out the PackBMatrix and col_offsets instance from the owning tensor.
-    auto& pack_ptr =
-        cpp_custom_type_hack::cast<PackedLinearWeight>(packed_weight);
+    auto& pack_ptr = cpp_custom_type_hack::cast<PackedFCWeight>(packed_weight);
     auto packB = pack_ptr.w.get();
-    // packB->printPackedMatrix("packedB inside fbgemm_linear (QLinearInt8): ");
+    // packB->printPackedMatrix("packedB inside fbgemm_linear (QFCInt8): ");
     auto& col_offsets = pack_ptr.col_offsets;
 
     int64_t N = static_cast<int64_t>(packB->numCols());
@@ -53,8 +54,8 @@ class QLinearInt8 final : public c10::OperatorKernel {
     AT_ASSERT(bias.size(0) == N);
     AT_ASSERT(bias.dim() == 1);
 
-    float input_scale_float = input.q_scale();
-    int32_t input_zero_point_int32 = input.q_zero_point();
+    float input_scale_float = input.q_scale().toFloat();
+    int32_t input_zero_point_int32 = input.q_zero_point().toInt();
 
     float weight_scale_float = pack_ptr.w_scale;
     int32_t weight_zero_point_int32 = pack_ptr.w_zp;
@@ -144,7 +145,7 @@ class QLinearInt8 final : public c10::OperatorKernel {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    TORCH_CHECK(
+    AT_ASSERTM(
         false, "This PyTorch installation was not built with FBGEMM operators");
   }
 #endif // USE_FBGEMM
@@ -154,10 +155,10 @@ static auto registry =
     c10::RegisterOperators()
         .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             c10::RegisterOperators::options()
-              .kernel<QLinearInt8<false>>(QuantizedCPUTensorId()))
+              .kernel<QFCInt8<false>>(QuantizedCPUTensorId()))
         .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             c10::RegisterOperators::options()
-              .kernel<QLinearInt8<true>>(QuantizedCPUTensorId()));
+              .kernel<QFCInt8<true>>(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at

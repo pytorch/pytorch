@@ -3,7 +3,6 @@
 #else
 
 #include <THCUNN/common.h>
-#include <ATen/CUDAGenerator.h>
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,
@@ -17,7 +16,8 @@ void THNN_(RReLU_updateOutput)(
            void *generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+  curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
+
   if (train)
   {
     input = THCTensor_(newContiguous)(state, input);
@@ -25,29 +25,18 @@ void THNN_(RReLU_updateOutput)(
     scalar_t *input_data = THCTensor_(data)(state, input);
     scalar_t *noise_data = THCTensor_(data)(state, noise);
     ptrdiff_t n = THCTensor_(nElement)(state, input);
-
-    // philox offset calculation for grid-stride loop utilizing curand4
-    const uint32_t curand4_engine_calls = 4;
-    dim3 grid = NUM_BLOCKS(n);
-    uint64_t counter_offset = ((n - 1) / (BLOCK_SIZE * grid.x) + 1) * curand4_engine_calls;
-    std::pair<uint64_t, uint64_t> rng_engine_inputs;
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(gen->mutex_);
-      rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
-    }
     if (inplace)
     {
-      rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, rng_engine_inputs, input_data, noise_data, input_data, lower, upper);
+      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+        n, gen_states, input_data, noise_data, input_data, lower, upper);
       THCTensor_(set)(state, output, input);
     }
     else
     {
       THCTensor_(resizeAs)(state, output, input);
       scalar_t *output_data = THCTensor_(data)(state, output);
-      rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, rng_engine_inputs, input_data, noise_data, output_data, lower, upper);
+      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+        n, gen_states, input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());
     THCTensor_(free)(state, input);

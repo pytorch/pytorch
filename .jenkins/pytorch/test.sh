@@ -35,30 +35,30 @@ fi
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
-  pip_install ninja
+  pip install -q ninja --user
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
   # TODO: move this to Docker
-  pip_install hypothesis
+  pip install -q hypothesis --user
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
   echo $PYTHON_VERSION
   # if [[ $PYTHON_VERSION == "2" ]]; then
-  #   pip_install https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
+  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
   # else
-  #   pip_install https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
+  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
   # fi
-  pip_install tb-nightly
+  pip install -q tb-nightly --user
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip_install mypy || true
+  pip install mypy --user || true
 fi
 
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip_install faulthandler
+  pip install -q faulthandler --user
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -138,7 +138,22 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install git+https://github.com/pytorch/vision.git@487c9bf4b7750e779fac31c35d930381baa60a4a
+  rm -rf ninja
+
+  echo "Installing torchvision at branch master"
+  rm -rf vision
+  # TODO: This git clone is bad, it means pushes to torchvision can break
+  # PyTorch CI
+  git clone https://github.com/pytorch/vision --quiet
+  pushd vision
+  # python setup.py install with a tqdm dependency is broken in the
+  # Travis Python nightly (but not in latest Python nightlies, so
+  # this should be a transient requirement...)
+  # See https://github.com/pytorch/pytorch/issues/7525
+  #time python setup.py install
+  pip install -q --user .
+  popd
+  rm -rf vision
 }
 
 test_libtorch() {
@@ -147,13 +162,13 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py setup
     CPP_BUILD="$PWD/../cpp-build"
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      "$CPP_BUILD"/caffe2/build/bin/test_jit
+      "$CPP_BUILD"/caffe2/bin/test_jit
     else
-      "$CPP_BUILD"/caffe2/build/bin/test_jit "[cpu]"
+      "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
     fi
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/build/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
     assert_git_not_dirty
   fi
 }

@@ -19,14 +19,14 @@ std::shared_ptr<Graph> Canonicalize(
     auto* r_input = r->addInput();
     r_input->copyMetadata(input);
     if (!keep_unique_names)
-      r_input->setDebugName("");
+      r_input->setUniqueName("");
     rn_env[input] = r_input;
   }
   for (auto* node : graph->nodes()) {
     auto* r_node = r->createClone(node, rn_fn);
     if (!keep_unique_names) {
       for (auto* output : r_node->outputs()) {
-        output->setDebugName("");
+        output->setUniqueName("");
       }
     }
     r->appendNode(r_node);

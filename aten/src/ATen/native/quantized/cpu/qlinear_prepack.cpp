@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -10,7 +11,7 @@
 namespace caffe2 {
 #ifdef USE_FBGEMM
 // Required for cpp_custom_type_hack to work
-CAFFE_KNOWN_TYPE(PackedLinearWeight);
+CAFFE_KNOWN_TYPE(PackedFCWeight);
 #endif // USE_FBGEMM
 } // namespace caffe2
 
@@ -18,7 +19,7 @@ namespace at {
 namespace native {
 namespace {
 
-class QLinearPackWeightInt8 final : public c10::OperatorKernel {
+class QFCPackWeightInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   // Calculate the column offsets.
@@ -41,14 +42,10 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
   }
 
   at::Tensor operator()(at::Tensor weight) {
-    TORCH_CHECK(
-        weight.dim() == 2,
-        "The weight tensor for quantized::fbgemm_linear_prepack should be 2-dimensional.");
-
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = weight.q_zero_point();
+    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt();
 
     // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
@@ -64,7 +61,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
         /*B_zero_point=*/weight_zero_point_int32,
         /*col_offsets=*/col_offsets.data());
 
-    auto ret_ptr = guts::make_unique<PackedLinearWeight>(PackedLinearWeight{
+    auto ret_ptr = guts::make_unique<PackedFCWeight>(PackedFCWeight{
         guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
             /*trans=*/fbgemm::matrix_op_t::Transpose,
             /*nRow=*/K,
@@ -74,7 +71,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
         col_offsets,
-        weight.q_scale(),
+        weight.q_scale().toFloat(),
         weight_zero_point_int32});
 
     // TODO: we will need to replace this with torchscript classes at a later
@@ -87,7 +84,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    TORCH_CHECK(
+    AT_ASSERTM(
         false, "This PyTorch installation was not built with FBGEMM operators");
   }
 #endif // USE_FBGEMM
@@ -96,7 +93,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
     c10::RegisterOperators::options()
-      .kernel<QLinearPackWeightInt8>(QuantizedCPUTensorId()));
+      .kernel<QFCPackWeightInt8>(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at

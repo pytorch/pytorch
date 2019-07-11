@@ -19,7 +19,4 @@ typedef void THNNState;
 #include <THNN/generic/THNN.h>
 #include <THGenerateFloatTypes.h>
 
-#include <THNN/generic/THNN.h>
-#include <THGenerateLongType.h>
-
 #endif

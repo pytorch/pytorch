@@ -154,15 +154,13 @@ def prepare_prediction_net(filename, db_type, device_option=None):
     return predict_net
 
 
-def _global_init_net(predictor_export_meta, db_type):
+def _global_init_net(predictor_export_meta):
     net = core.Net("global-init")
-    # manifold_db does not need DBReader
-    if db_type != "manifold_db":
-        net.Load(
-            [predictor_constants.PREDICTOR_DBREADER],
-            predictor_export_meta.parameters)
-        net.Proto().external_input.extend([predictor_constants.PREDICTOR_DBREADER])
-        net.Proto().external_output.extend(predictor_export_meta.parameters)
+    net.Load(
+        [predictor_constants.PREDICTOR_DBREADER],
+        predictor_export_meta.parameters)
+    net.Proto().external_input.extend([predictor_constants.PREDICTOR_DBREADER])
+    net.Proto().external_output.extend(predictor_export_meta.parameters)
 
     if predictor_export_meta.global_init_net:
         net.AppendNet(predictor_export_meta.global_init_net)
@@ -172,7 +170,7 @@ def _global_init_net(predictor_export_meta, db_type):
     return net.Proto()
 
 
-def get_meta_net_def(predictor_export_meta, ws=None, db_type=None):
+def get_meta_net_def(predictor_export_meta, ws=None):
     """
     """
 
@@ -183,7 +181,7 @@ def get_meta_net_def(predictor_export_meta, ws=None, db_type=None):
     utils.AddNet(meta_net_def, predictor_export_meta.predict_init_name(),
                  utils.create_predict_init_net(ws, predictor_export_meta))
     utils.AddNet(meta_net_def, predictor_export_meta.global_init_name(),
-                 _global_init_net(predictor_export_meta, db_type))
+                 _global_init_net(predictor_export_meta))
     utils.AddNet(meta_net_def, predictor_export_meta.predict_net_name(),
                  utils.create_predict_net(predictor_export_meta))
     utils.AddBlobs(meta_net_def, predictor_export_meta.parameters_name(),
@@ -202,9 +200,8 @@ def set_model_info(meta_net_def, project_str, model_class_str, version):
     meta_net_def.modelInfo.version = version
 
 
-def save_to_db(db_type, db_destination, predictor_export_meta, use_ideep=False,
-               *args, **kwargs):
-    meta_net_def = get_meta_net_def(predictor_export_meta, db_type=db_type)
+def save_to_db(db_type, db_destination, predictor_export_meta, use_ideep = False):
+    meta_net_def = get_meta_net_def(predictor_export_meta)
     device_type = caffe2_pb2.IDEEP if use_ideep else caffe2_pb2.CPU
     with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
         workspace.FeedBlob(
@@ -214,20 +211,17 @@ def save_to_db(db_type, db_destination, predictor_export_meta, use_ideep=False,
 
     blobs_to_save = [predictor_constants.META_NET_DEF] + \
         predictor_export_meta.parameters
-
     op = core.CreateOperator(
         "Save",
         blobs_to_save, [],
         device_option = core.DeviceOption(device_type),
         absolute_path=True,
-        db=db_destination, db_type=db_type,
-        **kwargs
-    )
+        db=db_destination, db_type=db_type)
 
     workspace.RunOperatorOnce(op)
 
 
-def load_from_db(filename, db_type, device_option=None, *args, **kwargs):
+def load_from_db(filename, db_type, device_option=None):
     # global_init_net in meta_net_def will load parameters from
     # predictor_constants.PREDICTOR_DBREADER
     create_db = core.CreateOperator(

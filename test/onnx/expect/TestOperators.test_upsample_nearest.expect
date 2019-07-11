@@ -51,20 +51,10 @@ graph {
   node {
     input: "5"
     output: "6"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 1
-      type: INT
-    }
-  }
-  node {
-    input: "6"
-    output: "7"
     op_type: "Floor"
   }
   node {
-    output: "8"
+    output: "7"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -77,13 +67,13 @@ graph {
   }
   node {
     input: "input"
-    output: "9"
+    output: "8"
     op_type: "Shape"
   }
   node {
-    input: "9"
     input: "8"
-    output: "10"
+    input: "7"
+    output: "9"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -92,7 +82,7 @@ graph {
     }
   }
   node {
-    output: "11"
+    output: "10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -104,50 +94,40 @@ graph {
     }
   }
   node {
+    input: "9"
     input: "10"
-    input: "11"
-    output: "12"
+    output: "11"
     op_type: "Mul"
   }
   node {
-    input: "12"
+    input: "11"
+    output: "12"
+    op_type: "Floor"
+  }
+  node {
+    input: "6"
     output: "13"
-    op_type: "Cast"
+    op_type: "Unsqueeze"
     attribute {
-      name: "to"
-      i: 1
-      type: INT
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "12"
+    output: "14"
+    op_type: "Unsqueeze"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
     }
   }
   node {
     input: "13"
-    output: "14"
-    op_type: "Floor"
-  }
-  node {
-    input: "7"
-    output: "15"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
     input: "14"
-    output: "16"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
-    input: "15"
-    input: "16"
-    output: "17"
+    output: "15"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -156,7 +136,7 @@ graph {
     }
   }
   node {
-    output: "18"
+    output: "16"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -169,8 +149,8 @@ graph {
     }
   }
   node {
-    input: "17"
-    output: "19"
+    input: "15"
+    output: "17"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -180,12 +160,12 @@ graph {
   }
   node {
     input: "input"
-    output: "20"
+    output: "18"
     op_type: "Shape"
   }
   node {
-    input: "20"
-    output: "21"
+    input: "18"
+    output: "19"
     op_type: "Slice"
     attribute {
       name: "axes"
@@ -204,8 +184,8 @@ graph {
     }
   }
   node {
-    input: "21"
-    output: "22"
+    input: "19"
+    output: "20"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -214,15 +194,15 @@ graph {
     }
   }
   node {
-    input: "19"
-    input: "22"
-    output: "23"
+    input: "17"
+    input: "20"
+    output: "21"
     op_type: "Div"
   }
   node {
-    input: "18"
-    input: "23"
-    output: "24"
+    input: "16"
+    input: "21"
+    output: "22"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -232,8 +212,8 @@ graph {
   }
   node {
     input: "input"
-    input: "24"
-    output: "25"
+    input: "22"
+    output: "23"
     op_type: "Upsample"
     attribute {
       name: "mode"
@@ -265,7 +245,7 @@ graph {
     }
   }
   output {
-    name: "25"
+    name: "23"
     type {
       tensor_type {
         elem_type: 1

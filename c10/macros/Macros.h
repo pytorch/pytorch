@@ -90,8 +90,6 @@
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
 
-#define C10_RESTRICT __restrict
-
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10

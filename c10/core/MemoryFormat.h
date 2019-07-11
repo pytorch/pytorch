@@ -2,7 +2,6 @@
 
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
-#include <c10/util/ArrayRef.h>
 
 #include <iostream>
 
@@ -12,6 +11,10 @@
 // interrogation functions (internally and externally).
 //
 // Possible options are:
+//  Any:
+//    An operator can return Tensor with any memory format. This describes the
+//    current behavior of operators.
+//
 //  Preserve:
 //    If any of the input tensors is in channels_last format, operator output
 //    should be in channels_last format
@@ -24,12 +27,14 @@
 
 
 namespace c10 {
-enum class MemoryFormat : int8_t { Contiguous, Preserve, ChannelsLast };
+enum class MemoryFormat : int8_t { Any, Preserve, Contiguous, ChannelsLast };
 
 inline std::ostream& operator<<(
     std::ostream& stream,
     at::MemoryFormat memory_format) {
   switch (memory_format) {
+    case MemoryFormat::Any:
+      return stream << "Any";
     case MemoryFormat::Preserve:
       return stream << "Preserve";
     case MemoryFormat::Contiguous:
@@ -39,16 +44,6 @@ inline std::ostream& operator<<(
     default:
       AT_ERROR("Unknown memory format");
   }
-}
-
-inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
-  AT_ASSERT(sizes.size() == 4);
-  std::vector<int64_t> strides(sizes.size());
-  strides[1] = 1;
-  strides[3] = sizes[1];
-  strides[2] = strides[3] * sizes[3];
-  strides[0] = strides[2] * sizes[2];
-  return strides;
 }
 
 } // namespace c10

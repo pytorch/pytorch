@@ -16,7 +16,7 @@ using namespace at::cuda;
 
 template <typename dst_t, typename src_t>
 void copy_kernel_impl(TensorIterator& iter) {
-  gpu_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
+  gpu_unary_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
     return static_cast<dst_t>(static_cast<native::inter_copy_type_t<dst_t>>(x));
   });
 }
@@ -88,7 +88,7 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
+static bool copy_requires_temporaries(TensorIterator& iter) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
@@ -104,7 +104,8 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
     return false;
   } else if (dst_device.is_cuda() && src_device.is_cuda()) {
     // Copies between GPUs can use the copy kernel if P2P is supported
-    return !p2p_enabled;
+    return !THCState_getPeerToPeerAccess(
+        globalContext().getTHCState(), src_device.index(), dst_device.index());
   } else {
     // The remaining cases require temporaries. For example, this includes
     // non-contiguous copies between CPU and GPU.
@@ -112,24 +113,10 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   }
 }
 
-static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
-  if (dst_device.is_cpu() || src_device.is_cpu()) {
-    return false;
-  }
-  return THCState_getPeerToPeerAccess(
-        globalContext().getTHCState(), src_device.index(), dst_device.index());
-}
-
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   AT_ASSERT(iter.ntensors() == 2);
 
-  Device dst_device = iter.device(0);
-  Device src_device = iter.device(1);
-
-  // Enable p2p access between devices. (No-op if it invovles the CPU)
-  bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
-
-  if (copy_requires_temporaries(iter, p2p_enabled)) {
+  if (copy_requires_temporaries(iter)) {
     // NB: this involves recursive calls to copy. Be careful that those copies
     // don't require temporaries or you will cause an infinite recursion!
     auto& dst = iter.tensor(0);
@@ -159,6 +146,9 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     }
     return;
   }
+
+  Device dst_device = iter.device(0);
+  Device src_device = iter.device(1);
 
   // Copy on GPU (or between GPUs)
   if (dst_device.is_cuda() && src_device.is_cuda()) {

@@ -218,8 +218,6 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   c10::raw::intrusive_ptr::decref(weight);
 }
 
-#if !defined(TH_REAL_IS_LONG)
-
 static void THNN_(SpatialConvolutionMM_updateGradInput_frame)(
           THTensor *gradInput,
           THTensor *gradOutput,
@@ -414,5 +412,5 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
     c10::raw::intrusive_ptr::decref(gradWeight);
   }
 }
-#endif
+
 #endif

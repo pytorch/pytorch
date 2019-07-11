@@ -18,7 +18,7 @@ def parse_arguments(args):
                 del arg['arg']
             new_args.append(arg)
         else:
-            raise AssertionError()
+            assert False
     return new_args
 
 

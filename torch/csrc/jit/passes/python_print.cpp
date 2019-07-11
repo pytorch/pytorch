@@ -167,104 +167,7 @@ const static std::unordered_set<std::string> reserved_names = {
 };
 
 struct PythonPrintPass {
-  using SourceRangeStack = std::vector<SourceRange>;
-  SourceRangeStack source_range_stack_ = {SourceRange("")};
-
-  struct WithSourceRange {
-    explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
-      TORCH_INTERNAL_ASSERT(stack);
-      if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
-        stack->push_back(std::move(gen_source.value()));
-      } else {
-        stack->push_back(std::move(n->sourceRange()));
-      }
-    }
-
-    ~WithSourceRange() {
-      stack->pop_back();
-    }
-
-    SourceRangeStack* stack;
-  };
-
-  class TaggedStringStream {
-   public:
-    TaggedStringStream(const SourceRangeStack* srs) : srs_(srs) {}
-    TaggedStringStream(TaggedStringStream&& rhs) = default;
-
-    TaggedStringStream& operator<<(const std::string& s) {
-      // This prevents having redundant entries at the same offset,
-      // which can happen for example in printValueList when begin
-      // and end are the empty string.
-      if (s.size() == 0) {
-        return *this;
-      }
-
-      if (!ranges_.size() || ranges_.back().range != srs_->back()) {
-        ranges_.emplace_back((size_t)oss_.tellp(), srs_->back());
-      }
-      oss_ << s;
-      return *this;
-    }
-
-    TaggedStringStream& operator<<(const TaggedStringStream& rhs) {
-      for (const auto& range : rhs.ranges_) {
-        if (!ranges_.size() || ranges_.back().range != range.range) {
-          ranges_.emplace_back((size_t)oss_.tellp() + range.bytes, range.range);
-        }
-      }
-      oss_ << rhs.oss_.str();
-      return *this;
-    }
-
-    // This overload is here to prevent people from shooting themselves in the
-    // foot. I would be highly surprised if someone actually wanted to write out
-    // the address of a TaggedStringStream in the pretty print.
-    TaggedStringStream& operator<<(
-        const std::shared_ptr<TaggedStringStream>& rhs) {
-      (*this) << *rhs;
-      return *this;
-    }
-
-    template <typename T>
-    TaggedStringStream& operator<<(const T& t) {
-      if (!ranges_.size() || ranges_.back().range != srs_->back()) {
-        ranges_.emplace_back((size_t)oss_.tellp(), srs_->back());
-      }
-      oss_ << t;
-      return *this;
-    }
-
-    std::string str() const {
-      return oss_.str();
-    }
-
-    const std::vector<TaggedRange>& ranges() const {
-      return ranges_;
-    }
-
-    // Write out this TaggedStringStream's text and source ranges to
-    // os and source_ranges_out, respectively. stream_pos gives
-    // the byte offset into the current stream, so we can accurately
-    // record source ranges as byte offsets.
-    void print(
-        std::ostream& os,
-        SourceRangeRecords* source_ranges_out,
-        int64_t stream_pos) {
-      os << str();
-      for (const auto& x : ranges()) {
-        source_ranges_out->push_back(x);
-        source_ranges_out->back().bytes += stream_pos;
-      }
-    }
-
-   private:
-    std::ostringstream oss_;
-    std::vector<TaggedRange> ranges_;
-    const SourceRangeStack* srs_;
-  };
-
-  TaggedStringStream body_;
+  std::ostringstream body_;
 
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
@@ -272,25 +175,23 @@ struct PythonPrintPass {
 
   // Any classes used are written to this table, to be later written out as
   // dependencies.
-  std::vector<c10::NamedTypePtr>& class_table_;
-  std::vector<c10::NamedTypePtr> class_deps_;
+  std::vector<ClassTypePtr>& class_table_;
+  std::vector<ClassTypePtr> class_deps_;
   // Helper to avoid duplicating class types
-  void addToClassTable(const c10::NamedTypePtr& type) {
+  void addToClassTable(const ClassTypePtr& classType) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
-    if (auto classType = type->cast<ClassType>()) {
-      if (classType->is_module()) {
-        return;
-      }
+    if (classType->qualname() == "__torch__.$Module") {
+      return;
     }
-    if (std::find(class_table_.cbegin(), class_table_.cend(), type) ==
+    if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
         class_table_.cend()) {
-      class_table_.push_back(type);
+      class_table_.push_back(classType);
     }
-    if (std::find(class_deps_.cbegin(), class_deps_.cend(), type) ==
+    if (std::find(class_deps_.cbegin(), class_deps_.cend(), classType) ==
         class_deps_.cend()) {
-      class_deps_.push_back(type);
+      class_deps_.push_back(classType);
     }
   }
 
@@ -350,7 +251,7 @@ struct PythonPrintPass {
     // if it has a name set, then it was written as a variable so preserve that
     // unless it is being fed directly to the end of the block.
     // in which case it is not as useful to give it a name just to return it
-    if (v->hasDebugName() && use.user->kind() != prim::Return)
+    if (v->hasUniqueName() && use.user->kind() != prim::Return)
       return false;
     // don't try to inline control blocks
     if (n->blocks().size() != 0)
@@ -452,7 +353,7 @@ struct PythonPrintPass {
     buildConstantList(b->return_node(), constants);
   }
 
-  // get a new name unique across calls to debugName() and
+  // get a new name unique across calls to uniqueName() and
   // anything we have used.
   std::unordered_map<std::string, size_t> next_id;
 
@@ -492,42 +393,20 @@ struct PythonPrintPass {
     return ss.str();
   }
   // if we have to assign 'v' a name, what should it be?
-  // use the debugName if it was set, otherwise generate a name.
+  // use the uniqueName if it was set, otherwise generate a name.
   std::string genUniqueNameFor(Value* v) {
     return genName(
-        v->hasDebugName() ? makeValidIdentifier(v->debugNameBase()) : "_");
+        v->hasUniqueName() ? makeValidIdentifier(v->uniqueNameBase()) : "_");
   }
 
   // map from Value to how it should be printed at each use
-  std::unordered_map<Value*, std::shared_ptr<TaggedStringStream>> expr_table_;
-  std::unordered_map<Value*, std::string> ident_refs_;
+  std::unordered_map<Value*, std::string> value_names_;
 
-  // NB: we MUST pass around the shared pointers to these streams by value.
-  // There is an interaction in splitLongInlines where the string value for
-  // both the RHS and the LHS of an expression are live at the same time,
-  // however the value for the RHS is overwritten in the table.
-  std::shared_ptr<TaggedStringStream> useOf(Value* v) const {
-    // Ident refs take precedent over expression refs, since presence in
-    // the ident ref table indicates we have already emitted a statement
-    // assigning the given value.
-    if (ident_refs_.count(v)) {
-      auto rv = std::make_shared<TaggedStringStream>(&source_range_stack_);
-      (*rv) << ident_refs_.at(v);
-      return rv;
-    }
-    if (expr_table_.count(v)) {
-      return expr_table_.at(v);
-    }
-    TORCH_INTERNAL_ASSERT(
-        false,
-        "Value was not present in either expressions"
-        " table or ident refs table");
+  std::string useOf(Value* v) const {
+    return value_names_.at(v);
   }
   void assignValue(Value* v, const std::string& s) {
-    ident_refs_[v] = s;
-  }
-  void assignValue(Value* v, std::shared_ptr<TaggedStringStream> s) {
-    expr_table_[v] = std::move(s);
+    value_names_[v] = s;
   }
   void assignValue(Value* v, Value* w) {
     assignValue(v, useOf(w));
@@ -540,7 +419,7 @@ struct PythonPrintPass {
 
   size_t level = 0;
   // indent to the current indent level
-  TaggedStringStream& indent() {
+  std::ostream& indent() {
     for (size_t i = 0; i < level; ++i) {
       body_ << "  ";
     }
@@ -568,7 +447,7 @@ struct PythonPrintPass {
   }
 
   void printValueList(
-      TaggedStringStream& stmt,
+      std::ostream& stmt,
       at::ArrayRef<Value*> list,
       const char* begin = "",
       const char* end = "") {
@@ -583,7 +462,7 @@ struct PythonPrintPass {
   }
 
   void printDict(
-      TaggedStringStream& stmt,
+      std::ostream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
       const char* begin = "{",
       const char* end = "}") {
@@ -714,8 +593,7 @@ struct PythonPrintPass {
   }
 
   bool isLongInline(Node* node) {
-    return output_inline_.count(node) &&
-        isLongLine(useOf(node->output())->str());
+    return output_inline_.count(node) && isLongLine(useOf(node->output()));
   }
 
   bool isNonConstantInline(Value* input) {
@@ -749,13 +627,12 @@ struct PythonPrintPass {
     // first place
     for (size_t i = 0; i < long_inline_slice; ++i) {
       if (isNonConstantInline(inputs[i])) {
-        printOutputDefinition(inputs[i]->node(), *useOf(inputs[i]));
+        printOutputDefinition(inputs[i]->node(), useOf(inputs[i]));
       }
     }
   }
 
-  template <typename T>
-  void printOutputDefinition(Node* node, const T& expr) {
+  void printOutputDefinition(Node* node, const std::string& str) {
     assignValuesToTheirUniqueNames(node->outputs());
     indent();
     // Print outputs
@@ -763,17 +640,13 @@ struct PythonPrintPass {
       printValueList(body_, node->outputs());
       body_ << " = ";
     }
-    body_ << expr << "\n";
+    body_ << str << "\n";
   }
 
   // Recursively check contained types for any class dependencies
   void registerClassDependencies(const TypePtr& type) {
     if (const auto classType = type->cast<ClassType>()) {
       addToClassTable(classType);
-    } else if (const auto tupleType = type->cast<TupleType>()) {
-      if (tupleType->qualified_name_obj()) {
-        addToClassTable(tupleType);
-      }
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -781,7 +654,6 @@ struct PythonPrintPass {
   }
 
   void printNode(Node* node, bool print_const) {
-    WithSourceRange guard(&source_range_stack_, node);
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -856,7 +728,7 @@ struct PythonPrintPass {
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
-        auto name = useOf(node->output())->str();
+        auto name = useOf(node->output());
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         indent();
         body_ << "def " << name << "(";
@@ -872,19 +744,19 @@ struct PythonPrintPass {
         printBody(graph->block());
       } break;
       default:
-        auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
-        printRHS(*ss, node);
+        std::stringstream ss;
+        printRHS(ss, node);
 
         // we prevent long constants from inlining here.
         // it is not safe to do the same thing for non-constants here
         // because of [reordering of inlines]
         if (output_inline_.count(node) == 0 ||
-            (node->kind() == prim::Constant && isLongLine(ss->str()))) {
-          printOutputDefinition(node, *ss);
+            (node->kind() == prim::Constant && isLongLine(ss.str()))) {
+          printOutputDefinition(node, ss.str());
         } else {
           // this node is safe to inline, so assign the output value
           // to that expression directly
-          assignValue(node->output(), ss);
+          assignValue(node->output(), ss.str());
         }
     }
   }
@@ -901,40 +773,39 @@ struct PythonPrintPass {
     }
   }
 
-  void printConstant(TaggedStringStream& stmt, const IValue& v) {
-    std::stringstream ss;
+  void printConstant(std::ostream& stmt, const IValue& v) {
     if (v.isTensor()) {
-      ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+      stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if (v.isString()) {
-      printQuotedString(ss, v.toStringRef());
+      printQuotedString(stmt, v.toStringRef());
     } else if (v.isDevice()) {
-      std::stringstream device_stream;
-      device_stream << v.toDevice();
-      ss << "torch.device(";
-      printQuotedString(ss, device_stream.str());
-      ss << ")";
+      std::stringstream ss;
+      ss << v.toDevice();
+      stmt << "torch.device(";
+      printQuotedString(stmt, ss.str());
+      stmt << ")";
     } else if (v.isTensorList()) {
-      ss << "[";
+      stmt << "[";
       const char* delim = "";
-      for (const at::Tensor& t : v.toTensorListRef()) {
-        ss << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
+      for (const auto& t : v.toTensorListRef()) {
+        stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
-      ss << "]";
+      stmt << "]";
     } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
+      printMaybeAnnotatedConstantList(
+          stmt, "bool", v.toBoolListRef().size(), v);
     } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
+      printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleListRef().size(), v);
+          stmt, "float", v.toDoubleListRef().size(), v);
     } else {
-      ss << v;
+      stmt << v;
     }
-    stmt << ss.str();
   }
 
-  void printNone(TaggedStringStream& stmt, const Node* node) {
+  void printNone(std::ostream& stmt, const Node* node) {
     if (node->output()->type()->isSubtypeOf(NoneType::get())) {
       stmt << "None";
       return;
@@ -965,7 +836,7 @@ struct PythonPrintPass {
   }
 
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
-  void printRHS(TaggedStringStream& stmt, Node* node) {
+  void printRHS(std::ostream& stmt, Node* node) {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
@@ -980,15 +851,10 @@ struct PythonPrintPass {
         if (value->ignore_on_export) {
           stmt << "ops.prim.IgnoredPythonOp";
         } else {
-          std::stringstream scalars_stream;
           stmt << "^" << value->name();
-          value->writeScalars(scalars_stream);
-          stmt << scalars_stream.str();
+          value->writeScalars(stmt);
         }
         printValueList(stmt, node->inputs(), "(", ")");
-      } break;
-      case prim::Uninitialized: {
-        stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
       } break;
       case prim::Constant: {
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
@@ -1002,28 +868,22 @@ struct PythonPrintPass {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;
-      case aten::Int: {
+      case prim::Int: {
         printValueList(stmt, node->inputs(), "int(", ")");
       } break;
-      case aten::Float: {
+      case prim::Float: {
         printValueList(stmt, node->inputs(), "float(", ")");
       } break;
-      case aten::Bool: {
+      case prim::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
-      case aten::str: {
+      case prim::str: {
         printValueList(stmt, node->inputs(), "str(", ")");
       } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
       case prim::TupleConstruct: {
-        if (auto qualname = node->output()
-                                ->type()
-                                ->expect<TupleType>()
-                                ->qualified_name_obj()) {
-          stmt << qualname->qualifiedName();
-        }
         printValueList(
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
@@ -1076,9 +936,8 @@ struct PythonPrintPass {
           stmt << useOf(obj) << "." << field;
         } else {
           stmt << "getattr(" << useOf(obj) << ", ";
-          std::stringstream field_stream;
-          printQuotedString(field_stream, field);
-          stmt << field_stream.str() << ")";
+          printQuotedString(stmt, field);
+          stmt << ")";
         }
       } break;
       default: {
@@ -1108,14 +967,14 @@ struct PythonPrintPass {
             // vararg functions like format can have extra arguments
             AT_ASSERT(schema.is_vararg());
           }
-          stmt << *v;
+          stmt << v;
         }
         stmt << ")";
       } break;
     }
   }
 
-  TaggedStringStream& printBlock(Block* root, bool block_has_other_statements) {
+  std::ostream& printBlock(Block* root, bool block_has_other_statements) {
     // pythons weird 'pass' syntax creates a bunch of places where we have to
     // check if this block would be empty. But not everything in a block is a
     // node. Sometimes if, loop, and return statements will follow this block
@@ -1133,7 +992,7 @@ struct PythonPrintPass {
 
   void printDefaultValue(
       const TypePtr& typ,
-      TaggedStringStream& stmt,
+      std::ostream& stmt,
       const IValue& value) {
     // xxx - many weak script modules store default values for broadcasting
     // lists that are not actually the same type as the argument. We can only
@@ -1169,12 +1028,10 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(const Function& func) {
+  void printFunction(const script::Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
-
-    WithSourceRange guard(&source_range_stack_, graph.param_node());
 
     indent();
     body_ << "def " << func.name() << "(";
@@ -1216,11 +1073,10 @@ struct PythonPrintPass {
 
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
-      std::vector<c10::NamedTypePtr>& class_table,
+      std::vector<ClassTypePtr>& class_table,
       bool enforce_importable,
       bool is_method)
-      : body_(&source_range_stack_),
-        tensor_table_(tensor_table),
+      : tensor_table_(tensor_table),
         class_table_(class_table),
         enforce_importable_(enforce_importable),
         is_method_(is_method) {}
@@ -1242,80 +1098,58 @@ struct PythonPrintPass {
     }
   }
 
-  void printClass(const c10::NamedTypePtr& type) {
-    if (auto classType = type->cast<ClassType>()) {
-      body_ << "class " << classType->basename() << ":\n";
-      {
-        const auto guard = WithIndented();
-        // TODO fields
-        for (auto& method : classType->methods()) {
-          printFunction(*method);
-        }
+  void printClass(const ClassTypePtr& classType) {
+    body_ << "class " << classType->basename() << ":\n";
+    {
+      const auto guard = WithIndented();
+      for (auto& method : classType->methods()) {
+        printFunction(*method);
       }
-    } else if (auto tupleType = type->cast<TupleType>()) {
-      TORCH_INTERNAL_ASSERT(tupleType->schema());
-      body_ << "class " << tupleType->basename();
-      body_ << "(NamedTuple):\n";
-      {
-        const auto guard = WithIndented();
-        for (const auto& attr : tupleType->schema()->arguments()) {
-          TORCH_INTERNAL_ASSERT(attr.type());
-          indent();
-          body_ << attr.name() << " : " << attr.type()->python_str() << "\n";
-        }
-      }
-    } else {
-      TORCH_INTERNAL_ASSERT(false);
     }
     // remove `classType` from the list of deps
     class_deps_.erase(
-        std::remove(class_deps_.begin(), class_deps_.end(), type),
+        std::remove(class_deps_.begin(), class_deps_.end(), classType),
         class_deps_.end());
   }
 
-  void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
-    out << getImports();
-    int64_t source_offset = out.tellp();
-    body_.print(out, &source_ranges_out, source_offset);
+  void print(std::ostream& out) {
+    out << getImports() << body_.str();
   }
 };
 
 void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const Function& func,
+    const script::Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printFunction(func);
-  pp.print(out, source_ranges_out);
+  pp.print(out);
 }
 
 void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printCompilationUnit(cu);
-  pp.print(out, source_ranges_out);
+  pp.print(out);
 }
 
 void PythonPrint(
     std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& classType,
+    const ClassTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);
-  pp.print(out, source_ranges_out);
+  pp.print(out);
 }
 
 bool printerHasSpecialCaseFor(Symbol sym) {
@@ -1328,7 +1162,6 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
       prim::Constant,
-      prim::Uninitialized,
       prim::fork,
       prim::ListConstruct,
       prim::DictConstruct,

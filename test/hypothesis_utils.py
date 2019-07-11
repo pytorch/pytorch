@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 import numpy as np
 import torch
 
-from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
 from hypothesis.searchstrategy import SearchStrategy
@@ -102,21 +101,11 @@ def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None):
 The resulting tensor is in float32 format.
 
 Args:
-    min_batch, max_batch: Range to generate `nbatch`
-    min_in_channels, max_in_channels: Range to generate `iChannels`
-    min_out_channels, max_out_channels: Range to generate `oChannels`
-    H_range, W_range: Ranges to generate height and width of matrix. Must be
-                      tuples of `(min, max)`
-    kH_range, kW_range: Ranges to generate kernel height and width. Must be
-                        tuples of `(min, max)`
-    max_groups: Maximum number of groups to generate
+    shapes: A list of shapes to generate.
     dtypes: A list of data types to generate. See note below.
+    float_min, float_max: Min and max FP value for the output.
 Generates:
-    (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
-        X: (`nbatch, iChannels, H, W`)
-        w: (`oChannels, iChannels // groups, kH, kW)
-        b: `(oChannels,)`
-        g: Number of groups the input is divided into
+    Xhy: Tensor of type `float32` and shape drawn from the `shapes`.
     (scale, zero_point): Drawn from valid ranges derived from the dtypes
     (qmin, qmax): Valid quantization ranges derived from the dtypes.
     (torch_type, np_type): Data types (torch and numpy) for conversion in test.
@@ -136,17 +125,13 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
                   min_out_channels=3, max_out_channels=7,
                   H_range=(6, 12), W_range=(6, 12),
                   kH_range=(3, 7), kW_range=(3, 7),
-                  max_groups=1, dtypes=None):
+                  groups=1, dtypes=None):
     float_min = -1e6
     float_max = 1e6
     # Resolve the minibatch, in_channels, out_channels, iH/iW, iK/iW
     _minibatch = draw(st.integers(min_batch, max_batch))
     _in_channels = draw(st.integers(min_in_channels, max_in_channels))
     _out_channels = draw(st.integers(min_out_channels, max_out_channels))
-    g = draw(st.integers(1, max_groups))
-    assume(_in_channels % g == 0)
-    assume(_out_channels % g == 0)
-
     _iH = draw(st.integers(H_range[0], H_range[1]))
     _iW = draw(st.integers(W_range[0], W_range[1]))
     _kH = draw(st.integers(kH_range[0], kH_range[1]))
@@ -158,7 +143,7 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
                          shape=(_minibatch, _in_channels, _iH, _iW)))
     w = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
-                         shape=(_out_channels // g, _in_channels // g,
+                         shape=(_out_channels, _in_channels // groups,
                                 _kH, _kW)))
     b = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
@@ -186,5 +171,4 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
     # Resolve scale
     scale = draw(st.floats(min_value=np.finfo(np.float32).resolution,
                            max_value=(np.finfo(np.float32).max)))
-    return ((X, w, b, g), (scale, zero_point), (qmin, qmax),
-            (torch_type, np_type))
+    return (X, w, b), (scale, zero_point), (qmin, qmax), (torch_type, np_type)

@@ -2,13 +2,11 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <cmath>
 #include <limits>
 
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
-#include <thrust/execution_policy.h>
 
 namespace at {
 namespace native {
@@ -58,9 +56,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
       LinspaceOp<scalar_t> linspace_method(scalar_start, step);
       thrust::device_ptr<scalar_t> data_(r.data<scalar_t>());
-      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-      auto policy = thrust::cuda::par.on(stream);
-      thrust::tabulate(policy, data_, data_ + steps, linspace_method);
+      thrust::tabulate(data_, data_ + steps, linspace_method);
     });
   }
 
@@ -91,9 +87,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
       LogspaceOp<scalar_t> logspace_method(scalar_start, step, scalar_base);
       thrust::device_ptr<scalar_t> data_(r.data<scalar_t>());
-      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-      auto policy = thrust::cuda::par.on(stream);
-      thrust::tabulate(policy, data_, data_ + steps, logspace_method);
+      thrust::tabulate(data_, data_ + steps, logspace_method);
     });
   }
 
@@ -123,10 +117,8 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     }
     Tensor r = result.is_contiguous() ? result : result.contiguous();
     LinspaceOp<scalar_t, accscalar_t> linspace_method(xstart, xstep);
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    auto policy = thrust::cuda::par.on(stream);
     thrust::device_ptr<scalar_t> data_ptr(r.data<scalar_t>());
-    thrust::tabulate(policy, data_ptr, data_ptr + size, linspace_method);
+    thrust::tabulate(data_ptr, data_ptr + size, linspace_method);
 
     if (!result.is_contiguous()) {
       result.copy_(r);
@@ -176,10 +168,8 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     }
     Tensor r = result.is_contiguous() ? result : result.contiguous();
     LinspaceOp<scalar_t, accscalar_t> linspace_method(xstart, xstep);
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    auto policy = thrust::cuda::par.on(stream);
     thrust::device_ptr<scalar_t> data_ptr(r.data<scalar_t>());
-    thrust::tabulate(policy, data_ptr, data_ptr + size, linspace_method);
+    thrust::tabulate(data_ptr, data_ptr + size, linspace_method);
 
     if (!result.is_contiguous()) {
       result.copy_(r);

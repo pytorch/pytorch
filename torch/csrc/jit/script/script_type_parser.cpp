@@ -182,7 +182,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
       return itr->second;
     }
     if (resolver_) {
-      if (auto typePtr = resolver_->resolveType(*name, expr.range())) {
+      if (auto typePtr = resolver_->resolveType(*name)) {
         return typePtr;
       }
     }
@@ -195,7 +195,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
 }
 
 TypePtr ScriptTypeParser::parseType(const std::string& str) {
-  Parser p(std::make_shared<Source>(str));
+  Parser p(str);
   return parseTypeFromExpr(p.parseExp());
 }
 } // namespace script

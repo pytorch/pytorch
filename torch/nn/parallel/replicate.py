@@ -23,9 +23,10 @@ def _is_jit_enabled():
 
 
 # Check if we can safely replicate the module.
-# there are two types of module:
+# there are three types of module:
 # 1. python modules
-# 2. ScriptModule
+# 2. weak python modules (nn.Module annotated by @weak_module)
+# 3. ScriptModule
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
@@ -122,17 +123,10 @@ def replicate(network, devices, detach=False):
                 # we have to initialize ScriptModule properly so that
                 # it works with pybind11
                 replica = _init_script_module()
-
-                attribute_names = set(entry[0] for entry in module._c._get_attributes())
-
-                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr - attribute_names
+                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr
                 for key in keys:
                     if not _is_script_method(module.__dict__[key]):
                         replica.__dict__[key] = module.__dict__[key]
-                for name, the_type, value in module._c._get_attributes():
-                    if name in module._buffers.keys():
-                        continue
-                    replica._c._register_attribute(name, the_type, value)
             else:
                 replica = module.__new__(type(module))
                 replica.__dict__ = module.__dict__.copy()

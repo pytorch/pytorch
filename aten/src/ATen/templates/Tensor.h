@@ -1,9 +1,9 @@
 #pragma once
 
+#include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
-#include <c10/core/QScheme.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
@@ -12,12 +12,8 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
-#ifdef BUILD_NAMEDTENSOR
-#include <ATen/NamedTensor.h>
-#endif
 
 namespace caffe2 {
 class Tensor;
@@ -36,12 +32,6 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
-
-struct Quantizer;
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
@@ -172,15 +162,10 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-#ifdef BUILD_NAMEDTENSOR
-  optional<DimnameList> names() const {
-    return impl::internal_get_names(unsafeGetTensorImpl());
-  }
-#endif
   int64_t ndimension() const {
     return dim();
   }
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
     return impl_->is_contiguous(memory_format);
   }
 
@@ -209,6 +194,9 @@ class CAFFE2_API Tensor {
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
         is_variable());
+  }
+  Type & dispatch_type() const {
+    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
@@ -259,15 +247,6 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
-
-#ifdef BUILD_NAMEDTENSOR
-  /// Returns if a `Tensor` has any dimension names
-  bool is_named() const;
-
-  /// Returns a `Tensor`'s dimension names data structure
-  const NamedTensorMeta* get_named_tensor_meta() const;
-  NamedTensorMeta* get_named_tensor_meta();
-#endif
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -345,6 +324,14 @@ class CAFFE2_API Tensor {
     return impl_->grad();
   }
 
+  void set_data(Tensor new_data);
+
+  /// Computes the gradient of current tensor w.r.t. graph leaves.
+  void backward(
+      c10::optional<Tensor> gradient = c10::nullopt,
+      bool keep_graph = false,
+      bool create_graph = false);
+
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
@@ -369,11 +356,41 @@ class CAFFE2_API Tensor {
     return func(*this, std::forward<Args>(params)...);
   }
 
+  friend struct WeakTensor;
+
 protected:
   friend class ::caffe2::Tensor;
 
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
+};
+
+struct CAFFE2_API WeakTensor {
+  WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
+
+  // XXX: this can return undefined tensors
+  // Ideally it would be c10::optional<Tensor>, but MSVC is too cool for that
+  Tensor lock() const {
+    return Tensor(weak_impl_.lock());
+  }
+
+  bool is_same(const WeakTensor& other) const noexcept {
+    return weak_impl_ == other.weak_impl_;
+  }
+
+  size_t use_count() const noexcept {
+    return weak_impl_.use_count();
+  }
+  size_t weak_use_count() const noexcept {
+    return weak_impl_.weak_use_count();
+  }
+
+  TensorImpl* unsafeGetTensorImpl() const {
+    return weak_impl_._unsafe_get_target();
+  }
+
+private:
+  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
 
 namespace detail {

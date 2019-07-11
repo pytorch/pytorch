@@ -10,6 +10,8 @@
 #include <string>
 #include <stdexcept>
 
+#include <ATen/CPUGenerator.h>
+#include <ATen/RegisterCPU.h>
 #include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
@@ -17,9 +19,28 @@
 
 namespace at {
 
+static inline void errorHandler(const char * msg, void * data) {
+  throw std::runtime_error(msg);
+}
+static inline void argErrorHandler(int arg, const char * msg, void * data) {
+  std::stringstream new_error;
+  new_error << "invalid argument " << arg << ": " << msg;
+  throw std::runtime_error(new_error.str());
+}
+
 Context::Context()
-: thc_state(nullptr, [](THCState* p){ /* no-op */ } )
-, thh_state(nullptr, [](THHState* p){ /* no-op */ } ) {}
+: next_id(static_cast<size_t>(TypeID::NumOptions))
+, thc_state(nullptr, [](THCState* p){ /* no-op */ } )
+, thh_state(nullptr, [](THHState* p){ /* no-op */ } )
+{
+
+  THSetDefaultErrorHandler(errorHandler,nullptr);
+  THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
+
+  generator_registry[static_cast<int>(DeviceType::CPU)]
+    .reset(new CPUGenerator(this));
+  register_cpu_types(this);
+}
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
@@ -91,6 +112,38 @@ bool Context::setFlushDenormal(bool on) {
   return at::cpu::set_flush_denormal(on);
 }
 
+// NOTE: We also check `at::NonVariableTypeMode`, and if it's enabled we always
+// return non-Variable type in this function.
+// See NOTE [ Treating Variables as non-Variables in type dispatch ]
+TypeExtendedInterface& getType(TensorOptions options) {
+  return globalContext().getType(
+            options.backend(), typeMetaToScalarType(options.dtype()), options.is_variable() && !at::NonVariableTypeMode::is_enabled());
+}
+
+// NOTE: We also check `at::NonVariableTypeMode`, and if it's enabled we always
+// return non-Variable type in this function.
+// See NOTE [ Treating Variables as non-Variables in type dispatch ]
+TypeExtendedInterface& getType(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getType(
+            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable());
+}
+
+TypeExtendedInterface& getType(const Tensor& t) {
+  return getType(t.unsafeGetTensorImpl());
+}
+
+LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options) {
+  return globalContext().getLegacyTHDispatcher(
+            options.backend(), typeMetaToScalarType(options.dtype()));
+}
+
+LegacyTHDispatcher& getLegacyTHDispatcher(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getLegacyTHDispatcher(
+            backend, typeMetaToScalarType(impl->dtype()));
+}
+
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
@@ -105,6 +158,9 @@ struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
   }
   void initHIP() const override {
     globalContext().lazyInitHIP();
+  }
+  void initComplex() const override {
+    globalContext().lazyInitComplex();
   }
 };
 REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);

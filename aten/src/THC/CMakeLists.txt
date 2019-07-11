@@ -31,6 +31,7 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cpp
 
   ${CMAKE_CURRENT_SOURCE_DIR}/THCReduceApplyUtils.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCBlas.cu
@@ -107,6 +108,7 @@ INSTALL(FILES
           THCTensorMode.cuh
           THCTensorTopK.cuh
           # See Note [TH abstraction violation]
+          THCGenerator.hpp
           THCTensor.hpp
           THCStorage.hpp
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC")

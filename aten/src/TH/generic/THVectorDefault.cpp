@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "TH/generic/THVectorDefault.cpp"
 #else
 
-#include <ATen/Context.h>
+#include <TH/THRandom.h>
 
 void THVector_(fill_DEFAULT)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   ptrdiff_t i = 0;
@@ -152,22 +152,17 @@ static void THVector_(interleaved_normal_fill_16)(scalar_t *data,
 
 void THVector_(normal_fill_DEFAULT)(scalar_t *data,
                                     int64_t size,
-                                    at::Generator *generator,
+                                    THGenerator *generator,
                                     const scalar_t mean,
                                     const scalar_t stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for normal fill");
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-  
+
   for (int64_t i = 0; i < size; ++i) {
 #ifdef TH_REAL_IS_FLOAT
-    at::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(gen);
+    data[i] = THRandom_uniformFloat(generator, 0, 1);
 #else
-    at::uniform_real_distribution<double> uniform(0, 1);
-    data[i] = uniform(gen);
+    data[i] = THRandom_uniform(generator, 0, 1);
 #endif
   }
 
@@ -180,11 +175,9 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
     data = data + size - 16;
     for (int64_t i = 0; i < 16; ++i) {
 #ifdef TH_REAL_IS_FLOAT
-    at::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(gen);
+      data[i] = THRandom_uniformFloat(generator, 0, 1);
 #else
-    at::uniform_real_distribution<double> uniform(0, 1);
-    data[i] = uniform(gen);
+      data[i] = THRandom_uniform(generator, 0, 1);
 #endif
     }
     THVector_(interleaved_normal_fill_16)(data, mean, stddev);

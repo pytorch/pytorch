@@ -9,7 +9,6 @@ graph {
     attribute {
       name: "axes"
       ints: 2
-      ints: 3
       type: INTS
     }
     attribute {
@@ -57,7 +56,7 @@ graph {
             dim_value: 1
           }
           dim {
-            dim_value: 1
+            dim_value: 4
           }
         }
       }

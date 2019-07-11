@@ -182,29 +182,29 @@ void Pickler::addIValue(const IValue& ivalue) {
   } else if (ivalue.isIntList()) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
-          for (const int64_t item : ivalue.toIntListRef()) {
+          for (const auto& item : ivalue.toIntListRef()) {
             addIValue(item);
           }
         });
   } else if (ivalue.isTensorList()) {
     pushSpecializedList(
         ivalue, PicklerClass::TENSORLIST, [=](const IValue& ivalue) {
-          for (const at::Tensor& item : ivalue.toTensorListRef()) {
+          for (const auto& item : ivalue.toTensorListRef()) {
             addIValue(item);
           }
         });
   } else if (ivalue.isDoubleList()) {
     pushSpecializedList(
         ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
-          for (double item : ivalue.toDoubleListRef()) {
+          for (const auto& item : ivalue.toDoubleListRef()) {
             addIValue(item);
           }
         });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(
         ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
-          for (bool item : ivalue.toBoolList()) {
-            addIValue(item);
+          for (const auto& item : ivalue.toBoolListRef()) {
+            addIValue(bool(item));
           }
         });
   } else {
@@ -217,10 +217,22 @@ void Pickler::addIValue(const IValue& ivalue) {
 /// IValues so the pointers are guaranteed to be valid for the Pickler's
 /// lifetime.
 const void* Pickler::getPointer(const IValue& ivalue) {
-  if (ivalue.isGenericDict() || ivalue.isGenericList() || ivalue.isTuple()
-    || ivalue.isString() || ivalue.isIntList() || ivalue.isTensorList()
-    || ivalue.isDoubleList() || ivalue.isBoolList()) {
-      return ivalue.internalToPointer();
+  if (ivalue.isGenericDict()) {
+    return ivalue.toGenericDict().get();
+  } else if (ivalue.isGenericList()) {
+    return ivalue.toGenericList().get();
+  } else if (ivalue.isTuple()) {
+    return ivalue.toTuple().get();
+  } else if (ivalue.isString()) {
+    return ivalue.toString().get();
+  } else if (ivalue.isIntList()) {
+    return ivalue.toIntList().get();
+  } else if (ivalue.isTensorList()) {
+    return ivalue.toTensorList().get();
+  } else if (ivalue.isDoubleList()) {
+    return ivalue.toDoubleList().get();
+  } else if (ivalue.isBoolList()) {
+    return ivalue.toBoolList().get();
   }
 
   return nullptr;
@@ -424,7 +436,7 @@ void Pickler::pushDict(const IValue& ivalue) {
   push<OpCode>(OpCode::MARK);
 
   // Sort the dict for deterministic keys
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
+  auto dict_items = ivalue.toGenericDict()->iterationOrder();
   for (const auto& pair : dict_items) {
     addIValue(pair.first);
     addIValue(pair.second);
@@ -471,7 +483,7 @@ void Pickler::pushGenericList(const IValue& ivalue) {
 
   push<OpCode>(OpCode::MARK);
 
-  for (const IValue& item : list) {
+  for (const auto& item : list) {
     addIValue(item);
   }
 
@@ -481,9 +493,9 @@ void Pickler::pushGenericList(const IValue& ivalue) {
 void Pickler::pushTuple(const IValue& ivalue) {
   // TODO: Small tuple unrolling (e.g. TUPLE3)
   push<OpCode>(OpCode::MARK);
-  auto tuple = ivalue.toTuple();
+  auto tuple = ivalue.toTuple()->elements();
 
-  for (const IValue& item : tuple->elements()) {
+  for (const auto& item : tuple) {
     addIValue(item);
   }
 
@@ -501,7 +513,7 @@ std::vector<IValue> Unpickler::parse_ivalue_list() {
   auto value = stack_[0].ivalue();
   if (value.isGenericList()) {
     // TODO [unpickler refactor]
-    return value.toGenericListRef().vec();
+    return value.toGenericListRef();
   }
   return value.toTuple()->elements();
 }
@@ -588,7 +600,7 @@ OpCode Unpickler::readInstruction() {
     } break;
     case OpCode::BINPUT: {
       size_t memo_id = read<uint8_t>();
-      if (memo_table_.capacity() <= memo_id) {
+      if (memo_table_.size() <= memo_id) {
         memo_table_.reserve(1 + 2 * memo_id);
       }
       memo_table_.push_back(stack_.back());
@@ -600,7 +612,7 @@ OpCode Unpickler::readInstruction() {
           "Found a LONG_BINPUT opcode, but size_t on this system is "
           "not big enough to decode it");
       size_t memo_id = read<uint32_t>();
-      if (memo_table_.capacity() <= memo_id) {
+      if (memo_table_.size() <= memo_id) {
         memo_table_.reserve(1 + 2 * memo_id);
       }
       memo_table_.push_back(stack_.back());
@@ -655,7 +667,7 @@ OpCode Unpickler::readInstruction() {
       stack_.emplace_back(IValue(tuple));
     } break;
     case OpCode::EMPTY_DICT:
-      stack_.emplace_back(c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()));
+      stack_.emplace_back(c10::impl::make_generic_dict());
       break;
     case OpCode::APPENDS: {
       readList();
@@ -665,7 +677,7 @@ OpCode Unpickler::readInstruction() {
       marks_.pop_back();
       auto dict = stack_.at(start - 1).ivalue().toGenericDict();
       for (size_t i = start; i < stack_.size(); i += 2) {
-        dict.insert_or_assign(stack_[i].ivalue(), stack_[i + 1].ivalue());
+        dict->elements().insert_or_assign(stack_[i].ivalue(), stack_[i + 1].ivalue());
       }
       stack_.erase(stack_.begin() + start, stack_.end());
     } break;
@@ -727,16 +739,16 @@ OpCode Unpickler::readInstruction() {
               tensor_table_->at(data->elements().at(0).toInt()));
           break;
         case PicklerClass::INTLIST:
-          stack_.emplace_back(data->elements().at(0).toIntList());
+          stack_.emplace_back(data->elements().at(0).toIntListRef());
           break;
         case PicklerClass::TENSORLIST:
-          stack_.emplace_back(data->elements().at(0).toTensorList());
+          stack_.emplace_back(data->elements().at(0).toTensorListRef());
           break;
         case PicklerClass::DOUBLELIST:
-          stack_.emplace_back(data->elements().at(0).toDoubleList());
+          stack_.emplace_back(data->elements().at(0).toDoubleListRef());
           break;
         case PicklerClass::BOOLLIST:
-          stack_.emplace_back(data->elements().at(0).toBoolList());
+          stack_.emplace_back(data->elements().at(0).toBoolListRef());
           break;
         default:
           AT_ERROR("Unknown pickler class id");
@@ -761,31 +773,31 @@ void Unpickler::readList() {
   auto num_elements = stack_.size() - start;
   auto elements = at::ArrayRef<StackItem>(stack_).slice(start);
   if (list_ivalue.isIntList()) {
-    auto list = std::move(list_ivalue).toIntList();
+    auto& list = list_ivalue.toIntList()->elements();
     list.reserve(num_elements);
     for (const auto& elem : elements) {
       list.emplace_back(elem.ivalue().toInt());
     }
   } else if (list_ivalue.isTensorList()) {
-    auto list = std::move(list_ivalue).toTensorList();
+    auto& list = list_ivalue.toTensorList()->elements();
     list.reserve(num_elements);
     for (const auto& elem : elements) {
       list.emplace_back(elem.ivalue().toTensor());
     }
   } else if (list_ivalue.isDoubleList()) {
-    auto list = std::move(list_ivalue).toDoubleList();
+    auto& list = list_ivalue.toDoubleList()->elements();
     list.reserve(num_elements);
     for (const auto& elem : elements) {
       list.emplace_back(elem.ivalue().toDouble());
     }
   } else if (list_ivalue.isBoolList()) {
-    auto list = std::move(list_ivalue).toBoolList();
+    auto& list = list_ivalue.toBoolList()->elements();
     list.reserve(num_elements);
     for (const auto& elem : elements) {
       list.push_back(elem.ivalue().toBool());
     }
   } else if (list_ivalue.isGenericList()) {
-    auto list = std::move(list_ivalue).toGenericList();
+    auto& list = list_ivalue.toGenericList()->elements();
     list.reserve(num_elements);
     for (const auto& elem : elements) {
       list.emplace_back(elem.ivalue());

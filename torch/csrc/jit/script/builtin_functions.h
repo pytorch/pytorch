@@ -8,6 +8,7 @@ namespace jit {
 namespace script {
 
 TORCH_API const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name);
+
 }
 } // namespace jit
 } // namespace torch

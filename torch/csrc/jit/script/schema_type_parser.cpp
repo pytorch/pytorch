@@ -37,7 +37,6 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"QScheme", IntType::get()},
       {"Device", DeviceObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},

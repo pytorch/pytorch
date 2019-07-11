@@ -262,7 +262,6 @@ also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
 
-.. _cuda-memory-pinning:
 
 Use pinned memory buffers
 ^^^^^^^^^^^^^^^^^^^^^^^^^

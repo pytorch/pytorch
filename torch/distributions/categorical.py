@@ -35,7 +35,7 @@ class Categorical(Distribution):
 
     Args:
         probs (Tensor): event probabilities
-        logits (Tensor): event log-odds
+        logits (Tensor): event log probabilities
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real}

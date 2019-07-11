@@ -3,6 +3,7 @@ import warnings
 from .module import Module
 from .. import functional as F
 from .. import _reduction as _Reduction
+from ..._jit_internal import weak_module, weak_script_method
 
 
 class _Loss(Module):
@@ -20,6 +21,7 @@ class _WeightedLoss(_Loss):
         self.register_buffer('weight', weight)
 
 
+@weak_module
 class L1Loss(_Loss):
     r"""Creates a criterion that measures the mean absolute error (MAE) between each element in
     the input :math:`x` and target :math:`y`.
@@ -84,10 +86,12 @@ class L1Loss(_Loss):
     def __init__(self, size_average=None, reduce=None, reduction='mean'):
         super(L1Loss, self).__init__(size_average, reduce, reduction)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.l1_loss(input, target, reduction=self.reduction)
 
 
+@weak_module
 class NLLLoss(_WeightedLoss):
     r"""The negative log likelihood loss. It is useful to train a classification
     problem with `C` classes.
@@ -200,10 +204,12 @@ class NLLLoss(_WeightedLoss):
         super(NLLLoss, self).__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
 
+    @weak_script_method
     def forward(self, input, target):
         return F.nll_loss(input, target, weight=self.weight, ignore_index=self.ignore_index, reduction=self.reduction)
 
 
+@weak_module
 class NLLLoss2d(NLLLoss):
     def __init__(self, weight=None, size_average=None, ignore_index=-100,
                  reduce=None, reduction='mean'):
@@ -213,6 +219,7 @@ class NLLLoss2d(NLLLoss):
         super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce, reduction)
 
 
+@weak_module
 class PoissonNLLLoss(_Loss):
     r"""Negative log likelihood loss with Poisson distribution of target.
 
@@ -279,11 +286,13 @@ class PoissonNLLLoss(_Loss):
         self.full = full
         self.eps = eps
 
+    @weak_script_method
     def forward(self, log_input, target):
         return F.poisson_nll_loss(log_input, target, log_input=self.log_input, full=self.full,
                                   eps=self.eps, reduction=self.reduction)
 
 
+@weak_module
 class KLDivLoss(_Loss):
     r"""The `Kullback-Leibler divergence`_ Loss
 
@@ -361,10 +370,12 @@ class KLDivLoss(_Loss):
     def __init__(self, size_average=None, reduce=None, reduction='mean'):
         super(KLDivLoss, self).__init__(size_average, reduce, reduction)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.kl_div(input, target, reduction=self.reduction)
 
 
+@weak_module
 class MSELoss(_Loss):
     r"""Creates a criterion that measures the mean squared error (squared L2 norm) between
     each element in the input :math:`x` and target :math:`y`.
@@ -427,10 +438,12 @@ class MSELoss(_Loss):
     def __init__(self, size_average=None, reduce=None, reduction='mean'):
         super(MSELoss, self).__init__(size_average, reduce, reduction)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.mse_loss(input, target, reduction=self.reduction)
 
 
+@weak_module
 class BCELoss(_WeightedLoss):
     r"""Creates a criterion that measures the Binary Cross Entropy
     between the target and the output:
@@ -494,10 +507,12 @@ class BCELoss(_WeightedLoss):
     def __init__(self, weight=None, size_average=None, reduce=None, reduction='mean'):
         super(BCELoss, self).__init__(weight, size_average, reduce, reduction)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.binary_cross_entropy(input, target, weight=self.weight, reduction=self.reduction)
 
 
+@weak_module
 class BCEWithLogitsLoss(_Loss):
     r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single
     class. This version is more numerically stable than using a plain `Sigmoid`
@@ -594,6 +609,7 @@ class BCEWithLogitsLoss(_Loss):
         self.register_buffer('weight', weight)
         self.register_buffer('pos_weight', pos_weight)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.binary_cross_entropy_with_logits(input, target,
                                                   self.weight,
@@ -601,6 +617,7 @@ class BCEWithLogitsLoss(_Loss):
                                                   reduction=self.reduction)
 
 
+@weak_module
 class HingeEmbeddingLoss(_Loss):
     r"""Measures the loss given an input tensor :math:`x` and a labels tensor :math:`y`
     (containing 1 or -1).
@@ -656,10 +673,12 @@ class HingeEmbeddingLoss(_Loss):
         super(HingeEmbeddingLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
 
+    @weak_script_method
     def forward(self, input, target):
         return F.hinge_embedding_loss(input, target, margin=self.margin, reduction=self.reduction)
 
 
+@weak_module
 class MultiLabelMarginLoss(_Loss):
     r"""Creates a criterion that optimizes a multi-class multi-classification
     hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
@@ -720,10 +739,12 @@ class MultiLabelMarginLoss(_Loss):
     def __init__(self, size_average=None, reduce=None, reduction='mean'):
         super(MultiLabelMarginLoss, self).__init__(size_average, reduce, reduction)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.multilabel_margin_loss(input, target, reduction=self.reduction)
 
 
+@weak_module
 class SmoothL1Loss(_Loss):
     r"""Creates a criterion that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
@@ -778,10 +799,12 @@ class SmoothL1Loss(_Loss):
     def __init__(self, size_average=None, reduce=None, reduction='mean'):
         super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.smooth_l1_loss(input, target, reduction=self.reduction)
 
 
+@weak_module
 class SoftMarginLoss(_Loss):
     r"""Creates a criterion that optimizes a two-class classification
     logistic loss between input tensor :math:`x` and target tensor :math:`y`
@@ -819,10 +842,12 @@ class SoftMarginLoss(_Loss):
     def __init__(self, size_average=None, reduce=None, reduction='mean'):
         super(SoftMarginLoss, self).__init__(size_average, reduce, reduction)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.soft_margin_loss(input, target, reduction=self.reduction)
 
 
+@weak_module
 class CrossEntropyLoss(_WeightedLoss):
     r"""This criterion combines :func:`nn.LogSoftmax` and :func:`nn.NLLLoss` in one single class.
 
@@ -911,11 +936,13 @@ class CrossEntropyLoss(_WeightedLoss):
         super(CrossEntropyLoss, self).__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
 
+    @weak_script_method
     def forward(self, input, target):
         return F.cross_entropy(input, target, weight=self.weight,
                                ignore_index=self.ignore_index, reduction=self.reduction)
 
 
+@weak_module
 class MultiLabelSoftMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-label one-versus-all
     loss based on max-entropy, between input :math:`x` and target :math:`y` of size
@@ -959,10 +986,12 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     def __init__(self, weight=None, size_average=None, reduce=None, reduction='mean'):
         super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce, reduction)
 
+    @weak_script_method
     def forward(self, input, target):
         return F.multilabel_soft_margin_loss(input, target, weight=self.weight, reduction=self.reduction)
 
 
+@weak_module
 class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label :math:`y` with values 1 or -1.
@@ -1005,10 +1034,12 @@ class CosineEmbeddingLoss(_Loss):
         super(CosineEmbeddingLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
 
+    @weak_script_method
     def forward(self, input1, input2, target):
         return F.cosine_embedding_loss(input1, input2, target, margin=self.margin, reduction=self.reduction)
 
 
+@weak_module
 class MarginRankingLoss(_Loss):
     r"""Creates a criterion that measures the loss given
     inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
@@ -1051,10 +1082,12 @@ class MarginRankingLoss(_Loss):
         super(MarginRankingLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
 
+    @weak_script_method
     def forward(self, input1, input2, target):
         return F.margin_ranking_loss(input1, input2, target, margin=self.margin, reduction=self.reduction)
 
 
+@weak_module
 class MultiMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-class classification hinge
     loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`) and
@@ -1112,11 +1145,13 @@ class MultiMarginLoss(_WeightedLoss):
         self.p = p
         self.margin = margin
 
+    @weak_script_method
     def forward(self, input, target):
         return F.multi_margin_loss(input, target, p=self.p, margin=self.margin,
                                    weight=self.weight, reduction=self.reduction)
 
 
+@weak_module
 class TripletMarginLoss(_Loss):
     r"""Creates a criterion that measures the triplet loss given an input
     tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater than :math:`0`.
@@ -1186,11 +1221,13 @@ class TripletMarginLoss(_Loss):
         self.eps = eps
         self.swap = swap
 
+    @weak_script_method
     def forward(self, anchor, positive, negative):
         return F.triplet_margin_loss(anchor, positive, negative, margin=self.margin, p=self.p,
                                      eps=self.eps, swap=self.swap, reduction=self.reduction)
 
 
+@weak_module
 class CTCLoss(_Loss):
     r"""The Connectionist Temporal Classification loss.
 
@@ -1290,6 +1327,7 @@ class CTCLoss(_Loss):
         self.blank = blank
         self.zero_infinity = zero_infinity
 
+    @weak_script_method
     def forward(self, log_probs, targets, input_lengths, target_lengths):
         return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
                           self.zero_infinity)

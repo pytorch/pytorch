@@ -12,8 +12,8 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <cstddef>
 #include <memory>
@@ -134,8 +134,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     const std::vector<int64_t>& devices) {
 #ifndef USE_C10D_NCCL
   if (devices.size() > 1) {
-    AT_ERROR(
-        "queueReduction with more than 1 device not suppported without NCCL");
+    AT_ERROR("queueReduction with more than 1 device not suppported without NCCL");
   }
 #endif
   AT_ASSERT(!gradsBatch.empty());
@@ -164,7 +163,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     // freed before their worker stream ops finish.
     for (at::Tensor& grad : gradsBatch[devIdx]) {
       c10::cuda::CUDACachingAllocator::recordStream(
-          grad.storage().data(), workerStreams.back());
+        grad.storage().data(), workerStreams.back());
     }
   }
 
@@ -182,8 +181,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
 #ifdef USE_C10D_NCCL
     torch::cuda::nccl::reduce(gradsBatchCoalesced, 0);
 #else
-    AT_ERROR(
-        "shouldn't have gotten here -- queueReduction not suppported without NCCL");
+    AT_ERROR("shouldn't have gotten here -- queueReduction not suppported without NCCL");
 #endif
   }
 
@@ -209,7 +207,7 @@ void syncReduction(
   // before their worker stream ops finish.
   for (at::Tensor& grad : gradsBatch) {
     c10::cuda::CUDACachingAllocator::recordStream(
-        grad.storage().data(), workerStream);
+      grad.storage().data(), workerStream);
   }
 
   at::cuda::CUDAStreamGuard cudaGuard(workerStream);

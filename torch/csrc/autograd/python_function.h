@@ -23,7 +23,7 @@ struct VariableInfo {
 
   Variable zeros(at::OptionalDeviceGuard& device_guard) const;
 
-  at::Backend backend = at::Backend::Undefined;
+  at::Type* type;
   at::Device device = at::kCPU;
   at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;

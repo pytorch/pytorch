@@ -22,10 +22,7 @@ class Reducer {
   explicit Reducer(
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
-      std::shared_ptr<c10d::ProcessGroup> process_group,
-      std::vector<std::vector<bool>> expect_sparse_gradients);
-
-  ~Reducer() noexcept(false);
+      std::shared_ptr<c10d::ProcessGroup> process_group);
 
   // To (re-)initialize bucket assignment, pass a list of buckets, each
   // of which is specified by a list of indices in the variables list.
@@ -48,46 +45,25 @@ class Reducer {
   }
 
  protected:
-  // Forward declaration.
-  struct Bucket;
-
-  // Locates a specific variable by replica index and variable index.
-  struct VariableIndex {
-    size_t replica_index;
-    size_t variable_index;
-  };
-
   std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;
   std::shared_ptr<c10d::ProcessGroup> process_group_;
-  std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Function*, VariableIndex> func_;
-  std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Function>>>
-      hooks_;
+  std::unordered_map<torch::autograd::Function*, std::tuple<int, int>> func_;
 
   bool expect_autograd_hooks_;
   bool require_finalize_;
+  bool has_marked_unused_parameters_;
   size_t next_bucket_;
 
-  bool has_marked_unused_parameters_;
-  std::vector<VariableIndex> unused_parameters_;
-
-  void mark_variable_ready_dense(VariableIndex index);
-
-  void mark_variable_ready_sparse(VariableIndex index);
-
-  void mark_variable_ready(VariableIndex index);
-
-  void autograd_hook(VariableIndex index);
+  void mark_variable_ready(
+      size_t replica_index,
+      size_t variable_index,
+      bool called_from_autograd = false);
 
   void mark_bucket_ready(size_t bucket_index);
-
-  void finalize_bucket_dense(Bucket& replica);
-
-  void finalize_bucket_sparse(Bucket& replica);
 
   void finalize_backward();
 
@@ -139,10 +115,6 @@ class Reducer {
 
     // Keep work handle around when this set of buckets is being reduced.
     std::shared_ptr<c10d::ProcessGroup::Work> work;
-
-    // If this bucket should expect a single sparse gradient.
-    // Implies: replicas[i].variables.size() == 1.
-    bool expect_sparse_gradient = false;
   };
 
   std::vector<Bucket> buckets_;
@@ -170,7 +142,6 @@ class Reducer {
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
-    const std::vector<size_t>& bucket_size,
-    const std::vector<bool>& expect_sparse_gradient = {});
+    std::vector<size_t> bucket_size);
 
 } // namespace c10d

@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
 
+#include <ATen/native/mkldnn/TensorShape.h>
+
 namespace at { namespace native {
 
 // Methods

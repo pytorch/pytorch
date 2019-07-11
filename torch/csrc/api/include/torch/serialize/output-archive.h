@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/script/module.h>
 
 #include <iosfwd>
 #include <memory>
@@ -64,7 +63,7 @@ class TORCH_API OutputArchive final {
   }
 
  private:
-  jit::script::Module module_;
+  std::shared_ptr<jit::script::Module> module_;
 };
 } // namespace serialize
 } // namespace torch

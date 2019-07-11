@@ -30,6 +30,28 @@
 namespace torch {
 namespace jit {
 
+struct ExecutionPlan {
+  ExecutionPlan() = default;
+  ExecutionPlan(std::shared_ptr<Graph> graph)
+      : code(graph), graph(std::move(graph)) {}
+
+  void run(Stack& stack) const;
+
+  operator bool() const {
+    return static_cast<bool>(graph);
+  }
+
+  ExecutionPlanState getDebugState() {
+    ExecutionPlanState state;
+    state.code = &code;
+    state.graph = graph.get();
+    return state;
+  }
+
+  Code code;
+  std::shared_ptr<Graph> graph;
+};
+
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
 // and different requires_grad states, and handles specializations for each
@@ -52,44 +74,7 @@ struct GraphExecutorImplBase {
         num_outputs(this->graph->outputs().size()) {}
 
   // entry point where execution begins
-  void run(Stack& stack);
-
-  void runTraced(Stack& stack) {
-    const auto& state = tracer::getTracingState();
-    auto inputs = last(stack, num_inputs);
-    auto input_values = fmap(
-        inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
-
-    // NB: we could just run the fallback in here and call it a day, but that
-    // would loose all the control flow information we have in the graph. Thus,
-    // we run the fallback to get the correct output values, but we will
-    // override the tracing states later.
-    {
-      // No need to trace a script module.
-      ResourceGuard guard(tracer::pauseTracing());
-      run(stack);
-    }
-
-    // Traces always have types propagated through them, so we make sure to
-    // also propagate types through the graph we are inserting here.
-    // However, this->graph itself may already have been generated with
-    // tracing and so we only do the type propgation if no concrete types have
-    // been set.
-    auto local_graph = this->graph->copy();
-    for (size_t i = 0; i < input_values.size(); ++i) {
-      local_graph->inputs().at(i)->setType(input_values.at(i)->type());
-    }
-    PropagateInputShapes(local_graph);
-    auto output_values =
-        inlineCallTo(*state->graph, *local_graph, input_values);
-
-    auto outputs = last(stack, num_outputs);
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      tracer::setValueTrace(outputs[i], output_values[i]);
-    }
-  }
-
-  virtual ExecutionPlan getPlanFor(Stack& stack) = 0;
+  virtual void run(Stack& stack) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
 

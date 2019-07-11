@@ -892,11 +892,10 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
 
       if (filter->get_descriptor() != expectedDesc) {
         filter->set_public_format(ideep::format::iohw);
-        itensor newFilter;
-        newFilter.init(expectedDesc);
+        itensor&& newFilter(expectedDesc);
         newFilter.feed_from(*filter);
         newFilter.set_public_format(ideep::format::iohw);
-        filterBlob->Reset<itensor>(new itensor(std::move(newFilter)));
+        filterBlob->Reset<itensor>(new itensor(newFilter));
       }
     } else if (repr::nn::is<repr::Conv>(node)) {
       auto conv = repr::nn::get<repr::Conv>(node);
@@ -933,10 +932,9 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
           aalgorithm);
 
       if (filter->get_descriptor() != expectedDesc) {
-        itensor newFilter;
-        newFilter.init(expectedDesc);
+        itensor&& newFilter(expectedDesc);
         newFilter.feed_from(*filter);
-        filterBlob->Reset<itensor>(new itensor(std::move(newFilter)));
+        filterBlob->Reset<itensor>(new itensor(newFilter));
       }
       // convert weights for FC
     } else if (repr::nn::is<repr::FC>(node)) {
@@ -961,10 +959,9 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
           filter->get_dims());
 
       if (filter->get_descriptor() != expectedDesc) {
-        itensor newFilter;
-        newFilter.init(expectedDesc);
+        itensor&& newFilter(expectedDesc);
         newFilter.feed_from(filter->as_weights());
-        filterBlob->Reset<itensor>(new itensor(std::move(newFilter)));
+        filterBlob->Reset<itensor>(new itensor(newFilter));
       }
     }
   }

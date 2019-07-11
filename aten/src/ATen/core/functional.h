@@ -14,11 +14,20 @@ namespace c10 {
 // No explicit template parameters are required.
 
 // Overload for explicit function and ArrayRef
-template<class F, class T>
+template<typename F, typename T>
 inline auto fmap(const T& inputs, const F& fn) -> std::vector<decltype(fn(*inputs.begin()))> {
   std::vector<decltype(fn(*inputs.begin()))> r;
   r.reserve(inputs.size());
   for(const auto & input : inputs)
+    r.push_back(fn(input));
+  return r;
+}
+
+template<typename F, typename T>
+inline auto fmap(T& inputs, const F& fn) -> std::vector<decltype(fn(*inputs.begin()))> {
+  std::vector<decltype(fn(*inputs.begin()))> r;
+  r.reserve(inputs.size());
+  for(auto & input : inputs)
     r.push_back(fn(input));
   return r;
 }

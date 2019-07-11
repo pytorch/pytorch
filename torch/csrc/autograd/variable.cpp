@@ -68,7 +68,7 @@ void Variable::detach_() {
 }
 
 void Variable::backward(
-    const Tensor& gradient,
+    c10::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) const {
   auto autograd_meta = get_autograd_meta();
@@ -76,20 +76,19 @@ void Variable::backward(
   edges.emplace_back(autograd_meta->grad_fn_, autograd_meta->output_nr_);
 
   std::vector<Variable> inputs;
-  Tensor gradient_ = gradient;
-  if (!gradient.defined()) {
-    gradient_ = at::ones_like(*this);
+  if (!gradient.has_value()) {
+    gradient = at::ones_like(*this);
   }
-  inputs.push_back(std::move(as_variable_ref(gradient_)));
+  inputs.push_back(std::move(as_variable_ref(*gradient)));
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
-void Variable::set_data(const at::Tensor &new_data) const {
+void Variable::set_data(const at::Tensor &new_data) {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` has the same derived
   // type of TensorImpl as `var`.
   TORCH_CHECK(
-    _has_same_tensorimpl_type(*this, new_data),
+    typeid(*(this->unsafeGetTensorImpl())) == typeid(*(new_data.unsafeGetTensorImpl())),
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
 
   // Resets gradient accumulator if metadata is out of date

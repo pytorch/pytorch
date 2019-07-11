@@ -1,4 +1,3 @@
-#!/usr/bin/env python2
 ## @package process
 # Module doxygen.process
 # Script to insert preamble for doxygen and regen API docs

@@ -100,8 +100,7 @@ namespace script {
   _(TK_LIST_COMP, "list comprehension", "")      \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
-  _(TK_IMPORT, "import", "import")               \
-  _(TK_NAMED_TUPLE_DEF, "named tuple", "")
+  _(TK_IMPORT, "import", "import")
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
 
@@ -368,8 +367,8 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(const std::shared_ptr<Source>& source)
-      : source(source),
+  explicit Lexer(const std::string& str)
+      : source(std::make_shared<Source>(str)),
         pos(0),
         nesting(0),
         indent_stack(),

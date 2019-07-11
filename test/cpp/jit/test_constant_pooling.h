@@ -35,7 +35,7 @@ graph():
         R"IR(
 graph(%cond : Tensor):
   %a : str = prim::Constant[value="bcd"]()
-  %3 : bool = aten::Bool(%cond)
+  %3 : bool = prim::Bool(%cond)
   %b : str = prim::If(%3)
     block0():
       %b.1 : str = prim::Constant[value="abc"]()

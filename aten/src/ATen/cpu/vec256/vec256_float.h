@@ -17,7 +17,6 @@ template <> class Vec256<float> {
 private:
   __m256 values;
 public:
-  using value_type = float;
   static constexpr int size() {
     return 8;
   }

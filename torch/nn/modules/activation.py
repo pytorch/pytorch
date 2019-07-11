@@ -7,8 +7,10 @@ from torch.nn.init import xavier_normal_
 from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
+@weak_module
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.
 
@@ -46,6 +48,7 @@ class Threshold(Module):
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
+    @weak_script_method
     def forward(self, input):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
@@ -56,6 +59,7 @@ class Threshold(Module):
         )
 
 
+@weak_module
 class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise:
 
@@ -90,6 +94,7 @@ class ReLU(Module):
         super(ReLU, self).__init__()
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.relu(input, inplace=self.inplace)
 
@@ -98,6 +103,7 @@ class ReLU(Module):
         return inplace_str
 
 
+@weak_module
 class RReLU(Module):
     r"""Applies the randomized leaky rectified liner unit function, element-wise,
     as described in the paper:
@@ -145,6 +151,7 @@ class RReLU(Module):
         self.upper = upper
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
@@ -153,6 +160,7 @@ class RReLU(Module):
         return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
+@weak_module
 class Hardtanh(Module):
     r"""Applies the HardTanh function element-wise
 
@@ -205,6 +213,7 @@ class Hardtanh(Module):
         self.inplace = inplace
         assert self.max_val > self.min_val
 
+    @weak_script_method
     def forward(self, input):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
@@ -215,6 +224,7 @@ class Hardtanh(Module):
         )
 
 
+@weak_module
 class ReLU6(Hardtanh):
     r"""Applies the element-wise function:
 
@@ -246,6 +256,7 @@ class ReLU6(Hardtanh):
         return inplace_str
 
 
+@weak_module
 class Sigmoid(Module):
     r"""Applies the element-wise function:
 
@@ -267,10 +278,12 @@ class Sigmoid(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return torch.sigmoid(input)
 
 
+@weak_module
 class Tanh(Module):
     r"""Applies the element-wise function:
 
@@ -291,10 +304,12 @@ class Tanh(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return torch.tanh(input)
 
 
+@weak_module
 class ELU(Module):
     r"""Applies the element-wise function:
 
@@ -325,6 +340,7 @@ class ELU(Module):
         self.alpha = alpha
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.elu(input, self.alpha, self.inplace)
 
@@ -333,6 +349,7 @@ class ELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+@weak_module
 class CELU(Module):
     r"""Applies the element-wise function:
 
@@ -368,6 +385,7 @@ class CELU(Module):
         self.alpha = alpha
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.celu(input, self.alpha, self.inplace)
 
@@ -376,6 +394,7 @@ class CELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+@weak_module
 class SELU(Module):
     r"""Applied element-wise, as:
 
@@ -411,6 +430,7 @@ class SELU(Module):
         super(SELU, self).__init__()
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.selu(input, self.inplace)
 
@@ -419,6 +439,7 @@ class SELU(Module):
         return inplace_str
 
 
+@weak_module
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
@@ -444,6 +465,7 @@ class GLU(Module):
         super(GLU, self).__init__()
         self.dim = dim
 
+    @weak_script_method
     def forward(self, input):
         return F.glu(input, self.dim)
 
@@ -451,6 +473,7 @@ class GLU(Module):
         return 'dim={}'.format(self.dim)
 
 
+@weak_module
 class Hardshrink(Module):
     r"""Applies the hard shrinkage function element-wise:
 
@@ -484,6 +507,7 @@ class Hardshrink(Module):
         super(Hardshrink, self).__init__()
         self.lambd = lambd
 
+    @weak_script_method
     def forward(self, input):
         return F.hardshrink(input, self.lambd)
 
@@ -491,6 +515,7 @@ class Hardshrink(Module):
         return '{}'.format(self.lambd)
 
 
+@weak_module
 class LeakyReLU(Module):
     r"""Applies the element-wise function:
 
@@ -531,6 +556,7 @@ class LeakyReLU(Module):
         self.negative_slope = negative_slope
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
@@ -539,6 +565,7 @@ class LeakyReLU(Module):
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
+@weak_module
 class LogSigmoid(Module):
     r"""Applies the element-wise function:
 
@@ -559,10 +586,12 @@ class LogSigmoid(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return F.logsigmoid(input)
 
 
+@weak_module
 class Softplus(Module):
     r"""Applies the element-wise function:
 
@@ -599,6 +628,7 @@ class Softplus(Module):
         self.beta = beta
         self.threshold = threshold
 
+    @weak_script_method
     def forward(self, input):
         return F.softplus(input, self.beta, self.threshold)
 
@@ -606,6 +636,7 @@ class Softplus(Module):
         return 'beta={}, threshold={}'.format(self.beta, self.threshold)
 
 
+@weak_module
 class Softshrink(Module):
     r"""Applies the soft shrinkage function elementwise:
 
@@ -639,6 +670,7 @@ class Softshrink(Module):
         super(Softshrink, self).__init__()
         self.lambd = lambd
 
+    @weak_script_method
     def forward(self, input):
         return F.softshrink(input, self.lambd)
 
@@ -646,6 +678,7 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
+@weak_module
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces.
@@ -663,11 +696,6 @@ class MultiheadAttention(Module):
         add_bias_kv: add bias to the key and value sequences at dim=0.
         add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
-        kdim: total number of features in key. Default: None.
-        vdim: total number of features in key. Default: None.
-
-        Note: if kdim and vdim are None, they will be set to embed_dim such that
-        query, key, and value have the same number of features.
 
     Examples::
 
@@ -675,25 +703,15 @@ class MultiheadAttention(Module):
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
     """
 
-    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
+    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False):
         super(MultiheadAttention, self).__init__()
         self.embed_dim = embed_dim
-        self.kdim = kdim if kdim is not None else embed_dim
-        self.vdim = vdim if vdim is not None else embed_dim
-        self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
-
         self.num_heads = num_heads
         self.dropout = dropout
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
         self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
-
-        if self._qkv_same_embed_dim is False:
-            self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
-            self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
-            self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
-
         if bias:
             self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
         else:
@@ -711,13 +729,11 @@ class MultiheadAttention(Module):
         self._reset_parameters()
 
     def _reset_parameters(self):
-        if self._qkv_same_embed_dim:
-            xavier_uniform_(self.in_proj_weight)
-        else:
-            xavier_uniform_(self.q_proj_weight)
-            xavier_uniform_(self.k_proj_weight)
-            xavier_uniform_(self.v_proj_weight)
+        xavier_uniform_(self.in_proj_weight[:self.embed_dim, :])
+        xavier_uniform_(self.in_proj_weight[self.embed_dim:(self.embed_dim * 2), :])
+        xavier_uniform_(self.in_proj_weight[(self.embed_dim * 2):, :])
 
+        xavier_uniform_(self.out_proj.weight)
         if self.in_proj_bias is not None:
             constant_(self.in_proj_bias, 0.)
             constant_(self.out_proj.bias, 0.)
@@ -726,6 +742,7 @@ class MultiheadAttention(Module):
         if self.bias_v is not None:
             xavier_normal_(self.bias_v)
 
+    @weak_script_method
     def forward(self, query, key, value, key_padding_mask=None,
                 need_weights=True, attn_mask=None):
         r"""
@@ -733,11 +750,10 @@ class MultiheadAttention(Module):
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is an binary mask. When the value is True,
-            the corresponding value on the attention layer will be filled with -inf.
+            be ignored by the attention.
         need_weights: output attn_output_weights.
-        attn_mask: mask that prevents attention to certain positions. This is an additive mask
-            (i.e. the values will be added to the attention layer).  
+        attn_mask: mask that prevents attention to certain positions.
+
 
     Shape:
         - Inputs:
@@ -756,33 +772,14 @@ class MultiheadAttention(Module):
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
         """
-        if hasattr(self, '_qkv_same_embed_dim') and self._qkv_same_embed_dim is False:
-            return F.multi_head_attention_forward(
-                query, key, value, self.embed_dim, self.num_heads,
-                self.in_proj_weight, self.in_proj_bias,
-                self.bias_k, self.bias_v, self.add_zero_attn,
-                self.dropout, self.out_proj.weight, self.out_proj.bias, 
-                training=self.training,
-                key_padding_mask=key_padding_mask, need_weights=need_weights, 
-                attn_mask=attn_mask, use_separate_proj_weight=True,
-                q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
-                v_proj_weight=self.v_proj_weight)
-        else:
-            if not hasattr(self, '_qkv_same_embed_dim'):
-                warnings.warn('A new version of MultiheadAttention module has been implemented. \
-                    Please re-train your model with the new module',
-                              UserWarning)
-
-            return F.multi_head_attention_forward(
-                query, key, value, self.embed_dim, self.num_heads,
-                self.in_proj_weight, self.in_proj_bias,
-                self.bias_k, self.bias_v, self.add_zero_attn,
-                self.dropout, self.out_proj.weight, self.out_proj.bias, 
-                training=self.training,
-                key_padding_mask=key_padding_mask, need_weights=need_weights, 
-                attn_mask=attn_mask)
+        return F.multi_head_attention_forward(
+            query, key, value, self.embed_dim, self.num_heads,
+            self.in_proj_weight, self.in_proj_bias, self.bias_k, self.bias_v, self.add_zero_attn,
+            self.dropout, self.out_proj.weight, self.out_proj.bias, training=self.training,
+            key_padding_mask=key_padding_mask, need_weights=need_weights, attn_mask=attn_mask)
 
 
+@weak_module
 class PReLU(Module):
     r"""Applies the element-wise function:
 
@@ -839,6 +836,7 @@ class PReLU(Module):
         super(PReLU, self).__init__()
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
+    @weak_script_method
     def forward(self, input):
         return F.prelu(input, self.weight)
 
@@ -846,6 +844,7 @@ class PReLU(Module):
         return 'num_parameters={}'.format(self.num_parameters)
 
 
+@weak_module
 class Softsign(Module):
     r"""Applies the element-wise function:
 
@@ -866,10 +865,12 @@ class Softsign(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return F.softsign(input)
 
 
+@weak_module
 class Tanhshrink(Module):
     r"""Applies the element-wise function:
 
@@ -890,10 +891,12 @@ class Tanhshrink(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return F.tanhshrink(input)
 
 
+@weak_module
 class Softmin(Module):
     r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
@@ -929,10 +932,12 @@ class Softmin(Module):
         super(Softmin, self).__init__()
         self.dim = dim
 
+    @weak_script_method
     def forward(self, input):
         return F.softmin(input, self.dim, _stacklevel=5)
 
 
+@weak_module
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
@@ -978,6 +983,7 @@ class Softmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
+    @weak_script_method
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
 
@@ -985,6 +991,7 @@ class Softmax(Module):
         return 'dim={dim}'.format(dim=self.dim)
 
 
+@weak_module
 class Softmax2d(Module):
     r"""Applies SoftMax over features to each spatial location.
 
@@ -1007,11 +1014,13 @@ class Softmax2d(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return F.softmax(input, 1, _stacklevel=5)
 
 
+@weak_module
 class LogSoftmax(Module):
     r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
     input Tensor. The LogSoftmax formulation can be simplified as:
@@ -1048,5 +1057,6 @@ class LogSoftmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
+    @weak_script_method
     def forward(self, input):
         return F.log_softmax(input, self.dim, _stacklevel=5)

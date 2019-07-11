@@ -1,5 +1,3 @@
-#pragma once
-
 #include <ATen/core/alias_info.h>
 
 namespace torch {

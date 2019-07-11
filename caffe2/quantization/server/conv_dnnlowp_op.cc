@@ -10,7 +10,6 @@
 #endif
 
 #include "caffe2/core/tensor_int8.h"
-#include "caffe2/operators/conv_op_impl.h"
 #include "caffe2/utils/cpuid.h"
 
 #include <fbgemm/src/RefImplementations.h>

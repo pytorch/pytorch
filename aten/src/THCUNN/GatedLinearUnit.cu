@@ -1,6 +1,6 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THC/THCNumerics.cuh>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
 #include <THCUNN/common.h>
 

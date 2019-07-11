@@ -28,9 +28,20 @@ $extra_cuda_headers
 
 namespace at {
 
-${type_derived_method_definitions}
+${Type}::${Type}()
+  : ${DeviceType}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+Backend ${Type}::backend() const {
+  return Backend::${Backend};
+}
 
-static auto& registerer = globalATenDispatch()
-  ${function_registrations};
+const char * ${Type}::toString() const {
+  return "${Type}";
+}
+
+TypeID ${Type}::ID() const {
+  return ${TypeID};
+}
+
+${type_derived_method_definitions}
 
 }

@@ -2,35 +2,30 @@
 
 from collections import OrderedDict
 
-import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
-from cimodel.lib.conf_tree import Ver
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.visualization as visualization
 from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
 
 
-from dataclasses import dataclass
-
-
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = 287
+DOCKER_IMAGE_VERSION = 276
 
 
-@dataclass
-class Conf:
-    language: str
-    distro: Ver
-    compiler: Ver
-    build_only: bool
-    is_important: bool
+class Conf(object):
+    def __init__(self, language, distro, compiler, phase, build_only):
+
+        self.language = language
+        self.distro = distro
+        self.compiler = compiler
+        self.phase = phase
+        self.build_only = build_only
 
     # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):
 
         omit = self.language == "onnx_py2" \
-            or self.language == "onnx_py3.6" \
             or self.compiler.name in ["android", "mkl", "clang"] \
             or str(self.distro) in ["ubuntu14.04", "macos10.13"]
 
@@ -49,6 +44,9 @@ class Conf:
         root_parts = self.get_build_name_root_parts()
         return "_".join(root_parts + [phase]).replace(".", "_")
 
+    def get_name(self):
+        return self.construct_phase_name(self.phase)
+
     def get_platform(self):
         platform = self.distro.name
         if self.distro.name != "macos":
@@ -59,7 +57,6 @@ class Conf:
 
         lang_substitutions = {
             "onnx_py2": "py2",
-            "onnx_py3.6": "py3.6",
             "cmake": "py2",
         }
 
@@ -67,13 +64,12 @@ class Conf:
         parts = [lang] + self.get_build_name_middle_parts()
         return miniutils.quote(DOCKER_IMAGE_PATH_BASE + "-".join(parts) + ":" + str(DOCKER_IMAGE_VERSION))
 
-    def gen_yaml_tree(self, phase):
+    def gen_yaml_tree(self):
 
         tuples = []
 
         lang_substitutions = {
             "onnx_py2": "onnx-py2",
-            "onnx_py3.6": "onnx-py3.6",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
@@ -81,7 +77,7 @@ class Conf:
         parts = [
             "caffe2",
             lang,
-        ] + self.get_build_name_middle_parts() + [phase]
+        ] + self.get_build_name_middle_parts() + [self.phase]
 
         build_env = "-".join(parts)
         if not self.distro.name == "macos":
@@ -92,7 +88,7 @@ class Conf:
         if self.compiler.name == "ios":
             tuples.append(("BUILD_IOS", miniutils.quote("1")))
 
-        if phase == "test":
+        if self.phase == "test":
             # TODO cuda should not be considered a compiler
             if self.compiler.name == "cuda":
                 tuples.append(("USE_CUDA_DOCKER_RUNTIME", miniutils.quote("1")))
@@ -107,11 +103,11 @@ class Conf:
 
         d = OrderedDict({"environment": OrderedDict(tuples)})
 
-        if phase == "test":
+        if self.phase == "test":
             resource_class = "large" if self.compiler.name != "cuda" else "gpu.medium"
             d["resource_class"] = resource_class
 
-        d["<<"] = "*" + "_".join(["caffe2", self.get_platform(), phase, "defaults"])
+        d["<<"] = "*" + "_".join(["caffe2", self.get_platform(), self.phase, "defaults"])
 
         return d
 
@@ -129,11 +125,11 @@ def instantiate_configs():
     for fc in found_configs:
 
         c = Conf(
-            language=fc.find_prop("language_version"),
-            distro=fc.find_prop("distro_version"),
-            compiler=fc.find_prop("compiler_version"),
-            build_only=fc.find_prop("build_only"),
-            is_important=fc.find_prop("important"),
+            fc.find_prop("language_version"),
+            fc.find_prop("distro_version"),
+            fc.find_prop("compiler_version"),
+            fc.find_prop("phase_name"),
+            fc.find_prop("build_only"),
         )
 
         config_list.append(c)
@@ -142,13 +138,10 @@ def instantiate_configs():
 
 
 def add_caffe2_builds(jobs_dict):
+
     configs = instantiate_configs()
     for conf_options in configs:
-        phases = ["build"]
-        if not conf_options.build_only:
-            phases = dimensions.PHASES
-        for phase in phases:
-            jobs_dict[conf_options.construct_phase_name(phase)] = conf_options.gen_yaml_tree(phase)
+        jobs_dict[conf_options.get_name()] = conf_options.gen_yaml_tree()
 
     graph = visualization.generate_graph(get_root())
     graph.draw("caffe2-config-dimensions.png", prog="twopi")
@@ -165,23 +158,11 @@ def get_caffe2_workflows():
     x = []
     for conf_options in filtered_configs:
 
-        phases = ["build"]
-        if not conf_options.build_only:
-            phases = dimensions.PHASES
+        requires = ["setup"]
 
-        for phase in phases:
+        if conf_options.phase == "test":
+            requires.append(conf_options.construct_phase_name("build"))
 
-            requires = ["setup"]
-            sub_d = {"requires": requires}
-
-            if phase == "test":
-                requires.append(conf_options.construct_phase_name("build"))
-
-            if not conf_options.is_important:
-                # If you update this, update
-                # pytorch_build_definitions.py too
-                sub_d["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
-
-            x.append({conf_options.construct_phase_name(phase): sub_d})
+        x.append({conf_options.get_name(): {"requires": requires}})
 
     return x

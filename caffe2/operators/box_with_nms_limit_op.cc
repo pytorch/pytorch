@@ -308,7 +308,7 @@ SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 } // namespace caffe2
 
 // clang-format off
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
     BoxWithNMSLimit,
     "_caffe2::BoxWithNMSLimit("
       "Tensor scores, "

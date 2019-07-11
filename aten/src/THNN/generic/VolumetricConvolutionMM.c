@@ -521,8 +521,6 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
   c10::raw::intrusive_ptr::decref(weight);
 }
 
-#if !defined(TH_REAL_IS_LONG)
-
 static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
           THTensor *gradInput,
           THTensor *gradOutput,
@@ -729,5 +727,4 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
   }
 }
 
-#endif
 #endif

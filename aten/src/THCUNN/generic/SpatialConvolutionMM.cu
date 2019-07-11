@@ -200,14 +200,13 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     }
 
     // Extract columns:
-    at::native::im2col<scalar_t>(
+    im2col(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, input_n),
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
-      1, 1, 
-      columns->data<scalar_t>()
+      1, 1, THCTensor_(data)(state, columns)
     );
 
     // M,N,K are dims of matrix A and B
@@ -332,7 +331,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
     );
 
     // Unpack columns back into input:
-    at::native::col2im<scalar_t, accreal>(
+    col2im<scalar_t, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
@@ -431,14 +430,13 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       THCTensor_(select)(state, input_n, input, 0, elt);
 
       // Extract columns:
-      at::native::im2col<scalar_t>(
+      im2col(
         THCState_getCurrentStream(state),
         THCTensor_(data)(state, input_n),
         nInputPlane, inputHeight, inputWidth,
         outputHeight, outputWidth,
         kH, kW, padH, padW, dH, dW,
-        1, 1, 
-        columns->data<scalar_t>()
+        1, 1, THCTensor_(data)(state, columns)
       );
 
       // M,N,K are dims of matrix A and B

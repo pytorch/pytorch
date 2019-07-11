@@ -21,7 +21,6 @@ TESTS = [
     'autograd',
     'cpp_extensions',
     'c10d',
-    'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
@@ -42,6 +41,7 @@ TESTS = [
     'optim',
     'quantized',
     'sparse',
+    'thd_distributed',
     'torch',
     'type_info',
     'type_hints',
@@ -54,6 +54,7 @@ TESTS = [
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'thd_distributed',
 ]
 
 ROCM_BLACKLIST = [
@@ -62,6 +63,7 @@ ROCM_BLACKLIST = [
     'distributed',
     'multiprocessing',
     'nccl',
+    'thd_distributed',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
@@ -81,6 +83,16 @@ if dist.is_available():
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
 
+
+THD_DISTRIBUTED_TESTS_CONFIG = {
+    'tcp': {
+        'WORLD_SIZE': '3'
+    },
+    'gloo': {
+        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+    },
+    # THD NCCL and MPI tests are known to be flaky in CI
+}
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
@@ -181,6 +193,8 @@ def test_distributed(executable, test_module, test_directory, options):
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')
     config = DISTRIBUTED_TESTS_CONFIG
+    if test_module == "test_thd_distributed":
+        config = THD_DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
         if backend == 'mpi' and not mpi_available:
             continue
@@ -228,6 +242,7 @@ def test_distributed(executable, test_module, test_directory, options):
 CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
+    'thd_distributed': test_distributed,
 }
 
 

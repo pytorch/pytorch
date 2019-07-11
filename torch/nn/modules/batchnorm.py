@@ -6,10 +6,12 @@ from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init
+from ..._jit_internal import weak_module, weak_script_method
 
 
 # TODO: check contiguous in THNN
 # TODO: use separate backend functions?
+@weak_module
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
@@ -49,12 +51,13 @@ class _BatchNorm(Module):
     def reset_parameters(self):
         self.reset_running_stats()
         if self.affine:
-            init.ones_(self.weight)
+            init.uniform_(self.weight)
             init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
 
+    @weak_script_method
     def forward(self, input):
         self._check_input_dim(input)
 
@@ -100,6 +103,7 @@ class _BatchNorm(Module):
             missing_keys, unexpected_keys, error_msgs)
 
 
+@weak_module
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
@@ -111,8 +115,8 @@ class BatchNorm1d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0.
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -166,12 +170,14 @@ class BatchNorm1d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 
+@weak_module
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
@@ -183,8 +189,8 @@ class BatchNorm2d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0.
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -238,12 +244,14 @@ class BatchNorm2d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
                              .format(input.dim()))
 
 
+@weak_module
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
@@ -255,8 +263,8 @@ class BatchNorm3d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0.
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -311,6 +319,7 @@ class BatchNorm3d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'

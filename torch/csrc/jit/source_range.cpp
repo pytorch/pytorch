@@ -1,16 +1,7 @@
 #include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/jit/source_range_serialization.h>
 
 namespace torch {
 namespace jit {
-
-c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
-    const SourceRange& range) {
-  if (!gen_ranges_) {
-    return c10::nullopt;
-  }
-  return gen_ranges_->findSourceRangeThatGenerated(range);
-}
 
 // a range of a shared string 'file_' with
 C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
@@ -51,11 +42,13 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   }
   AT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
 
-  if (auto flc = file_line_col()) {
-    std::string filename;
-    size_t line, col;
-    std::tie(filename, line, col) = *flc;
-    out << "at " << filename << ":" << line << ":" << col << "\n";
+  if (source_->filename()) {
+    auto lineno = source_->lineno_for_offset(start());
+    auto col_offset = (int)start() -
+        (int)source_->offset_for_line(lineno);
+    out << "at " << *source_->filename() << ":"
+        << source_->lineno_to_source_lineno(lineno) << ":" << col_offset
+        << "\n";
   }
   out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
   out << std::string(start() - begin_line, ' ');
@@ -65,13 +58,6 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   out << str.substr(end_line, end_highlight - end_line);
   if (!str.empty() && str.back() != '\n')
     out << "\n";
-  // Retrieve original SourceRange, if present.
-  if (source_) {
-    if (auto orig_source_range = findSourceRangeThatGenerated()) {
-      out << "Compiled from code ";
-      orig_source_range->highlight(out);
-    }
-  }
 }
 
 } // namespace jit

@@ -2,7 +2,6 @@
 
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/TensorImpl.h>
-#include <ATen/core/Tensor.h>
 
 namespace at {
 

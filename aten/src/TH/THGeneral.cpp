@@ -23,7 +23,8 @@
 /* Torch Error Handling */
 static void defaultErrorHandlerFunction(const char *msg, void *data)
 {
-  throw std::runtime_error(msg);
+  printf("$ Error: %s\n", msg);
+  exit(-1);
 }
 
 static THErrorHandlerFunction defaultErrorHandler = defaultErrorHandlerFunction;
@@ -80,9 +81,11 @@ void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data)
 /* Torch Arg Checking Handling */
 static void defaultArgErrorHandlerFunction(int argNumber, const char *msg, void *data)
 {
-  std::stringstream new_error;
-  new_error << "invalid argument " << argNumber << ": " << msg;
-  throw std::runtime_error(new_error.str());
+  if(msg)
+    printf("$ Invalid argument %d: %s\n", argNumber, msg);
+  else
+    printf("$ Invalid argument %d\n", argNumber);
+  exit(-1);
 }
 
 static THArgErrorHandlerFunction defaultArgErrorHandler = defaultArgErrorHandlerFunction;
