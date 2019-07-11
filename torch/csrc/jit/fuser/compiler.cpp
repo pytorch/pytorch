@@ -203,6 +203,10 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
+
+    // TODO: can't get rid of this use of DimensionedTensorType yet
+    // until we switch to ProfilingGraphExecutor, so we don't have to
+    // run PropagateInputShapes below
     graph->inputs()[i]->setType(DimensionedTensorType::create(
         desc.scalar_type,
         device,
@@ -247,8 +251,10 @@ std::shared_ptr<FusedKernel> compileKernel(
     if (o->node()->kind() == prim::FusedConcat) {
       sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
     }
-    auto scalar_type = o->type()->expect<c10::DimensionedTensorType const>()->scalarType();
-    auto type = CompleteTensorType::create(scalar_type, device, sizes);
+
+    auto scalar_type = ProfiledTensorType::create(o->type())->scalarType();
+    TORCH_INTERNAL_ASSERT(scalar_type);
+    auto type = CompleteTensorType::create(*scalar_type, device, sizes);
     output_desc.emplace_back(type);
     const auto& desc = output_desc.back();
 

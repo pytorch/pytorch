@@ -175,13 +175,16 @@ struct GraphFuser {
   }
 
   bool isFusableDevice(Value *v) {
-    auto tensor_type = v->type()->cast<DimensionedTensorType>();
-    if (!tensor_type) {
+    if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    if (tensor_type->device().is_cpu()) {
+    auto device = ProfiledTensorType::create(v->type())->device();
+    if (!device) {
+      return true;
+    }
+    if ((*device).is_cpu()) {
       return canFuseOnCPU();
-    } else if (tensor_type->device().is_cuda()) {
+    } else if ((*device).is_cuda()) {
       return canFuseOnGPU();
     }
     throw std::runtime_error("Unknown device");
