@@ -10480,7 +10480,7 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "only supported on List, Dict, Tensor, Tuple, and str"):
+        with self.assertRaisesRegex(RuntimeError, "'int' object is not subscriptable"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8
@@ -11786,7 +11786,7 @@ a")
                 i += 1
             return b
 
-        FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::select") \
+        FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::__getitem__") \
             .check_count("aten::rand", 1, exactly=True).run(str(foo.graph))
 
     def test_mutable_dce_wildcards(self):

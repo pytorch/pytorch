@@ -1,7 +1,12 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import torch
-import torch.nn.quantized.functional as F
 import torch.nn.quantized as nnq
+import torch.nn.quantized.functional as qF
+from torch.nn.quantized.modules import Conv2d
 from common_utils import TestCase, run_tests, tempfile
 
 '''
@@ -18,7 +23,7 @@ class FunctionalAPITest(TestCase):
         zero_point = 1
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
         qY = torch.ops.quantized.relu(qX)
-        qY_hat = F.relu(qX)
+        qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
 
 
@@ -103,6 +108,62 @@ class ModuleAPITest(TestCase):
         self.assertEqual(rqr, rqr2)
 
 
+    def test_conv_api(self):
+        """Tests the correctness of the conv module.
+
+        The correctness is defined against the functional implementation.
+        """
+
+        N, iC, H, W = 10, 10, 10, 3
+        oC, g, kH, kW = 16, 1, 3, 3
+        scale, zero_point = 1.0/255, 128
+
+        X = torch.randn(N, iC, H, W, dtype=torch.float32)
+        X = X.permute([0, 2, 3, 1]).contiguous()
+        qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
+
+        w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
+        w = w.permute([0, 2, 3, 1]).contiguous()
+        qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
+
+        b = torch.randn(oC, dtype=torch.float32)
+        qb = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32)
+
+        conv_under_test = Conv2d(in_channels=iC,
+                                 out_channels=oC,
+                                 kernel_size=(kH, kW),
+                                 stride=1,
+                                 padding=0,
+                                 dilation=1,
+                                 groups=g,
+                                 bias=True,
+                                 padding_mode='zeros')
+        conv_under_test.weight = qw
+        conv_under_test.bias = qb
+        conv_under_test.scale = scale
+        conv_under_test.zero_point = zero_point
+
+        # Test members
+        self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
+        self.assertTrue(hasattr(conv_under_test, '_scale'))
+        self.assertTrue(hasattr(conv_under_test, '_zero_point'))
+
+        # Test properties
+        # self.assertEqual(qw, conv_under_test.weight)
+        self.assertEqual(qb, conv_under_test.bias)
+        self.assertEqual(scale, conv_under_test.scale)
+        self.assertEqual(zero_point, conv_under_test.zero_point)
+
+        # Test forward
+        result_under_test = conv_under_test(qX)
+        result_reference = qF.conv2d(qX, qw, bias=qb,
+                                     scale=scale, zero_point=zero_point,
+                                     stride=1, padding=0,
+                                     dilation=1, groups=g,
+                                     prepacked=False, dtype=torch.quint8)
+
+        self.assertEqual(result_reference, result_under_test,
+                         message="Tensors are not equal.")
 
 if __name__ == '__main__':
     run_tests()

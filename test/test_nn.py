@@ -2500,8 +2500,7 @@ class TestNN(NNTestCase):
             dtypes = [torch.float, torch.half]
         else:
             dtypes = [torch.float]
-        # FIXME: add (10, 0) after https://github.com/pytorch/pytorch/issues/17262 is fixed
-        sizes = [(0, 10), (32, 20)]
+        sizes = [(0, 10), (32, 20), (10, 0)]
         for fn in [F.softmax, F.log_softmax]:
             for dtype in dtypes:
                 for size in sizes:
