@@ -349,6 +349,10 @@ def add_torch_libs():
         # TODO: putting USE_CUDA in propagated_pp_flags is error-prone
         propagated_pp_flags=propagated_pp_flags + [
             "-DUSE_CUDA",
+            # The dynamically loaded NVRTC trick doesn't work in fbcode,
+            # and it's not necessary anyway, because we have a stub
+            # nvrtc library which we load canonically anyway
+            "-DUSE_DIRECT_NVRTC",
         ],
         deps=[
             ":generated-autograd-headers",

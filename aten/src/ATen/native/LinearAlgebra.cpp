@@ -136,7 +136,7 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
 
   Tensor S = _matrix_rank_helper(self, symmetric);
   double tol = _get_epsilon(self.scalar_type()) * std::max(self.size(0), self.size(1));
-  return (S > S.max().mul_(tol)).sum(ScalarType::Long);
+  return (S > S.max().mul_(tol)).sum();
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
