@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from ...modules.linear import Linear as NNLinear
 from torch.quantization.QConfig import default_qat_qconfig
+import torch.nn.functional as F
 
 class Linear(NNLinear):
     # TODO: update docs
@@ -34,10 +35,11 @@ class Linear(NNLinear):
     def __init__(self, in_features, out_features, bias=True):
         assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
-        self.weight_fake_qunat = default_qat_qconfig.weight()
+        self.observer = default_qat_qconfig.activation()
+        self.weight_fake_quant = default_qat_qconfig.weight()
 
-    def forward(self, x):
-        return F.linear(input, self.weight_fake_qunat(self.weight), self.bias)
+    def forward(self, input):
+        return self.observer(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     # TODO: support initializing from qconfig
     @staticmethod
@@ -53,5 +55,6 @@ class Linear(NNLinear):
         qat_linear = Linear(mod.in_features, mod.out_features)
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias
-        qat_linear.weight_fake_qunat = mod.qconfig.weight()
+        qat_linear.observer = mod.qconfig.activation()
+        qat_linear.weight_fake_quant = mod.qconfig.weight()
         return qat_linear
