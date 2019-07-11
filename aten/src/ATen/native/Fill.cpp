@@ -16,7 +16,7 @@ Tensor& fill_out(Tensor& self, const Scalar value) {
   return self;
 }
 
-Tensor& fill_(Tensor& self, Scalar value) {
+Tensor& fill_(Tensor& self, const Scalar value) {
   return fill_out(self, value);
 }
 
