@@ -1,4 +1,4 @@
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/NamedTensorUtils.h>
 #include <sstream>
@@ -153,6 +153,11 @@ optional<std::vector<Dimname>> erase_name(optional<DimnameList> self_names, int6
 
 void propagate_names(Tensor& result, const Tensor& src) {
   at::internal_set_names_inplace(result, src.names());
+}
+
+void propagate_names(TensorImpl* result, TensorImpl* src) {
+  const auto names = at::impl::internal_get_names(src);
+  at::impl::internal_set_names_inplace(result, names);
 }
 
 } // namespace namedinference

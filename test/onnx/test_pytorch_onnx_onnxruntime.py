@@ -9,14 +9,15 @@ import torch
 import numpy as np
 import io
 
-from test_pytorch_onnx_caffe2 import skipIfUnsupportedMinOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
+
 
 class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
 
-    def run_test(self, model, inputs):
-        outputs = model(inputs)
+    def run_test(self, model, inputs, rtol=1e-05, atol=1e-08):
+        outputs = model(inputs) if isinstance(inputs, torch.Tensor) else model(*inputs)
 
         # export the model to ONNX
         f = io.BytesIO()
@@ -50,10 +51,12 @@ class TestONNXRuntime(unittest.TestCase):
             "number of outputs differ"
 
         if isinstance(outputs, torch.Tensor):
-            assert np.allclose(get_numpy_value(outputs), ort_outs[0])
+            assert np.allclose(get_numpy_value(outputs), ort_outs[0],
+                               rtol=rtol, atol=atol)
         else :
             for i in range(0, len(outputs)):
-                assert np.allclose(get_numpy_value_at_index(outputs, i), ort_outs[i])
+                assert np.allclose(get_numpy_value_at_index(outputs, i), ort_outs[i],
+                                   rtol=rtol, atol=atol)
 
     def test_full_trace(self):
         class FullModel(torch.nn.Module):
@@ -147,6 +150,41 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviation()
         self.run_test(model, x)
 
+    # TODO: enable for opset 10 when ONNXRuntime version will be updated 
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_topk(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.topk(x, 3)
+
+        x = torch.arange(1., 6., requires_grad=True)
+        self.run_test(MyModule(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_topk_script(self):
+        class MyModuleDynamic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, k):
+                return torch.topk(x, k)
+
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.run_test(MyModuleDynamic(), [x, k])
+
+    def test_layer_norm(self):
+        model = torch.nn.LayerNorm([10, 10])
+        x = torch.randn(20, 5, 10, 10)
+        self.run_test(model, x, rtol=1e-05, atol=1e-07)
+
+    def test_reduce_log_sum_exp(self):
+        class ReduceLogSumExpModel(torch.nn.Module):
+            def forward(self, input):
+                a = torch.logsumexp(input, dim=0)
+                b = torch.logsumexp(input, dim=(0, 1))
+                return a + b
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_test(ReduceLogSumExpModel(), x)
 
 # opset 10 tests
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),

@@ -83,6 +83,23 @@ class TestONNXOpset(TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
+        # test with dynamic k
+        class MyModuleDynamic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, k):
+                return torch.topk(input, k)
+
+        ops_10 = [{"op_name" : "Unsqueeze", "attributes" : [{"name" : "axes", "ints" : [0], "type" : 7}]},
+                  {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
+        ops = {10 : ops_10}
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        module = MyModuleDynamic()
+        example_output = module(x, k)
+        check_onnx_opsets_operator(module, [x, k], ops,
+                                   opset_versions=[10],
+                                   example_outputs=example_output)
+
     def test_maxpool(self):
         module = torch.nn.MaxPool1d(2, stride=1)
 
