@@ -274,7 +274,7 @@ struct LoopContinuations {
           auto header_block = loop_continuation->addBlock();
           auto pre_header = curr_loop_->blocks().at(1);
           header_block->cloneFrom(pre_header, [](Value* v) { return v; });
-          inlineBlockBeforeNode(n, header_block);
+          InlineBlockBeforeNode(n, header_block);
           loop_continuation->addInput(header_block->outputs().at(0));
           loop_continuation->eraseBlock(0);
           addLoopCarriedOutputs(loop_continuation);

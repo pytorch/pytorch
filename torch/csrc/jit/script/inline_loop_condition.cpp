@@ -1,4 +1,3 @@
-
 #include <functional>
 #include <memory>
 #include <string>
@@ -9,9 +8,8 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
-void inlineBlockBeforeNode(Node* before_node, Block* block) {
+void InlineBlockBeforeNode(Node* before_node, Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto block_node = *it++;
     block_node->moveBefore(before_node);
@@ -39,11 +37,11 @@ void inlineLoopCondition(Node* n) {
   auto pre_header = n->blocks().at(1);
   auto temp_block = n->addBlock();
   temp_block->cloneFrom(pre_header, [](Value* v) { return v; });
-  inlineBlockBeforeNode(n, temp_block);
+  InlineBlockBeforeNode(n, temp_block);
   n->insertInput(/*start_condition_index*/ 1, temp_block->outputs().at(0));
   n->eraseBlock(2);
 
-  inlineBlockBeforeNode(body_block->return_node(), pre_header);
+  InlineBlockBeforeNode(body_block->return_node(), pre_header);
   body_block->return_node()->insertInput(0, pre_header->outputs().at(0));
   n->eraseBlock(1);
 }
@@ -63,6 +61,5 @@ void InlineLoopCondition(std::shared_ptr<Graph>& graph) {
   inlineLoopCondition(graph->block());
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
