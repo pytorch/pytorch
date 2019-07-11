@@ -99,6 +99,15 @@ def set_function(module, cls, tfunc, func):
     setattr(module, tfunc, _gen_func(tfunc))
 
 
+def _check_meaningful_overwrite(cls, pbf):
+    class DefaultClass:
+        pass
+
+    if getattr(cls, pbf, False) and not getattr(DefaultClass, pbf, False):
+        raise Exception("WARNING: " + pbf + " already exists "
+                        "and not part of default class")
+
+
 def set_unary_method(cls, tfunc, pbf, inplace):
     def _gen_func(pbf):
         def _func(self: cls):
@@ -108,8 +117,7 @@ def set_unary_method(cls, tfunc, pbf, inplace):
             else:
                 return getattr(torch, tfunc)(self)
         return _func
-    if getattr(cls, pbf, False):
-        print("WARNING: " + pbf + " already exists")
+    _check_meaningful_overwrite(cls, pbf)
     setattr(cls, pbf, _gen_func(pbf))
 
 
@@ -121,8 +129,7 @@ def set_binary_method(cls, tfunc, pbf, inplace):
             else:
                 return getattr(torch, tfunc)(self, other)
         return _func
-    if getattr(cls, pbf, False):
-        print("WARNING: " + pbf + " already exists")
+    _check_meaningful_overwrite(cls, pbf)
     setattr(cls, pbf, _gen_func(tfunc))
 
 

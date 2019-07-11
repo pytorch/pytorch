@@ -1,4 +1,3 @@
-from torch.utils.cpp_extension import load
 from string import Template
 import tempfile
 import torch.prototypes.nestedtensor.codegen as codegen
@@ -7,6 +6,8 @@ import argparse
 def get_header():
     header = """
 #include <torch/extension.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include <ATen/ATen.h>
 
 #include <vector>

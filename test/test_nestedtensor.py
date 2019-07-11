@@ -1,9 +1,15 @@
-import torch.prototypes.nestedtensor as nestedtensor
-
-NestedTensor = nestedtensor.NestedTensor
+from common_utils import TEST_WITH_PROTOTYPES, TestCase
 
 import torch
 import unittest
+
+if TEST_WITH_PROTOTYPES:
+   import torch.prototypes.nestedtensor as nestedtensor
+   NestedTensor = nestedtensor.NestedTensor
+else:
+   print('prototypes not available, skipping tests')
+   TestCase = object
+
 
 def _shape_prod(shape_):
     shape = tuple(shape_)
@@ -43,7 +49,7 @@ def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 3
    return torch.floor(random_float_tensor(seed, size, a, c, m) * (high - low)) + low
 
 
-class _TestNestedTensor(unittest.TestCase):
+class TestNestedTensor(TestCase):
 
     def gen_float_tensor(self, seed, shape):
         return random_float_tensor(seed, shape)

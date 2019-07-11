@@ -1,8 +1,8 @@
-import torch
 from . import nested
 import torch.prototypes.nestedtensor.codegen as codegen
+from torch.utils.cpp_extension import load
+tensor_list = load(name="tensor_list", sources=["torch/prototypes/nestedtensor/csrc/generated/tensor_list.cpp"])
 
-torch.nestedtensor = nested.make_nested_tensor
 NestedTensor = nested.NestedTensor
 
 def _create_out(input1, out, dtype=None):
@@ -22,7 +22,7 @@ def _unary(func_name, func, input1, out=None):
     for i in range(len(out)):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
-    list_func = getattr(tensor_list.tensor_list, func_name)
+    list_func = getattr(tensor_list, func_name)
     list_func(input1.tensors, out.tensors)
     return out
 
@@ -35,7 +35,7 @@ def _binary(func_name, func, input1, input2, out=None):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
         assert input2.tensors[i].size() == input1.tensors[i].size()
-    list_func = getattr(tensor_list.tensor_list, func_name)
+    list_func = getattr(tensor_list, func_name)
     list_func(input1.tensors, input2.tensors, out.tensors)
     return out
 
@@ -47,13 +47,17 @@ def _comparison(func_name, func, input1, input2, out=None):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
         assert input2.tensors[i].size() == input1.tensors[i].size()
-    list_func = getattr(tensor_list.tensor_list, func_name)
+    list_func = getattr(tensor_list, func_name)
     list_func(input1.tensors, input2.tensors, out.tensors)
     return out
 
+class Module:
+    pass
 
+import torch
 torch, NestedTensor = codegen.add_pointwise_unary_functions(torch, NestedTensor, _unary)
 torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor, _binary)
 torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _comparison)
+torch.nestedtensor = nested.make_nested_tensor
 
 __all__ = ["NestedTensor"]

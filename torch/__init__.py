@@ -312,7 +312,6 @@ import torch.backends.openmp
 import torch.utils.data
 import torch.__config__
 import torch.__future__
-import torch.prototypes
 
 _C._init_names(list(torch._storage_classes))
 
@@ -320,6 +319,12 @@ _C._init_names(list(torch._storage_classes))
 from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs
 
+def check_env_flag(name, default=''):
+    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
+
+# Prototypes overwrites torch builtins with functions!
+if check_env_flag('USE_PROTOTYPES'):
+    import torch.prototypes
 
 def compiled_with_cxx11_abi():
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
