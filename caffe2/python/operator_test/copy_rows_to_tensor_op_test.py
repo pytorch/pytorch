@@ -15,8 +15,6 @@ def get_input_tensors():
     height = np.random.randint(1, 10)
     width = np.random.randint(1, 10)
     dtype = np.float32
-    print("height", height)
-    print("width", width)
     input_tensor = hu.arrays(
         dims=[height, width],
         dtype=dtype,
@@ -43,12 +41,12 @@ class TestCopyRowsToTensor(hu.HypothesisTestCase):
             for idx in indices:
                 input_tensor[idx] = row
             return [input_tensor]
-
+        op = core.CreateOperator(
+            "CopyRowsToTensor", ["input_tensor", "indices", "row"], ["input_tensor"]
+        )
         self.assertReferenceChecks(
             device_option=gc,
-            op=core.CreateOperator(
-                "CopyRowsToTensor", ["input_tensor", "indices", "row"], ["input_tensor"]
-            ),
+            op=op,
             inputs=[input_tensor, indices, row],
             reference=ref,
         )

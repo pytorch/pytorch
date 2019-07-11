@@ -31,6 +31,7 @@ struct ConvParams {
   bool is_stride_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
+  bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
@@ -185,6 +186,143 @@ auto ConvParams::is_depthwise(
          input.size(1) == groups &&
          groups > 1 && // no point if there is only a single group
          weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
+}
+
+// Check workload to activate fast depthwise FP16 cudnn conv kernels
+bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
+  int w = input.size(3);  // same as h
+  int ch = input.size(1);
+  int bs = input.size(0);
+  if (stride==1) {
+    if (w >= 7) {
+      // All batch sizes and nb_channels
+      if (w >= 112) {
+        return true;
+      }
+
+      // large nb_channels
+      if (ch >= 1024) {
+        if (w >= 56) {
+          return true;
+        } else if (bs >= 32) {
+          return true;
+        }
+      }
+
+      // batch_size specific
+      if (bs >= 128) {
+        if (ch >= 512) {
+          return true;
+        } else if (ch >= 64) {
+          if (w >= 14) {
+            return true;  
+          }
+        } else if ((ch >= 32) && (w >=28)) {
+          return true;
+        }
+      } else if (bs >= 64) {
+        if ((ch >= 256) && (w >= 14)) {
+          return true;
+        } else if ((ch >= 32) && (w >= 28)) {
+          return true;
+        }
+      } else if (bs >= 32) {
+        if ((ch >= 256) && (w >= 14)) {
+          return true;
+        } else if ((ch >= 128) && (w >= 28)) {
+          return true;
+        } else if ((ch >= 32) && (w >= 56)) {
+          return true;
+        }
+      } else if (bs >= 16) {
+        if ((ch >= 1024) && (w >= 14)) {
+          return true;
+        }
+        if ((ch >= 256) && (w >= 28)) {
+          return true;
+        } else if ((ch >= 32) && (w >= 56)) {
+          return true;
+        }
+      } else if (bs >= 8) {
+        if ((ch >= 512) && (w >= 28)) {
+          return true;
+        } else if ((ch >= 64) && (w >= 56)) {
+          return true;
+        }
+      }
+    }
+  } else if (stride==2) {
+    if (ch < 256) {
+      return false;
+    }
+
+    if (w >= 7) {
+      if (bs >= 128) {
+        if (ch >= 1024) {
+          return true;
+        } else if ((ch >= 512) && (w >= 14)) {
+          return true;
+        } else if (w >= 28) {
+          return true;
+        }
+      } else if (bs >= 64) {
+        if ((ch >= 512) && (w >= 14)) {
+          return true;
+        } else if (w >= 28) {
+          return true;
+        }
+      } else if (bs >= 32) {
+        if ((ch >= 1024) && (w >= 14)) {
+          return true;
+        } else if (w >= 28) {
+          return true;
+        }
+      } else if (bs >= 16) {
+        if ((ch >= 512) && (w >= 28)) {
+          return true;
+        } else if (w >= 56) {
+          return true;
+        }
+      } else if (bs >= 8) {
+        if ((ch >= 1024) && (w >= 28)) {
+          return true;
+        } else if (w >= 56) {
+          return true;
+        } 
+      } else if (bs >= 1) {
+        if ((ch >= 512) && (w >=112)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Use cudnn for FP16 depthwise convolutions
+auto ConvParams::use_cudnn_depthwise(
+        const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
+    long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+    bool kernel_cond =  (cudnn_version >= 7600 &&
+                         use_cudnn(input) &&
+                         input.scalar_type() == kHalf && // only for FP16
+                         weight.scalar_type() == kHalf &&
+                         is_depthwise(input, weight) &&
+                         weight.size(2) == weight.size(3) && // only square kernels
+                         input.size(2) >= 7 && // min width/height 7
+                         !is_dilated() && // no dilation supported
+                         stride[0] == stride[1] && // equal strides
+                         ((weight.size(3) == 3) || (weight.size(3) == 1)) &&
+                         input.size(1) >= 32); // min 32 channels supported)
+    if (kernel_cond) {
+      return check_cudnn_depthwise_workload(input, stride[0]);
+    } else {
+      return false;
+    }
+  } else {
+    return false;
+  }
 }
 
 static void check_shape_forward(const at::Tensor& input,
@@ -407,7 +545,14 @@ at::Tensor _convolution(
       auto stride = params.stride;
       auto padding = params.padding;
       auto dilation = params.dilation;
-      output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      if (params.use_cudnn_depthwise(input, weight)) {
+        output = at::cudnn_convolution(
+            input, weight, bias,
+            padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
+        
+      } else {
+          output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      }
   } else if (params.use_cudnn(input)) {
     TORCH_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
