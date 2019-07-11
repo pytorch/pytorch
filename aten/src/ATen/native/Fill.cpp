@@ -29,7 +29,7 @@ DEFINE_DISPATCH(fill_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& fill_diagonal_(Tensor& self, const Scalar fill_value, bool wrap) {
+Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
   int64_t nDims = self.dim();
   TORCH_CHECK(nDims >= 2, "dimensions must larger than 1");
 
