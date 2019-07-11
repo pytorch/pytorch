@@ -18,7 +18,7 @@ THC_API scalar_t THCTensor_(maxall)(THCState *state, THCTensor *self);
 
 #if !defined(THC_REAL_IS_BOOL)
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
 
 THC_API void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t value, int dimension, scalar_t max_norm);
 THC_API void THCTensor_(std)(THCState *state, THCTensor *self, THCTensor *src, int dim, int biased, int keepdim);

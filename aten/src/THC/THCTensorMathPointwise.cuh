@@ -258,6 +258,17 @@ struct TensorCRemainderOp<at::Half> {
   }
 };
 
+template <>
+struct TensorCRemainderOp<at::BFloat16> {
+  __device__ __forceinline__ void operator()(at::BFloat16* out, at::BFloat16* in) {
+    *out = *in != 0.f ? *out - *in * floorf(*out / *in) : NAN;
+  }
+
+  __device__ __forceinline__ void operator()(at::BFloat16* out, at::BFloat16* in1, at::BFloat16* in2) {
+    *out = *in2 != 0.f ? *in1 - *in2 * floorf(*in1 / *in2) : NAN;
+  }
+};
+
 template <typename T>
 struct TensorCFmodOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
@@ -298,6 +309,17 @@ struct TensorCFmodOp<at::Half> {
   }
 
   __device__ __forceinline__ void operator()(at::Half* out, at::Half* in1, at::Half* in2) {
+    *out = fmodf(*in1, *in2);
+  }
+};
+
+template <>
+struct TensorCFmodOp<at::BFloat16> {
+  __device__ __forceinline__ void operator()(at::BFloat16* out, at::BFloat16* in) {
+    *out = fmodf(*out, *in);
+  }
+
+  __device__ __forceinline__ void operator()(at::BFloat16* out, at::BFloat16* in1, at::BFloat16* in2) {
     *out = fmodf(*in1, *in2);
   }
 };
@@ -561,7 +583,7 @@ template <typename T, typename accreal>
 struct TensorDigammaOp {
   __device__ __forceinline__ void
   operator()(T* out, T* in) {
-    using compute_type = typename std::conditional<std::is_same<T, at::Half>::value, accreal, T>::type;
+    using compute_type = typename std::conditional<std::is_same<T, at::Half>::value, accreal, typename std::conditional<std::is_same<T, at::BFloat16>::value, accreal, T>::type>::type;
     static const double PI_f64 = 3.14159265358979323846;
     static const compute_type PSI_10 = 2.25175258906672110764;
     static const compute_type A[] = {
@@ -621,7 +643,7 @@ struct TensorDigammaOp {
 
 template <typename T, typename accreal>
 struct TensorTrigammaOp {
-  using compute_type = typename std::conditional<std::is_same<T, at::Half>::value, accreal, T>::type;
+  using compute_type = typename std::conditional<std::is_same<T, at::Half>::value, accreal, typename std::conditional<std::is_same<T, at::BFloat16>::value, accreal, T>::type>::type;
   __device__ __forceinline__ void
   operator()(T* out, T* in) {
     const compute_type PI = 3.14159265358979323846;
