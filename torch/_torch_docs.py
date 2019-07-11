@@ -704,6 +704,22 @@ Example::
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
 """)
 
+add_docstr(torch.bitwise_not,
+           r"""
+           bitwise_not(input, out=None) -> Tensor
+
+Computes the bitwise NOT of the given :attr:`input` tensor. The input must be of integer or Boolean types.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.bitwise_not(torch.tensor([-1, -2, 3], dtype=torch.int8))
+    tensor([ 0,  1, -4], dtype=torch.int8)
+""")
+
 add_docstr(torch.bmm,
            r"""
 bmm(batch1, batch2, out=None) -> Tensor
@@ -1858,6 +1874,10 @@ Creates a :class:`Tensor` from a :class:`numpy.ndarray`.
 The returned tensor and :attr:`ndarray` share the same memory. Modifications to
 the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
 tensor is not resizable.
+
+It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
+``numpy.float32``, ``numpy.float16``, ``numpy.int64``, ``numpy.int32``,
+``numpy.int16``, ``numpy.int8``, ``numpy.uint8``, and ``numpy.bool``.
 
 Example::
 
@@ -3583,6 +3603,22 @@ Example::
 
     >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
+
+.. function:: normal(mean, std, size, *, out=None) -> Tensor
+
+Similar to the function above, but the means and standard deviations are shared
+among all drawn elements. The resulting tensor has size given by :attr:`size`.
+
+Args:
+    mean (float): the mean for all distributions
+    std (float): the standard deviation for all distributions
+    size (int...): a sequence of integers defining the shape of the output tensor.
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.normal(2, 3, size=(1, 4))
+    tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
 """)
 
 add_docstr(torch.numel,
@@ -3923,8 +3959,8 @@ between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
 .. note:
-    With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.int64`.
+    With the global dtype default (``torch.float32``), this function returns
+    a tensor with dtype ``torch.int64``.
 
 Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
@@ -3963,8 +3999,8 @@ random integers generated uniformly between :attr:`low` (inclusive) and
 :attr:`high` (exclusive).
 
 .. note:
-    With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.int64`.
+    With the global dtype default (``torch.float32``), this function returns
+    a tensor with dtype ``torch.int64``.
 
 Args:
     {input}
@@ -4894,17 +4930,14 @@ add_docstr(torch.symeig,
 symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
-of a real symmetric matrix :attr:`input`, represented by a namedtuple
-(eigenvalues, eigenvectors).
-
-:attr:`input` and :math:`V` are :math:`(m \times m)` matrices and :math:`e` is a
-:math:`m` dimensional vector.
+of a real symmetric matrix :attr:`input` or a batch of real symmetric matrices,
+represented by a namedtuple (eigenvalues, eigenvectors).
 
 This function calculates all eigenvalues (and vectors) of :attr:`input`
 such that :math:`\text{input} = V \text{diag}(e) V^T`.
 
 The boolean argument :attr:`eigenvectors` defines computation of
-eigenvectors or eigenvalues only.
+both eigenvectors and eigenvalues or eigenvalues only.
 
 If it is ``False``, only eigenvalues are computed. If it is ``True``,
 both eigenvalues and eigenvectors are computed.
@@ -4915,14 +4948,15 @@ only the upper triangular portion is used by default.
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 .. note:: Irrespective of the original strides, the returned matrix `V` will
-          be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+          be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).strides()`.
 
 .. note:: Extra care needs to be taken when backward through outputs. Such
           operation is really only stable when all eigenvalues are distinct.
           Otherwise, ``NaN`` can appear as the gradients are not properly defined.
 
 Args:
-    input (Tensor): the input symmetric matrix
+    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
+                    batch dimensions consisting of symmetric matrices.
     eigenvectors(boolean, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
     out (tuple, optional): the output tuple of (Tensor, Tensor)
@@ -4930,29 +4964,36 @@ Args:
 Returns:
     (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **eigenvalues** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
-          The eigenvalues are in ascending order.
-        - **eigenvectors** (*Tensor*): Shape :math:`(m \times m)`.
+        - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`. The eigenvalues in ascending order.
+        - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
           If ``eigenvectors=False``, it's a tensor filled with zeros.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
 
 
-    >>> a = torch.tensor([[ 1.96,  0.00,  0.00,  0.00,  0.00],
-                          [-6.49,  3.80,  0.00,  0.00,  0.00],
-                          [-0.47, -6.39,  4.17,  0.00,  0.00],
-                          [-7.20,  1.50, -1.51,  5.70,  0.00],
-                          [-0.65, -6.34,  2.67,  1.80, -7.10]]).t()
+    >>> a = torch.randn(5, 5)
+    >>> a = a + a.t()  # To make a symmetric
+    >>> a
+    tensor([[-5.7827,  4.4559, -0.2344, -1.7123, -1.8330],
+            [ 4.4559,  1.4250, -2.8636, -3.2100, -0.1798],
+            [-0.2344, -2.8636,  1.7112, -5.5785,  7.1988],
+            [-1.7123, -3.2100, -5.5785, -2.6227,  3.1036],
+            [-1.8330, -0.1798,  7.1988,  3.1036, -5.1453]])
     >>> e, v = torch.symeig(a, eigenvectors=True)
     >>> e
-    tensor([-11.0656,  -6.2287,   0.8640,   8.8655,  16.0948])
+    tensor([-13.7012,  -7.7497,  -2.3163,   5.2477,   8.1050])
     >>> v
-    tensor([[-0.2981, -0.6075,  0.4026, -0.3745,  0.4896],
-            [-0.5078, -0.2880, -0.4066, -0.3572, -0.6053],
-            [-0.0816, -0.3843, -0.6600,  0.5008,  0.3991],
-            [-0.0036, -0.4467,  0.4553,  0.6204, -0.4564],
-            [-0.8041,  0.4480,  0.1725,  0.3108,  0.1622]])
+    tensor([[ 0.1643,  0.9034, -0.0291,  0.3508,  0.1817],
+            [-0.2417, -0.3071, -0.5081,  0.6534,  0.4026],
+            [-0.5176,  0.1223, -0.0220,  0.3295, -0.7798],
+            [-0.4850,  0.2695, -0.5773, -0.5840,  0.1337],
+            [ 0.6415, -0.0447, -0.6381, -0.0193, -0.4230]])
+    >>> a_big = torch.randn(5, 2, 2)
+    >>> a_big = a_big + a_big.transpose(-2, -1)  # To make a_big symmetric
+    >>> e, v = a_big.symeig(eigenvectors=True)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(e.diag_embed(), v.transpose(-2, -1))), a_big)
+    True
 """)
 
 add_docstr(torch.t,
@@ -5833,7 +5874,7 @@ Example::
 
 add_docstr(torch.where,
            r"""
-where(condition, x, y) -> Tensor
+.. function:: where(condition, x, y) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -5868,6 +5909,14 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
+
+.. function:: where(condition) -> tuple of LongTensor
+
+``torch.where(condition)`` is identical to
+``torch.nonzero(condition, as_tuple=True)``.
+
+.. note::
+    See also :func:`torch.nonzero`.
 """)
 
 add_docstr(torch.logdet,

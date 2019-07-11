@@ -248,7 +248,6 @@ _(aten, conv3d) \
 _(aten, conv_tbc) \
 _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
-_(aten, conv_transpose3d) \
 _(aten, convolution) \
 _(aten, copy_sparse_to_sparse) \
 _(aten, cos) \
@@ -656,9 +655,8 @@ _(aten, conv_dilated3d) \
 _(aten, conv_dilated3d_backward) \
 _(aten, conv_transpose2d) \
 _(aten, conv_transpose2d_backward) \
-_(aten, thnn_conv_transpose3d) \
-_(aten, thnn_conv_transpose3d_backward) \
-_(aten, thnn_conv_transpose3d_forward) \
+_(aten, conv_transpose3d) \
+_(aten, conv_transpose3d_backward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, to) \
