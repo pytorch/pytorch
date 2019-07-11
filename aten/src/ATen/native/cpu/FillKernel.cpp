@@ -36,8 +36,9 @@ void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
   }
 }
 
+} // namespace
+
 REGISTER_DISPATCH(fill_stub, &fill_kernel);
 
-} // namespace
 } // namespace native
 } // namespace at
