@@ -15,7 +15,7 @@ namespace at { namespace native {
 
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
             const Tensor& input_r, TensorList weight, int64_t weight_stride0,
-            const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
+            const Tensor& hx, const Tensor& cx,
             int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
             bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
             IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
@@ -411,7 +411,7 @@ std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDe
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         const Tensor& input_r, TensorList weight, int64_t weight_stride0,
-        const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
+        const Tensor& hx, const Tensor& cx,
         int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
         bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
         IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
@@ -420,8 +420,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
     check_device(input_r, weight, {hx, cx});
     auto input = input_r;
-    auto weight_buf = weight_buf_r;
-    
 
     if (fn_dropout_state.defined()) {
     	AT_ERROR("miopen_rnn : Dropout is not supported in MIOpen. ");
@@ -467,19 +465,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
     //TODO: Need to implement get_parameters that gets params and params_stride0. [Done.]
     FilterDescriptor w_desc;
-    if (!weight_buf.defined()) {
-    	auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], datatype);
-    	weight_buf = at::empty(num_weights, x.options());
-    	w_desc.set(weight_buf, 3);
-    	weight_buf.zero_();
-    	std::vector<Tensor> params;
-    	size_t params_stride0;
-    	std::tie(params, params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
-    	_copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
-    				MatrixRef<Tensor>{params, params_stride0});
-    } else {
-    	w_desc.set(weight_buf, 3);
-    }
+    auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], datatype);
+    auto weight_buf = at::empty(num_weights, x.options());
+    w_desc.set(weight_buf, 3);
+    weight_buf.zero_();
+    std::vector<Tensor> params;
+    size_t params_stride0;
+    std::tie(params, params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
+   _copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
+               MatrixRef<Tensor>{params, params_stride0});
 
     AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size), "Expected cell size ", IntArrayRef{hidden_size}, ", got", cx.sizes());
 
