@@ -23,7 +23,7 @@ def get_footer():
     footer = """
 // prototypes methods on torch._C
 static PyMethodDef methods[] = {
-    {"_tensor_list_init", (PyCFunction)tensor_list_init, METH_NOARGS, nullptr},
+    {"_nestedtensor_init", (PyCFunction)nestedtensor_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {
@@ -83,7 +83,7 @@ void tensor_list_${op}(std::vector<at::Tensor>& input1,
 
 def build_bindings():
     cpp_source = """
-PyObject* tensor_list_init(PyObject* _unused) {
+PyObject* nestedtensor_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("tensor_list.python.import");
   auto tensor_list_module = THPObjectPtr(PyImport_ImportModule("torch.prototypes.nestedtensor"));
   if (!tensor_list_module) {

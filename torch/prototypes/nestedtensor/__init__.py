@@ -3,12 +3,12 @@ from . import nested
 import torch.prototypes.nestedtensor.codegen as codegen
 
 def is_available():
-    return hasattr(torch._C, "_tensor_list_init")
+    return hasattr(torch._C, "_nestedtensor_init")
 
-if is_available() and not torch._C._tensor_list_init():
+if is_available() and not torch._C._nestedtensor_init():
     raise RuntimeError("Failed to initialize PyTorch distributed support")
 
-import torch.prototypes.nestedtensor as tensor_list
+import torch.prototypes.nestedtensor as nestedtensor
 
 NestedTensor = nested.NestedTensor
 
@@ -29,7 +29,7 @@ def _unary(func_name, func, input1, out=None):
     for i in range(len(out)):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
-    list_func = getattr(tensor_list, func_name)
+    list_func = getattr(nestedtensor, func_name)
     list_func(input1.tensors, out.tensors)
     return out
 
@@ -42,7 +42,7 @@ def _binary(func_name, func, input1, input2, out=None):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
         assert input2.tensors[i].size() == input1.tensors[i].size()
-    list_func = getattr(tensor_list, func_name)
+    list_func = getattr(nestedtensor, func_name)
     list_func(input1.tensors, input2.tensors, out.tensors)
     return out
 
@@ -54,11 +54,10 @@ def _comparison(func_name, func, input1, input2, out=None):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
         assert input2.tensors[i].size() == input1.tensors[i].size()
-    list_func = getattr(tensor_list, func_name)
+    list_func = getattr(nestedtensor, func_name)
     list_func(input1.tensors, input2.tensors, out.tensors)
     return out
 
-import torch
 torch, NestedTensor = codegen.add_pointwise_unary_functions(torch, NestedTensor, _unary)
 torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor, _binary)
 torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _comparison)
