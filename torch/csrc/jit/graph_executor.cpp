@@ -313,7 +313,7 @@ struct DifferentiableGraphOp {
         fwd_function(
             "DifferentiableGraphOp",
             /*optimize=*/false,
-            this->grad.f,
+            packReturnValuesIntoTuple(this->grad.f),
             nullptr),
         grad_executor(this->grad.df),
         num_inputs(this->grad.f->inputs().size()),
@@ -338,6 +338,7 @@ struct DifferentiableGraphOp {
     }
     detachVariables(stack);
     fwd_function.run(stack);
+    unpackTupleIntoReturnValues(stack);
     {
       auto outputs = last(stack, num_outputs);
       // hookup the gradients for the output tensors that require gradients
@@ -360,6 +361,23 @@ struct DifferentiableGraphOp {
   }
 
  private:
+  static std::shared_ptr<Graph> packReturnValuesIntoTuple(
+      const std::shared_ptr<Graph>& graph) {
+    auto copy = graph->copy();
+    auto returnNode = copy->block()->return_node();
+    WithInsertPoint wip(returnNode);
+    auto tuple = copy->insertNode(copy->createTuple(returnNode->inputs()));
+    returnNode->removeAllInputs();
+    returnNode->addInput(tuple->output());
+    return copy;
+  }
+
+  static void unpackTupleIntoReturnValues(Stack& stack) {
+    auto tuple = pop(stack).toTuple();
+    stack.insert(
+        stack.end(), tuple->elements().begin(), tuple->elements().end());
+  }
+
   friend GraphExecutor* detail::getGradExecutor(Operation& op);
 
   at::Tensor detach(at::Tensor t) const {
