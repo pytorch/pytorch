@@ -41,7 +41,7 @@ FeatureDropoutImpl::FeatureDropoutImpl(DropoutOptions options_)
     : DropoutImplBase(options_) {}
 
 Tensor FeatureDropoutImpl::forward(const Tensor& input) {
-  return torch::feature_dropout(input, options.rate_, this->is_training());
+  return torch::feature_dropout(input, options.rate_, this->is_training(), input.sizes());
 }
 
 void FeatureDropoutImpl::pretty_print(std::ostream& stream) const {

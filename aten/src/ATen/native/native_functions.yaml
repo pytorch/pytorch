@@ -82,19 +82,19 @@
 
 - func: dropout(Tensor input, float p, bool train, int[] noise_shape) -> Tensor
 
-- func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: dropout_(Tensor(a!) self, float p, bool train, int[] noise_shape) -> Tensor(a!)
 
-- func: feature_dropout(Tensor input, float p, bool train) -> Tensor
+- func: feature_dropout(Tensor input, float p, bool train, int[] noise_shape) -> Tensor
 
-- func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: feature_dropout_(Tensor(a!) self, float p, bool train, int[] noise_shape) -> Tensor(a!)
 
-- func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
+- func: alpha_dropout(Tensor input, float p, bool train, int[] noise_shape) -> Tensor
 
-- func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: alpha_dropout_(Tensor(a!) self, float p, bool train, int[] noise_shape) -> Tensor(a!)
 
-- func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
+- func: feature_alpha_dropout(Tensor input, float p, bool train, int[] noise_shape) -> Tensor
 
-- func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train, int[] noise_shape) -> Tensor(a!)
 
 - func: abs(Tensor self) -> Tensor
   variants: function, method

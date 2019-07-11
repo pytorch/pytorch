@@ -99,7 +99,7 @@ class Dropout2d(_DropoutNd):
 
     @weak_script_method
     def forward(self, input):
-        return F.dropout2d(input, self.p, self.training, self.inplace)
+        return F.dropout2d(input, self.p, self.training, self.inplace, self.noise_shape)
 
 
 @weak_module

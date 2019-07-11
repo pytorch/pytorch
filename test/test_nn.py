@@ -873,12 +873,12 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
             module(input)
 
-    def _test_dropout(self, cls, cuda, input):
+    def _test_dropout(self, cls, cuda, input, noise_shape=None):
         p = 0.2
         device = torch.device("cuda") if cuda else torch.device("cpu")
         input = input.to(device).fill_(1 - p)
 
-        module = cls(p)
+        module = cls(p, noise_shape=noise_shape)
         input_var = input.clone().requires_grad_()
         output = module(input_var)
         self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
@@ -901,12 +901,12 @@ class TestNN(NNTestCase):
         module.__repr__()
         str(module)
 
-    def _test_alpha_dropout(self, cls, input):
+    def _test_alpha_dropout(self, cls, input, noise_shape=None):
         mean = input.mean()
         std = input.std()
 
         for p in [0.2, 0.5, 0.8]:
-            module = cls(p)
+            module = cls(p, noise_shape=noise_shape)
             input_var = input.detach().clone().requires_grad_()
             output = module(input_var)
             # output mean should be close to input mean
@@ -3016,6 +3016,13 @@ class TestNN(NNTestCase):
         input = torch.Tensor(num_features, b, w, h)
         self._test_dropout(nn.Dropout2d, False, input)
 
+        size = torch.Size([random.choice([1, num_features]),
+                           random.choice([1, b]),
+                           random.choice([1, w]),
+                           random.choice([1, h])])
+        self._test_dropout(nn.Dropout2d, False, input, size)
+
+
     def test_Dropout3d(self):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -3024,6 +3031,14 @@ class TestNN(NNTestCase):
         num_features = 1000
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, False, input)
+
+        size = torch.Size([random.choice([1, num_features]),
+                           random.choice([1, b]),
+                           random.choice([1, d]),
+                           random.choice([1, w]),
+                           random.choice([1, h])])
+        self._test_dropout(nn.Dropout3d, False, input, size)
+
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_Dropout_cuda(self):
@@ -3039,6 +3054,12 @@ class TestNN(NNTestCase):
         input = torch.Tensor(num_features, b, w, h)
         self._test_dropout(nn.Dropout2d, True, input)
 
+        size = torch.Size([random.choice([1, num_features]),
+                           random.choice([1, b]),
+                           random.choice([1, w]),
+                           random.choice([1, h])])
+        self._test_dropout(nn.Dropout2d, True, input, size)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_Dropout3d_cuda(self):
         b = random.randint(1, 5)
@@ -3048,6 +3069,13 @@ class TestNN(NNTestCase):
         num_features = 1000
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, True, input)
+
+        size = torch.Size([random.choice([1, num_features]),
+                           random.choice([1, b]),
+                           random.choice([1, d]),
+                           random.choice([1, w]),
+                           random.choice([1, h])])
+        self._test_dropout(nn.Dropout3d, True, input, size)
 
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
@@ -3062,6 +3090,13 @@ class TestNN(NNTestCase):
         num_features = 1000
         input = torch.randn(num_features, b, d, w, h)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
+
+        size = torch.Size([random.choice([1, num_features]),
+                           random.choice([1, b]),
+                           random.choice([1, d]),
+                           random.choice([1, w]),
+                           random.choice([1, h])])
+        self._test_alpha_dropout(nn.FeatureAlphaDropout, input, size)
 
     def _test_InstanceNorm_general(self, cls, input, device="cpu", dtype=torch.float):
         # default case track_running_stats=False

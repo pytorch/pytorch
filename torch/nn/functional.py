@@ -806,7 +806,7 @@ def adaptive_avg_pool3d(input, output_size):
 # Activation functions
 @weak_script
 def dropout(input, p=0.5, training=True, inplace=False, noise_shape=None):
-    # type: (Tensor, float, bool, bool, Size) -> Tensor
+    # type: (Tensor, float, bool, bool, Optional(BroadcastingList1[int])) -> Tensor
     r"""
     During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
@@ -832,8 +832,8 @@ def dropout(input, p=0.5, training=True, inplace=False, noise_shape=None):
 
 
 @weak_script
-def alpha_dropout(input, p=0.5, training=False, inplace=False):
-    # type: (Tensor, float, bool, bool) -> Tensor
+def alpha_dropout(input, p=0.5, training=False, inplace=False, noise_shape=None):
+    # type: (Tensor, float, bool, bool, Optional(BroadcastingList1[int])) -> Tensor
     r"""Applies alpha dropout to the input.
 
     See :class:`~torch.nn.AlphaDropout` for details.
@@ -841,14 +841,16 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.alpha_dropout_(input, p, training)
+    if noise_shape is None:
+        noise_shape = input.size()
+    return (_VF.alpha_dropout_(input, p, training, noise_shape)
             if inplace
-            else _VF.alpha_dropout(input, p, training))
+            else _VF.alpha_dropout(input, p, training, noise_shape))
 
 
 @weak_script
-def dropout2d(input, p=0.5, training=True, inplace=False):
-    # type: (Tensor, float, bool, bool) -> Tensor
+def dropout2d(input, p=0.5, training=True, inplace=False, noise_shape=None):
+    # type: (Tensor, float, bool, bool, Optional(BroadcastingList1[int])) -> Tensor
     r"""
     Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -862,18 +864,21 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
         p: probability of a channel to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+        noise_shape: A 1-D Tensor, representing the shape for randomly generated keep/drop flags.
     """
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.feature_dropout_(input, p, training)
+    if noise_shape is None:
+        noise_shape = input.size()
+    return (_VF.feature_dropout_(input, p, training, noise_shape)
             if inplace
-            else _VF.feature_dropout(input, p, training))
+            else _VF.feature_dropout(input, p, training, noise_shape))
 
 
 @weak_script
-def dropout3d(input, p=0.5, training=True, inplace=False):
-    # type: (Tensor, float, bool, bool) -> Tensor
+def dropout3d(input, p=0.5, training=True, inplace=False, noise_shape=None):
+    # type: (Tensor, float, bool, bool, Optional(BroadcastingList1[int])) -> Tensor
     r"""
     Randomly zero out entire channels (a channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -887,26 +892,31 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
         p: probability of a channel to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+        noise_shape: A 1-D Tensor, representing the shape for randomly generated keep/drop flags.
     """
     # This is 100% the same code as dropout2d. We duplicate this code so that
     # stack traces are not confusing.
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.feature_dropout_(input, p, training)
+    if noise_shape is None:
+        noise_shape = input.size()
+    return (_VF.feature_dropout_(input, p, training, noise_shape)
             if inplace
-            else _VF.feature_dropout(input, p, training))
+            else _VF.feature_dropout(input, p, training, noise_shape))
 
 
 @weak_script
-def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
-    # type: (Tensor, float, bool, bool) -> Tensor
+def feature_alpha_dropout(input, p=0.5, training=False, inplace=False, noise_shape=None):
+    # type: (Tensor, float, bool, bool, Optional(BroadcastingList1[int])) -> Tensor
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    return (_VF.feature_alpha_dropout_(input, p, training)
+    if noise_shape is None:
+        noise_shape = input.size()
+    return (_VF.feature_alpha_dropout_(input, p, training, noise_shape)
             if inplace
-            else _VF.feature_alpha_dropout(input, p, training))
+            else _VF.feature_alpha_dropout(input, p, training, noise_shape))
 
 
 @weak_script

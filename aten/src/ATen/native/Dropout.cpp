@@ -98,38 +98,31 @@ Tensor dropout(const Tensor& input, double p, bool train, IntArrayRef noise_shap
   return _dropout<false>(input, p, train, noise_shape);
 }
 
-Tensor& dropout_(Tensor& input, double p, bool train) {
-  auto noise_shape = input.sizes();
+Tensor& dropout_(Tensor& input, double p, bool train, IntArrayRef noise_shape) {
   return _dropout<true>(input, p, train, noise_shape);
 }
 
-Tensor feature_dropout(const Tensor& input, double p, bool train) {
-  auto noise_shape = input.sizes();
+Tensor feature_dropout(const Tensor& input, double p, bool train, IntArrayRef noise_shape) {
   return _feature_dropout<false>(input, p, train, noise_shape);
 }
 
-Tensor& feature_dropout_(Tensor& input, double p, bool train) {
-  auto noise_shape = input.sizes();
+Tensor& feature_dropout_(Tensor& input, double p, bool train, IntArrayRef noise_shape) {
   return _feature_dropout<true>(input, p, train, noise_shape);
 }
 
-Tensor alpha_dropout(const Tensor& input, double p, bool train) {
-  auto noise_shape = input.sizes();
+Tensor alpha_dropout(const Tensor& input, double p, bool train, IntArrayRef noise_shape) {
   return _alpha_dropout<false>(input, p, train, noise_shape);
 }
 
-Tensor& alpha_dropout_(Tensor& input, double p, bool train) {
-  auto noise_shape = input.sizes();
+Tensor& alpha_dropout_(Tensor& input, double p, bool train, IntArrayRef noise_shape) {
   return _alpha_dropout<true>(input, p, train, noise_shape);
 }
 
-Tensor feature_alpha_dropout(const Tensor& input, double p, bool train) {
-  auto noise_shape = input.sizes();
+Tensor feature_alpha_dropout(const Tensor& input, double p, bool train, IntArrayRef noise_shape) {
   return _feature_alpha_dropout<false>(input, p, train, noise_shape);
 }
 
-Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
-  auto noise_shape = input.sizes();
+Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train, IntArrayRef noise_shape) {
   return _feature_alpha_dropout<true>(input, p, train, noise_shape);
 }
 
