@@ -285,7 +285,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
 static Tensor dispatch_invert(const Tensor & self) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  self.bitwise_not();
+  return self.bitwise_not();
 }
 
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
