@@ -89,7 +89,17 @@ struct GraphExecutorImplBase {
     // been set.
     auto local_graph = this->graph->copy();
     for (size_t i = 0; i < input_values.size(); ++i) {
-      local_graph->inputs().at(i)->setType(input_values.at(i)->type());
+      // propagate tensor types
+      if (input_values.at(i)->type()->cast<TensorType>()) {
+        local_graph->inputs().at(i)->setType(input_values.at(i)->type());
+      }
+
+      // None does not subtype Optional[T], schema matching relies on
+      // None values being set to Optional[T] so update type here
+      // see logic for Nones in tryConvertToType
+      if (input_values.at(i)->type() == NoneType::get()) {
+        input_values.at(i)->setType(local_graph->inputs().at(i)->type());
+      }
     }
     PropagateInputShapes(local_graph);
     auto output_values =

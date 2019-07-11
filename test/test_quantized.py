@@ -82,7 +82,7 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the quantized::relu op."""
     @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5)))
     def test_qrelu(self, Q):
-        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
+        X, (scale, zero_point), (qmin, qmax), torch_type = Q
         relu = torch.ops.quantized.relu
 
         Y = X.copy()
@@ -94,7 +94,7 @@ class TestQuantizedOps(TestCase):
 
         Y[Y < 0] = 0
         qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale, zero_point=zero_point, dtype=torch_type)
-        self.assertEqual(qY.int_repr(), qY_hat.int_repr())
+        self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
@@ -169,7 +169,7 @@ class TestQuantizedOps(TestCase):
            padding=st.integers(0, 2))
     def test_max_pool2d(self, Q, kernel, stride, dilation, padding):
         import torch.nn.functional as F
-        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
+        X, (scale, zero_point), (qmin, qmax), torch_type = Q
 
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
@@ -379,9 +379,9 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
-    @given(Q=qtensor(shapes=array_shapes(2, 2,), dtypes=((torch.qint8, np.int8, None),)))
+    @given(Q=qtensor(shapes=array_shapes(2, 2,), dtypes=((torch.qint8, None),)))
     def test_qlinear_unpack(self, Q):
-        W, (W_scale, W_zp), (qmin, qmax), (torch_type, np_type) = Q
+        W, (W_scale, W_zp), (qmin, qmax), torch_type = Q
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
 
@@ -543,9 +543,9 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
-    @given(Q=qtensor(shapes=array_shapes(4, 4,), dtypes=((torch.qint8, np.int8, 0),)))
+    @given(Q=qtensor(shapes=array_shapes(4, 4,), dtypes=((torch.qint8, 0),)))
     def test_qconv_unpack(self, Q):
-        W, (W_scale, W_zp), (qmin, qmax), (torch_type, np_type) = Q
+        W, (W_scale, W_zp), (qmin, qmax), torch_type = Q
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
         qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
 
@@ -572,26 +572,26 @@ class TestQuantizedConv(unittest.TestCase):
 class TestQNNPackOps(TestCase):
 
     """Tests the correctness of the quantized::qnnpack_relu op."""
-    @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5), dtypes=((torch.quint8, np.uint8, 0),),))
+    @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5), dtypes=((torch.quint8, 0),),))
     def test_qnnpack_relu(self, Q):
-        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
+        X, (scale, zero_point), (qmin, qmax), torch_type = Q
         relu = torch.ops.quantized.qnnpack_relu
 
-        Y = X.copy()
         X = torch.from_numpy(X)
+        Y = X.clone()
 
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch_type)
         qY_hat = relu(qX)
 
         Y[Y < 0] = 0
-        qY = _quantize(Y, scale, zero_point, dtype=np_type)
-        np.testing.assert_equal(qY, qY_hat.int_repr())
+        qY = torch.quantize_linear(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
+        self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the quantized::qnnpack_linear op."""
     @given(output_channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           Q=qtensor(shapes=array_shapes(2, 3, 8, 15), dtypes=((torch.quint8, np.uint8, 0),),))
+           Q=qtensor(shapes=array_shapes(2, 3, 8, 15), dtypes=((torch.quint8, 0),),))
     def test_qnnpack_linear(self, output_channels, Q):
-        X, (X_scale, X_zp), (qmin, qmax), (torch_type, np_type) = Q
+        X, (X_scale, X_zp), (qmin, qmax), torch_type = Q
 
         input_channels = X.shape[X.ndim - 1]
 

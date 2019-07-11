@@ -3481,7 +3481,7 @@ class _TestTorchMixin(object):
                         self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device=device, dtype=dt).shape)
                         self.assertRaises(RuntimeError, lambda: torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                         self.assertRaises(RuntimeError, lambda: torch.full(shape, 3, device=device, dtype=dt).shape)
-                        self.assertRaises(RuntimeError, lambda: torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
+                        self.assertRaises(RuntimeError, lambda: torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3))
                         self.assertRaises(RuntimeError, lambda: torch.ones(shape, device=device, dtype=dt).shape)
                         self.assertRaises(RuntimeError, lambda: torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                         self.assertRaises(RuntimeError, lambda: torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
@@ -11347,6 +11347,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             else:
                 self.assertFalse(x[idx] ^ y[idx])
 
+        invert_result = ~x
+        for idx in iter_indices(x):
+            self.assertEqual(1 - x[idx], invert_result[idx])
+
         x_clone = x.clone()
         x_clone &= y
         self.assertEqual(x_clone, and_result)
@@ -11359,20 +11363,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x_clone ^= y
         self.assertEqual(x_clone, xor_result)
 
-    def test_op_invert(self):
-        res = 0xffff - torch.arange(127, dtype=torch.int8)
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.arange(127, dtype=dtype)
-            self.assertEqual(res.type(dtype), ~a)
-
-        self.assertEqual(torch.tensor([True, False]),
-                         ~torch.tensor([False, True]))
-
-        # test exceptions
-        for dtype in(torch.half, torch.float, torch.double):
-            a = torch.zeros(10, dtype=dtype)
-            with self.assertRaises(TypeError):
-                b = ~a
+    def test_invert(self):
+        x = torch.ByteTensor([0, 1, 1])
+        self.assertEqual((~x).tolist(), [1, 0, 0])
 
     def test_apply(self):
         x = torch.arange(1, 6)
@@ -12245,6 +12238,46 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         c1 = torch.tensor([True, False], dtype=torch.bool)
         c2 = torch.tensor([True, False], dtype=bool)
         self.assertEqual(c1.dtype, c2.dtype)
+
+    def test_fill_diagonal(self):
+        a1 = torch.randn(7, 3)
+        a2 = a1.clone()
+        v = 1
+        for i in range(3):
+            a2[i][i] = v
+        a1.fill_diagonal_(v)
+        self.assertEqual(a1, a2)
+
+        b1 = torch.randn(7, 3)
+        b2 = b1.clone()
+        for i in range(3):
+            b2[i][i] = v
+            b2[i + 4][i] = v
+        b1.fill_diagonal_(v, wrap=True)
+        self.assertEqual(b1, b2)
+
+        c1 = torch.rand(3, 3, 3)
+        c2 = c1.clone()
+        for i in range(3):
+            c2[i][i][i] = v
+        c1.fill_diagonal_(v)
+        self.assertEqual(c1, c2)
+
+        # non-contiguous tensor
+        d1 = torch.rand(3, 3, 3)[:, 1, ...]
+        d2 = d1.clone()
+        for i in range(3):
+            d2[i][i] = v
+        d1.fill_diagonal_(v)
+        self.assertEqual(d1, d2)
+
+        e1 = torch.rand(7, 3, 3)[:, 1, ...]
+        e2 = e1.clone()
+        for i in range(3):
+            e2[i][i] = v
+            e2[i + 4][i] = v
+        e1.fill_diagonal_(v, wrap=True)
+        self.assertEqual(e1, e2)
 
 # Functions to test negative dimension wrapping
 METHOD = 1

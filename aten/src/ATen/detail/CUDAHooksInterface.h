@@ -13,11 +13,6 @@
 // Forward-declares THCState
 struct THCState;
 
-// Forward-declares at::cuda::NVRTC
-namespace at { namespace cuda {
-struct NVRTC;
-}} // at::cuda
-
 namespace at {
 class Context;
 }
@@ -81,10 +76,6 @@ struct CAFFE2_API CUDAHooksInterface {
 
   virtual bool hasCuDNN() const {
     return false;
-  }
-
-  virtual const at::cuda::NVRTC& nvrtc() const {
-    AT_ERROR("NVRTC requires CUDA. ", CUDA_HELP);
   }
 
   virtual int64_t current_device() const {
