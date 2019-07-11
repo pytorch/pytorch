@@ -387,6 +387,54 @@ void testCustomFusion() {
   AT_ASSERT(hits == 2);
 }
 
+void testCustomFusionNestedBlocks() {
+  auto g = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+
+  // test CustomFusion in nested blocks;
+  auto a = SymbolicVariable::asNewInput(*g, type);
+  auto b = SymbolicVariable::asNewInput(*g, type);
+  auto c = SymbolicVariable::asNewInput(*g, type);
+ 
+  auto r =
+      g->appendNode(g->create(prim::If, {c.value()}));
+  auto then_block = r->addBlock();
+  auto else_block = r->addBlock();
+  {
+    WithInsertPoint guard(then_block);
+    auto d = c * a;
+    auto t = d * b;
+    then_block->registerOutput(t.value());
+  }
+  {
+    WithInsertPoint guard(else_block);
+    auto d = c + a;
+    auto t = d + b;
+    else_block->registerOutput(t.value());
+  }
+  g->registerOutput((Var(r->output()) + c).value());
+
+  CustomFuseGraph(
+      g,
+      [](Node* n) { return n->kind() == aten::mul; },
+      Symbol::fromQualString("prim::FusionGroup"));
+  
+  // Could be done in more efficient ways, but this is only a test.
+  std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b, Symbol s) {
+      for (auto node : b->nodes()) {
+          if (node->kind() == s) 
+              return true;
+          for (auto nested_b : node->blocks())
+              if (dfs(nested_b, s))
+                  return true;
+      }
+      return false;
+  };
+
+  AT_ASSERT(dfs(g->block(), Symbol::fromQualString("prim::FusionGroup")));
+}
+
 static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.

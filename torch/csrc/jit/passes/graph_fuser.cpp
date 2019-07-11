@@ -1155,7 +1155,7 @@ struct GraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(sub_block, graph_).run();
+        GraphFuser(sub_block, graph_, callback_, kind_).run();
       }
     }
   }
