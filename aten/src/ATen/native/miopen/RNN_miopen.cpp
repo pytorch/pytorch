@@ -448,7 +448,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
     RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
-    //TODO: Need to implement get_parameters that gets params and params_stride0. [Done.]
     FilterDescriptor w_desc;
     auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], datatype);
     auto weight_buf = at::empty(num_weights, x.options());
@@ -523,7 +522,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 
 	RNNParams fn;
 	auto datatype = getMiopenDataType(input);
-	fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, miopenRNNwithBias);	// AF TODO: Check the bias bool
+	fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, miopenRNNwithBias);
 	fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
 	auto handle = getMiopenHandle();

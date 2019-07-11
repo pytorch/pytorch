@@ -800,8 +800,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   } 
 
   if (use_miopen(_input, dropout_p)) {
-    //std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> output = at::miopen_rnn(_input, );
-    //AT_ERROR(" miopen_rnn : please implement the function.");
     Tensor output, hy, cy;
     lstm_miopen_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
               num_layers, dropout_p, train, bidirectional, batch_first);
@@ -831,7 +829,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   } 
 
   if (use_miopen(data, dropout_p)) {
-    //AT_ERROR("miopen_rnn (LSTM) : please implement the function.");
     Tensor output, hy, cy;
     lstm_packed_miopen_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
