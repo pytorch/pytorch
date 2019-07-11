@@ -10,13 +10,13 @@ namespace native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& fill_out(Tensor& self, const Scalar value) {
+Tensor& fill_out(Tensor& self, Scalar value) {
   auto iter = TensorIterator::nullary_op(self);
   fill_stub(iter->device_type(), *iter, value);
   return self;
 }
 
-Tensor& fill_(Tensor& self, const Scalar value) {
+Tensor& fill_(Tensor& self, Scalar value) {
   return fill_out(self, value);
 }
 
@@ -29,7 +29,7 @@ DEFINE_DISPATCH(fill_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& fill_diagonal_(Tensor& self, const Scalar fill_value, bool wrap) {
+Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
   int64_t nDims = self.dim();
   TORCH_CHECK(nDims >= 2, "dimensions must larger than 1");
 
