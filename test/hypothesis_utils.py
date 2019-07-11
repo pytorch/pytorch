@@ -158,7 +158,7 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
                          shape=(_minibatch, _in_channels, _iH, _iW)))
     w = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
-                         shape=(_out_channels // g, _in_channels // g,
+                         shape=(_out_channels, _in_channels // g,
                                 _kH, _kW)))
     b = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
