@@ -17,7 +17,7 @@ from torch.nn.modules.utils import _pair
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
     return np.floor((input_size + 2 * padding - kernel_size - (kernel_size - 1)
-                    * (dilation - 1)) / stride) + 2 * output_padding + 1
+                     * (dilation - 1)) / stride) + 2 * output_padding + 1
 
 
 class Conv2d(_ConvNd):
@@ -54,7 +54,8 @@ class Conv2d(_ConvNd):
         qbias = torch._empty_affine_quantized([out_channels],
                                               scale=1, zero_point=0,
                                               dtype=torch.qint32)
-        self.register_buffer('_packed_weight', torch.ops.quantized.fbgemm_conv_prepack(qweight, self.groups))
+        self.register_buffer('_packed_weight',
+                             torch.ops.quantized.fbgemm_conv_prepack(qweight, self.groups))
         self.register_buffer('bias', qbias)
         self.register_buffer('_scale', torch.tensor([1.0], dtype=torch.double))
         self.register_buffer('_zero_point', torch.tensor([0], dtype=torch.long))
