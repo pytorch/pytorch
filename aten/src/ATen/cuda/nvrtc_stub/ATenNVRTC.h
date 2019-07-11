@@ -2,10 +2,7 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
-
-#ifndef __HIP_PLATFORM_HCC__
 #include <nvrtc.h>
-#endif
 
 namespace at { namespace cuda {
 
