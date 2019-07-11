@@ -683,10 +683,6 @@ Tensor batch_norm_elemt_cuda_template(const Tensor& input_, const Tensor& weight
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
   auto output_reshaped = at::empty_like(input_reshaped);
 
-  //std::cout << "elemt_before_packed_accessor" << std::endl;
-  //std::cout << "input_: " << input_.scalar_type() << ", output_reshaped: " << output_reshaped.scalar_type();
-  //std::cout << ", weight_: " << weight_.scalar_type() << ", bias_: " << bias_.scalar_type();
-  //std::cout << ", mean_: " << mean_.scalar_type() << ", invstd_: " << invstd_.scalar_type() << std::endl;
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
@@ -700,7 +696,6 @@ Tensor batch_norm_elemt_cuda_template(const Tensor& input_, const Tensor& weight
   auto mean = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(mean_);
   auto invstd = packed_accessor_or_dummy<stat_accscalar_t, 1, RestrictPtrTraits, index_t>(invstd_);
   auto stream = at::cuda::getCurrentCUDAStream();
- // std::cout << "elemt_after_packed_accessor" << std::endl;
 
   // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
   // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks
@@ -723,7 +718,6 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
                                                                  const Tensor& running_mean_, const Tensor& running_var_,
                                                                  double momentum, double epsilon, const Tensor& counts_) {
 
-  //std::cout << "inside batch_norm_gather_stats_cuda_template" << std::endl;
   Tensor save_mean_;
   Tensor save_invstd_;
 
@@ -735,10 +729,6 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   save_mean_ = at::empty({features}, input_options);
   save_invstd_ = at::empty({features}, input_options);
 
-  //std::cout << "before packed_accessor_or_dummy" << std::endl;
-  //std::cout << "mean_.scalar_type(): " << mean_.scalar_type() << ", invstd.scalar_type(): " << invstd_.scalar_type();
-  //std::cout << ", running_mean.scalar_type(): " << running_mean_.scalar_type() << ", running_var.scalar_type(): " << running_var_.scalar_type();
-  //std::cout << ", counts.scalar_type(): " << counts_.scalar_type() << std::endl;
   auto mean = packed_accessor_or_dummy<accscalar_t, 2, RestrictPtrTraits, index_t>(mean_);
   auto invstd = packed_accessor_or_dummy<accscalar_t, 2, RestrictPtrTraits, index_t>(invstd_);
   auto running_mean = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits, index_t>(running_mean_);
@@ -748,15 +738,12 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   auto save_mean = save_mean_.packed_accessor<accscalar_t, 1, RestrictPtrTraits, index_t>();
   auto save_invstd = save_invstd_.packed_accessor<accscalar_t, 1, RestrictPtrTraits, index_t>();
   auto stream = at::cuda::getCurrentCUDAStream();
-  //std::cout << "after oacked_accessor_or_dummy" << std::endl;
 
   int block = getNumThreads(features);
   int grid = std::max<int>(1, features/block);
-  //std::cout << "before batch_norm_reduce_statistics_kernel" << std::endl;
   batch_norm_reduce_statistics_kernel<scalar_t, accscalar_t, index_t> <<<grid, block, 0, stream>>>
       (mean, invstd, save_mean, save_invstd, running_mean, running_var, epsilon, momentum, counts);
   THCudaCheck(cudaGetLastError());
-  //std::cout << "after batch_norm_reduce_statisitcs_kernel" << std::endl;
   return std::make_tuple(save_mean_, save_invstd_);
 }
 

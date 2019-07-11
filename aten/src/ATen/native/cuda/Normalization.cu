@@ -81,7 +81,6 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(const Tensor
                                                         const Tensor& running_var, double momentum, double epsilon, IntArrayRef counts) {
   Tensor counts_ = at::from_blob((void*)counts.data(), {(int64_t)counts.size()}, self.options().dtype(at::kLong).device(at::kCPU));
   counts_ = counts_.to(self.device()).to(running_mean.dtype());
-  std::cout << "running_mean.scalar_type() " << running_mean.scalar_type();
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(running_mean.scalar_type(), "batch_norm_update_stats_cuda", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
       if (cuda::detail::canUse32BitIndexMath(self)) {
