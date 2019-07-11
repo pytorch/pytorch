@@ -88,28 +88,23 @@ def _cast_to_type(g, input, to_type):
     return getattr(sym_opset9, '_cast_{}'.format(to_type))(g, input, False)
 
 
-@wrap_logical_op_with_cast_to('Byte')
-def gt(g, input, other):
-    return gt_impl(g, input, other)
-
-
-def gt_impl(g, input, other):
+def _comparison_operator(g, input, other, op_name):
     other = sym_help._maybe_get_scalar(other)
     other = sym_help._if_scalar_type_as(g, other, input)
     _, input, other = _try_cast_integer_to_float(g, input, other)
-    return g.op("Greater", input, other)
+    return g.op(op_name, input, other)
+
+
+# NOTE: For symbolics {gt, lt, bmm, matmul, prelu, mm, addmm, view, flatten},
+#       integer input type not supported in opset8. Cast to float if possible.
+@wrap_logical_op_with_cast_to('Byte')
+def gt(g, input, other):
+    return _comparison_operator(g, input, other, "Greater")
 
 
 @wrap_logical_op_with_cast_to('Byte')
 def lt(g, input, other):
-    return lt_impl(g, input, other)
-
-
-def lt_impl(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    other = sym_help._if_scalar_type_as(g, other, input)
-    _, input, other = _try_cast_integer_to_float(g, input, other)
-    return g.op("Less", input, other)
+    return _comparison_operator(g, input, other, "Less")
 
 
 def bmm(g, self, other):
@@ -121,11 +116,7 @@ def bmm(g, self, other):
 
 
 def matmul(g, self, other):
-    if _try_get_scalar_type(self):
-        old_type, self, other = _try_cast_integer_to_float(g, self, other)
-        return _cast_to_type(g, g.op("MatMul", self, other), old_type)
-    else:
-        return g.op("MatMul", self, other)
+    return bmm(g, self, other)
 
 
 def prelu(g, self, weight):
