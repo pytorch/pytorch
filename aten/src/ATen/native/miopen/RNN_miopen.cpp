@@ -80,9 +80,6 @@ struct RNNDescriptorParams {
         this->algo = algo;
     }
 
-    /*fn_mode is set in torch.backends.cudnn (get_cudnn_mode() method) 
-      Need to modify the interface to the frontend to make this function useful.
-     */
     void set_mode(int64_t fn_mode) {
         switch (fn_mode) {
             case 0:
