@@ -6896,6 +6896,9 @@ class TestNN(NNTestCase):
         m = nn.BatchNorm2d(3, affine=False).cuda().float()  # keep running stats in FP32
         output = m(input)
         self.assertEqual(output.type(), input.type())
+        m.eval()
+        output = m(input)
+        self.assertEqual(output.type(), input.type())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types([torch.float, torch.half])
