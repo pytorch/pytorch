@@ -154,9 +154,9 @@ struct ATenDLMTensor {
 };
 
 void deleter(DLManagedTensor* arg) {
-  arg->manager_ctx = nullptr;
   arg->dl_tensor.data = nullptr;
   delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
+  arg->manager_ctx = nullptr;
 }
 
 // This function returns a shared_ptr to memory managed DLpack tensor
