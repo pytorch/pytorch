@@ -185,6 +185,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: baddbmm_
    .. automethod:: bernoulli
    .. automethod:: bernoulli_
+   .. automethod:: bfloat16
    .. automethod:: bincount
    .. automethod:: bitwise_not
    .. automethod:: bitwise_not_

@@ -415,6 +415,10 @@ static PyObject * THPVariable_bool(PyObject* self, PyObject* args) {
   return THPVariable_to_type(self, ScalarType::Bool);
 }
 
+static PyObject * THPVariable_bfloat16(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::BFloat16);
+}
+
 static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -732,6 +736,7 @@ PyMethodDef variable_methods[] = {
   {"_is_view", (PyCFunction)THPVariable__is_view, METH_NOARGS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
+  {"bfloat16", (PyCFunction)THPVariable_bfloat16, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},

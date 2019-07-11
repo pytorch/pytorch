@@ -2522,6 +2522,12 @@ char() -> Tensor
 ``self.char()`` is equivalent to ``self.to(torch.int8)``. See :func:`to`.
 """)
 
+add_docstr_all('bfloat16',
+               r"""
+bfloat16() -> Tensor
+``self.bfloat16()`` is equivalent to ``self.to(torch.bfloat16)``. See :func:`to`.
+""")
+
 add_docstr_all('double',
                r"""
 double() -> Tensor
