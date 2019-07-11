@@ -721,6 +721,8 @@ void initJitScriptBindings(PyObject* module) {
               pythonResolver(rcb, classDef.name().name(), classType));
         }
         cu->define(methodDefs, rcbs, simpleSelf(classType));
+
+        return classType;
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {

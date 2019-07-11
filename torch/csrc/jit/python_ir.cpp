@@ -667,7 +667,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
-
+  py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
+      .def(py::init([](const std::string& name,
+                       std::shared_ptr<script::CompilationUnit> cu) {
+        return ClassType::create(c10::QualifiedName(name), cu);
+      }));
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
       .def(
           py::init([](std::vector<TypePtr> a) { return TupleType::create(a); }))

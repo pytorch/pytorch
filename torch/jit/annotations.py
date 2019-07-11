@@ -223,6 +223,14 @@ def ann_to_type(ann):
         return StringType.get()
     elif ann is bool:
         return BoolType.get()
+    elif inspect.isclass(ann):
+        qualname = torch.jit._qualified_name(ann)
+        print(qualname)
+        if qualname in torch.jit._script_classes:
+            return torch.jit._script_classes[qualname].type
+        else:
+            raise ValueError("Class annotation {} is not a script class "
+                             "(did you decorate the class with '@torch.jit.script'?)".format(ann))
     raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 

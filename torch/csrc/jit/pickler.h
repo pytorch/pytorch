@@ -138,6 +138,7 @@ class Pickler {
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
+  void pushObject(const IValue& ivalue);
 
   void pushBinGet(uint32_t memo_id);
   void pushClass(PicklerClass cls);
@@ -256,6 +257,7 @@ class Unpickler {
   OpCode readOpCode();
   std::string readString();
   void readList();
+  void readObject(std::string module, std::string basename);
   void run();
 
   std::vector<StackItem> stack_;

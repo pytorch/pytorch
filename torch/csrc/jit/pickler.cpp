@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/pickler.h>
 #include <ATen/ATen.h>
-#include <string>
 #include <ATen/core/Dict.h>
+#include <string>
 
 namespace torch {
 namespace jit {
@@ -12,7 +12,7 @@ using ::c10::IValue;
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
 
-PicklerClass getClass(const std::string& str) {
+c10::optional<PicklerClass> getClass(const std::string& str) {
   if (str == "build_tensor_from_id") {
     return PicklerClass::TENSOR;
   } else if (str == "build_intlist") {
@@ -31,7 +31,8 @@ PicklerClass getClass(const std::string& str) {
   } else if (str == "IntList") {
     return PicklerClass::INTLIST;
   }
-  AT_ERROR("Unknown class name for unpickler: ", str);
+
+  return c10::nullopt;
 }
 
 const std::string& getClassName(PicklerClass cls) {
@@ -207,6 +208,8 @@ void Pickler::addIValue(const IValue& ivalue) {
             addIValue(item);
           }
         });
+  } else if (ivalue.isObject()) {
+    pushObject(ivalue);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -224,6 +227,35 @@ const void* Pickler::getPointer(const IValue& ivalue) {
   }
 
   return nullptr;
+}
+
+void Pickler::pushObject(const IValue& ivalue) {
+  const auto& object = ivalue.toObject();
+
+  // Class name
+  std::stringstream global_name;
+  global_name << object->type()->qualifier() << "\n"
+              << object->type()->basename() << "\n";
+  pushGlobal(global_name.str());
+
+  // This amounts to a call to __new__
+  push<OpCode>(OpCode::EMPTY_TUPLE);
+  push<OpCode>(OpCode::NEWOBJ);
+
+  // State dict for __setstate__
+  // TODO: use __(s/g)etstate__ if present
+  auto state_dict = c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
+
+  for (size_t i = 0; i < object->type()->numAttributes(); ++i) {
+    auto name = object->type()->getAttributeName(i);
+    auto value = object->getSlot(i);
+    state_dict.insert(name, value);
+  }
+
+  pushDict(state_dict);
+
+  // Apply state dict / state to make new object
+  push<OpCode>(OpCode::BUILD);
 }
 
 void Pickler::pushInt(const IValue& ivalue) {
@@ -682,10 +714,17 @@ OpCode Unpickler::readInstruction() {
       auto module_name = readString();
       // TODO [unpickler refactor] __main__ isn't used by the pickler anymore
       if (module_name == "__main__") {
-        stack_.emplace_back(static_cast<uint8_t>(getClass(readString())));
+        stack_.emplace_back(static_cast<uint8_t>(*getClass(readString())));
       } else {
         // Push class name to stack
-        stack_.emplace_back(getClass(readString()));
+        auto basename = readString();
+        if (auto the_class = getClass(basename)) {
+          // It's a builtin function for a specialized pickle value
+          stack_.emplace_back(*the_class);
+        } else {
+          // It's a script class
+          readObject(module_name, basename);
+        }
       }
     } break;
     case OpCode::NEWOBJ: {
@@ -693,24 +732,26 @@ OpCode Unpickler::readInstruction() {
       stack_.pop_back();
     } break;
     case OpCode::BUILD: {
+      std::cout << "Building\n";
+      stack_.push_back(IValue(2));
       // TODO: [unpickler refactor]
-      auto setitem_data = stack_.back().ivalue();
-      stack_.pop_back();
-
-      auto class_name =
-          static_cast<PicklerClass>(uint8_t(stack_.back().ivalue().toInt()));
-      stack_.pop_back();
-
-      switch (class_name) {
-        case PicklerClass::TENSOR:
-          stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
-          break;
-        case PicklerClass::INTLIST:
-          stack_.emplace_back(setitem_data);
-          break;
-        default:
-          AT_ERROR("Unknown pickler class id");
-      }
+      // auto setitem_data = stack_.back().ivalue();
+      // stack_.pop_back();
+      //
+      // auto class_name =
+      //     static_cast<PicklerClass>(uint8_t(stack_.back().ivalue().toInt()));
+      // stack_.pop_back();
+      //
+      // switch (class_name) {
+      //   case PicklerClass::TENSOR:
+      //     stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+      //     break;
+      //   case PicklerClass::INTLIST:
+      //     stack_.emplace_back(setitem_data);
+      //     break;
+      //   default:
+      //     AT_ERROR("Unknown pickler class id");
+      // }
     } break;
     case OpCode::REDUCE: {
       // Pop reduce arg off the stack
@@ -751,6 +792,12 @@ OpCode Unpickler::readInstruction() {
   }
   return opcode;
 }
+
+void Unpickler::readObject(std::string module, std::string basename) {
+  std::cout << "Reading object " << module << " " << basename << "\n";
+  // stack_.emplace_back(IValue());
+}
+
 
 // Pop all the list items off of the stack and append them to the list at the
 // corresponding MARK

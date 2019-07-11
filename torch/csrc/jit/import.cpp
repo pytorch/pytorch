@@ -36,6 +36,12 @@ using caffe2::serialize::ReadAdapterInterface;
 
 namespace {
 
+struct PendingAttribute {
+  std::string attr_name;
+  std::string type_name;
+  IValue value;
+};
+
 // this is a deserializer class which loads script modules from pt files. the
 // content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h. all the records except the last
@@ -80,6 +86,7 @@ class ScriptModuleDeserializer final {
   std::vector<IValue> pickled_ivalues_;
 
   std::unordered_set<std::string> imported_libs_;
+  std::unordered_map<std::string, std::pair<script::Module, PendingAttribute>> pending_attributes;
 
   script::Module main_module_;
 };
@@ -256,6 +263,7 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
 }
 
 void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
+  std::cout << "Import callback for " << qualifier << "\n";
   if (imported_libs_.count(qualifier)) {
     return;
   }
@@ -274,6 +282,18 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
       src,
       tensor_table_,
       import_callback);
+
+  // This module has been loaded, so check if any attributes with types defined
+  // in this module are pending
+  if (pending_attributes.count(qualifier)) {
+    std::cout << "Pending attributes!\n";
+    auto entry = pending_attributes[qualifier];
+    auto type_name = entry.second.type_name;
+    // TypePtr type = nullptr;
+    auto pyCu = script::CompilationUnit::_get_python_cu();
+    const auto classType = pyCu->get_class(c10::QualifiedName(type_name));
+    entry.first.register_attribute(entry.second.attr_name, classType, entry.second.value);
+  }
 }
 
 void ScriptModuleDeserializer::moduleSetState(
@@ -327,8 +347,27 @@ void ScriptModuleDeserializer::convertModule(
       ivalue = pickled_ivalues_.at(attr_def.id());
     }
 
-    module.register_attribute(
-        attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
+    TypePtr type;
+    try {
+      type = typeParser.parseType(attr_def.type());
+    } catch (...) {
+      // TODO: make tryParseType instead of this try/catch
+      type = nullptr;
+      // type = TensorType::get();
+    }
+    std::cout << "Registering attribute " << attr_def.name() << " of type " << (type ? type->python_str() : "nullptr") << "\n";
+    if (type == nullptr) {
+      std::cout << " no type\n";
+      // TODO: get real qualifier
+      PendingAttribute attribute{attr_def.name(), attr_def.type(), ivalue};
+      pending_attributes["__torch__"] = std::make_pair(module, attribute);
+    } else {
+      module.register_attribute(
+          attr_def.name(), type, ivalue);
+    }
+
+
+
   }
 
   // If present, load in the table of source ranges from the original
@@ -358,6 +397,7 @@ void ScriptModuleDeserializer::convertModule(
 
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
+    std::cout << "Importing methods\n";
     script::import_methods(
         *main_module_.class_compilation_unit(),
         module,

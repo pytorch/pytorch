@@ -22,6 +22,7 @@ ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::shared_ptr<CompilationUnit> cu,
     bool is_module) {
+  std::cout << "Creating a class type: " << qualifiedName->qualifiedName() << "\n";
   return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
 }
 

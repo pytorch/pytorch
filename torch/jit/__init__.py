@@ -1099,8 +1099,9 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         qualified_name = _qualified_name(obj)
         ast = get_jit_class_def(obj, obj.__name__)
-        _jit_script_class_compile(qualified_name, ast, _rcb)
-        _add_script_class(obj, qualified_name)
+        class_type = _jit_script_class_compile(qualified_name, ast, _rcb)
+        print("got type", class_type)
+        _add_script_class(obj, qualified_name, class_type)
         return obj
     else:
         ast = get_jit_def(obj)
@@ -1538,6 +1539,8 @@ if _enabled:
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
                     try:
+                        print("the_type", the_type)
+                        print("value", value.value)
                         self._c._register_attribute(attr, the_type, value.value)
                     except RuntimeError:
                         raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
@@ -2026,13 +2029,15 @@ def _register_builtin(fn, op):
 def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
 
-# qualified_name => ScriptClass mapping
+# qualified_name => TypedClass[ScriptClass, ClassType] mapping
 _script_classes = {}
 
+TypedClass = collections.namedtuple('TypedClass', ['cls', 'type'])
 
-def _add_script_class(cls, name):
+
+def _add_script_class(cls, name, the_type):
     global _script_classes
-    _script_classes[name] = cls
+    _script_classes[name] = TypedClass(cls, the_type)
 
 
 def _get_script_class(name):
@@ -2040,7 +2045,7 @@ def _get_script_class(name):
     if name not in _script_classes:
         raise RuntimeError("Unknown reference to ScriptClass '{}'. "
                            "Did you forget to import it?".format(name))
-    return _script_classes[name]
+    return _script_classes[name].cls
 
 # torch.jit.Error
 Error = torch._C.JITException
