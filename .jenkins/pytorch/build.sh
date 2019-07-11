@@ -108,6 +108,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+
+  if [ -e /opt/rocm/hcc/bin/clang-7.0_original ]; then
+    # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+    mv /opt/rocm/hcc/bin/clang-7.0_original /opt/rocm/hcc/bin/clang-9
+  fi
   exit 0
 fi
 

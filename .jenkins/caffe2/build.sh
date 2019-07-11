@@ -176,7 +176,7 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # the build process, leaving undefined symbols in the shared lib
   # which will cause undefined symbol errors when later running
   # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
+  export MAX_JOBS=3
 
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
@@ -270,5 +270,12 @@ fi
 
 # Install ONNX into a local directory
 pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+
+if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  if [ -e /opt/rocm/hcc/bin/clang-7.0_original ]; then
+    # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+    mv /opt/rocm/hcc/bin/clang-7.0_original /opt/rocm/hcc/bin/clang-9
+  fi
+fi
 
 report_compile_cache_stats
