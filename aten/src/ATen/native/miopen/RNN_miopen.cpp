@@ -421,10 +421,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     check_device(input_r, weight, {hx, cx});
     auto input = input_r;
 
-    if (fn_dropout_state.defined()) {
-    	AT_ERROR("miopen_rnn : Dropout is not supported in MIOpen. ");
-    }
-
     RNNParams fn;
     auto datatype = getMiopenDataType(input);
     miopenRNNBiasMode_t bias_mode = (weight_stride0 == 4) ? miopenRNNwithBias : miopenRNNNoBias;
@@ -763,6 +759,31 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
 }
 
 namespace {
+
+std::tuple<Tensor, Tensor> unpack_hidden(const Tensor& hidden) {
+	return std::make_tuple(hidden, at::Tensor{});
+}
+
+std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidden) {
+	return hidden;
+}
+
+template<typename hidden_type>
+hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
+	static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
+	AT_ERROR("NOT IMPLEMENTED");
+}
+
+template<>
+Tensor pack_hidden<Tensor>(const Tensor& hx, const Tensor& cx) {
+	AT_ASSERT(cx.numel() == 0);
+	return hx;
+}
+
+template<>
+std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor& hx, const Tensor& cx) {
+	return std::make_tuple(hx, cx);
+}
 
 template<typename hidden_type>
 std::pair<Tensor, hidden_type> _miopen_impl(
