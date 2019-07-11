@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 import torch
 import torch.nn.quantized.functional as qF
+from torch.nn.quantized.modules.conv import _conv_output_shape
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -15,12 +16,6 @@ from common_utils import TestCase, run_tests
 
 
 class FunctionalAPITest(TestCase):
-    """Computes the output shape given convolution parameters."""
-    def _conv_output_shape(self, input_size, kernel_size, padding, stride,
-                           dilation):
-        return np.floor((input_size + 2 * padding - kernel_size
-                         - (kernel_size - 1) * (dilation - 1)) / stride) + 1
-
     @given(Q=qtensors_conv(min_batch=1, max_batch=3,
                            min_in_channels=1, max_in_channels=7,
                            min_out_channels=1, max_out_channels=7,
@@ -30,9 +25,8 @@ class FunctionalAPITest(TestCase):
                            max_groups=4),
            padH=st.integers(1, 3), padW=st.integers(1, 3),
            sH=st.integers(1, 3), sW=st.integers(1, 3),
-           dH=st.integers(1, 2), dW=st.integers(1, 2),
-           prepacked=st.booleans())
-    def test_conv_api(self, Q, padH, padW, sH, sW, dH, dW, prepacked):
+           dH=st.integers(1, 1), dW=st.integers(1, 1))  # No dilation for quant!
+    def test_conv_api(self, Q, padH, padW, sH, sW, dH, dW):
         """Tests the correctness of the conv functional.
 
         The correctness is defined by the behavior being similar to the
@@ -48,9 +42,9 @@ class FunctionalAPITest(TestCase):
         kH, kW = filters.shape[2:]
         assume(kH // 2 >= padH)
         assume(kW // 2 >= padW)
-        oH = self._conv_output_shape(iH, kH, padH, sH, dH)
+        oH = _conv_output_shape(iH, kH, padH, sH, dH)
         assume(oH > 0)
-        oW = self._conv_output_shape(iW, kW, padW, sW, dW)
+        oW = _conv_output_shape(iW, kW, padW, sW, dW)
         assume(oW > 0)
 
         inputs = torch.from_numpy(inputs).to(torch.float)
@@ -84,19 +78,16 @@ class FunctionalAPITest(TestCase):
             e_msg = str(e).split("\n")[0].split("(")[0].strip()
             np.testing.assert_raises_regex(
                 type(e), e_msg, qF.conv2d,
-                q_inputs, q_filters_ref, bias=q_bias,
+                q_inputs, q_filters, bias=q_bias,
                 scale=scale, zero_point=zero_point,
                 stride=stride, padding=i_padding, dilation=dilation,
-                groups=groups, prepacked=True, dtype=torch_type)
+                groups=groups, dtype=torch_type)
         else:
-            if prepacked:
-                q_filters = torch.ops.quantized.fbgemm_conv_prepack(q_filters,
-                                                                    groups)
             q_result = qF.conv2d(q_inputs, q_filters, bias=q_bias,
                                  scale=scale, zero_point=zero_point,
                                  stride=stride, padding=i_padding,
                                  dilation=dilation, groups=groups,
-                                 prepacked=prepacked, dtype=torch_type)
+                                 dtype=torch_type)
 
             np.testing.assert_equal(ref_result.int_repr().numpy(),
                                     q_result.int_repr().numpy())
