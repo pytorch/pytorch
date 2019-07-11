@@ -808,7 +808,7 @@ class OneCycleLR(_LRScheduler):
         pct_start (float): The percentage of the cycle (in number of steps) spent
             increasing the learning rate.
             Default: 0.3
-        anneal_strategy (str): {'cos', 'linear', 'exp'}
+        anneal_strategy (str): {'cos', 'linear'}
             Specifies the annealing strategy.
             Default: 'cos'
         cycle_momentum (bool): If ``True``, momentum is cycled inversely
@@ -892,14 +892,12 @@ class OneCycleLR(_LRScheduler):
         if pct_start < 0 or pct_start > 1 or not isinstance(pct_start, float):
             raise ValueError("Expected float between 0 and 1 pct_start, but got {}".format(pct_start))
 
-        if anneal_strategy not in ['cos', 'linear', 'exp']:
-            raise ValueError("anneal_strategy must by one of 'cos', 'linear' or 'exp', instead got {}".format(anneal_strategy))
+        if anneal_strategy not in ['cos', 'linear']:
+            raise ValueError("anneal_strategy must by one of 'cos' or 'linear', instead got {}".format(anneal_strategy))
         elif anneal_strategy == 'cos':
             self.anneal_func = self._annealing_cos
         elif anneal_strategy == 'linear':
             self.anneal_func = self._annealing_linear
-        elif anneal_strategy == 'exp':
-            self.anneal_func = self._annealing_exp
 
         self.cycle_momentum = cycle_momentum
         if self.cycle_momentum:
@@ -944,10 +942,6 @@ class OneCycleLR(_LRScheduler):
     def _annealing_linear(self, start, end, pct):
         "Linearly anneal from `start` to `end` as pct goes from 0.0 to 1.0."
         return (end - start) * pct + start
-
-    def _annealing_exp(self, start, end, pct):
-        "Exponentially anneal from `start` to `end` as pct goes from 0.0 to 1.0."
-        return start * (end / start) ** pct
 
     def get_lr(self):
         lrs = []
