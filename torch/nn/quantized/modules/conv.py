@@ -77,7 +77,7 @@ class Conv2d(_ConvNd):
         if isinstance(s, torch.Tensor):
             self._scale = s
         else:
-            self._scale = torch.Tensor([s])
+            self._scale = torch.tensor([s], dtype=torch.double)
 
     @property
     def zero_point(self):
