@@ -1,7 +1,15 @@
+import torch
 from . import nested
 import torch.prototypes.nestedtensor.codegen as codegen
-from torch.utils.cpp_extension import load
-tensor_list = load(name="tensor_list", sources=["torch/prototypes/nestedtensor/csrc/generated/tensor_list.cpp"])
+
+# from torch.utils.cpp_extension import load
+# tensor_list = load(name="tensor_list", sources=["torch/prototypes/nestedtensor/csrc/generated/tensor_list.cpp"])
+
+def is_available():
+    return hasattr(torch._C, "_tensor_list_init")
+
+if is_available() and not torch._C._tensor_list_init():
+    raise RuntimeError("Failed to initialize PyTorch distributed support")
 
 NestedTensor = nested.NestedTensor
 
