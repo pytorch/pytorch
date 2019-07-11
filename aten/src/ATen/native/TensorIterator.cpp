@@ -16,8 +16,13 @@ void TensorIterator::reorder_dimensions() {
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
 
-  // initialize perm with n-1, n-2, ..., 1, 0
   perm_.resize(ndim());
+  if (ndim() == 1) {
+    perm_[0] = 0;
+    return;
+  }
+
+  // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm_.rbegin(), perm_.rend(), 0);
 
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
@@ -209,7 +214,7 @@ void TensorIterator::allocate_outputs() {
 }
 
 void TensorIterator::coalesce_dimensions() {
-  if (ndim() == 0) {
+  if (ndim() <= 1) {
     return;
   }
 
