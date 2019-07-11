@@ -704,6 +704,22 @@ Example::
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
 """)
 
+add_docstr(torch.bitwise_not,
+           r"""
+           bitwise_not(input, out=None) -> Tensor
+
+Computes the bitwise NOT of the given :attr:`input` tensor. The input must be of integer or Boolean types.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.bitwise_not(torch.tensor([-1, -2, 3], dtype=torch.int8))
+    tensor([ 0,  1, -4], dtype=torch.int8)
+""")
+
 add_docstr(torch.bmm,
            r"""
 bmm(batch1, batch2, out=None) -> Tensor

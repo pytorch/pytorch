@@ -25,7 +25,6 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
             module.qconfig = qconfig_dict[prefix]
         else:
             module.qconfig = qconfig_parent
-        print('prefix:', prefix, 'qconfig: ', module.qconfig)
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
@@ -244,7 +243,6 @@ def swap_module(mod, mapping):
         The corresponding quantized module of `mod`
     """
     new_mod = mod
-    print('swapping:', mod)
     if hasattr(mod, 'observer'):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)

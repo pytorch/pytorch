@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 import torch
 import torch.nn.quantized.functional as qF
+from torch.nn.quantized.modules.conv import _conv_output_shape
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -15,12 +16,6 @@ from common_utils import TestCase, run_tests
 
 
 class FunctionalAPITest(TestCase):
-    """Computes the output shape given convolution parameters."""
-    def _conv_output_shape(self, input_size, kernel_size, padding, stride,
-                           dilation):
-        return np.floor((input_size + 2 * padding - kernel_size
-                         - (kernel_size - 1) * (dilation - 1)) / stride) + 1
-
     @given(Q=qtensors_conv(min_batch=1, max_batch=3,
                            min_in_channels=1, max_in_channels=7,
                            min_out_channels=1, max_out_channels=7,
@@ -48,9 +43,9 @@ class FunctionalAPITest(TestCase):
         kH, kW = filters.shape[2:]
         assume(kH // 2 >= padH)
         assume(kW // 2 >= padW)
-        oH = self._conv_output_shape(iH, kH, padH, sH, dH)
+        oH = _conv_output_shape(iH, kH, padH, sH, dH)
         assume(oH > 0)
-        oW = self._conv_output_shape(iW, kW, padW, sW, dW)
+        oW = _conv_output_shape(iW, kW, padW, sW, dW)
         assume(oW > 0)
 
         inputs = torch.from_numpy(inputs).to(torch.float)
