@@ -9,7 +9,7 @@ import torch
 import numpy as np
 import io
 
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
 
 
 class TestONNXRuntime(unittest.TestCase):
@@ -17,7 +17,7 @@ class TestONNXRuntime(unittest.TestCase):
     opset_version = _export_onnx_opset_version
 
     def run_test(self, model, inputs, rtol=1e-05, atol=1e-08):
-        outputs = model(inputs)
+        outputs = model(inputs) if isinstance(inputs, torch.Tensor) else model(*inputs)
 
         # export the model to ONNX
         f = io.BytesIO()
@@ -131,6 +131,27 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=[1, 1, 0.5, 0.5])
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
+
+    # TODO: enable for opset 10 when ONNXRuntime version will be updated 
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_topk(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.topk(x, 3)
+
+        x = torch.arange(1., 6., requires_grad=True)
+        self.run_test(MyModule(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_topk_script(self):
+        class MyModuleDynamic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, k):
+                return torch.topk(x, k)
+
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.run_test(MyModuleDynamic(), [x, k])
 
     def test_layer_norm(self):
         model = torch.nn.LayerNorm([10, 10])
