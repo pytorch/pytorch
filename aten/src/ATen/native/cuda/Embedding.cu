@@ -12,6 +12,8 @@
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
+#include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
+
 
 namespace at { namespace native {
 
@@ -231,14 +233,12 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
-  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
-
-  int64_t stride = grad_weight.stride(0);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   if (num_indices <= 768 && !scale_grad_by_freq) {
     auto indices_contig = indices.contiguous();
-
+    auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
+    int64_t stride = grad_weight.stride(0);
     dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
@@ -323,23 +323,8 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     );
   }
 
-  dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-  dim3 block(WARP_SIZE, 4);
-
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "embedding_backward", [&] {
-    embedding_backward_kernel<<<grid, block, 0, stream>>>(
-      sorted_indices.data<int64_t>(),
-      orig_indices.data<int64_t>(),
-      grad.data<scalar_t>(),
-      grad_weight.data<scalar_t>(),
-      count.defined() ? count.data<int64_t>() : nullptr,
-      num_indices,
-      stride,
-      padding_idx);
-  });
-  THCudaCheck(cudaGetLastError());
-
-  return grad_weight;
+  return embedding_backward_cuda_kernel(grad, orig_indices,
+      sorted_indices, count, num_weights, padding_idx);
 }
 
 Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,

@@ -329,22 +329,22 @@ using SizeType = uint64_t;
 // `success_cond` is an expression used to check if an error has happend. So for
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
 // is stored in variable `__output` and may be used in `success_cond`.
-#define SYSCHECK(expr, success_cond)                          \
-while (true) {                                                \
-  auto __output = (expr);                                     \
-  (void) __output;                                            \
-  if (!(success_cond)) {                                      \
-    if (errno == EINTR) {                                     \
-      continue;                                               \
-    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
-      throw std::runtime_error("Socket Timeout");             \
-    } else {                                                  \
-      throw std::system_error(errno, std::system_category()); \
-    }                                                         \
-  } else {                                                    \
-    break;                                                    \
-  }                                                           \
-}
+#define SYSCHECK(expr, success_cond)                            \
+  while (true) {                                                \
+    auto __output = (expr);                                     \
+    (void)__output;                                             \
+    if (!(success_cond)) {                                      \
+      if (errno == EINTR) {                                     \
+        continue;                                               \
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
+        throw std::runtime_error("Socket Timeout");             \
+      } else {                                                  \
+        throw std::system_error(errno, std::system_category()); \
+      }                                                         \
+    } else {                                                    \
+      break;                                                    \
+    }                                                           \
+  }
 
 // Most functions indicate error by returning `-1`. This is a helper macro for
 // this common case with `SYSCHECK`.
@@ -400,7 +400,8 @@ void sendBytes(
 
   while (bytesToSend > 0) {
     ssize_t bytesSent;
-    SYSCHECK_ERR_RETURN_NEG1(bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
+    SYSCHECK_ERR_RETURN_NEG1(
+        bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -422,7 +423,8 @@ void recvBytes(int socket, T* buffer, size_t length) {
 
   while (bytesToReceive > 0) {
     ssize_t bytesReceived;
-    SYSCHECK_ERR_RETURN_NEG1(bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
+    SYSCHECK_ERR_RETURN_NEG1(
+        bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }

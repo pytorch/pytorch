@@ -20,7 +20,7 @@ from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
 
-NAMEDTENSOR_ENABLED = os.getenv('USE_NAMEDTENSOR', '').upper() == '1'
+BUILD_NAMEDTENSOR = os.getenv('BUILD_NAMEDTENSOR', '').upper() == '1'
 
 def _find_cuda_home():
     '''Finds the CUDA install path.'''
@@ -92,10 +92,13 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819']
+
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
     '-D__CUDA_NO_HALF_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
+    '--expt-relaxed-constexpr'
 ]
 
 
@@ -233,8 +236,8 @@ class BuildExtension(build_ext, object):
         self._check_abi()
         for extension in self.extensions:
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
-            if NAMEDTENSOR_ENABLED:
-                self._add_compile_flag(extension, '-DNAMEDTENSOR_ENABLED')
+            if BUILD_NAMEDTENSOR:
+                self._add_compile_flag(extension, '-DBUILD_NAMEDTENSOR')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
@@ -316,15 +319,15 @@ class BuildExtension(build_ext, object):
                             cflags = self.cflags
                         else:
                             cflags = []
-                        cmd = [
-                            nvcc, '-c', src, '-o', obj, '-Xcompiler',
-                            '/wd4819', '-Xcompiler', '/MD'
-                        ] + include_list + cflags
+                        cflags = COMMON_NVCC_FLAGS + cflags
+                        for flag in COMMON_MSVC_FLAGS:
+                            cflags = ['-Xcompiler', flag] + cflags
+                        cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
-                        cflags = self.cflags['cxx'] + ['/MD']
+                        cflags = COMMON_MSVC_FLAGS + self.cflags['cxx'] 
                         cmd += cflags
                     elif isinstance(self.cflags, list):
-                        cflags = self.cflags + ['/MD']
+                        cflags = COMMON_MSVC_FLAGS + self.cflags
                         cmd += cflags
 
                 return original_spawn(cmd)
@@ -955,7 +958,7 @@ def _build_extension_module(name, build_directory, verbose):
         # error.output contains the stdout and stderr of the build attempt.
         message = "Error building extension '{}'".format(name)
         if hasattr(error, 'output') and error.output:
-            message += ": {}".format(str(error.output))
+            message += ": {}".format(error.output.decode())
         raise RuntimeError(message)
 
 
@@ -1011,8 +1014,8 @@ def _write_ninja_file(path,
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
-    if NAMEDTENSOR_ENABLED:
-        common_cflags.append('-DNAMEDTENSOR_ENABLED')
+    if BUILD_NAMEDTENSOR:
+        common_cflags.append('-DBUILD_NAMEDTENSOR')
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 

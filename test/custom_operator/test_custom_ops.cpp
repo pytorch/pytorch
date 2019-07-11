@@ -18,7 +18,7 @@ void check_all_parameters(
     AT_ASSERT(predicate(parameter.value().toTensor()));
   }
   for (const auto& child : module.get_modules()) {
-    check_all_parameters(*child, predicate);
+    check_all_parameters(child, predicate);
   }
 }
 } // namespace helpers
@@ -48,25 +48,22 @@ void get_operator_from_registry_and_execute() {
 
 void load_serialized_module_with_custom_op_and_execute(
     const std::string& path_to_exported_script_module) {
-  std::shared_ptr<torch::jit::script::Module> module =
+  torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
-
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back(torch::ones(5));
-  auto output = module->forward(inputs).toTensor();
+  auto output = module.forward(inputs).toTensor();
 
   AT_ASSERT(output.allclose(torch::ones(5) + 1));
 }
 
 void test_argument_checking_for_serialized_modules(
     const std::string& path_to_exported_script_module) {
-  std::shared_ptr<torch::jit::script::Module> module =
+  torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
-
+  
   try {
-    module->forward({torch::jit::IValue(1), torch::jit::IValue(2)});
+    module.forward({torch::jit::IValue(1), torch::jit::IValue(2)});
     AT_ASSERT(false);
   } catch (const c10::Error& error) {
     AT_ASSERT(
@@ -76,7 +73,7 @@ void test_argument_checking_for_serialized_modules(
   }
 
   try {
-    module->forward({torch::jit::IValue(5)});
+    module.forward({torch::jit::IValue(5)});
     AT_ASSERT(false);
   } catch (const c10::Error& error) {
     AT_ASSERT(
@@ -86,7 +83,7 @@ void test_argument_checking_for_serialized_modules(
   }
 
   try {
-    module->forward({});
+    module.forward({});
     AT_ASSERT(false);
   } catch (const c10::Error& error) {
     AT_ASSERT(
@@ -96,41 +93,39 @@ void test_argument_checking_for_serialized_modules(
 }
 
 void test_move_to_device(const std::string& path_to_exported_script_module) {
-  std::shared_ptr<torch::jit::script::Module> module =
+  torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cpu();
   });
 
-  module->to(torch::kCUDA);
+  module.to(torch::kCUDA);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cuda();
   });
 
-  module->to(torch::kCPU);
+  module.to(torch::kCPU);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cpu();
   });
 }
 
 void test_move_to_dtype(const std::string& path_to_exported_script_module) {
-  std::shared_ptr<torch::jit::script::Module> module =
+  torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
 
-  module->to(torch::kInt);
+  module.to(torch::kInt);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.dtype() == torch::kInt;
   });
 
-  module->to(torch::kDouble);
+  module.to(torch::kDouble);
 
-  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+  helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.dtype() == torch::kDouble;
   });
 }

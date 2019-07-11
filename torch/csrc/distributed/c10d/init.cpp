@@ -2,7 +2,10 @@
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroup.hpp>
+
+#ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
+#endif
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
@@ -30,7 +33,9 @@ namespace c10d {
 
 namespace {
 
+#ifdef USE_C10D_GLOO
 constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+#endif
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -45,15 +50,16 @@ PyObject* c10d_init(PyObject* _unused) {
   auto module = py::handle(c10d_module).cast<py::module>();
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
-      .def(py::init<
-           std::vector<std::vector<torch::autograd::Variable>>,
-           std::vector<std::vector<size_t>>,
-           std::shared_ptr<::c10d::ProcessGroup>,
-           std::vector<std::vector<bool>>>(),
-           py::arg("replicas"),
-           py::arg("bucket_indices"),
-           py::arg("process_group"),
-           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>())
+      .def(
+          py::init<
+              std::vector<std::vector<torch::autograd::Variable>>,
+              std::vector<std::vector<size_t>>,
+              std::shared_ptr<::c10d::ProcessGroup>,
+              std::vector<std::vector<bool>>>(),
+          py::arg("replicas"),
+          py::arg("bucket_indices"),
+          py::arg("process_group"),
+          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>())
       .def(
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
@@ -377,6 +383,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>());
 
+#ifdef USE_C10D_GLOO
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup);
 
@@ -447,6 +454,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = std::chrono::milliseconds(10 * 1000));
+#endif
 
 #ifdef USE_C10D_NCCL
   shared_ptr_class_<::c10d::ProcessGroupNCCL>(
@@ -470,11 +478,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
   // part of a sub group that is to be created.
-  processGroupMPI.def_static(
-      "create",
-      [](std::vector<int> ranks) {
-        return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-      });
+  processGroupMPI.def_static("create", [](std::vector<int> ranks) {
+    return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+  });
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")

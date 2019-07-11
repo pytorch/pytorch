@@ -46,23 +46,27 @@ const std::vector<std::string> functions = {
                 result = AD_unsqueeze_multiple(result, dim, n_dims)
             return grad * (self - result).exp()
 
-        def mean_0(self):
+        def mean_0(self, *, dtype: Optional[int]):
             self_size = self.size()
             self_numel = self.numel()
+            self_scalar_type = self.dtype
             def backward(grad_output):
-                return grad_output.expand(self_size) / self_numel
+                return grad_output.expand(self_size).to(self_scalar_type) / self_numel, None
 
-            return torch.mean(self), backward
+            return torch.mean(self, dtype=dtype), backward
 
         def mean_1(self,
                    dim: List[int],
-                   keepdim: bool):
+                   keepdim: bool,
+                   *,
+                   dtype: Optional[int]):
             self_size = self.size()
+            self_scalar_type = self.dtype
             def backward(grad_output):
-                grad_self = AD_sum_backward(grad_output, self_size, dim, keepdim) / AD_safe_size(self_size, dim)
-                return grad_self, None, None
+                grad_self = AD_sum_backward(grad_output, self_size, dim, keepdim).to(self_scalar_type) / AD_safe_size(self_size, dim)
+                return grad_self, None, None, None
 
-            return torch.mean(self, dim, keepdim), backward
+            return torch.mean(self, dim, keepdim, dtype=dtype), backward
 
         def logsumexp(self,
                       dim: List[int],
@@ -776,9 +780,7 @@ const std::vector<std::string> functions = {
             other_size = other.size()
             def backward(grad_output):
                 grad_self = (grad_output * condition.type_as(grad_output))._grad_sum_to_size(self_size)
-
-                #TODO: we should implement type promotion and replace '1-condition.byte()' with '!condition'
-                grad_other = (grad_output * (1 - condition.byte()).type_as(grad_output))._grad_sum_to_size(other_size)
+                grad_other = (grad_output * (condition.bitwise_not()).type_as(grad_output))._grad_sum_to_size(other_size)
                 return None, grad_self, grad_other
 
             return torch.where(condition, self, other), backward
@@ -1178,11 +1180,11 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
-        def log_softmax(self, dim: int):
-            result = torch.log_softmax(self, dim)
+        def log_softmax(self, dim: int, dtype: Optional[int]):
+            result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
                 grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
-                return grad_self, None
+                return grad_self, None, None
 
             return result, backward
 
@@ -1192,21 +1194,13 @@ const std::vector<std::string> functions = {
                 return torch.nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight), None, None, None, None
             return result, backward
 
-        def softmax_0(self, dim: int):
-            result = torch.softmax(self, dim)
-            def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
-                return grad_self, None
-
-            return result, backward
-
-        def softmax_1(self, dim: int, dtype: int):
+        def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
                 grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
                 return grad_self, None, None
 
-            return torch.softmax(self, dim, dtype), backward
+            return result, backward
 
         def AD_interpolate_backward(grad,
                                     input,

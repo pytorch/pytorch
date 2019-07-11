@@ -125,15 +125,21 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/unfold.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/unfold.c>
 #include <TH/THGenerateFloatTypes.h>
+
+#include <THNN/generic/SpatialConvolutionMM.c>
+#include <TH/THGenerateLongType.h>
 
 #include <THNN/generic/SpatialConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateFloatTypes.h>
+#include <TH/THGenerateLongType.h>
 
-#include <THNN/generic/VolumetricFullDilatedConvolution.c>
+#include <THNN/generic/VolumetricConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialClassNLLCriterion.c>
