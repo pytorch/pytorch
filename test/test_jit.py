@@ -4832,6 +4832,36 @@ a")
                 return a + b
             ''')
 
+    def test_opt_error(self):
+        @torch.jit.script
+        def opt(flag):
+            # type: (bool) -> Optional[int]
+            if flag:
+                return None
+            else:
+                return 2
+
+        def fn(flag):
+            # type: (bool)
+            if opt(flag) is None:
+                return 2
+            else:
+                return 3
+
+        print(fn(False))
+        print(fn(True))
+
+        fn_script = torch.jit.script(fn)
+        print(fn_script(False))
+        print(fn_script(True))
+
+    def test_elias(self):
+        @torch.jit.script
+        def test():
+            return torch.tensor((1, 2, 3))
+
+        print(test.graph)
+
     def test_opt_opt_refinement(self):
         @torch.jit.script
         def test_unify(weight, bias):

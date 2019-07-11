@@ -38,6 +38,10 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
     return true;
   }
   if (auto tuple = type->cast<TupleType>()) {
+    if (tuple->elements().size() == 0) {
+      return 0;
+    }
+
     return std::all_of(
         tuple->elements().begin(),
         tuple->elements().end(),
@@ -49,6 +53,36 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   return false;
 }
 
+c10::optional<TypePtr> resolveListToInputs(
+    at::ArrayRef<TypePtr> inputs,
+    const ListTypePtr& formal_type) {
+  if (!formal_type->getElementType()->cast<VarType>()) {
+    return formal_type;
+  }
+
+  if (inputs.size() == 0) {
+    return c10::nullopt;
+  }
+
+  auto begin = inputs.begin();
+  auto end = inputs.end();
+
+  auto var_type = std::accumulate(
+      begin, end, *begin, [](TypePtr t1, TypePtr t2) -> TypePtr {
+        if (t1 == nullptr || t2 == nullptr) {
+          return nullptr;
+        }
+        auto new_type = unifyTypes(t1, t2);
+        return new_type ? *new_type : nullptr;
+      });
+
+  if (var_type) {
+    return ListType::create(var_type);
+  } else {
+    return c10::nullopt;
+  }
+}
+
 // Applies implict conversion from value trying to turn it into type
 // concrete_type. It succeeds if `return_value->isSubclassOf(concrete_type)`
 Value* tryConvertToType(
@@ -58,13 +92,20 @@ Value* tryConvertToType(
     Value* value,
     bool allow_conversions) {
   if (auto value_tuple = value->type()->cast<TupleType>()) {
-    // Allow homogeneous tuples to be casted implicitly to lists of appropriate
-    // types
-    if (convertibleToList(value->type(), unwrapOptional(concrete_type))) {
-      auto unpacked = createTupleUnpack(value);
-      auto elem_type =
-          unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
-      value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+    if (auto concrete_list_type =
+            unwrapOptional(concrete_type)->cast<ListType>()) {
+      auto resolved_concrete_type =
+          resolveListToInputs(value_tuple->elements(), concrete_list_type);
+      // Allow homogeneous tuples to be casted implicitly to lists of
+      // appropriate types
+      if (resolved_concrete_type &&
+          convertibleToList(value->type(), *resolved_concrete_type)) {
+        auto unpacked = createTupleUnpack(value);
+        auto elem_type =
+            (*resolved_concrete_type)->expect<ListType>()->getElementType();
+        value =
+            graph.insertNode(graph.createList(elem_type, unpacked))->output();
+      }
     }
 
     // inductively apply implicit conversions to tuples
@@ -289,11 +330,18 @@ c10::optional<MatchedSchema> tryMatchSchema(
         // The actual cannot already be a list
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
-          auto formal_type =
-              unwrapOptional(arg.type())->expect<ListType>()->getElementType();
+          auto formal_type = unwrapOptional(arg.type())->expect<ListType>();
+          std::vector<TypePtr> types;
+          for (auto nv : (args).slice(used_args)) {
+            types.push_back(nv.value(graph)->type());
+          }
+          auto matched_formal_type = resolveListToInputs(types, formal_type);
+          if (!matched_formal_type) {
+            return c10::nullopt;
+          }
 
           Value* list = tryCreateList(
-              formal_type,
+              (*matched_formal_type)->expect<ListType>()->getElementType(),
               graph,
               loc,
               at::ArrayRef<NamedValue>(args).slice(used_args),
