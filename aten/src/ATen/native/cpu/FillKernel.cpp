@@ -3,6 +3,8 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/cpu/vec256/functional.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
+
 #include <ATen/native/Fill.h>
 
 namespace at { namespace native {
