@@ -101,11 +101,20 @@ def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None):
 The resulting tensor is in float32 format.
 
 Args:
-    shapes: A list of shapes to generate.
+    min_batch, max_batch: Range to generate `nbatch`
+    min_in_channels, max_in_channels: Range to generate `iChannels`
+    min_out_channels, max_out_channels: Range to generate `oChannels`
+    H_range, W_range: Ranges to generate height and width of matrix. Must be
+                      tuples of `(min, max)`
+    kH_range, kW_range: Ranges to generate kernel height and width. Must be
+                        tuples of `(min, max)`
+    groups: Maximum number of groups to generate
     dtypes: A list of data types to generate. See note below.
-    float_min, float_max: Min and max FP value for the output.
 Generates:
-    Xhy: Tensor of type `float32` and shape drawn from the `shapes`.
+    (X, w, b): Tensors of type `float32` of the following drawen shapes:
+        X: (`nbatch, iChannels, H, W`)
+        w: (`oChannels, iChannels // groups, kH, kW)
+        b: `(oChannels,)`
     (scale, zero_point): Drawn from valid ranges derived from the dtypes
     (qmin, qmax): Valid quantization ranges derived from the dtypes.
     (torch_type, np_type): Data types (torch and numpy) for conversion in test.
@@ -136,6 +145,7 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
     _iW = draw(st.integers(W_range[0], W_range[1]))
     _kH = draw(st.integers(kH_range[0], kH_range[1]))
     _kW = draw(st.integers(kW_range[0], kW_range[1]))
+    _groups = draw(st.integers(1, groups))
 
     # Resolve the tensors
     X = draw(stnp.arrays(dtype=np.float32,
@@ -143,7 +153,7 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
                          shape=(_minibatch, _in_channels, _iH, _iW)))
     w = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
-                         shape=(_out_channels, _in_channels // groups,
+                         shape=(_out_channels, _in_channels // _groups,
                                 _kH, _kW)))
     b = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
