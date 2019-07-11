@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/jit/ir.h>
 
 namespace torch {
@@ -68,6 +70,10 @@ struct LoopView {
   ArrayRef<Value*> carriedInputs() const {
     // skip trip count and cond
     return node_->inputs().slice(2);
+  }
+  ArrayRef<Value*> carriedInputsWithCond() const {
+    // skip trip count and cond
+    return node_->inputs().slice(1);
   }
   ArrayRef<Value*> carriedOutputs() const {
     return node_->outputs();

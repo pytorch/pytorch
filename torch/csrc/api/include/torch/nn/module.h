@@ -230,8 +230,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// \endrst
   std::vector<std::shared_ptr<Module>> modules(bool include_self = true) const;
 
-  /// Returns an `OrderedDict` of he submodules of this `Module` (the entire
-  /// submodule hierarchy) and thei keys, and if `include_self` is true, also
+  /// Returns an `OrderedDict` of the submodules of this `Module` (the entire
+  /// submodule hierarchy) and their keys, and if `include_self` is true, also
   /// inserts a `shared_ptr` to this module in the first position. If
   /// `name_prefix` is given, it is prepended to every key as
   /// `<name_prefix>.<key>` (and just `name_prefix` for the module itself).
@@ -486,6 +486,14 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   TORCH_API friend std::ostream& operator<<(
       std::ostream& stream,
       const nn::Module& module);
+
+  // data parallel using this method to configure gradient edges during the
+  // replicate step.
+  template <typename ModuleType>
+  friend void replicate_grad_edges(
+      const std::shared_ptr<Module>& module,
+      const std::vector<std::shared_ptr<ModuleType>>& replicas,
+      const std::vector<Device>& devices);
 
   // Private methods.
 

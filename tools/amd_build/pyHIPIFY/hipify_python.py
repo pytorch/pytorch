@@ -31,10 +31,7 @@ import re
 import shutil
 import sys
 import os
-import json
-import subprocess
 
-from enum import Enum
 from pyHIPIFY import constants
 from pyHIPIFY.cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from pyHIPIFY.cuda_to_hip_mappings import MATH_TRANSPILATIONS
@@ -76,135 +73,6 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
-class disablefuncmode(Enum):
-    """ How to disable functions
-    REMOVE - Remove the function entirely (includes the signature).
-        e.g.
-        FROM:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ...
-                ...
-                ...
-            }```
-
-        TO:
-            ```
-            ```
-
-    STUB - Stub the function and return an empty object based off the type.
-        e.g.
-        FROM:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ...
-                ...
-                ...
-            }```
-
-        TO:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ret_type obj;
-                return obj;
-            }```
-
-
-    HCC_MACRO - Add !defined(__HIP_PLATFORM_HCC__) preprocessors around the function.
-        This macro is defined by HIP if the compiler used is hcc.
-        e.g.
-        FROM:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ...
-                ...
-                ...
-            }```
-
-        TO:
-            ```#if !defined(__HIP_PLATFORM_HCC__)
-                    ret_type function(arg_type1 arg1, ..., ){
-                    ...
-                    ...
-                    ...
-                }
-               #endif
-            ```
-
-
-    DEVICE_MACRO - Add !defined(__HIP_DEVICE_COMPILE__) preprocessors around the function.
-        This macro is defined by HIP if either hcc or nvcc are used in the device path.
-        e.g.
-        FROM:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ...
-                ...
-                ...
-            }```
-
-        TO:
-            ```#if !defined(__HIP_DEVICE_COMPILE__)
-                    ret_type function(arg_type1 arg1, ..., ){
-                    ...
-                    ...
-                    ...
-                }
-               #endif
-            ```
-
-
-    EXCEPTION - Stub the function and throw an exception at runtime.
-        e.g.
-        FROM:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ...
-                ...
-                ...
-            }```
-
-        TO:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                throw std::runtime_error("The function function is not implemented.")
-            }```
-
-
-    ASSERT - Stub the function and throw an assert(0).
-        e.g.
-        FROM:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ...
-                ...
-                ...
-            }```
-
-        TO:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                assert(0);
-            }```
-
-
-    EMPTYBODY - Stub the function and keep an empty body.
-        e.g.
-        FROM:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ...
-                ...
-                ...
-            }```
-
-        TO:
-            ```ret_type function(arg_type1 arg1, ..., ){
-                ;
-            }```
-
-
-
-    """
-    REMOVE = 0
-    STUB = 1
-    HCC_MACRO = 2
-    DEVICE_MACRO = 3
-    EXCEPTION = 4
-    ASSERT = 5
-    EMPTYBODY = 6
-
-
 def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False):
     def _fnmatch(filepath, patterns):
         return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
@@ -234,7 +102,11 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
             filepath = os.path.join(rel_dirpath, filename)
             # We respect extensions, UNLESS you wrote the entire
             # filename verbatim, in which case we always accept it
-            if _fnmatch(filepath, includes) and (not _fnmatch(filepath, ignores)) and (match_extensions(filepath) or filepath in exact_matches):
+            if (
+                _fnmatch(filepath, includes)
+                and (not _fnmatch(filepath, ignores))
+                and (match_extensions(filepath) or filepath in exact_matches)
+            ):
                 if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
                     continue
                 if out_of_place_only and not is_out_of_place(filepath):
@@ -368,7 +240,7 @@ def processKernelLaunches(string, stats):
 
             # Handle Kernel Name
             if status != AT_TEMPLATE:
-                if string[i].isalnum() or string[i] in  {'(', ')', '_', ':', '#'}:
+                if string[i].isalnum() or string[i] in {'(', ')', '_', ':', '#'}:
                     if status != AT_KERNEL_NAME:
                         status = AT_KERNEL_NAME
                         pos["kernel_name"]["end"] = i
@@ -493,19 +365,6 @@ def find_parentheses_group(input_string, start):
 RE_ASSERT = re.compile(r"\bassert[ ]*\(")
 
 
-def disable_asserts(input_string):
-    """ Disables regular assert statements
-    e.g. "assert(....)" -> "/*assert(....)*/"
-    """
-    output_string = input_string
-    asserts = list(RE_ASSERT.finditer(input_string))
-    for assert_item in asserts:
-        p_start, p_end = find_parentheses_group(input_string, assert_item.end() - 1)
-        start = assert_item.start()
-        output_string = output_string.replace(input_string[start:p_end + 1], "")
-    return output_string
-
-
 def replace_math_functions(input_string):
     """ FIXME: Temporarily replace std:: invocations of math functions with non-std:: versions to prevent linker errors
         NOTE: This can lead to correctness issues when running tests, since the correct version of the math function (exp/expf) might not get called.
@@ -513,7 +372,7 @@ def replace_math_functions(input_string):
     """
     output_string = input_string
     for func in MATH_TRANSPILATIONS:
-      output_string = output_string.replace(r'{}('.format(func), '{}('.format(MATH_TRANSPILATIONS[func]))
+        output_string = output_string.replace(r'{}('.format(func), '{}('.format(MATH_TRANSPILATIONS[func]))
 
     return output_string
 
@@ -564,145 +423,6 @@ def replace_extern_shared(input_string):
         lambda inp: "HIP_DYNAMIC_SHARED({0} {1}, {2})".format(
             inp.group(1) or "", inp.group(2), inp.group(3)), output_string)
 
-    return output_string
-
-
-def disable_function(input_string, function, replace_style):
-    """ Finds and disables a function in a particular file.
-
-    If type(function) == List
-        function - The signature of the function to disable.
-            e.g. ["bool", "overlappingIndices", "(const Tensor& t)"]
-            disables function -> "bool overlappingIndices(const Tensor& t)"
-
-    If type(function) == String
-        function - Disables the function by name only.
-            e.g. "overlappingIndices"
-
-    replace_style - The style to use when stubbing functions.
-    """
-# void (*)(hcrngStateMtgp32 *, int, float *, double, double)
-    info = {
-        "function_start": -1,
-        "function_end": -1,
-        "bracket_count": 0
-    }
-
-    STARTED = 0
-    INSIDE_FUNCTION = 1
-    BRACKET_COMPLETE = 2
-
-    STATE = STARTED
-
-    if type(function) == list:
-        # Extract components from function signature.
-        func_info = {
-            "return_type": function[0].strip(),
-            "function_name": function[1].strip(),
-            "function_args": function[2].strip()
-        }
-
-        # Create function string to search for
-        function_string = "{0}{1}{2}".format(
-            func_info["return_type"],
-            func_info["function_name"],
-            func_info["function_args"]
-        )
-
-        # Find the starting position for the function
-        info["function_start"] = input_string.find(function_string)
-    else:
-        # Automatically detect signature.
-        the_match = re.search(r"(((.*) (\*)?)({0})(\([^{{)]*\)))\s*{{".format(
-            function.replace("(", r"\(").replace(")", r"\)")), input_string)
-        if the_match is None:
-            return input_string
-
-        func_info = {
-            "return_type": the_match.group(2).strip(),
-            "function_name": the_match.group(5).strip(),
-            "function_args": the_match.group(6).strip(),
-        }
-
-        # Find the starting position for the function
-        info["function_start"] = the_match.start()
-        function_string = the_match.group(1)
-
-    # The function can't be found anymore.
-    if info["function_start"] == -1:
-        return input_string
-
-    # Find function block start.
-    pos = info["function_start"] + len(function_string) - 1
-    while pos < len(input_string) and STATE != BRACKET_COMPLETE:
-        if input_string[pos] == "{":
-            if STATE != INSIDE_FUNCTION:
-                STATE = INSIDE_FUNCTION
-                info["bracket_count"] = 1
-            else:
-                info["bracket_count"] += 1
-        elif input_string[pos] == "}":
-            info["bracket_count"] -= 1
-
-            if info["bracket_count"] == 0 and STATE == INSIDE_FUNCTION:
-                STATE = BRACKET_COMPLETE
-                info["function_end"] = pos
-
-        pos += 1
-
-    # Never found the function end. Corrupted file!
-    if STATE != BRACKET_COMPLETE:
-        return input_string
-
-    # Preprocess the source by removing the function.
-    function_body = input_string[info["function_start"]:info["function_end"] + 1]
-
-    # Remove the entire function body
-    if replace_style == disablefuncmode.REMOVE:
-        output_string = input_string.replace(function_body, "")
-
-    # Stub the function based off its return type.
-    elif replace_style == disablefuncmode.STUB:
-        # void return type
-        if func_info["return_type"] == "void" or func_info["return_type"] == "static void":
-            stub = "{0}{{\n}}".format(function_string)
-        # pointer return type
-        elif "*" in func_info["return_type"]:
-            stub = "{0}{{\nreturn {1};\n}}".format(function_string, "NULL")  # nullptr
-        else:
-            stub = "{0}{{\n{1} stub_var;\nreturn stub_var;\n}}".format(function_string, func_info["return_type"])
-
-        output_string = input_string.replace(function_body, stub)
-
-    # Add HIP Preprocessors.
-    elif replace_style == disablefuncmode.HCC_MACRO:
-        output_string = input_string.replace(
-            function_body,
-            "#if !defined(__HIP_PLATFORM_HCC__)\n{0}\n#endif".format(function_body))
-
-    # Add HIP Preprocessors.
-    elif replace_style == disablefuncmode.DEVICE_MACRO:
-        output_string = input_string.replace(
-            function_body,
-            "#if !defined(__HIP_DEVICE_COMPILE__)\n{0}\n#endif".format(function_body))
-
-    # Throw an exception at runtime.
-    elif replace_style == disablefuncmode.EXCEPTION:
-        stub = "{0}{{\n{1};\n}}".format(
-            function_string,
-            'throw std::runtime_error("The function {0} is not implemented.")'.format(
-                function_string.replace("\n", " ")))
-        output_string = input_string.replace(function_body, stub)
-
-    elif replace_style == disablefuncmode.ASSERT:
-        stub = "{0}{{\n{1};\n}}".format(
-            function_string,
-            'assert(0)')
-        output_string = input_string.replace(function_body, stub)
-
-    elif replace_style == disablefuncmode.EMPTYBODY:
-        stub = "{0}{{\n;\n}}".format(function_string)
-        output_string = input_string.replace(function_body, stub)
     return output_string
 
 
@@ -906,7 +626,14 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch):
         def mk_repl(templ):
             def repl(m):
                 f = m.group(1)
-                if f.startswith("ATen/cuda") or f.startswith("ATen/native/cuda") or f.startswith("ATen/native/sparse/cuda") or f.startswith("THC/") or f.startswith("THCUNN/") or (f.startswith("THC") and not f.startswith("THCP")):
+                if (
+                    f.startswith("ATen/cuda")
+                    or f.startswith("ATen/native/cuda")
+                    or f.startswith("ATen/native/sparse/cuda")
+                    or f.startswith("THC/")
+                    or f.startswith("THCUNN/")
+                    or (f.startswith("THC") and not f.startswith("THCP"))
+                ):
                     return templ.format(get_hip_file_path(m.group(1)))
                 return m.group(0)
             return repl
@@ -924,13 +651,9 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch):
         if not hip_clang_launch:
             output_source = processKernelLaunches(output_source, stats)
 
-        # Disable asserts
-        # if not filepath.endswith("THCGeneral.h.in"):
-        #    output_source = disable_asserts(output_source)
-
         # Replace std:: with non-std:: versions
         if filepath.endswith(".cu") or filepath.endswith(".cuh"):
-          output_source = replace_math_functions(output_source)
+            output_source = replace_math_functions(output_source)
 
         # Include header if device code is contained.
         output_source = hip_header_magic(output_source)
@@ -970,58 +693,7 @@ def fix_static_global_kernels(in_txt):
     return in_txt
 
 
-def disable_unsupported_function_call(function, input_string, replacement):
-    """Disables calls to an unsupported HIP function"""
-    # Prepare output string
-    output_string = input_string
-
-    # Find all calls to the function
-    calls = re.finditer(r"\b{0}\b".format(re.escape(function)), input_string)
-
-    # Do replacements
-    for call in calls:
-        start = call.start()
-        end = call.end()
-
-        pos = end
-        started_arguments = False
-        bracket_count = 0
-        while pos < len(input_string):
-            if input_string[pos] == "(":
-                if started_arguments is False:
-                    started_arguments = True
-                    bracket_count = 1
-                else:
-                    bracket_count += 1
-            elif input_string[pos] == ")" and started_arguments:
-                bracket_count -= 1
-
-            if bracket_count == 0 and started_arguments:
-                # Finished!
-                break
-            pos += 1
-
-        function_call = input_string[start:pos + 1]
-        output_string = output_string.replace(function_call, replacement)
-
-    return output_string
-
-
 RE_INCLUDE = re.compile(r"#include .*\n")
-
-
-def disable_module(input_file):
-    """Disable a module entirely except for header includes."""
-    with openf(input_file, "r+") as f:
-        txt = f.read()
-        last = list(RE_INCLUDE.finditer(txt))[-1]
-        end = last.end()
-
-        disabled = "{0}#if !defined(__HIP_PLATFORM_HCC__)\n{1}\n#endif".format(txt[0:end], txt[end:])
-
-        f.seek(0)
-        f.write(disabled)
-        f.truncate()
 
 
 def extract_arguments(start, string):
@@ -1087,7 +759,6 @@ def hipify(
     extensions=(".cu", ".cuh", ".c", ".cc", ".cpp", ".h", ".in", ".hpp"),
     output_directory="",
     includes=(),
-    json_settings="",
     out_of_place_only=False,
     ignores=(),
     show_progress=True,
@@ -1109,94 +780,6 @@ def hipify(
     # Copy from project directory to output directory if not done already.
     if not os.path.exists(output_directory):
         shutil.copytree(project_directory, output_directory)
-
-    # Open JSON file with disable information.
-    if json_settings != "":
-        with openf(json_settings, "r") as f:
-            json_data = json.load(f)
-
-        # Disable functions in certain files according to JSON description
-        for disable_info in json_data["disabled_functions"]:
-            filepath = os.path.join(output_directory, disable_info["path"])
-            if "functions" in disable_info:
-                functions = disable_info["functions"]
-            else:
-                functions = disable_info.get("functions", [])
-
-            if "non_hip_functions" in disable_info:
-                non_hip_functions = disable_info["non_hip_functions"]
-            else:
-                non_hip_functions = disable_info.get("non_hip_functions", [])
-
-            if "non_device_functions" in disable_info:
-                not_on_device_functions = disable_info["non_device_functions"]
-            else:
-                not_on_device_functions = disable_info.get("non_device_functions", [])
-
-            with openf(filepath, "r+") as f:
-                txt = f.read()
-                for func in functions:
-                    # TODO - Find fix assertions in HIP for device code.
-                    txt = disable_function(txt, func, disablefuncmode.ASSERT)
-
-                for func in non_hip_functions:
-                    # Disable this function on HIP stack
-                    txt = disable_function(txt, func, disablefuncmode.HCC_MACRO)
-
-                for func in not_on_device_functions:
-                    # Disable this function when compiling on Device
-                    txt = disable_function(txt, func, disablefuncmode.DEVICE_MACRO)
-
-                f.seek(0)
-                f.write(txt)
-                f.truncate()
-
-        # Disable modules
-        disable_modules = json_data["disabled_modules"]
-        for module in disable_modules:
-            disable_module(os.path.join(output_directory, module))
-
-        # Disable unsupported HIP functions
-        for disable in json_data["disable_unsupported_hip_calls"]:
-            filepath = os.path.join(output_directory, disable["path"])
-            if "functions" in disable:
-                functions = disable["functions"]
-            else:
-                functions = disable.get("functions", [])
-
-            if "constants" in disable:
-                constants = disable["constants"]
-            else:
-                constants = disable.get("constants", [])
-
-            if "s_constants" in disable:
-                s_constants = disable["s_constants"]
-            else:
-                s_constants = disable.get("s_constants", [])
-
-            if not os.path.exists(filepath):
-                print("\n" + bcolors.WARNING + "JSON Warning: File {0} does not exist.".format(filepath) + bcolors.ENDC)
-                continue
-
-            with openf(filepath, "r+") as f:
-                txt = f.read()
-
-                # Disable HIP Functions
-                for func in functions:
-                    txt = disable_unsupported_function_call(func, txt, functions[func])
-
-                # Disable Constants w\ Boundary.
-                for const in constants:
-                    txt = re.sub(r"\b{0}\b".format(re.escape(const)), constants[const], txt)
-
-                # Disable Constants
-                for s_const in s_constants:
-                    txt = txt.replace(s_const, s_constants[s_const])
-
-                # Save Changes
-                f.seek(0)
-                f.write(txt)
-                f.truncate()
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,

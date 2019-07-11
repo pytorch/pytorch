@@ -37,7 +37,7 @@ struct Resolver {
       const SourceRange& loc) const = 0;
 
   // Resolve `name` to a TypePtr.
-  virtual TypePtr resolveType(const std::string& name) const = 0;
+  virtual TypePtr resolveType(const std::string& name, const SourceRange& loc) const = 0;
 };
 
 // A resolver that only understands "torch.foo()" lookups.
@@ -52,7 +52,7 @@ struct NativeResolver : public Resolver {
     return nullptr;
   }
 
-  TypePtr resolveType(const std::string& name) const override {
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
     return nullptr;
   }
 };

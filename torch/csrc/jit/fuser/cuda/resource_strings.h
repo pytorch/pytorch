@@ -190,7 +190,7 @@ constexpr auto half_support_literal = R"(
       return val;
     }
 )"
-// MSVC's preprocesor (but not the standard compiler) has a bug
+// MSVC's preprocessor (but not the standard compiler) has a bug
 // where it incorrectly tokenizes raw string literals, ending when it sees a "
 // this causes the #endif in this string literal to be treated as a preprocessor
 // token which, in turn, cause sccache on windows CI to fail.

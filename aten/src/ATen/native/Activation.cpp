@@ -33,12 +33,12 @@ Tensor & selu_(Tensor & self) {
 
 Tensor celu(const Tensor & self, Scalar alpha) {
   double inv_alpha = 1. / alpha.to<double>();
-  return at::elu(self, 1.0, alpha, Scalar(inv_alpha));
+  return at::elu(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
   double inv_alpha = 1. / alpha.to<double>();
-  return at::elu_(self, 1.0, alpha, Scalar(inv_alpha));
+  return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
@@ -370,5 +370,35 @@ Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar 
   });
   return out_tensor;
 }
+
+
+Tensor gelu_cpu(const Tensor& self) {
+  const auto X = self.contiguous();
+  Tensor Y = at::native::empty_like(X);
+  GeluKernel(kCPU, X, &Y);
+  return Y;
+}
+
+Tensor gelu_cuda(const Tensor& self) {
+  Tensor Y = at::native::empty_like(self);
+  GeluKernel(kCUDA, self, &Y);
+  return Y;
+}
+
+Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
+  const auto X = self.contiguous();
+  Tensor dX = at::native::empty_like(X);
+  GeluBackwardKernel(kCPU, grad.contiguous(), X, &dX);
+  return dX;
+}
+
+Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
+  Tensor dX = at::native::empty_like(self);
+  GeluBackwardKernel(kCUDA, grad, self, &dX);
+  return dX;
+}
+
+DEFINE_DISPATCH(GeluKernel);
+DEFINE_DISPATCH(GeluBackwardKernel);
 
 }}  // namespace at::native

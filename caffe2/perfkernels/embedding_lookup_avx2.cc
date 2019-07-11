@@ -366,7 +366,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
               reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
         for (; j < block_size; j++) {
-          op[j] += wgt * ip[j];
+          op[j] = std::fma(wgt, ip[j], op[j]);
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
@@ -793,7 +793,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
               reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
         for (; j < block_size; j++) {
-          op[j] += wgt * ip[j];
+          op[j] = std::fma(wgt, ip[j], op[j]);
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
@@ -1340,7 +1340,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
           vtmp1[0] = ip[j];
           __m256 vtmp2 =
               _mm256_cvtph_ps(*(reinterpret_cast<const __m128i*>(vtmp1)));
-          op[j] += wgt * ((float*)(&vtmp2))[0];
+          op[j] = std::fma(wgt, ((float*)(&vtmp2))[0], op[j]);
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
@@ -1887,7 +1887,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
           vtmp1[0] = ip[j];
           __m256 vtmp2 =
               _mm256_cvtph_ps(*(reinterpret_cast<const __m128i*>(vtmp1)));
-          op[j] += wgt * ((float*)(&vtmp2))[0];
+          op[j] = std::fma(wgt, ((float*)(&vtmp2))[0], op[j]);
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
@@ -2447,7 +2447,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
               reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
         for (; j < block_size; j++) {
-          op[j] += wgt * ((float)ip[j]) + bio;
+          op[j] = std::fma(wgt, (float)ip[j], bio + op[j]);
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {
@@ -3007,7 +3007,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
               reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
         for (; j < block_size; j++) {
-          op[j] += wgt * ((float)ip[j]) + bio;
+          op[j] = std::fma(wgt, (float)ip[j], bio + op[j]);
         }
       }
       if (normalize_by_lengths && lengths[rangeIndex]) {

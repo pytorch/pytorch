@@ -82,7 +82,7 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
     static _locale_t loc = _create_locale(LC_ALL, "C");
     return _strtod_l(nptr, endptr, loc);
 }
-#else
+#elif defined(__ANDROID__)
 C10_EXPORT double strtod_c(const char *nptr, char **endptr)
 {
     char *fail_pos;
@@ -246,6 +246,12 @@ invalid_string:
     *endptr = (char*)nptr;
     errno = EINVAL;
     return -1.0;
+}
+#else
+C10_EXPORT double strtod_c(const char* nptr, char** endptr) {
+  /// NOLINTNEXTLINE(hicpp-signed-bitwise)
+  static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
+  return strtod_l(nptr, endptr, loc);
 }
 #endif
 

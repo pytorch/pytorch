@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/resolver.h>
 
 namespace torch {
@@ -38,7 +38,8 @@ def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
 )SCRIPT");
 
 struct BuiltinFunctionRegistry {
-  const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
+  const std::vector<Function*>& getAllBuiltinFunctionsFor(
+      Symbol name) {
     const static std::vector<Function*> empty;
     // when initializing the builtin function library, we will re-enter
     // getAllBuiltinFunctionsFor since it is called in the compiler to
@@ -55,8 +56,8 @@ struct BuiltinFunctionRegistry {
       state = INITIALIZED;
     }
     AT_ASSERT(state == INITIALIZED);
-    auto it = builtins_by_name.find(name);
-    if (it == builtins_by_name.end())
+    auto it = builtins_by_name_.find(name);
+    if (it == builtins_by_name_.end())
       return empty;
     return it->second;
   }
@@ -65,10 +66,11 @@ struct BuiltinFunctionRegistry {
   void loadSource(const std::string& source) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
-    cu->define(source, script::nativeResolver(), /*self=*/nullptr);
+    cu->define(
+        c10::nullopt, source, script::nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
-      builtins_by_name[Symbol::fromQualString("aten::" + method->name())]
-          .push_back(method.get());
+      builtins_by_name_[Symbol::fromQualString("aten::" + method->name())]
+          .push_back(method);
     }
   }
   void loadBuiltinFunctions() {
@@ -98,10 +100,12 @@ struct BuiltinFunctionRegistry {
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
-  std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name;
+  std::unordered_map<Symbol, std::vector<Function*>>
+      builtins_by_name_;
 };
 
-const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
+const std::vector<Function*>& getAllBuiltinFunctionsFor(
+    Symbol name) {
   static BuiltinFunctionRegistry registry;
   return registry.getAllBuiltinFunctionsFor(name);
 }

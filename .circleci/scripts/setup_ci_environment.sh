@@ -38,7 +38,11 @@ sudo apt-get -y install \
 
 sudo pkill -SIGHUP dockerd
 
-sudo pip -q install awscli==1.16.35
+retry () {
+    $*  || $* || $* || $* || $*
+}
+
+retry sudo pip -q install awscli==1.16.35
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
   DRIVER_FN="NVIDIA-Linux-x86_64-410.104.run"

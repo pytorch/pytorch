@@ -3,7 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/CPUGenerator.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
 #include <ATen/Generator.h>
 #include <ATen/Parallel.h>
 
@@ -22,9 +22,6 @@
 #include <mkl.h>
 #endif
 
-#include <TH/THGenerator.hpp>
-#include <TH/THRandom.h>
-
 namespace at { namespace native {
 namespace {
 
@@ -32,7 +29,7 @@ using namespace vec256;
 
 static void sigmoid_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_cpu", [&]() {
-    unary_kernel_vec(
+    cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return (1 / (1 + std::exp((-a)))); },
         [=](Vec256<scalar_t> a) {
@@ -47,25 +44,52 @@ static void sigmoid_kernel(TensorIterator& iter) {
 
 static void abs_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cpu", [&]() {
-    unary_kernel_vec(
+    cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::abs(a); },
         [=](Vec256<scalar_t> a) { return a.abs(); });
   });
 }
 
+static void bitwise_not_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    // Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not wraps this operation for both Boolean and
+    // integral types.
+    cpu_kernel(
+          iter,
+          [](bool a) {
+            return !a;
+          });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_cpu", [&]() {
+      cpu_kernel(
+          iter,
+          [](scalar_t a) -> scalar_t {
+            return ~a;
+      });
+    });
+  }
+}
+
 static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
-  if( iter.dtype() == ScalarType::Half ) {
+  if (iter.dtype() == ScalarType::Half) {
     auto value = value_scalar.to<at::Half>().x;
     using H = decltype(value);
-    nullary_kernel_vec(
+    cpu_kernel_vec(
+        iter,
+        [=]() -> H { return value; },
+        [=]() { return Vec256<H>(value); });
+  } else if (iter.dtype() == ScalarType::BFloat16) {
+    auto value = value_scalar.to<at::BFloat16>().x;
+    using H = decltype(value);
+    cpu_kernel_vec(
         iter,
         [=]() -> H { return value; },
         [=]() { return Vec256<H>(value); });
   } else {
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
       scalar_t value = value_scalar.to<scalar_t>();
-      nullary_kernel_vec(
+      cpu_kernel_vec(
           iter,
           [=]() -> scalar_t { return value; },
           [=]() { return Vec256<scalar_t>(value); });
@@ -75,7 +99,7 @@ static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
 
 static void frac_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "frac_cpu", [&]() {
-    unary_kernel_vec(
+    cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
         [=](Vec256<scalar_t> a) { return a.frac(); });
@@ -84,7 +108,7 @@ static void frac_kernel(TensorIterator& iter) {
 
 static void reciprocal_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "reciprocal_cpu", [&]() {
-    unary_kernel_vec(
+    cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return decltype(a)(1.0) / a; },
         [=](Vec256<scalar_t> a) { return a.reciprocal(); });
@@ -93,7 +117,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
 
 static void neg_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "neg_cpu", [&]() {
-    unary_kernel_vec(
+    cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
         [=](Vec256<scalar_t> a) { return a.neg(); });
@@ -102,7 +126,7 @@ static void neg_kernel(TensorIterator& iter) {
 
 static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
-    unary_kernel(
+    cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); });
   });
@@ -110,7 +134,7 @@ static void sinh_kernel(TensorIterator& iter) {
 
 static void cosh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cosh_cpu", [&]() {
-    unary_kernel(
+    cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); });
   });
@@ -124,11 +148,12 @@ void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
 }
 #else
 void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
-  THGenerator* generator = get_generator(gen);
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   int64_t seed;
   {
-    std::lock_guard<std::mutex> lock(generator->mutex);
-    seed = THRandom_random(generator);
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    seed = generator->random();
   }
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
@@ -176,7 +201,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 
 static void rsqrt_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
-    unary_kernel_vec(
+    cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t {
           return ((scalar_t)1) / std::sqrt(a);
@@ -189,10 +214,10 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
+    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {            \
       iter.serial_for_each(                                                   \
-          [&](int ntensor, char** data_, const int64_t* strides, int64_t n) { \
-            AT_ASSERT(ntensor == 2);                                          \
+          [&](char** data_, const int64_t* strides, int64_t n) { \
             scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
             scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);        \
             int64_t out_stride = strides[0] / sizeof(scalar_t);               \
@@ -224,6 +249,7 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
+REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
