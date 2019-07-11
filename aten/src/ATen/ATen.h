@@ -7,7 +7,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/DimVector.h>
 #include <ATen/Dispatch.h>
-#include <ATen/DynamicLibrary.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
 #ifdef BUILD_NAMEDTENSOR
