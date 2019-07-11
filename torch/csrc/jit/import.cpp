@@ -279,10 +279,11 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
 void ScriptModuleDeserializer::moduleSetState(
     const script::Module& module,
     IValue state) {
-  auto setstate = module.find_method("__setstate__");
+  auto setstate =
+      module.class_compilation_unit()->find_function("__setstate__");
 
   TORCH_CHECK(
-      setstate,
+      setstate != nullptr,
       "Cannot call '__setstate__' method because"
       " it does not exist");
 

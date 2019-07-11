@@ -30,11 +30,7 @@ struct SugaredValue;
 struct Resolver;
 
 using ResolverPtr = std::shared_ptr<Resolver>;
-struct Self {
-  virtual ~Self() {}
-  virtual std::shared_ptr<SugaredValue> makeSugared(Value* v) const = 0;
-  virtual ClassTypePtr getClassType() const = 0;
-};
+using Self = std::function<std::shared_ptr<SugaredValue>(Value*)>;
 
 // A CompilationUnit is a list of named Functions
 // with helper methods to iterate the list, or invoke the function.
@@ -53,19 +49,17 @@ struct TORCH_API CompilationUnit {
   CompilationUnit& operator=(const CompilationUnit&) = delete;
   CompilationUnit(const CompilationUnit&) = delete;
 
-  Function* find_function(const c10::QualifiedName& name) const {
+  Function* find_function(const std::string& name) const {
     auto it = dict_.find(name);
-    if (it == dict_.end()) {
+    if (it == dict_.end())
       return nullptr;
-    }
     return functions_[it->second].get();
   }
 
-  Function& get_function(const c10::QualifiedName& name) const {
-    if (auto r = find_function(name)) {
+  Function& get_function(const std::string& name) const {
+    if (auto r = find_function(name))
       return *r;
-    }
-    TORCH_CHECK(false, "attempted to get undefined function ", name.name());
+    AT_ERROR("attempted to get undefined function ", name);
   }
 
   void set_optimized(bool o) {
@@ -77,28 +71,21 @@ struct TORCH_API CompilationUnit {
   }
 
   // for historic reasons, these are defined in compiler.cpp
-  // Returns the list of Function's just defined.
-  std::vector<Function*> define(
-      const c10::optional<c10::QualifiedName>& prefix,
+  void define(
       const std::vector<Def>& definitions,
       const std::vector<ResolverPtr>&
           resolvers, /* determines how we handle free
                      variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
-      const Self* self);
+      const Self& self);
 
   // same as above but parse the definitions from source
-  // Returns the list of Function's just defined.
-  std::vector<Function*> define(
-      // prefix namespace to put all the defined functions into
-      const c10::optional<c10::QualifiedName>& prefix,
+  void define(
       const std::string& source,
       const ResolverPtr& resolver,
-      const Self* self);
+      const Self& self);
 
-  Function* create_function(
-      c10::QualifiedName name,
-      std::shared_ptr<Graph> graph) {
+  Function* create_function(std::string name, std::shared_ptr<Graph> graph) {
     auto fn = torch::make_unique<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
     auto ret = fn.get();
@@ -126,7 +113,7 @@ struct TORCH_API CompilationUnit {
   /// @return An IValue containing the return value (or values if it is a tuple)
   /// from the method
   template <typename... Types>
-  IValue run_method(const c10::QualifiedName& method_name, Types&&... args) {
+  IValue run_method(const std::string& method_name, Types&&... args) {
     return get_function(method_name)({IValue(std::forward<Types>(args))...});
   }
 
@@ -186,31 +173,29 @@ struct TORCH_API CompilationUnit {
   // have isolation.
   static void _clear_python_cu() {
     _get_python_cu()->classes_.clear();
-    _get_python_cu()->functions_.clear();
-    _get_python_cu()->dict_.clear();
   }
 
  private:
   std::unique_ptr<Function> define(
-      const c10::optional<c10::QualifiedName>& prefix,
       const Def& def,
       const ResolverPtr& resolver,
-      const Self* self,
-      const std::unordered_map<std::string, Function*>& function_table) const;
+      const Self& self,
+      const std::unordered_map<std::string, Function*>&
+          function_table) const;
 
   Function& register_function(std::unique_ptr<Function> fn) {
     TORCH_CHECK(
-        0 == dict_.count(fn->qualname()),
+        0 == dict_.count(fn->name()),
         "method '",
-        fn->qualname().qualifiedName(),
+        fn->name(),
         "' already defined.");
     functions_.emplace_back(std::move(fn));
-    dict_[functions_.back()->qualname()] = functions_.size() - 1;
+    dict_[functions_.back()->name()] = functions_.size() - 1;
     return *functions_.back();
   }
   std::vector<std::unique_ptr<Function>> functions_;
   // for fast lookup
-  std::unordered_map<c10::QualifiedName, size_t> dict_;
+  std::unordered_map<std::string, size_t> dict_;
   bool optimized_ = true;
 
   // [class owernship] Right now there aree two relationships between classes
