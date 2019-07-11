@@ -358,7 +358,7 @@ struct TORCH_API Module {
  private:
   void clone_method(
       const Module& orig,
-      const QualifiedName& name,
+      const QualifiedName& orig_method_name,
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {

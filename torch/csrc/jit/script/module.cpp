@@ -230,7 +230,7 @@ void Module::copy_into(
 
 void Module::clone_method(
     const Module& orig,
-    const QualifiedName& qualname,
+    const QualifiedName& orig_method_name,
     const std::unordered_map<TypePtr, TypePtr>& type_remap) {
   // type remapping - when we copy method implementations from one module
   // singleton to another, we need to update the types of the self arguments
@@ -248,11 +248,14 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  const Function& fn = orig.class_compilation_unit()->get_function(qualname);
+  const Function& fn =
+      orig.class_compilation_unit()->get_function(orig_method_name);
   auto graph = fn.graph()->copy();
   graph->remapTypes(type_remap_fn);
   auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
-  auto copied = class_compilation_unit()->create_function(qualname, graph);
+  const auto this_method_name = getNameForMethod(orig_method_name.name());
+  auto copied =
+      class_compilation_unit()->create_function(this_method_name, graph);
   copied->setSchema(std::move(schema));
 }
 
@@ -268,8 +271,8 @@ void Module::clone_method(const Module& orig, const std::string& name) {
       to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
     }
   }
-  const auto qualname = getNameForMethod(name);
-  return clone_method(orig, qualname, type_remap);
+  const auto orig_method_name = QualifiedName(orig.name(), name);
+  return clone_method(orig, orig_method_name, type_remap);
 }
 
 void Module::train(bool on) {

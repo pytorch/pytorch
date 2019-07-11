@@ -105,8 +105,10 @@ class Linear(NNLinear):
         self.register_buffer('_packed_weight',
                              torch.ops.quantized.fbgemm_linear_prepack(qweight))
         self.register_buffer('bias', qbias)
-        self.register_buffer('out_scale', torch.Tensor([1]))
-        self.register_buffer('out_zero_point', torch.Tensor([0]))
+        self.register_buffer('out_scale',
+                             torch.Tensor([1.0]).to(torch.double))
+        self.register_buffer('out_zero_point',
+                             torch.Tensor([0]).to(torch.long))
 
     @property
     def weight(self):
