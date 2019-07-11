@@ -41,8 +41,8 @@ void tensor_list_binary_${op}(std::vector<at::Tensor>& input1,
 def build_comparison_functions():
     cpp_template = """
 void tensor_list_comparison_${op}(std::vector<at::Tensor>& input1,
-                              std::vector<at::Tensor>& input2,
-                              std::vector<at::Tensor>& out) {
+                                  std::vector<at::Tensor>& input2,
+                                  std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::${op}_out(out[i], input1[i], input2[i]);
   }

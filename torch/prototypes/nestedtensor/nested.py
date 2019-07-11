@@ -20,6 +20,7 @@ def make_nested_tensor(obj):
         tensors = []
         for obj_ in obj:
             tensors.append(obj_.clone().detach())
+        tensors = tuple(tensors)
         return NestedTensor(tensors)
 
 
