@@ -38,10 +38,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         "The dimension of input tensor should be larger than or equal to 2");
     // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
     // matrices, respectively.
-    int64_t M = 1;
-    for (size_t i = 0; i < input.dim() - 1; ++i) {
-      M *= input.size(i);
-    }
+    int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
 
     // Pull out the PackBMatrix and col_offsets instance from the owning tensor.
     auto& pack_ptr =
