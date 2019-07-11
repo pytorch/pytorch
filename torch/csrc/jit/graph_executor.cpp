@@ -361,6 +361,8 @@ struct DifferentiableGraphOp {
   }
 
  private:
+  // a `graph` can have multiple outputs, so we need to pack its outputs into a
+  // tuple if we want to create a `Function` from `graph`.
   static std::shared_ptr<Graph> packReturnValuesIntoTuple(
       const std::shared_ptr<Graph>& graph) {
     auto copy = graph->copy();
@@ -372,6 +374,7 @@ struct DifferentiableGraphOp {
     return copy;
   }
 
+  // unpack values packed by `packReturnValuesIntoTuple`
   static void unpackTupleIntoReturnValues(Stack& stack) {
     auto tuple = pop(stack).toTuple();
     stack.insert(
