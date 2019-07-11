@@ -2972,7 +2972,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     _resolver =
         std::make_shared<FunctionResolver>(resolver.get(), function_table);
   }
-  auto creator = [def, _resolver, self](Function& method) {
+  auto creator = [=](Function& method) {
+    std::cout << "Creating " << name << "\n";
     to_ir(def, _resolver, self, method);
   };
   return torch::make_unique<Function>(

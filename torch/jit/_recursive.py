@@ -10,28 +10,30 @@ import inspect
 from collections import OrderedDict
 
 
-def copy_module_to_script_module(original, script_module):
+code_cache = {}
+
+
+def copy_module_to_script_module(module):
     """
     Copies the parameters, buffers, constants, attributes, and submodules
     of an nn.Module into itself.
     """
-    if not hasattr(original, '_parameters'):
+    script_module = torch.jit.ScriptModule()
+    if not hasattr(module, '_parameters'):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                           .format(type(original).__name__))
+                           .format(type(module).__name__))
 
-    constants_set = set(getattr(original, "__constants__", []))
+    constants_set = set(getattr(module, "__constants__", []))
     script_module.__dict__["_constants_set"] = {}
 
     # Copy Parameters and Modules
-    for name in dir(original):
-        item = getattr(original, name)
-        if item is None and name in original._parameters:
+    for name in dir(module):
+        item = getattr(module, name)
+        if item is None and name in module._parameters:
             # XXX: treat None value simply as module attributes instead of adding them to the parameter list
             # TODO: need to handle this more generally when non-tensor attributes added to module
             object.__setattr__(script_module, name, item)
-        elif item is script_module:
-            continue
-        elif isinstance(item, (torch.nn.Parameter, torch.nn.Module, torch.jit.Attribute)):
+        elif isinstance(item, (torch.nn.Parameter, torch.jit.Attribute)):
             if isinstance(item, (torch.nn.ModuleList, torch.nn.Sequential)):
                 # These are in __constants__, so ignore them here
 
@@ -42,32 +44,35 @@ def copy_module_to_script_module(original, script_module):
                     # [weak script refactor]
                     continue
             setattr(script_module, name, item)
+        elif isinstance(item, torch.nn.Module):
+            # eagerly compile modules, but not their code
+            setattr(script_module, name, copy_module_to_script_module(item))
 
     # Copy buffers
-    for name in original._buffers:
-        if original._buffers[name] is None:
+    for name in module._buffers:
+        if module._buffers[name] is None:
             object.__setattr__(script_module, name, None)
         else:
-            script_module.register_buffer(name, original._buffers[name])
+            script_module.register_buffer(name, module._buffers[name])
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
-    for name, ann in getattr(original, '__annotations__', {}).items():
+    for name, ann in getattr(module, '__annotations__', {}).items():
         if torch._jit_internal.is_final(ann):
             constants_set.add(name)
 
     # Copy constants
     script_module.__dict__["_constants_set"] = constants_set
     for name in script_module.__dict__["_constants_set"]:
-        if hasattr(original, name):
-            if (name in original._parameters or name in original._buffers) and item is not None:
+        if hasattr(module, name):
+            if (name in module._parameters or name in module._buffers) and item is not None:
                 # for 'None' parameters/buffers, don't actually add their values if it exists
                 continue
-            setattr(script_module, name, getattr(original, name))
+            setattr(script_module, name, getattr(module, name))
 
     # Copy annotations, pull types from `__annotations__` or try to infer
     # the type if possible
-    class_annotations = getattr(original, '__annotations__', {})
-    for name in dir(original):
+    class_annotations = getattr(module, '__annotations__', {})
+    for name in dir(module):
         if name in ("training", "__dict__"):
             # TODO: removing this skip should let us remove the code to add training as an
             # attribute in python_sugared_value.cpp
@@ -75,7 +80,7 @@ def copy_module_to_script_module(original, script_module):
         if hasattr(script_module, name):
             # Don't re-copy properties
             continue
-        item = getattr(original, name)
+        item = getattr(module, name)
         if name in class_annotations:
             the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
         else:
@@ -84,16 +89,18 @@ def copy_module_to_script_module(original, script_module):
             script_module._c._register_attribute(name, the_type, item)
 
     # Copy overloads
-    script_module.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
+    script_module.__dict__["_overloads"] = dict(getattr(module, "__overloads__", {}))
 
     # Copy python ops
-    for name in dir(original):
+    for name in dir(module):
         if hasattr(script_module, name):
             # Skip Python class stuff and don't re-assign anything, but keep
             # functions around so they can be called
             continue
-        value = getattr(original, name)
+        value = getattr(module, name)
         setattr(script_module, name, value)
+
+    return script_module
 
 def recursive_script(mod):
     """
@@ -131,9 +138,11 @@ def recursive_script(mod):
 
     stubs = list(map(make_stub, methods))
 
-    script_module = torch.jit.ScriptModule()
-    copy_module_to_script_module(mod, script_module)
-
+    script_module = copy_module_to_script_module(mod)
+    print(script_module)
+    print(script_module._c)
+    print(methods)
+    print(stubs)
     torch.jit._create_methods_from_stubs(script_module, stubs)
 
     return script_module
@@ -171,18 +180,18 @@ def create_constant_iterable_module(module):
                            "into constant modules, found {}".format(module))
 
 
-def make_strong_submodule(field, module, parent):
-    if field not in parent._modules:
-        # It's not a submodule, don't do anything
-        return None
-
-    # Convert the module to a ScriptModule
-    new_strong_submodule = recursive_script(module)
-
-    # Install the ScriptModule on the python side
-    parent._modules._python_modules[field] = new_strong_submodule
-
-    return new_strong_submodule
+# def make_strong_submodule(field, module, parent):
+#     if field not in parent._modules:
+#         # It's not a submodule, don't do anything
+#         return None
+#
+#     # Convert the module to a ScriptModule
+#     new_strong_submodule = recursive_script(module)
+#
+#     # Install the ScriptModule on the python side
+#     parent._modules._python_modules[field] = new_strong_submodule
+#
+#     return new_strong_submodule
 
 
 # TODO: we are leaking these things because they don't have a distinct owner

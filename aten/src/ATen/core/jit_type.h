@@ -1438,6 +1438,10 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(false, python_str(), " does not have a field with the name '", name, "'");
   }
 
+  void swapCU(std::shared_ptr<CompilationUnit> new_cu) {
+    compilation_unit_ = new_cu;
+  }
+
   bool hasAttribute(const std::string& name) const {
     return std::find_if(
                attributeNames_.cbegin(),

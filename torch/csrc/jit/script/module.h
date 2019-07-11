@@ -109,7 +109,8 @@ struct TORCH_API Method {
 
 struct TORCH_API Module {
   Module(std::string class_name)
-      : module_value_(create_module_object(std::move(class_name))) {}
+      : module_value_(create_module_object(std::move(class_name))) {
+      }
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
