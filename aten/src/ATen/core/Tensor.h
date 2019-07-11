@@ -587,6 +587,7 @@ class CAFFE2_API Tensor {
   Tensor & _coalesced_(bool coalesced);
   Tensor indices() const;
   Tensor values() const;
+  Tensor & copy_sparse_to_sparse_(const Tensor & src, bool non_blocking=false);
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
   Tensor to_sparse(int64_t sparse_dim) const;

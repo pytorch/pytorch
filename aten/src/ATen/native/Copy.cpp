@@ -89,7 +89,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   TORCH_CHECK(self.defined(), "src is undefined");
 
   if (self.is_sparse() && src.is_sparse()) {
-    return at::copy_sparse_to_sparse_(self, src, non_blocking);
+    return self.copy_sparse_to_sparse_(src, non_blocking);
   } else if (self.is_sparse() || src.is_sparse()) {
     AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
              self.type(), " and src type = ", src.type());

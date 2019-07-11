@@ -999,6 +999,10 @@ inline Tensor Tensor::values() const {
     static auto table = globalATenDispatch().getOpTable("aten::values(Tensor(a) self) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
+inline Tensor & Tensor::copy_sparse_to_sparse_(const Tensor & src, bool non_blocking) {
+    static auto table = globalATenDispatch().getOpTable("aten::copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, src, non_blocking);
+}
 inline int64_t Tensor::numel() const {
     static auto table = globalATenDispatch().getOpTable("aten::numel(Tensor self) -> int");
     return table->getOp<int64_t (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
