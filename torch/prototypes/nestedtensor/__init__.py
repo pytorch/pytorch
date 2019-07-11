@@ -1,7 +1,6 @@
 import torch
 from . import nested
-from .codegen import tensorextension
-from .codegen import tensor_list
+import torch.prototypes.nestedtensor.codegen as codegen
 
 torch.nestedtensor = nested.make_nested_tensor
 NestedTensor = nested.NestedTensor
@@ -53,8 +52,8 @@ def _comparison(func_name, func, input1, input2, out=None):
     return out
 
 
-torch, NestedTensor = tensorextension.add_pointwise_unary_functions(torch, NestedTensor, _unary)
-torch, NestedTensor = tensorextension.add_pointwise_binary_functions(torch, NestedTensor, _binary)
-torch, NestedTensor = tensorextension.add_pointwise_comparison_functions(torch, NestedTensor, _comparison)
+torch, NestedTensor = codegen.add_pointwise_unary_functions(torch, NestedTensor, _unary)
+torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor, _binary)
+torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _comparison)
 
 __all__ = ["NestedTensor"]

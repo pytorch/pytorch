@@ -82,7 +82,7 @@
 #   USE_LMDB
 #     enables use of LMDB for storage
 #
-#   USE_PROTOTYPES=0
+#   USE_PROTOTYPES
 #     toogles the exposure of prototype features
 #
 #   BUILD_BINARY
