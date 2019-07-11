@@ -790,7 +790,22 @@ std::pair<Tensor, hidden_type> _miopen_impl(
 	const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
 	TensorList params, bool has_biases, miopenRNNMode_t mode,
 	int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-	AT_ERROR("_miopen_impl : Didn't implement it yet.");
+	Tensor hx, cx;
+	std::tie(hx, cx) = unpack_hidden(hidden);
+	int64_t hidden_size = hx.size(2);
+
+	AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+	IntArrayRef batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+
+	Tensor dropout_state = at::empty({0}, input.options());
+
+	auto miopen_output = at::miopen_rnn(
+		input, params, has_biases ? 4 : 2,
+		hx, cx, static_cast<int>(mode), hidden_size, num_layers, /*batch_first=*/false,
+		dropout_p, train, bidirectional, batch_sizes, dropout_state);
+
+	return {std::get<0>(miopen_output),
+		pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
 }
 
 template<typename hidden_type>
@@ -798,7 +813,19 @@ std::pair<Tensor, hidden_type> _miopen_impl(
 	const Tensor& input, const hidden_type& hidden,
 	TensorList params, bool has_biases, miopenRNNMode_t mode,
 	int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-	AT_ERROR("_miopen_impl : Didn't implement it yet.");
+	Tensor hx, cx;
+	std::tie(hx, cx) = unpack_hidden(hidden);
+	int64_t hidden_size = hx.size(2);
+
+	Tensor dropout_state = at::empty({0}, input.options());
+
+	auto miopen_output = at::miopen_rnn(
+		input, params, has_biases ? 4 : 2,
+		hx, cx, static_cast<int>(mode), hidden_size, num_layers, batch_first, dropout_p,
+		train, bidirectional, /*batch_sizes=*/{}, dropout_state);
+
+	return {std::get<0>(miopen_output),
+		pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
 }
 
 #define ONE_HIDDEN_RNN(NAME, MODE)                                             \
@@ -829,24 +856,22 @@ void lstm_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& input, TensorList hx,
       TensorList params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  AT_ERROR("lstm_miopen : Didn't implement it yet.");
-//  auto result = _miopen_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
-//      miopenLSTM, num_layers, dropout_p, train, bidirectional, batch_first);
-//  output = result.first;
-//  hy = std::get<0>(result.second);
-//  cy = std::get<1>(result.second);
+	auto result = _miopen_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
+		miopenLSTM, num_layers, dropout_p, train, bidirectional, batch_first);
+	output = result.first;
+	hy = std::get<0>(result.second);
+	cy = std::get<1>(result.second);
 }
 
 void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& data, const Tensor& batch_sizes, TensorList hx,
       TensorList params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-  AT_ERROR("lstm_packed_miopen: didn't implement yet.");
-//  auto result = _miopen_impl(data, batch_sizes, std::make_tuple(hx[0], hx[1]),
-//      params, has_biases, miopenLSTM, num_layers, dropout_p, train, bidirectional);
-//  output = result.first;
-//  hy = std::get<0>(result.second);
-//  cy = std::get<1>(result.second);
+	auto result = _miopen_impl(data, batch_sizes, std::make_tuple(hx[0], hx[1]),
+		params, has_biases, miopenLSTM, num_layers, dropout_p, train, bidirectional);
+	output = result.first;
+	hy = std::get<0>(result.second);
+	cy = std::get<1>(result.second);
 }
 
 REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen);
