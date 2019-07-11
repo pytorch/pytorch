@@ -77,7 +77,7 @@ class Linear(NNLinear):
                 module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
         bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
-        out_scale: `scale` parameter of output Quantized Tensor, type: float
+        out_scale: `scale` parameter of output Quantized Tensor, type: double
         out_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
 
     Examples::
@@ -105,8 +105,8 @@ class Linear(NNLinear):
             dtype=torch.qint8)
         self.register_buffer('_packed_weight',
                              torch.ops.quantized.fbgemm_linear_prepack(qweight))
-        self.register_buffer('out_scale', torch.Tensor([1]))
-        self.register_buffer('out_zero_point', torch.Tensor([0]))
+        self.register_buffer('out_scale', torch.Tensor([1]).to(dtype=torch.double))
+        self.register_buffer('out_zero_point', torch.Tensor([0]).to(dtype=torch.long))
 
     @property
     def weight(self):
