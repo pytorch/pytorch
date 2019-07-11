@@ -148,11 +148,11 @@ struct PythonResolver : public Resolver {
           annotations,
           qualifiedName,
           TupleType::namedTupleSchemaFromNamesAndTypes(qualifiedName, fields, annotations));
-      CompilationUnit::_get_python_cu()->register_class(tt);
+      get_python_cu()->register_class(tt);
       return tt;
     }
 
-    return CompilationUnit::_get_python_cu()->get_class(qualifiedName);
+    return get_python_cu()->get_class(qualifiedName);
   }
 
  private:
@@ -694,16 +694,17 @@ void initJitScriptBindings(PyObject* module) {
          ResolutionCallback rcb,
          FunctionDefaults defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
-        // TODO this should be the global python CU
         const auto name = c10::QualifiedName(qualname);
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
-        auto cu = std::make_shared<CompilationUnit>();
-        cu->define(
+        auto cu = get_python_cu();
+        auto defined_functions = cu->define(
             QualifiedName(name.prefix()),
             {def},
             {pythonResolver(std::move(rcb))},
-            nullptr);
-        auto defined = cu->get_functions().at(0);
+            nullptr,
+            true);
+        TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
+        auto& defined = defined_functions[0];
         defined->setSchema(getSchemaWithNameAndDefaults(
             def.range(), defined->getSchema(), def.name().name(), defaults));
         StrongFunctionPtr ret(std::move(cu), defined);
@@ -736,7 +737,7 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
-        auto cu = CompilationUnit::_get_python_cu();
+        auto cu = get_python_cu();
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
         cu->register_class(classType);
@@ -794,7 +795,7 @@ void initJitScriptBindings(PyObject* module) {
          const std::vector<at::Tensor>& constant_table) {
         import_functions(
             c10::nullopt,
-            *CompilationUnit::_get_python_cu_const(),
+            *get_python_cu(),
             cu,
             std::make_shared<Source>(src),
             constant_table,
@@ -804,7 +805,9 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
-  m.def("_jit_clear_class_registry", CompilationUnit::_clear_python_cu);
+  m.def("_jit_clear_class_registry", []() {
+    get_python_cu()->_clear_python_cu();
+  });
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);
