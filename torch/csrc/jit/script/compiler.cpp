@@ -492,7 +492,7 @@ struct to_ir {
   to_ir(
       const Def& def,
       ResolverPtr resolver_,
-      const Self& self,
+      const Self* self,
       Function& method) // method being constructed
       : method(method),
         graph(method.graph()),
@@ -542,7 +542,7 @@ struct to_ir {
     return old_frame;
   }
 
-  FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
+  FunctionSchema emitDef(const Def& def, const Self* self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
@@ -591,13 +591,13 @@ struct to_ir {
     CompilationUnit cu;
     // set optimize to false since we don't need to run it in optimize mode
     cu.set_optimized(false);
-    cu.define({def}, {resolver}, nullptr);
+    cu.define(c10::nullopt, {def}, {resolver}, nullptr);
     Stack stack;
-    cu.get_function("defaults").run(stack);
+    cu.get_function(def.name().name()).run(stack);
     return stack.at(0).toTuple()->elements();
   }
 
-  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self* self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -678,7 +678,7 @@ struct to_ir {
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false)};
   }
-  FunctionSchema extractSchemaFromDef(const Def& def, const Self& self) {
+  FunctionSchema extractSchemaFromDef(const Def& def, const Self* self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -688,7 +688,7 @@ struct to_ir {
 
   std::vector<Argument> emitFormalArguments(
       const Def& def,
-      const Self& self,
+      const Self* self,
       const FunctionSchema& schema,
       Block* block) {
     std::vector<Argument> arguments; // for schema
@@ -712,7 +712,7 @@ struct to_ir {
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
-          (*it).ident().range(), name, self(new_input));
+          (*it).ident().range(), name, self->makeSugared(new_input));
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
@@ -2909,16 +2909,15 @@ struct FunctionResolver : public Resolver {
 CompilationUnit::CompilationUnit(const std::string& source)
     : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
-  define(source, nativeResolver(), nullptr);
+  define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
 std::unique_ptr<Function> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
-    const Self& self,
-    const std::unordered_map<std::string, Function*>&
-        function_table) const {
-  const std::string& name = def.name().name();
+    const Self* self,
+    const std::unordered_map<std::string, Function*>& function_table) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -2936,15 +2935,18 @@ std::unique_ptr<Function> CompilationUnit::define(
     // Compilation was successful, so remove the function def info
     ErrorReport::CallStack::pop_function();
   };
+  auto name = prefix ? QualifiedName(*prefix, def.name().name())
+                     : QualifiedName(def.name().name());
   return torch::make_unique<Function>(
-      name, is_optimized(), std::make_shared<Graph>(), creator);
+      std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
 }
 
-void CompilationUnit::define(
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
-    const Self& self) {
-  AT_ASSERT(definitions.size() == resolvers.size());
+    const Self* self) {
+  TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
   c10::optional<size_t> init_idx;
@@ -2956,15 +2958,19 @@ void CompilationUnit::define(
     }
   }
 
-  std::vector<Function*> methods;
+  std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
   if (init_idx.has_value()) {
     // if we have an init, do it first.
     auto fn = define(
-        definitions[*init_idx], resolvers[*init_idx], self, function_table);
+        prefix,
+        definitions[*init_idx],
+        resolvers[*init_idx],
+        self,
+        function_table);
     const auto& name = fn->name();
     function_table[name] = fn.get();
-    methods.push_back(fn.get());
+    functions.push_back(fn.get());
     register_function(std::move(fn));
   }
 
@@ -2974,22 +2980,25 @@ void CompilationUnit::define(
       continue;
     }
 
-    auto fn = define(definitions[i], resolvers[i], self, function_table);
+    auto fn =
+        define(prefix, definitions[i], resolvers[i], self, function_table);
     const auto& name = fn->name();
     function_table[name] = fn.get();
-    methods.push_back(fn.get());
+    functions.push_back(fn.get());
     register_function(std::move(fn));
   }
 
-  for (Function* method : methods) {
-    method->ensure_defined();
+  for (Function* function : functions) {
+    function->ensure_defined();
   }
+  return functions;
 }
 
-void CompilationUnit::define(
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
-    const Self& self) {
+    const Self* self) {
   Parser p(std::make_shared<Source>(source, "<string>", 1));
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
@@ -2998,7 +3007,7 @@ void CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  define(definitions, resolvers, self);
+  return define(prefix, definitions, resolvers, self);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {

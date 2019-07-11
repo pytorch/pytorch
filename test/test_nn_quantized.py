@@ -16,6 +16,7 @@ not correctness test for the underlying quantized operators. For correctness
 test please see `caffe2/test/test_quantized.py`.
 '''
 
+
 class FunctionalAPITest(TestCase):
     def test_relu_api(self):
         X = torch.arange(-5, 5, dtype=torch.float)
@@ -107,7 +108,6 @@ class ModuleAPITest(TestCase):
         rqr2 = dequant_m(qr2)
         self.assertEqual(rqr, rqr2)
 
-
     def test_conv_api(self):
         """Tests the correctness of the conv module.
 
@@ -116,7 +116,7 @@ class ModuleAPITest(TestCase):
 
         N, iC, H, W = 10, 10, 10, 3
         oC, g, kH, kW = 16, 1, 3, 3
-        scale, zero_point = 1.0/255, 128
+        scale, zero_point = 1.0 / 255, 128
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
         X = X.permute([0, 2, 3, 1]).contiguous()
@@ -164,6 +164,7 @@ class ModuleAPITest(TestCase):
 
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
+
 
 if __name__ == '__main__':
     run_tests()
