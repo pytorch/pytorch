@@ -894,6 +894,7 @@ bool Node::hasSideEffects() const {
     case prim::TimePoint:
     case prim::CallFunction:
     case prim::CallMethod:
+    case prim::BailoutTemplate:
       return true;
   }
   // All other builtin ops are known to be safe.
@@ -1388,15 +1389,6 @@ Node* Graph::createDict(
     n->addInput(values[i]);
   }
   n->output()->setType(DictType::create(key_type, value_type));
-  return n;
-}
-
-Node* Graph::createDictIndex(Value* dict, Value* index) {
-  auto dict_type = dict->type()->expect<DictType>();
-  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
-
-  auto n = create(prim::DictIndex, {dict, index});
-  n->output()->setType(dict_type->getValueType());
   return n;
 }
 

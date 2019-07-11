@@ -1748,6 +1748,43 @@ class _TestTorchMixin(object):
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
+    @staticmethod
+    def _test_bitwise_not(self, device):
+        res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
+        for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            if dtype == torch.bool:
+                a = torch.tensor([True, False], device=device)
+                expected_res = torch.tensor([False, True], device=device)
+            else:
+                a = torch.arange(127, dtype=dtype, device=device)
+                expected_res = res.type(dtype)
+            # new tensor
+            self.assertEqual(expected_res, a.bitwise_not())
+            # out
+            b = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_not(a, out=b)
+            self.assertEqual(expected_res, b)
+            # in-place
+            a.bitwise_not_()
+            self.assertEqual(expected_res, a)
+
+        # test exceptions
+        for dtype in(torch.half, torch.float, torch.double):
+            a = torch.zeros(10, dtype=dtype, device=device)
+            # new tensor
+            with self.assertRaises(RuntimeError):
+                a.bitwise_not()
+            # out
+            b = torch.empty(0, dtype=dtype, device=device)
+            with self.assertRaises(RuntimeError):
+                torch.bitwise_not(a, out=b)
+            # in-place
+            with self.assertRaises(RuntimeError):
+                a.bitwise_not_()
+
+    def test_bitwise_not(self):
+        self._test_bitwise_not(self, 'cpu')
+
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
             if dtype != torch.uint8 and dtype != torch.float16:
@@ -2613,6 +2650,10 @@ class _TestTorchMixin(object):
         expected = torch.tensor([[0.]], dtype=torch.float16)
         self.assertEqual(halfTensor, expected)
 
+        bfloat16Tensor = torch.zeros(1, 1, dtype=torch.bfloat16)
+        expected = torch.tensor([[0.]], dtype=torch.bfloat16)
+        self.assertEqual(bfloat16Tensor, expected)
+
     def test_std_mean(self):
         for device in torch.testing.get_all_device_types():
             x = torch.rand(100, 50, 20, device=device)
@@ -2855,6 +2896,7 @@ class _TestTorchMixin(object):
         all_dtypes = torch.testing.get_all_dtypes()
         do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
         if torch.cuda.is_available():
+            all_dtypes.remove(torch.bfloat16)  # Remove once _th_zero_ is enabled on cuda for bfloat16
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
     def test_copy_dtypes(self):
@@ -3333,6 +3375,10 @@ class _TestTorchMixin(object):
     def test_unfold_all_devices_and_dtypes(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
+                if dt == torch.bfloat16:
+                    self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
+                    continue
+
                 if dt == torch.half and device == 'cpu':
                     # fix once random is implemented for Half on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
@@ -3345,8 +3391,12 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
-                x_clone = x.clone()
 
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.clone())
+                    continue
+
+                x_clone = x.clone()
                 y = copy(x)
                 y.fill_(1)
 
@@ -3367,6 +3417,9 @@ class _TestTorchMixin(object):
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.resize_as_(y))
+                    continue
                 x.resize_as_(y)
                 self.assertEqual(y.shape, x.shape)
 
@@ -3374,12 +3427,18 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.view(6))
+                    continue
                 self.assertEqual(x.view(6).shape, [6])
 
     def test_fill_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.fill_(1))
+                    continue
                 x.fill_(1)
 
                 self.assertEqual(x, torch.tensor([1, 1], dtype=dt, device=device))
@@ -3389,6 +3448,10 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.clone())
+                    continue
+
                 y = x.clone()
                 self.assertEqual(x, y)
 
@@ -3396,6 +3459,10 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
+                    continue
+
                 expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
                 self.assertEqual(torch.cat((x, x), 0), expected1)
 
@@ -3409,20 +3476,33 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for shape in shapes:
                 for dt in torch.testing.get_all_dtypes():
-                    self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                    self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
-                    self.assertEqual(shape, torch.ones(shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                    self.assertEqual(shape, torch.empty(shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                    self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
+
+                    if (device == 'cuda' and dt == torch.bfloat16):
+                        self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device=device, dtype=dt).shape)
+                        self.assertRaises(RuntimeError, lambda: torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                        self.assertRaises(RuntimeError, lambda: torch.full(shape, 3, device=device, dtype=dt).shape)
+                        self.assertRaises(RuntimeError, lambda: torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3))
+                        self.assertRaises(RuntimeError, lambda: torch.ones(shape, device=device, dtype=dt).shape)
+                        self.assertRaises(RuntimeError, lambda: torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                        self.assertRaises(RuntimeError, lambda: torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                    else:
+                        self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
+                        self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                        self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
+                        self.assertEqual(shape, torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
+                        self.assertEqual(shape, torch.ones(shape, device=device, dtype=dt).shape)
+                        self.assertEqual(shape, torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                        self.assertEqual(shape, torch.empty(shape, device=device, dtype=dt).shape)
+                        self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                        self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
                     if dt == torch.half and device == "cpu":
                         # update once random is implemented for half on CPU
                         self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                     else:
+                        if dt == torch.bfloat16:
+                            self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt))
+                            continue  # Remove once random is supported for bfloat16 on cuda
                         self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                         self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
 
@@ -4418,12 +4498,17 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
     def test_randperm(self):
-        _RNGState = torch.get_rng_state()
-        res1 = torch.randperm(100)
-        res2 = torch.LongTensor()
-        torch.set_rng_state(_RNGState)
-        torch.randperm(100, out=res2)
-        self.assertEqual(res1, res2, 0)
+        # Test core functionality. Ensure both integer and floating-point numbers are tested.
+        for dtype in (torch.long, torch.half):
+            _RNGState = torch.get_rng_state()
+            res1 = torch.randperm(100)
+            res2 = torch.empty(0, dtype=dtype)
+            torch.set_rng_state(_RNGState)
+            torch.randperm(100, out=res2)
+            self.assertEqual(res1, res2)
+
+        # Default type is long
+        self.assertIsInstance(torch.randperm(100), torch.LongTensor)
 
         # randperm of 0 elements is an empty tensor
         res1 = torch.randperm(0)
@@ -4431,6 +4516,14 @@ class _TestTorchMixin(object):
         torch.randperm(0, out=res2)
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
+
+        # Test exceptions when n is too large for a floating point type
+        for res, small_n, large_n in ((torch.HalfTensor(), 2**11 + 1, 2**11 + 2),
+                                      (torch.FloatTensor(), 2**24 + 1, 2**24 + 2),
+                                      (torch.DoubleTensor(), 2**25,  # 2**53 + 1 is too large to run
+                                       2**53 + 2)):
+            torch.randperm(small_n, out=res)  # No exception expected
+            self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res))
 
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
@@ -7737,7 +7830,7 @@ class _TestTorchMixin(object):
     def test_index_fill(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
-                if dt == torch.half:
+                if dt == torch.half or dt == torch.bfloat16:
                     continue
 
                 x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
@@ -10432,6 +10525,9 @@ class _TestTorchMixin(object):
             if t.is_sparse:
                 continue
             if t.is_cuda and not torch.cuda.is_available():
+                continue
+            if t == torch.cuda.BFloat16Tensor:
+                self.assertRaises(RuntimeError, lambda: t(100, 100).fill_(1))
                 continue
             obj = t(100, 100).fill_(1)
             obj.__repr__()
