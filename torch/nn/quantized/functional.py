@@ -79,3 +79,6 @@ def conv2d(input, weight, bias,
     return ops.quantized.fbgemm_conv2d(input, weight, bias,
                                        stride, padding, dilation,
                                        groups, scale, zero_point)
+
+# MaxPool is in the native_functions.
+max_pool2d = torch.nn.functional.max_pool2d

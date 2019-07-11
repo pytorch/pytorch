@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.jit
 import torch.nn.functional as F
+import torch.nn.quantized.functional as qF
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -65,8 +66,6 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     return Y_q_ref
 
 
-@skipIfNotRegistered("Relu_ENGINE_FBGEMM",
-                     "fbgemm-based Caffe2 ops are not linked")
 class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
     def _pool_output_shape(self, input_size, kernel_size, padding, stride,
@@ -168,7 +167,6 @@ class TestQuantizedOps(TestCase):
            dilation=st.integers(1, 2),
            padding=st.integers(0, 2))
     def test_max_pool2d(self, Q, kernel, stride, dilation, padding):
-        import torch.nn.functional as F
         X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
 
         # Check constraints
@@ -184,22 +182,27 @@ class TestQuantizedOps(TestCase):
         d = (dilation, dilation)
         p = (padding, padding)
 
-        q_max_pool = torch.ops.quantized.max_pool2d
+        max_pool_params = {"kernel_size": k,
+                           "stride": s,
+                           "padding": p,
+                           "dilation": d}
 
         a = torch.from_numpy(X)
         qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
 
-        a_hat = qa.dequantize()
-        a_pool = F.max_pool2d(a_hat, kernel_size=k, stride=s, padding=p,
-                              dilation=d)
+        Y_ref = F.max_pool2d(a, **max_pool_params)
+        qY_ref = torch.quantize_linear(Y_ref, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+        ops_under_test = [
+            F.max_pool2d,
+            torch.ops.quantized.max_pool2d
+        ]
 
-        qa_pool_hat = q_max_pool(qa, kernel_size=k, stride=s, padding=p,
-                                 dilation=d)
-        a_pool_hat = qa_pool_hat.dequantize()
-
-        np.testing.assert_equal(a_pool.numpy(), a_pool_hat.numpy())
-
+        for op in ops_under_test:
+            qY_hat = op(qa, **max_pool_params)
+            self.assertEqual(qY_ref, qY_hat)
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),

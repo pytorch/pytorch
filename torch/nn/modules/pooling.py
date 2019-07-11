@@ -70,10 +70,6 @@ class MaxPool1d(_MaxPoolNd):
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
 
-    def extra_repr(self):
-        return 'kernel_size={kernel_size}, stride={stride}, padding={padding}' \
-            ', dilation={dilation}, ceil_mode={ceil_mode}'.format(**self.__dict__)
-
 
 class MaxPool2d(_MaxPoolNd):
     r"""Applies a 2D max pooling over an input signal composed of several input
