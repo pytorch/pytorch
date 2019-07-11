@@ -4,9 +4,9 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
-#include <ATen/native/cuda/LaunchUtils.h>
 
 namespace at {
 namespace native {
@@ -79,13 +79,17 @@ __global__ void upsample_nearest2d_backward_out_frame(
 
   float scale_factor = (float)src_dim_h / (float)dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
-  int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
-  int src_y_up = nearest_neighbor_compute_source_index(scale_factor, dst_y+1, src_dim_h+1);
+  int src_y =
+      nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
+  int src_y_up = nearest_neighbor_compute_source_index(
+      scale_factor, dst_y + 1, src_dim_h + 1);
 
   scale_factor = (float)src_dim_w / (float)dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
-  int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
+  int src_x =
+      nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_compute_source_index(
+      scale_factor, dst_x + 1, src_dim_w + 1);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -144,10 +148,16 @@ static void upsample_nearest2d_out_cuda_template(
   const int max_threads = std::min<int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS);
 
+  int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+
   // upsample_2d_shape_check makes sure input/output tensor is not empty;
-  int block_x = std::min<int>(lastPow2(output_width), max_threads);
-  int block_y = std::min<int>(lastPow2(output_height), max_threads / block_x);
-  int block_z = std::min<int>(nc, max_threads / block_x / block_y);
+  int block_x = std::min<int>(
+      maxThreadsDim[0], std::min<int>(lastPow2(output_width), max_threads));
+  int block_y = std::min<int>(
+      maxThreadsDim[1],
+      std::min<int>(lastPow2(output_height), max_threads / block_x));
+  int block_z = std::min<int>(
+      maxThreadsDim[2], std::min<int>(nc, max_threads / block_x / block_y));
   const dim3 block(block_x, block_y, block_z);
 
   int grid_x = cuda::ATenCeilDiv(output_width, block_x);
@@ -222,8 +232,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
   // upsample_2d_shape_check makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
-      MAX_THREADS)};
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(

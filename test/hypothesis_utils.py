@@ -80,9 +80,16 @@ def qtensor(draw, shapes, dtypes=None, float_min=None, float_max=None):
     # Resolve scale
     scale = draw(st.floats(min_value=float_eps,
                            max_value=float_max))
+
+    adjustment = 1 + float_eps
+    _long_type_info = torch.iinfo(torch.long)
+    long_min, long_max = _long_type_info.min / adjustment, _long_type_info.max / adjustment
+    # make sure intermediate results are within the range of float representation
+    min_value = max((long_min - zero_point) * scale, (long_min / scale + zero_point), float_min)
+    max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point), float_max)
     # Resolve the tensor
     Xhy = draw(stnp.arrays(dtype=np.float32,
-                           elements=st.floats(min_value=float_min, max_value=float_max),
+                           elements=st.floats(min_value=min_value, max_value=max_value),
                            shape=shape))
     return Xhy, (scale, zero_point), (qmin, qmax), quantized_type
 
@@ -165,7 +172,7 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
                          shape=(_minibatch, _in_channels, _iH, _iW)))
     w = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
-                         shape=(_out_channels // g, _in_channels // g,
+                         shape=(_out_channels, _in_channels // g,
                                 _kH, _kW)))
     b = draw(stnp.arrays(dtype=np.float32,
                          elements=st.floats(float_min, float_max),
