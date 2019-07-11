@@ -13,7 +13,7 @@ from hypothesis_utils import qtensor, array_shapes
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS
 from common_utils import skipIfNotRegistered
-from common_utils import _quantize, _dequantize, _requantize
+from common_quantized import _quantize, _dequantize, _requantize
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -577,8 +577,8 @@ class TestQNNPackOps(TestCase):
         X, (scale, zero_point), (qmin, qmax), torch_type = Q
         relu = torch.ops.quantized.qnnpack_relu
 
-        Y = X.copy()
         X = torch.from_numpy(X)
+        Y = X.clone()
 
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch_type)
         qY_hat = relu(qX)
