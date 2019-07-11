@@ -545,6 +545,11 @@ void initJitScriptBindings(PyObject* module) {
             m.clone_method(orig, name);
           });
 
+  py::class_<ErrorReport, std::shared_ptr<ErrorReport>>(
+      m, "ErrorReport")
+      .def(py::init<SourceRange>())
+      .def("what", &ErrorReport::what);
+
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
       m, "CompilationUnit")
       .def(py::init<>())
