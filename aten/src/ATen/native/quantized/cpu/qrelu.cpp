@@ -7,7 +7,7 @@
 #include <algorithm>
 
 namespace at { namespace native {
-Tensor quantized_relu(Tensor qx) {
+Tensor quantized_relu(const Tensor& qx) {
   Tensor qy;
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
