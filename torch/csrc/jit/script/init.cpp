@@ -321,7 +321,8 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   auto graph = func.function_->graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
-  module.module_object()->compilation_unit()->create_function("forward", graph);
+  const auto name = QualifiedName(module.name(), "forward");
+  module.module_object()->compilation_unit()->create_function(name, graph);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -362,7 +363,7 @@ void initJitScriptBindings(PyObject* module) {
              ResolutionCallback rcb) {
             c10::optional<Self> self;
             m.class_compilation_unit()->define(
-                script, pythonResolver(rcb), moduleSelf(m, py_m));
+                m.name(), script, pythonResolver(rcb), moduleSelf(m, py_m));
             didFinishEmitModule(m);
           })
       .def(
@@ -372,19 +373,23 @@ void initJitScriptBindings(PyObject* module) {
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,
              const std::vector<FunctionDefaults>& defaults) {
+            TORCH_INTERNAL_ASSERT(defs.size() == rcbs.size());
             std::vector<ResolverPtr> resolvers;
             resolvers.reserve(rcbs.size());
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
+            const auto prefix = QualifiedName(m.name());
             m.class_compilation_unit()->define(
-                defs, resolvers, moduleSelf(m, py_m));
+                prefix, defs, resolvers, moduleSelf(m, py_m));
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
             while (defs_it != defs.end()) {
-              auto& method = m.class_compilation_unit()->get_function(
-                  (*defs_it).name().name());
+              const auto method_name =
+                  QualifiedName(m.name(), (*defs_it).name().name());
+              auto& method =
+                  m.class_compilation_unit()->get_function(method_name);
               method.setSchema(getSchemaWithNameAndDefaults(
                   defs_it->range(),
                   method.getSchema(),
@@ -508,8 +513,9 @@ void initJitScriptBindings(PyObject* module) {
             auto typed_inputs = toTypedStack(input_tuple);
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, &self);
-            self.module_object()->type()->compilation_unit()->create_function(
-                name, graph);
+            const auto method_name = QualifiedName(self.name(), name);
+            self.module_object()->compilation_unit()->create_function(
+                method_name, graph);
             didFinishEmitModule(self);
           })
       .def(
@@ -556,8 +562,8 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "find_function",
           [](std::shared_ptr<CompilationUnit> self, const std::string& name) {
-            auto fn =  self->find_function(name);
-            return StrongFunctionPtr(std::move(self), fn);
+            auto& fn = self->get_function(QualifiedName(name));
+            return StrongFunctionPtr(std::move(self), &fn);
           })
       .def("set_optimized", &CompilationUnit::set_optimized)
       .def(
@@ -565,7 +571,7 @@ void initJitScriptBindings(PyObject* module) {
           [](CompilationUnit& cu,
              const std::string& src,
              ResolutionCallback rcb) {
-            cu.define(src, pythonResolver(rcb), nullptr);
+            cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
           });
 
   py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
@@ -673,11 +679,20 @@ void initJitScriptBindings(PyObject* module) {
       [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
-      [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
+      [](const std::string& qualname,
+         const Def& def,
+         ResolutionCallback rcb,
+         FunctionDefaults defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         // TODO this should be the global python CU
+        const auto name = c10::QualifiedName(qualname);
+        TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
         auto cu = std::make_shared<CompilationUnit>();
-        cu->define({def}, {pythonResolver(std::move(rcb))}, nullptr);
+        cu->define(
+            QualifiedName(name.prefix()),
+            {def},
+            {pythonResolver(std::move(rcb))},
+            nullptr);
         auto defined = cu->get_functions().at(0);
         defined->setSchema(getSchemaWithNameAndDefaults(
             def.range(), defined->getSchema(), def.name().name(), defaults));
@@ -688,7 +703,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_create_function_from_trace",
-      [](std::string name,
+      [](std::string qualname,
          py::function func,
          py::tuple input_tuple,
          py::function var_lookup_fn,
@@ -696,7 +711,9 @@ void initJitScriptBindings(PyObject* module) {
         auto typed_inputs = toTypedStack(input_tuple);
         auto graph = tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, force_outplace);
+        // TODO this should go in the global Python CU
         auto cu = std::make_shared<CompilationUnit>();
+        const auto name = c10::QualifiedName(qualname);
         auto result = cu->create_function(std::move(name), std::move(graph));
         StrongFunctionPtr ret(std::move(cu), result);
         didFinishEmitFunction(ret);
@@ -709,10 +726,10 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
-        auto cu = std::make_shared<CompilationUnit>();
-        auto classType =
-            ClassType::create(c10::QualifiedName(qualifiedName), cu);
-        CompilationUnit::_get_python_cu()->register_class(classType);
+        auto cu = CompilationUnit::_get_python_cu();
+        const auto classname = c10::QualifiedName(qualifiedName);
+        auto classType = ClassType::create(classname, cu);
+        cu->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
@@ -720,7 +737,8 @@ void initJitScriptBindings(PyObject* module) {
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
-        cu->define(methodDefs, rcbs, simpleSelf(classType));
+        cu->define(
+            QualifiedName(classname), methodDefs, rcbs, simpleSelf(classType));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
@@ -766,6 +784,7 @@ void initJitScriptBindings(PyObject* module) {
          const std::vector<at::Tensor>& constant_table,
          const Self& self) {
         import_functions(
+            c10::nullopt,
             *CompilationUnit::_get_python_cu_const(),
             cu,
             std::make_shared<Source>(src),
@@ -817,9 +836,11 @@ void initJitScriptBindings(PyObject* module) {
       "Retrieve the optimized graph that was run the last time the graph executor ran on this thread");
   m.def(
       "_create_function_from_graph",
-      [](const std::string& name, std::shared_ptr<Graph> graph) {
+      [](const std::string& qualname, std::shared_ptr<Graph> graph) {
+        // TODO this should go in the global Python CU
         auto cu = std::make_shared<CompilationUnit>();
-        auto fn = cu->create_function(name, graph);
+        c10::QualifiedName name(qualname);
+        auto fn = cu->create_function(std::move(name), graph);
         return StrongFunctionPtr(std::move(cu), fn);
       });
 
