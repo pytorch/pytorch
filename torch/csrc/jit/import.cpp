@@ -81,6 +81,7 @@ class ScriptModuleDeserializer final {
 
   std::unordered_set<std::string> imported_libs_;
 
+  std::shared_ptr<script::CompilationUnit> compilation_unit_;
   script::Module main_module_;
 };
 
@@ -437,13 +438,14 @@ script::Module load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
-  script::Module module("__main__");
+  auto cu = std::make_shared<script::CompilationUnit>();
+  script::Module module("__main__", cu);
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
     script::Module curr = module;
     for (const auto& name : qualified_name) {
       if (!curr.find_module(name)) {
-        curr.register_module(name, script::Module("__main__"));
+        curr.register_module(name, script::Module("__main__", cu));
       }
       curr = curr.get_module(name);
     }
