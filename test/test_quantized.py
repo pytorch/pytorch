@@ -13,7 +13,7 @@ from hypothesis_utils import qtensor, array_shapes
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS
 from common_utils import skipIfNotRegistered
-from common_utils import _quantize, _dequantize, _requantize
+from common_quantized import _quantize, _dequantize, _requantize
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -94,7 +94,7 @@ class TestQuantizedOps(TestCase):
 
         Y[Y < 0] = 0
         qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale, zero_point=zero_point, dtype=torch_type)
-        self.assertEqual(qY.int_repr(), qY_hat.int_repr())
+        self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
@@ -577,15 +577,15 @@ class TestQNNPackOps(TestCase):
         X, (scale, zero_point), (qmin, qmax), torch_type = Q
         relu = torch.ops.quantized.qnnpack_relu
 
-        Y = X.copy()
         X = torch.from_numpy(X)
+        Y = X.clone()
 
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch_type)
         qY_hat = relu(qX)
 
         Y[Y < 0] = 0
         qY = torch.quantize_linear(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
-        np.testing.assert_equal(qY, qY_hat)
+        self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the quantized::qnnpack_linear op."""
     @given(output_channels=st.sampled_from([2, 4, 5, 8, 16, 32]),

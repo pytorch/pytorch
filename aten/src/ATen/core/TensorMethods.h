@@ -185,6 +185,14 @@ inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const 
     static auto table = globalATenDispatch().getOpTable("aten::bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, weights, minlength);
 }
+inline Tensor Tensor::bitwise_not() const {
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_not(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+}
+inline Tensor & Tensor::bitwise_not_() {
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_not_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+}
 inline Tensor Tensor::bmm(const Tensor & mat2) const {
     static auto table = globalATenDispatch().getOpTable("aten::bmm(Tensor self, Tensor mat2) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, mat2);

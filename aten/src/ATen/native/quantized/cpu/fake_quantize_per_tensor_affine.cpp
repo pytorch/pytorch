@@ -43,8 +43,8 @@ Tensor fake_quantize_per_tensor_affine_cpu(
     double inv_scale = 1.0f / scale;
     auto iter = TensorIterator::unary_op(Y, self);
     cpu_kernel(*iter, [&](float self) -> float {
-      return (std::clamp<double>(std::nearbyint(self * inv_scale + zero_point),
-              quant_min, quant_max) - zero_point) * scale;
+      return (std::fmin(std::fmax(std::nearbyint(self * inv_scale + zero_point),
+              quant_min), quant_max) - zero_point) * scale;
     });
 
     return Y;
