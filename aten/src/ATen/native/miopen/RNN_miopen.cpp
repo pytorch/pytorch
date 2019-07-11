@@ -231,6 +231,23 @@ struct RNNDescriptors {
 	}
 };
 
+Tensor permute_wei_for_miopen(Tensor wei, int64_t mode)
+{
+	if (mode < 2)
+		return wei;
+
+	Tensor permuted_wei;
+	if(mode == 2) {	// LSTM
+		auto sliced_tensor = wei.chunk(4, 0);
+		permuted_wei = at::cat({sliced_tensor[0], sliced_tensor[1], sliced_tensor[3], sliced_tensor[2]});
+	}
+	else if(mode == 3) {	// GRU
+		auto sliced_tensor = wei.chunk(3, 0);
+		permuted_wei = at::cat({sliced_tensor[1], sliced_tensor[0], sliced_tensor[2]});
+	}
+	return permuted_wei;
+}
+
 void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, bool copy) {
     AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
@@ -249,6 +266,22 @@ void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_t
             } else {
                 param_from.resize_as_(param_to);
             }
+        }
+    }
+}
+
+void _copyParams_and_permute(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, int64_t mode) {
+    AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
+    for (size_t i = 0; i < params_from.size(0); i++) {
+        auto layer_params_from = params_from[i];
+        auto layer_params_to = params_to[i];
+        for (auto a = layer_params_from.begin(), b = layer_params_to.begin();
+                a != layer_params_from.end() && b != layer_params_to.end();
+                ++a, ++b) {
+            auto param_from = *a, param_to = *b;
+            AT_ASSERTM(param_from.type() == param_to.type(), "parameter types mismatch");
+            auto tmp = permute_wei_for_miopen(param_from, mode);
+            param_to.copy_(tmp.view_as(param_to));
         }
     }
 }
@@ -456,8 +489,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     std::vector<Tensor> params;
     size_t params_stride0;
     std::tie(params, params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
-   _copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
-               MatrixRef<Tensor>{params, params_stride0});
+    if (fn_mode < 2)
+		_copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
+			    MatrixRef<Tensor>{params, params_stride0});
+	else
+		_copyParams_and_permute(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
+					MatrixRef<Tensor>{params, params_stride0}, fn_mode);
 
     AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size), "Expected cell size ", IntArrayRef{hidden_size}, ", got", cx.sizes());
 
@@ -726,6 +763,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     std::vector<Tensor> dw;
     if (output_mask[3]) {
 		dw = at::native::miopen_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, ws);
+		if (mode > 1) {
+			for (int i = 0; i < dw.size(); i++) {
+				dw[i] = permute_wei_for_miopen(dw[i], mode);
+			}
+		}
     }
     return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
 }
