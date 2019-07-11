@@ -171,9 +171,9 @@ void testTHNNConv() {
 
   // make JIT graph
   auto graph = std::make_shared<Graph>();
-  auto ksz_val = graph->insertConstant(IValue(kernel_size));
-  auto kst_val = graph->insertConstant(IValue(stride));
-  auto pad_val = graph->insertConstant(IValue(padding));
+  auto ksz_val = graph->insertConstant(c10::impl::toList(kernel_size));
+  auto kst_val = graph->insertConstant(c10::impl::toList(stride));
+  auto pad_val = graph->insertConstant(c10::impl::toList(padding));
 
   auto inputg = graph->addInput("self");
   auto weightg = graph->addInput("weight");
@@ -442,13 +442,12 @@ void testEvalModeForLoadedModule() {
   if (isSandcastle())
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
-  std::shared_ptr<torch::jit::script::Module> module =
-      torch::jit::load(module_path);
-  AT_ASSERT(module->get_module("dropout")->is_training());
-  module->eval();
-  AT_ASSERT(!module->get_module("dropout")->is_training());
-  module->train();
-  AT_ASSERT(module->get_module("dropout")->is_training());
+  torch::jit::script::Module module = torch::jit::load(module_path);
+  AT_ASSERT(module.get_module("dropout").is_training());
+  module.eval();
+  AT_ASSERT(!module.get_module("dropout").is_training());
+  module.train();
+  AT_ASSERT(module.get_module("dropout").is_training());
 }
 
 // test a few features that are not directly used in schemas yet
@@ -840,36 +839,36 @@ void testNoneSchemaMatch() {
 }
 
 void testModuleDefine() {
-  auto m = std::make_shared<script::Module>();
-  m->register_parameter("foo", torch::ones({}), false);
-  m->define(R"(
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
     def add_it(self, x, b : int = 4):
       return self.foo + x + b
   )");
-  auto result = m->run_method("add_it", torch::ones({}));
+  auto result = m.run_method("add_it", torch::ones({}));
   AT_ASSERT(result.toTensor().item<float>() == 6)
 }
 
 void testModuleConversion() {
-  auto m = std::make_shared<script::Module>();
+  script::Module m("test");
   {
     // test cuda to cpu for params and buffers
-    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
-    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+    m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m.register_buffer("bar", torch::ones({}, at::kCUDA));
 
-    m->to(at::kCUDA);
-    m->to(at::kCPU);
-    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
-    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
+    m.to(at::kCUDA);
+    m.to(at::kCPU);
+    AT_ASSERT(m.get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m.get_buffer("bar").device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
-    m->register_parameter("foo", torch::ones({}), false);
-    m->register_buffer("bar", torch::ones({}));
+    m.register_parameter("foo", torch::ones({}), false);
+    m.register_buffer("bar", torch::ones({}));
 
-    m->to(at::kCUDA);
-    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
-    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
+    m.to(at::kCUDA);
+    AT_ASSERT(m.get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m.get_buffer("bar").device().is_cuda());
   }
 }
 
@@ -995,8 +994,7 @@ void testInsertBailOuts() {
   std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
 
   for (auto blo : bailouts) {
-    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
-    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::BailoutTemplate);
   }
 }
 
