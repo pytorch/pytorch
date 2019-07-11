@@ -243,15 +243,21 @@ only interested in a specific component.
   Caffe2 operators.
 
 On the initial build, you can also speed things up with the environment
-variables `DEBUG` and `USE_CUDA`.
+variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
 - `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
+- `USE_DISTRIBUTED=0` will disable distributed (c10d, gloo, mpi, etc.) build.
+- `USE_MKLDNN=0` will disable using MKL-DNN.
 - `USE_CUDA=0` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
+- `BUILD_TEST=0` will disable building C++ test binaries.
+- `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
+- `USE_NNPACK=0` will disable compiling with NNPACK.
+- `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
 
 For example:
 ```bash
-USE_CUDA=0 DEBUG=1 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 python setup.py develop
 ```
 
 Make sure you continue to pass these flags on subsequent builds.
