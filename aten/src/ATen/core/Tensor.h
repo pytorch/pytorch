@@ -382,6 +382,8 @@ class CAFFE2_API Tensor {
   Tensor & bernoulli_(double p=0.5, Generator * generator=nullptr);
   Tensor bernoulli(double p, Generator * generator=nullptr) const;
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
+  Tensor bitwise_not() const;
+  Tensor & bitwise_not_();
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
   Tensor & ceil_();
