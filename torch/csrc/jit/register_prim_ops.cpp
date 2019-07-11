@@ -1074,8 +1074,10 @@ RegisterOperators reg(
            const auto type = node->output()->type()->expect<ClassType>();
            const size_t numAttrs = type->numAttributes();
            return [type, numAttrs](Stack& stack) {
+             auto cu = type->compilation_unit().lock();
+             TORCH_INTERNAL_ASSERT(cu);
              auto userObj = c10::ivalue::Object::create(
-                 c10::StrongTypePtr(type->compilation_unit(), type), numAttrs);
+                 c10::StrongTypePtr(cu, type), numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };

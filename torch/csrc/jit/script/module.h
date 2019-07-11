@@ -430,15 +430,12 @@ struct TORCH_API Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
-  static void clearMethods(c10::ivalue::Object* self) {
-    self->compilation_unit()->drop_all_functions();
-  }
   static ModulePtr create_module_object(std::string class_name) {
     auto cu = std::make_shared<CompilationUnit>();
     auto cls = ClassType::create(
         QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
     return c10::ivalue::Object::create(
-        c10::StrongTypePtr(std::move(cu), std::move(cls)), 0, clearMethods);
+        c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
   }
   // mutable be we lazily initialize in module_object.
   mutable ModulePtr module_value_;

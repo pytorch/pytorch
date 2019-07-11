@@ -9,19 +9,21 @@ namespace c10 {
 
 Function* ClassType::getMethod(const std::string& name) const {
   const auto qualname = QualifiedName(*qualified_name_obj(), name);
-  return compilation_unit_->find_function(qualname);
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu->find_function(qualname);
 }
 
-std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
+std::weak_ptr<CompilationUnit> ClassType::compilation_unit() {
   return compilation_unit_;
 }
-std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
+std::weak_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   return compilation_unit_;
 }
 
 ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
-    std::shared_ptr<CompilationUnit> cu,
+    std::weak_ptr<CompilationUnit> cu,
     bool is_module) {
   return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
 }
@@ -69,7 +71,7 @@ const std::vector<Function*>& ClassType::methods() const {
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
-    std::shared_ptr<CompilationUnit> cu,
+    std::weak_ptr<CompilationUnit> cu,
     bool is_module)
     : NamedType(TypeKind::ClassType, name), compilation_unit_(std::move(cu)) {
   if (is_module) {
