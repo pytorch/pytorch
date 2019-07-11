@@ -6,20 +6,20 @@
 
 #include <ATen/ATen.h>
 #include <ATen/CPUGenerator.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/core/TensorOptions.h>
-#include <TH/THRandom.h>
-#include <TH/THGenerator.hpp>
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -49,11 +49,6 @@ void window_function_checks(
       function_name,
       " requires non-negative window_length, got window_length=",
       window_length);
-}
-
-// FIXME: point to LegacyTHDispatcher.
-const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
-  return at::getType(options);
 }
 
 } // namespace
@@ -90,7 +85,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
+Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.backend() == Backend::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
@@ -111,13 +106,27 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::CPUTensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
+
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor empty(
+    IntArrayRef size,
+    at::optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  internal_set_names_inplace(result, names);
+  return result;
+}
+#endif
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
   check_size_nonnegative(size);
@@ -126,7 +135,15 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptio
   return t;
 }
 
-Tensor& empty_out(Tensor& result, IntArrayRef size) {
+Tensor& empty_out(
+    Tensor& result,
+    IntArrayRef size,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // Preferably, this argument would not be accepted by _out, but the code
+  // generator requires the out and non-out overloads to match exactly
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "'memory_format' argument is incompatible with 'out' tensor argument");
   check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
@@ -156,22 +173,55 @@ Tensor empty_like(const Tensor& self) {
   return native::empty_like(self, self.options());
 }
 
-Tensor empty_like(const Tensor& self, const TensorOptions& options) {
+Tensor empty_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+
+  TORCH_CHECK(
+      !(options.layout() != kStrided &&
+          optional_memory_format.has_value()),
+      "memory format option is only supported by strided tensors");
   if (options.layout() == kSparse && self.is_sparse()) {
-    auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
-    return res;
+    auto result = at::empty({0}, options); // to be resized
+    result.sparse_resize_and_clear_(
+        self.sizes(), self.sparse_dim(), self.dense_dim());
+    return result;
   }
+
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  auto use_memory_format = memory_format;
+  if (memory_format == MemoryFormat::Preserve) {
+    if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
+      use_memory_format = MemoryFormat::ChannelsLast;
+    } else if (self.is_contiguous(MemoryFormat::Contiguous)) {
+      use_memory_format = MemoryFormat::Contiguous;
+    } else {
+      TORCH_CHECK(
+          false,
+          "undefined behavior of the preserve format, source tensor neither channels last nor contiguous")
+    }
+  }
+
   if (self.is_quantized()) {
+    // We could check if dtype is still quantized?  But then should we shift/scale
+    // the q_zero_point / q_scale or not?
+    TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
+                "It is currently not supported to specify a dtype that doesn't match "
+                "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
+                " Input tensor's dtype: ", self.dtype());
     // TODO: uncomment when qscheme diff is landed
     // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
     //                       "empty_like for quantized Tensor only works for
     //                        PerTensorAffine scheme right now");
-    return at::_empty_affine_quantized(self.sizes(), self.options(),
-                                       self.q_scale().toDouble(),
-                                       self.q_zero_point().toLong());
+    return at::_empty_affine_quantized(self.sizes(), options,
+                                       self.q_scale(),
+                                       self.q_zero_point(),
+                                       use_memory_format);
   }
-  return at::empty(self.sizes(), options);
+
+  return at::empty(self.sizes(), options, use_memory_format);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -235,6 +285,55 @@ Tensor full_like(const Tensor& self, Scalar fill_value) {
 
 Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
   return native::full(self.sizes(), fill_value, options);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
+  int64_t nDims = self.dim();
+  TORCH_CHECK(nDims >= 2, "dimensions must larger than 1");
+
+  int64_t height = self.size(0);
+  int64_t width = self.size(1);
+
+  if (nDims > 2) {
+    int64_t dim1 = height;
+    for (int64_t i = 1; i < nDims; i++) {
+      if (self.size(i) != dim1) {
+        AT_ERROR("all dimensions of input must be of equal length");
+      }
+    }
+  }
+
+  int64_t storage_offset = self.storage_offset();
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+  int64_t size = std::min(height, width);
+
+  int64_t stride = 0;
+  for (int64_t i = 0; i < nDims; i++) {
+    stride += self.stride(i);
+  }
+  strides.push_back(stride);
+  sizes.push_back(size);
+
+  auto main_diag = self.as_strided(sizes, strides, storage_offset);
+  main_diag.fill_(fill_value);
+
+  if (wrap && nDims == 2 && height > width + 1) {
+    std::vector<int64_t> wrap_sizes;
+
+    int64_t step = width + 1;
+    int64_t wrap_size = ((self.numel() + step - 1) / step) - size;
+    wrap_sizes.push_back(wrap_size);
+
+    int64_t offset = self.stride(0) * (width + 1);
+
+    auto wrap_diag = self.as_strided(wrap_sizes, strides, storage_offset + offset);
+    wrap_diag.fill_(fill_value);
+  }
+
+  return self;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -414,6 +513,18 @@ Tensor& randn_out(Tensor& result, IntArrayRef size, Generator* generator) {
   return result.normal_(0, 1, generator);
 }
 
+Tensor normal(double mean, double std, IntArrayRef size,
+              Generator* generator, const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  return result.normal_(mean, std, generator);
+}
+
+Tensor& normal_out(Tensor& result, double mean, double std,
+                   IntArrayRef size, Generator* generator) {
+  result.resize_(size);
+  return result.normal_(mean, std, generator);
+}
+
 Tensor randn_like(const Tensor& self) {
   return native::randn_like(self, self.options());
 }
@@ -426,33 +537,27 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
 
 namespace {
 template <typename scalar_t>
-void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
-  std::lock_guard<std::mutex> lock(generator->mutex);
+void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
   scalar_t *r__data = result.data<scalar_t>();
 
   result.resize_({n});
   int64_t r__stride_0 = result.stride(0);
 
-  for(int64_t i = 0; i < n; i++) {
-    r__data[i*r__stride_0] = static_cast<scalar_t>(i);
-  }
+  at::parallel_for(0, n, internal::GRAIN_SIZE,
+                  [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
+    for(int64_t i = p_begin; i < p_end; i++)
+      r__data[i*r__stride_0] = static_cast<scalar_t>(i);
+  });
 
   for(int64_t i = 0; i < n - 1; i++)
   {
-    int64_t z = THRandom_random(generator) % (n-i);
+    int64_t z = generator->random() % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;
   }
 }
 } // namespace
-
-
-THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
-  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
-  return gen_->generator;
-}
 
 Tensor randperm(int64_t n, const TensorOptions& options) {
   return native::randperm(n, nullptr, options);
@@ -469,9 +574,12 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
 
 Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
+  check_supported_max_int_with_precision(n, result);
   result.resize_({n});
-  auto gen = get_generator(generator);
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
+  auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
 

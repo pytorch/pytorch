@@ -506,8 +506,8 @@ class TestCase(expecttest.TestCase):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
-                    if a.device.type == 'cpu' and a.dtype == torch.float16:
-                        # CPU half tensors don't have the methods we need below
+                    if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
+                        # CPU half and bfloat16 tensors don't have the methods we need below
                         a = a.to(torch.float32)
                     b = b.to(a)
 
@@ -538,11 +538,17 @@ class TestCase(expecttest.TestCase):
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
+            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
+            elif x.is_quantized and y.is_quantized:
+                self.assertEqual(x.qscheme(), y.qscheme())
+                self.assertEqual(x.q_scale(), y.q_scale())
+                self.assertEqual(x.q_zero_point(), y.q_zero_point())
+                self.assertEqual(x.int_repr(), y.int_repr())
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -787,6 +793,11 @@ class TestCase(expecttest.TestCase):
         # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 
+    if sys.version_info < (3, 5):
+        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
+        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
+
+
 
 def download_file(url, binary=True):
     if sys.version_info < (3,):
@@ -863,11 +874,11 @@ def random_square_matrix_of_rank(l, rank):
     return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
 
 
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
+def random_symmetric_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
     for i in range(l):
         for j in range(i):
-            A[i, j] = A[j, i]
+            A[..., i, j] = A[..., j, i]
     return A
 
 

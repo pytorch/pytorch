@@ -72,7 +72,7 @@ class ProcessGroupShareTensorTest(TestCase):
                 expected,
                 result,
                 (
-                    "Expect rank {} to broadcast result {} but got {}."
+                    "Expect rank {} to receive tensor {} but got {}."
                 ).format(pid, expected, result)
             )
 
@@ -185,6 +185,26 @@ class ProcessGroupShareTensorTest(TestCase):
             ProcessGroupShareTensorTest._test_allgather_process,
             [torch.ones(2, 2).to(i) * i for i in range(self.world_size)],
             ProcessGroupShareTensorTest._init_pg_nccl,
+            self.world_size)
+
+    @classmethod
+    def _test_allgather_chunk_process(
+            cls, rank, filename, shared_tensor, world_size, init_pg, c2p, p2c):
+        pg = init_pg(rank, filename, world_size)
+        chunks = torch.chunk(shared_tensor, world_size, dim=0)
+        x = chunks[rank]
+        ys = [torch.zeros_like(x) for _ in range(world_size)]
+        pg.allgather(ys, x).wait()
+        c2p.put((rank, chunks[0].to("cpu"), ys[0].to("cpu")))
+        c2p.put((rank, chunks[1].to("cpu"), ys[1].to("cpu")))
+        p2c.get()
+
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    def test_shared_allgather_chunk_gloo(self):
+        self._test_multiprocess(
+            ProcessGroupShareTensorTest._test_allgather_chunk_process,
+            torch.tensor(range(4)).reshape(2, 2),
+            ProcessGroupShareTensorTest._init_pg_gloo,
             self.world_size)
 
 

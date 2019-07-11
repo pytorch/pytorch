@@ -2,7 +2,7 @@
 
 #include <assert.h>
 #include <ATen/ATen.h>
-#include <ATen/cuda/Array.h>
+#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
@@ -20,7 +20,7 @@
 
 namespace at { namespace native {
 
-using at::cuda::Array;
+using at::detail::Array;
 
 static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;

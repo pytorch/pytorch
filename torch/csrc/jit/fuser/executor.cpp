@@ -385,7 +385,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
     if (omap.needsSumToSize()) {
       return at::sum_to(
           raw_outputs[omap.offset()],
-          all_inputs[omap.sizeInput()].toIntList()->elements());
+          all_inputs[omap.sizeInput()].toIntListRef());
     } else {
       return raw_outputs[omap.offset()];
     }

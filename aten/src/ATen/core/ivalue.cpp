@@ -17,15 +17,29 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 
 namespace {
 
-template<typename List>
-std::ostream& printList(std::ostream & out, const List &v,
+template<class T>
+std::ostream& printList(std::ostream & out, const c10::List<T> &v,
   const std::string start, const std::string finish) {
   out << start;
-  for(size_t i = 0; i < v->elements().size(); ++i) {
+  for(size_t i = 0; i < v.size(); ++i) {
     if(i > 0)
       out << ", ";
     // make sure we use ivalue printing, and not default printing for the element type
-    out << IValue(v->elements()[i]);
+    out << IValue(v.get(i));
+  }
+  out << finish;
+  return out;
+}
+
+template<class T>
+std::ostream& printList(std::ostream & out, const std::vector<T> &v,
+  const std::string start, const std::string finish) {
+  out << start;
+  for(size_t i = 0; i < v.size(); ++i) {
+    if(i > 0)
+      out << ", ";
+    // make sure we use ivalue printing, and not default printing for the element type
+    out << IValue(v[i]);
   }
   out << finish;
   return out;
@@ -36,7 +50,7 @@ std::ostream& printDict(std::ostream& out, const Dict& v) {
   out << "{";
 
   bool first = true;
-  for (const auto& pair : v->elements()) {
+  for (const auto& pair : v) {
     if (!first) {
       out << ", ";
     }
@@ -75,7 +89,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple:
-      return printList(out, v.toTuple(), "(", ")");
+      return printList(out, v.toTuple()->elements(), "(", ")");
     case IValue::Tag::IntList:
       return printList(out, v.toIntList(), "[", "]");
     case IValue::Tag::DoubleList:
@@ -99,11 +113,12 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict());
     case IValue::Tag::Object:
-      // TODO we should print the object contents
-      return out << "Object<" << v.toObject()->name()
-                 << ">";
+      // TODO we should attempt to call __str__ if the object defines it.
+      auto obj = v.toObject();
+      // print this out the way python would do it
+      return out << "<" << obj->name() << " object at " << obj.get() << ">";
   }
-  AT_ERROR("Tag not found\n");
+  AT_ERROR("Tag not found: ", v.tagKind());
 }
 
 #undef TORCH_FORALL_TAGS
@@ -114,16 +129,16 @@ void IValue::dump() const {
 
 
 std::string ivalue::Object::name() const {
-  return this->type_->qualname();
+  return this->type_.type_->qualname();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
@@ -146,9 +161,9 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
   AT_ERROR("Illegal dict key");
 }
 
-const ivalue::GenericDict::IterationOrder ivalue::GenericDict::iterationOrder() const {
-  IterationOrder ordered;
-  for (auto element : elements()) {
+std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict) {
+  std::vector<std::pair<IValue, IValue>> ordered;
+  for (auto& element : dict) {
     ordered.emplace_back(element.key(), element.value());
   }
   std::sort(ordered.begin(), ordered.end(), CompareIValue);

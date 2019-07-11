@@ -297,8 +297,7 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
   }
   if (tensors.size() > static_cast<size_t>(at::cuda::getNumGPUs())) {
     throw std::runtime_error(
-      "Tensor list mustn't be larger than the number of available GPUs"
-    );
+        "Tensor list mustn't be larger than the number of available GPUs");
   }
 
   const auto& first = tensors.front();
@@ -335,8 +334,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     size_t world_size) {
   if (tensor_lists.size() != other.size()) {
     throw std::runtime_error(
-      "Tensor list operands to scatter/gather must have the same length"
-    );
+        "Tensor list operands to scatter/gather must have the same length");
   }
   const auto num_devices = tensor_lists.size();
 
@@ -346,25 +344,22 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
   for (auto i = size_t{}; i < num_devices; ++i) {
     if (tensor_lists[i].size() != world_size * num_devices) {
       throw std::runtime_error(
-        "Tensor list input to scatter/gather must match number of collective"
-        " participants"
-      );
+          "Tensor list input to scatter/gather must match number of collective"
+          " participants");
     }
 
     // Only check device match for the first tensor in the list; the call to
     // newLikeFlat() below will check the rest.
     if (tensor_lists[i].front().get_device() != other[i].get_device()) {
       throw std::runtime_error(
-        "Corresponding input/output tensors to scatter/gather must all reside"
-        " on the same device"
-      );
+          "Corresponding input/output tensors to scatter/gather must all reside"
+          " on the same device");
     }
 
     for (const auto& t : tensor_lists[i]) {
       if (t.numel() != other[i].numel()) {
         throw std::runtime_error(
-          "All tensor operands to scatter/gather must have the same size"
-        );
+            "All tensor operands to scatter/gather must have the same size");
       }
     }
     // Flatten the tensors (from all ranks) into a single big tensor.
@@ -373,9 +368,9 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
   return flattened;
 }
 
-}
+} // namespace
 
-template<typename Fn, typename PreProcess, typename PostProcess>
+template <typename Fn, typename PreProcess, typename PostProcess>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
@@ -414,14 +409,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     //
     // See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-      inputs[i].storage().data(), ncclStream);
+        inputs[i].storage().data(), ncclStream);
 
-    C10D_NCCL_CHECK(fn(
-      inputs[i],
-      outputs[i],
-      ncclComms[i]->getNcclComm(),
-      ncclStream
-    ));
+    C10D_NCCL_CHECK(
+        fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
@@ -437,16 +428,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   return work;
 }
 
-template<typename Fn>
+template <typename Fn>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     Fn fn) {
   return collective(
-    inputs, outputs, fn,
-    [] (std::vector<at::cuda::CUDAStream>&) {},
-    [] (std::vector<at::cuda::CUDAStream>&) {}
-  );
+      inputs,
+      outputs,
+      fn,
+      [](std::vector<at::cuda::CUDAStream>&) {},
+      [](std::vector<at::cuda::CUDAStream>&) {});
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
@@ -454,20 +446,22 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     const AllreduceOptions& opts) {
   check_gpu_tensors(tensors);
 
-  return collective(tensors, tensors,
-    [&] (at::Tensor& input, at::Tensor& output,
-         ncclComm_t comm, at::cuda::CUDAStream& stream) {
-      return ncclAllReduce(
-        input.data_ptr(),
-        output.data_ptr(),
-        input.numel(),
-        getNcclDataType(input.scalar_type()),
-        ncclOp[opts.reduceOp],
-        comm,
-        stream.stream()
-      );
-    }
-  );
+  return collective(
+      tensors,
+      tensors,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        return ncclAllReduce(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            ncclOp[opts.reduceOp],
+            comm,
+            stream.stream());
+      });
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
@@ -475,20 +469,22 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     const BroadcastOptions& opts) {
   check_gpu_tensors(tensors);
 
-  return collective(tensors, tensors,
-    [&] (at::Tensor& input, at::Tensor& output,
-         ncclComm_t comm, at::cuda::CUDAStream& stream) {
-      const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
-      return ncclBcast(
-        input.data_ptr(),
-        input.numel(),
-        getNcclDataType(input.scalar_type()),
-        root,
-        comm,
-        stream.stream()
-      );
-    }
-  );
+  return collective(
+      tensors,
+      tensors,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
+        return ncclBcast(
+            input.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            root,
+            comm,
+            stream.stream());
+      });
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
@@ -496,22 +492,24 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     const ReduceOptions& opts) {
   check_gpu_tensors(tensors);
 
-  return collective(tensors, tensors,
-    [&] (at::Tensor& input, at::Tensor& output,
-         ncclComm_t comm, at::cuda::CUDAStream& stream) {
-      const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
-      return ncclReduce(
-        input.data_ptr(),
-        output.data_ptr(),
-        input.numel(),
-        getNcclDataType(input.scalar_type()),
-        ncclOp[opts.reduceOp],
-        root,
-        comm,
-        stream.stream()
-      );
-    }
-  );
+  return collective(
+      tensors,
+      tensors,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
+        return ncclReduce(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            ncclOp[opts.reduceOp],
+            root,
+            comm,
+            stream.stream());
+      });
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
@@ -520,41 +518,41 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     const AllgatherOptions& opts) {
   check_gpu_tensors(inputTensors);
 
-  auto outputFlattened = flatten_for_scatter_gather(
-    outputTensors, inputTensors, size_
-  );
+  auto outputFlattened =
+      flatten_for_scatter_gather(outputTensors, inputTensors, size_);
   check_gpu_tensors(outputFlattened);
 
-  return collective(inputTensors, outputFlattened,
-    [&] (at::Tensor& input, at::Tensor& output,
-         ncclComm_t comm, at::cuda::CUDAStream& stream) {
-      c10::cuda::CUDACachingAllocator::recordStream(
-        output.storage().data(), stream
-      );
-      return ncclAllGather(
-        input.data_ptr(),
-        output.data_ptr(),
-        input.numel(),
-        getNcclDataType(input.scalar_type()),
-        comm,
-        stream.stream()
-      );
-    },
-    [&] (std::vector<at::cuda::CUDAStream>& ncclStreams) {},
-    [&] (std::vector<at::cuda::CUDAStream>& ncclStreams) {
-      // Copy the flattened output tensors to the outputs.
-      for (size_t i = 0; i < outputTensors.size(); ++i) {
-        at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
-        for (size_t j = 0; j < outputTensors[0].size(); ++j) {
-          // See [Sync Streams].
-          c10::cuda::CUDACachingAllocator::recordStream(
-            outputTensors[i][j].storage().data(), ncclStreams[i]);
+  return collective(
+      inputTensors,
+      outputFlattened,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data(), stream);
+        return ncclAllGather(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            comm,
+            stream.stream());
+      },
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {
+        // Copy the flattened output tensors to the outputs.
+        for (size_t i = 0; i < outputTensors.size(); ++i) {
+          at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
+          for (size_t j = 0; j < outputTensors[0].size(); ++j) {
+            // See [Sync Streams].
+            c10::cuda::CUDACachingAllocator::recordStream(
+                outputTensors[i][j].storage().data(), ncclStreams[i]);
 
-          outputTensors[i][j].copy_(outputFlattened[i][j], true);
+            outputTensors[i][j].copy_(outputFlattened[i][j], true);
+          }
         }
-      }
-    }
-  );
+      });
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
@@ -563,42 +561,42 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
     const ReduceScatterOptions& opts) {
   check_gpu_tensors(outputTensors);
 
-  auto inputFlattened = flatten_for_scatter_gather(
-    inputTensors, outputTensors, size_
-  );
+  auto inputFlattened =
+      flatten_for_scatter_gather(inputTensors, outputTensors, size_);
   check_gpu_tensors(inputFlattened);
 
-  return collective(inputFlattened, outputTensors,
-    [&] (at::Tensor& input, at::Tensor& output,
-         ncclComm_t comm, at::cuda::CUDAStream& stream) {
-      c10::cuda::CUDACachingAllocator::recordStream(
-        output.storage().data(), stream
-      );
-      return ncclReduceScatter(
-        input.data_ptr(),
-        output.data_ptr(),
-        output.numel(),
-        getNcclDataType(input.scalar_type()),
-        ncclOp[opts.reduceOp],
-        comm,
-        stream.stream()
-      );
-    },
-    [&] (std::vector<at::cuda::CUDAStream>& ncclStreams) {
-      // Copy the input tensors to the flattened inputs.
-      for (size_t i = 0; i < inputTensors.size(); ++i) {
-        at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
-        for (size_t j = 0; j < inputTensors[0].size(); ++j) {
-          // See [Sync Streams].
-          c10::cuda::CUDACachingAllocator::recordStream(
-            inputTensors[i][j].storage().data(), ncclStreams[i]);
+  return collective(
+      inputFlattened,
+      outputTensors,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data(), stream);
+        return ncclReduceScatter(
+            input.data_ptr(),
+            output.data_ptr(),
+            output.numel(),
+            getNcclDataType(input.scalar_type()),
+            ncclOp[opts.reduceOp],
+            comm,
+            stream.stream());
+      },
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {
+        // Copy the input tensors to the flattened inputs.
+        for (size_t i = 0; i < inputTensors.size(); ++i) {
+          at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
+          for (size_t j = 0; j < inputTensors[0].size(); ++j) {
+            // See [Sync Streams].
+            c10::cuda::CUDACachingAllocator::recordStream(
+                inputTensors[i][j].storage().data(), ncclStreams[i]);
 
-          inputFlattened[i][j].copy_(inputTensors[i][j], true);
+            inputFlattened[i][j].copy_(inputTensors[i][j], true);
+          }
         }
-      }
-    },
-    [&] (std::vector<at::cuda::CUDAStream>& ncclStreams) {}
-  );
+      },
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {});
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(

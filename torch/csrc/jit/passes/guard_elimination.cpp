@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <memory>
 #include <unordered_set>
 
@@ -9,12 +10,15 @@ namespace jit {
 struct GuardElimination {
   GuardElimination(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)),
-        aliasDb_(caffe2::make_unique<AliasDb>(graph_)) {}
+        aliasDb_(c10::guts::make_unique<AliasDb>(graph_)) {}
 
   void run() {
     moveGuardsToDefs(graph_->block());
+    GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
-    eliminateGuards(graph_->block());
+    GRAPH_DUMP("After coalesceGuards", graph_);
+    eliminateRedundantGuards(graph_->block());
+    GRAPH_DUMP("After eliminateRedundantGuards", graph_);
   }
 
   void moveGuardsToDefs(Block* b) {
@@ -31,7 +35,14 @@ struct GuardElimination {
         if (guardee->owningBlock() != n->owningBlock()) {
           guardee = *n->owningBlock()->nodes().begin();
         }
-        aliasDb_->moveAfterTopologicallyValid(n, guardee);
+        bool moved = aliasDb_->moveAfterTopologicallyValid(n, guardee);
+        if (moved) {
+          GRAPH_UPDATE(
+              "Moved ",
+              n->output()->debugName(),
+              " to ",
+              n->inputs().at(0)->debugName());
+        }
       } else {
         it++;
         for (Block* ib : n->blocks()) {
@@ -55,6 +66,11 @@ struct GuardElimination {
         if (inputs_to_guards.count(n->input())) {
           auto prev = inputs_to_guards[n->input()];
           n->output()->replaceAllUsesWith(prev->output());
+          GRAPH_UPDATE(
+              "Replacing ",
+              n->output()->debugName(),
+              " with ",
+              prev->output()->debugName());
           it.destroyCurrent();
         } else {
           inputs_to_guards.insert({n->input(), n});
@@ -82,7 +98,7 @@ struct GuardElimination {
     return true;
   }
 
-  void eliminateGuards(Block* b) {
+  void eliminateRedundantGuards(Block* b) {
     // a very simple pass to eliminate redundant guards for ops
     // whose outputs are fully determined by their inputs
     // i.e. if inputs to such ops are guarded we are allowed
@@ -94,11 +110,13 @@ struct GuardElimination {
         auto pttp = n->output()->type();
         n->output()->replaceAllUsesWith(n->inputs().at(0));
         n->inputs().at(0)->setType(pttp);
+        GRAPH_UPDATE(
+            "Eliminating the redundant guard ", n->output()->debugName());
         it.destroyCurrent();
       } else {
         it++;
         for (Block* ib : n->blocks()) {
-          eliminateGuards(ib);
+          eliminateRedundantGuards(ib);
         }
       }
     }
@@ -147,7 +165,7 @@ static void removeProfilingNodes(Block* b) {
   }
 }
 
-void EliminateGuards(std::shared_ptr<Graph> graph) {
+void EliminateRedundantGuards(std::shared_ptr<Graph> graph) {
   GuardElimination ge(std::move(graph));
   ge.run();
 }

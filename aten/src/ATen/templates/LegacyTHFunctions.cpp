@@ -3,8 +3,8 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
-#include <ATen/CheckGenerator.h>
-#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/Utils.h>
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 #include <ATen/${Generator}.h>

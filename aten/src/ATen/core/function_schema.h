@@ -64,7 +64,7 @@ struct Argument {
           "because it was not annotated with an explicit type.\n");
     }
     return c10::str(
-        "expected a value of type '",
+        "Expected a value of type '",
         type()->python_str(),
         "' for argument '",
         name(),
@@ -160,6 +160,9 @@ private:
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
 public:
+  const OperatorName& operator_name() const {
+    return name_;
+  }
   const std::string& name() const {
     return name_.name;
   }
