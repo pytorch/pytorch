@@ -65,8 +65,6 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     return Y_q_ref
 
 
-@skipIfNotRegistered("Relu_ENGINE_FBGEMM",
-                     "fbgemm-based Caffe2 ops are not linked")
 class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
     def _pool_output_shape(self, input_size, kernel_size, padding, stride,
@@ -83,18 +81,21 @@ class TestQuantizedOps(TestCase):
     @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5)))
     def test_qrelu(self, Q):
         X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
-        relu = torch.ops.quantized.relu
+        ops_relu = torch.ops.quantized.relu
+        native_relu = torch.relu
 
         Y = X.copy()
         X = torch.from_numpy(X)
 
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
-        qY_hat = relu(qX)
+        qY_hat = ops_relu(qX)
+        qY_native_hat = native_relu(qX)
 
         Y[Y < 0] = 0
         qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale, zero_point=zero_point, dtype=torch_type)
-        self.assertEqual(qY.int_repr(), qY_hat.int_repr())
+        self.assertEqual(qY.int_repr(), qY_hat.int_repr(), "torch.ops.quantized.relu failed")
+        self.assertEqual(qY.int_repr(), qY_native_hat.int_repr(), "torch.relu failed")
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
