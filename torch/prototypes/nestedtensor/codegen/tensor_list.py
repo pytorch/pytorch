@@ -39,7 +39,7 @@ PyMethodDef* python_functions() {
 
 def build_unary_functions():
     cpp_template = """
-void tensor_list_${op}(std::vector<at::Tensor>& input1,
+void nestedtensor_${op}(std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::${op}_out(out[i], input1[i]);
@@ -53,7 +53,7 @@ void tensor_list_${op}(std::vector<at::Tensor>& input1,
 
 def build_binary_functions():
     cpp_template = """
-void tensor_list_${op}(std::vector<at::Tensor>& input1,
+void nestedtensor_${op}(std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
@@ -68,7 +68,7 @@ void tensor_list_${op}(std::vector<at::Tensor>& input1,
 
 def build_comparison_functions():
     cpp_template = """
-void tensor_list_${op}(std::vector<at::Tensor>& input1,
+void nestedtensor_${op}(std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
@@ -85,15 +85,15 @@ def build_bindings():
     cpp_source = """
 PyObject* nestedtensor_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("tensor_list.python.import");
-  auto tensor_list_module = THPObjectPtr(PyImport_ImportModule("torch.prototypes.nestedtensor"));
-  if (!tensor_list_module) {
+  auto nestedtensor_module = THPObjectPtr(PyImport_ImportModule("torch.prototypes.nestedtensor"));
+  if (!nestedtensor_module) {
     throw python_error();
   }
 
-  auto m = py::handle(tensor_list_module).cast<py::module>();
+  auto m = py::handle(nestedtensor_module).cast<py::module>();
 """
 
-    pybind_template = '  m.def("${op}", &tensor_list_${op}, "${op}");'
+    pybind_template = '  m.def("${op}", &nestedtensor_${op}, "${op}");'
     pybind_template = Template(pybind_template)
 
     for op in codegen.get_unary_functions():
