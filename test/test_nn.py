@@ -522,10 +522,10 @@ class TestAvgPool(TestCase):
         input = torch.rand(1, 1, n, m)
         for i in range(1, n + 1):
             for j in range(1, m + 1):
-                acctual = torch.nn.functional.avg_pool2d(input[0], (i, j))
-                acctual = acctual.view(1, acctual.numel())
+                actual = torch.nn.functional.avg_pool2d(input[0], (i, j))
+                actual = actual.view(1, actual.numel())
                 expected = self._avg_pool2d(input, (i, j))
-                self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
+                self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
 
     def test_avg_pool2d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
@@ -537,10 +537,10 @@ class TestAvgPool(TestCase):
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 for divisor in [1, 7, i * j]:
-                    acctual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
-                    acctual = acctual.view(1, acctual.numel())
+                    actual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
+                    actual = actual.view(1, actual.numel())
                     expected = self._sum_pool2d(input, (i, j)) / divisor
-                    self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
 
     def test_doubletensor_avg_pool3d(self):
         h, w, d = 5, 6, 7
@@ -548,10 +548,10 @@ class TestAvgPool(TestCase):
         for i in range(1, h + 1):
             for j in range(1, w + 1):
                 for k in range(1, d + 1):
-                    acctual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
-                    acctual = acctual.view(1, acctual.numel())
+                    actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
+                    actual = actual.view(1, actual.numel())
                     expected = self._avg_pool3d(input, (i, j, k))
-                    self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
 
     def test_doubletensor_avg_pool3d_with_divisor(self):
         h, w, d = 6, 5, 7
@@ -560,10 +560,10 @@ class TestAvgPool(TestCase):
             for j in range(1, w + 1):
                 for k in range(1, d + 1):
                     for divisor in [1, 7, i * j]:
-                        acctual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
-                        acctual = acctual.view(1, acctual.numel())
+                        actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
+                        actual = actual.view(1, actual.numel())
                         expected = self._sum_pool3d(input, (i, j, k)) / divisor
-                        self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
+                        self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
 
     def test_avg_pool3d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",

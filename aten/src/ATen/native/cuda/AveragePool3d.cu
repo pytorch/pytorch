@@ -342,7 +342,7 @@ void avg_pool3d_out_cuda_template(
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
-  //if divisor=0 then we will ignore it
+  // if divisor==0 then we will ignore it
   int64_t divisor = 0;
   if (divisor_override.has_value()) {
     TORCH_CHECK(divisor_override.value() != 0, "divisor must be not zero");
@@ -475,7 +475,7 @@ void avg_pool3d_backward_out_cuda_template(
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for gradOutput");
 
-  //if divisor=0 then we will ignore it
+  // if divisor==0 then we will ignore it
   int64_t divisor = 0;
   if (divisor_override.has_value()) {
     TORCH_CHECK(divisor_override.value() != 0, "divisor must be not zero");
