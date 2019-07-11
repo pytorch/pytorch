@@ -149,7 +149,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: device
    .. autoattribute:: grad
    .. autoattribute:: ndim
-   .. autoattribute:: T 
+   .. autoattribute:: T
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -226,7 +226,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: diag_embed
    .. automethod:: diagflat
    .. automethod:: diagonal
-   .. automethod:: fill_diagonal_
    .. automethod:: digamma
    .. automethod:: digamma_
    .. automethod:: dim
