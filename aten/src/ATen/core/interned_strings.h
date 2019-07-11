@@ -60,7 +60,6 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
-  _(prim, DictIndex)                 \
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
@@ -132,6 +131,7 @@ namespace c10 {
   _(aten, ne_)                       \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
+  _(aten, __getitem__)               \
   _(aten, _set_item)                 \
   _(aten, manual_seed)               \
   _(aten, set_)                      \
