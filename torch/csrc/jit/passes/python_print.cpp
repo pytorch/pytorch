@@ -582,6 +582,18 @@ struct PythonPrintPass {
     stmt << end;
   }
 
+  void printValueIndex(TaggedStringStream& stmt, at::ArrayRef<Value*> inputs) {
+    const std::string val_name = useOf(inputs[0])->str();
+    if (isValidIdentifier(val_name)) {
+      stmt << val_name;
+    } else {
+      stmt << "(" << val_name << ")";
+    }
+    stmt << "[";
+    stmt << useOf(inputs[1]);
+    stmt << "]";
+  }
+
   void printDict(
       TaggedStringStream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
@@ -1014,6 +1026,9 @@ struct PythonPrintPass {
       case aten::str: {
         printValueList(stmt, node->inputs(), "str(", ")");
       } break;
+      case aten::__getitem__: {
+        printValueIndex(stmt, node->inputs());
+      } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
@@ -1058,10 +1073,6 @@ struct PythonPrintPass {
         } else {
           printDict(stmt, node->inputs());
         }
-      } break;
-      case prim::DictIndex: {
-        stmt << "(" << useOf(node->inputs().at(0)) << ")["
-             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
@@ -1337,7 +1348,6 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::PythonOp,
       prim::TupleConstruct,
       prim::TupleIndex,
-      prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::CreateObject,
