@@ -249,8 +249,9 @@ if (USE_NCCL)
 endif()
 
 if (USE_PROTOTYPES)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_PROTOTYPES)
     list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/prototypes/init.cpp)
+      ${TORCH_SRC_DIR}/csrc/prototypes/nestedtensor/init.cpp)
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists

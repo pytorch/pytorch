@@ -9,6 +9,7 @@
 
 namespace torch {
 namespace prototypes {
+namespace nestedtensor {
     
 void tensor_list_abs(std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
@@ -339,7 +340,7 @@ void tensor_list_ne(std::vector<at::Tensor>& input1,
 
 PyObject* tensor_list_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("tensor_list.python.import");
-  auto tensor_list_module = THPObjectPtr(PyImport_ImportModule("torch.prototypes"));
+  auto tensor_list_module = THPObjectPtr(PyImport_ImportModule("torch.prototypes.nestedtensor"));
   if (!tensor_list_module) {
     throw python_error();
   }
@@ -405,6 +406,7 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
+} // namespace nestedtensor
 } // namespace prototypes
 } // namespace torch
     

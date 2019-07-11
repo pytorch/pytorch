@@ -15,6 +15,7 @@ def get_header():
 
 namespace torch {
 namespace prototypes {
+namespace nestedtensor {
     """
     return header
 
@@ -31,6 +32,7 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
+} // namespace nestedtensor
 } // namespace prototypes
 } // namespace torch
     """

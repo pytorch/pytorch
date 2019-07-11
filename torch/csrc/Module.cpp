@@ -57,7 +57,9 @@
 #endif
 #endif
 
-#include <torch/csrc/prototypes/prototypes.h>
+#ifdef USE_PROTOTYPES
+#include <torch/csrc/prototypes/nestedtensor/nestedtensor.h>
+#endif
 
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -618,7 +620,9 @@ PyObject* initModule() {
 #endif
 #endif
 
-  THPUtils_addPyMethodDefs(methods, torch::prototypes::python_functions());
+#ifdef USE_PROTOTYPES
+  THPUtils_addPyMethodDefs(methods, torch::prototypes::nestedtensor::python_functions());
+#endif
 
 #if PY_MAJOR_VERSION == 2
   ASSERT_TRUE(module = Py_InitModule("torch._C", methods.data()));

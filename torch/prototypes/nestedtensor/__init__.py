@@ -11,7 +11,7 @@ def is_available():
 if is_available() and not torch._C._tensor_list_init():
     raise RuntimeError("Failed to initialize PyTorch distributed support")
 
-import torch.prototypes as tensor_list
+import torch.prototypes.nestedtensor as tensor_list
 
 NestedTensor = nested.NestedTensor
 
@@ -61,13 +61,8 @@ def _comparison(func_name, func, input1, input2, out=None):
     list_func(input1.tensors, input2.tensors, out.tensors)
     return out
 
-class Module:
-    pass
-
 import torch
 torch, NestedTensor = codegen.add_pointwise_unary_functions(torch, NestedTensor, _unary)
 torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor, _binary)
 torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _comparison)
 torch.nestedtensor = nested.make_nested_tensor
-
-__all__ = ["NestedTensor"]
