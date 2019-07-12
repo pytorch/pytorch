@@ -60,7 +60,7 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
-    from torch.utils.tensorboard import _caffe2_graph as tb
+    from torch.utils.tensorboard import _caffe2_graph as c2_graph
     from caffe2.python import brew, cnn, core, model_helper
 
     class TestTensorBoardPyTorchNumpy(BaseTestCase):
@@ -535,7 +535,7 @@ if TEST_TENSORBOARD:
         @skipIfNoCaffe2
         def test_caffe2_np(self):
             workspace.FeedBlob("testBlob", tensor_N(shape=(1, 3, 64, 64)))
-            self.assertIsInstance(make_np('testBlob'), np.ndarray)   
+            self.assertIsInstance(make_np('testBlob'), np.ndarray)
 
         @skipIfNoCaffe2
         def test_caffe2_np_expect_fail(self):
@@ -573,7 +573,7 @@ if TEST_TENSORBOARD:
             model.param_init_net.RunAllOnMKL()
             model.AddGradientOperators([loss], skip=1)
             blob_name_tracker = {}
-            graph = tb.model_to_graph_def(
+            graph = c2_graph.model_to_graph_def(
                 model,
                 blob_name_tracker=blob_name_tracker,
                 shapes={},
@@ -596,7 +596,7 @@ if TEST_TENSORBOARD:
                 loss = model.AveragedLoss(xent, "loss")
 
             blob_name_tracker = {}
-            graph = tb.model_to_graph_def(
+            graph = c2_graph.model_to_graph_def(
                 model,
                 blob_name_tracker=blob_name_tracker,
                 shapes={},
