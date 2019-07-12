@@ -2777,13 +2777,13 @@
     QuantizedCPU: qscheme_quant
 
 - func: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
-  variants: function, method
+  variants: function
   dispatch:
     CPU: fake_quantize_per_tensor_affine_cpu
     CUDA: fake_quantize_per_tensor_affine_cuda
 
 - func: fake_quantize_per_tensor_affine_backward(Tensor grad, Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
-  variants: function, method
+  variants: function
   dispatch:
     CPU: fake_quantize_per_tensor_affine_backward_cpu
     CUDA: fake_quantize_per_tensor_affine_backward_cuda
