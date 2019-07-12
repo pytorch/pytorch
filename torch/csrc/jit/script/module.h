@@ -108,8 +108,8 @@ struct TORCH_API Method {
 };
 
 struct TORCH_API Module {
-  explicit Module(std::string class_name);
-  Module(std::string class_name, std::shared_ptr<CompilationUnit> cu);
+  explicit Module(c10::QualifiedName class_name);
+  Module(c10::QualifiedName, std::shared_ptr<CompilationUnit> cu);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}

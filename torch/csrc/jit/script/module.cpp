@@ -12,18 +12,19 @@ namespace torch {
 namespace jit {
 namespace script {
 
-static ModulePtr create_module_object(std::string class_name) {
+static ModulePtr create_module_object(c10::QualifiedName class_name) {
   auto cu = std::make_shared<CompilationUnit>();
-  auto cls = ClassType::create(
-      QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
+  auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
   return c10::ivalue::Object::create(
       c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
 }
 
-Module::Module(std::string class_name)
+Module::Module(c10::QualifiedName class_name)
     : module_value_(create_module_object(std::move(class_name))) {}
 
-Module::Module(std::string class_name, std::shared_ptr<CompilationUnit> cu) {
+Module::Module(
+    c10::QualifiedName class_name,
+    std::shared_ptr<CompilationUnit> cu) {
   auto cls = ClassType::create(
       QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
   // TODO: register class? Does it actaully matter?
