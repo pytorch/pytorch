@@ -447,11 +447,11 @@ def quantize_rnn_cell_modules(module):
     for name, mod in reassign.items():
         setattr(module, name, mod)
     if isinstance(module, torch.nn.LSTMCell):
-        return QuantizedLSTMCell(mod)
+        return QuantizedLSTMCell(module)
     if isinstance(module, torch.nn.GRUCell):
-        return QuantizedGRUCell(mod)
+        return QuantizedGRUCell(module)
     if isinstance(module, torch.nn.RNNCell):
-        return QuantizedRNNCell(mod)
+        return QuantizedRNNCell(module)
 
     return module
 
@@ -467,8 +467,8 @@ def quantize_linear_modules(module):
 
     for name, mod in reassign.items():
         setattr(module, name, mod)
-    if isinstance(mod, torch.nn.Linear):
-        return QuantizedLinear(mod)
+    if isinstance(module, torch.nn.Linear):
+        return QuantizedLinear(module)
     return module
 
 
@@ -483,6 +483,6 @@ def quantize_rnn_modules(module):
 
     for name, mod in reassign.items():
         setattr(module, name, mod)
-    if isinstance(mod, torch.nn.LSTM):
-        return QuantizedLSTM(mod)
+    if isinstance(module, torch.nn.LSTM):
+        return QuantizedLSTM(module)
     return module

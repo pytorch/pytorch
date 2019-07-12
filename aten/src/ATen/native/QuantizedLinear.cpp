@@ -47,10 +47,7 @@ Tensor fbgemm_linear_int8_weight(
   auto* input_ptr = input_contig.data<float>();
 
   AT_ASSERT(input.dim() >= 2);
-  int64_t M = 1;
-  for (size_t i = 0; i < input.dim() - 1; ++i) {
-    M *= input.size(i);
-  }
+  int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   int64_t K = input.size(input.dim() - 1);
   AT_ASSERT(weight.dim() == 2);
   AT_ASSERT(K == weight.size(1));
