@@ -266,6 +266,24 @@ class CMake:
             'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
 
+        # Options starting with CMAKE_
+        cmake__options = {
+            'CMAKE_INSTALL_PREFIX': install_dir,
+            'CMAKE_C_FLAGS': cflags,
+            'CMAKE_CXX_FLAGS': cflags,
+            'CMAKE_EXE_LINKER_FLAGS': ldflags,
+            'CMAKE_SHARED_LINKER_FLAGS': ldflags,
+        }
+
+        # We set some CMAKE_* options in our Python build code instead of relying on the user's direct settings. Emit an
+        # error if the user also attempts to set these CMAKE options directly.
+        specified_cmake__options = set(build_options).intersection(cmake__options)
+        if len(specified_cmake__options) > 0:
+            print(', '.join(specified_cmake__options) +
+                  ' should not be specified in the environment variable. They are directly set by PyTorch build script.')
+            sys.exit(1)
+        build_options.update(cmake__options)
+
         CMake.defines(args,
                       PYTHON_EXECUTABLE=escape_path(sys.executable),
                       PYTHON_LIBRARY=escape_path(cmake_python_library),
@@ -273,11 +291,6 @@ class CMake:
                       TORCH_BUILD_VERSION=version,
                       INSTALL_TEST=build_test,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
-                      CMAKE_INSTALL_PREFIX=install_dir,
-                      CMAKE_C_FLAGS=cflags,
-                      CMAKE_CXX_FLAGS=cflags,
-                      CMAKE_EXE_LINKER_FLAGS=ldflags,
-                      CMAKE_SHARED_LINKER_FLAGS=ldflags,
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
                       **build_options)
 
