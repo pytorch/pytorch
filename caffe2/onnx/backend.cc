@@ -1081,7 +1081,7 @@ Caffe2Ops Caffe2Backend::CreateDynamicSlice(
   // Axes tensor will be used to populate the fully-specified starts and ends
   // arguments to the caffe2 Slice operator.
   std::string axes_tensor;
-  if (onnx_node->node.input_size() > 2) {
+  if (onnx_node->node.input_size() > 3) {
     axes_tensor = onnx_node->node.input(3);
   } else {
     axes_tensor = dummy_->NewDummyName();

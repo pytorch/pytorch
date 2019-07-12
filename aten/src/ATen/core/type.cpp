@@ -1,8 +1,17 @@
 #include <ATen/core/jit_type.h>
+#include <ATen/core/function_schema.h>
 #include <ATen/core/Dict.h>
 #include <iostream>
-
+#include <c10/macros/Macros.h>
 namespace c10 {
+
+namespace ivalue {
+Object::~Object() {
+  if (on_delete_) {
+    on_delete_(this);
+  }
+}
+} // namespace ivalue
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
@@ -53,10 +62,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
+    if (tup->schema()) {
+      out << "NamedTuple";
+    }
     out << "(";
     for(size_t i = 0; i < tup->elements().size(); ++i) {
       if(i > 0)
         out << ", ";
+      if (tup->schema()) {
+        out << tup->schema()->arguments()[i].name() << " : ";
+      }
       out << *(tup->elements()[i]);
     }
     out << ")";
@@ -155,7 +170,7 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
   } else if (value.isDoubleList()) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
-    return TupleType::create(fmap(value.toTupleRef(), incompleteInferTypeFrom));
+    return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
   } else if (value.isDevice()) {
     return DeviceObjType::get();
   } else if (value.isObject()) {
@@ -201,7 +216,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   }
 
   if (ivalue.isTuple()) {
-    auto elems = ivalue.toTupleRef();
+    auto elems = ivalue.toTuple()->elements();
     auto tuple_type = type->cast<TupleType>();
     if (!tuple_type || tuple_type->elements().size() != elems.size()) {
       return false;
@@ -228,7 +243,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto dict_type = type->expect<DictType>();
     const auto dict = ivalue.toGenericDict();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const c10::impl::GenericDictPtr::const_iterator::value_type& item) {
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::const_iterator::value_type& item) {
           return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
               isSubvalueOf(item.value(), dict_type->getValueType());
         });
@@ -309,28 +324,23 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 }
 
 MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
-  MatchTypeReturn ret;
   if(!formal->hasFreeVariables()) {
-    ret.type = formal;
-    return ret;
+    return formal;
   }
 
   if(auto vt = formal->cast<VarType>()) {
     auto it = type_env.find(vt->name());
     if(it == type_env.end()) {
       type_env[vt->name()] = actual;
-      ret.type = actual;
-      return ret;
+      return actual;
     } else if(auto unified = unifyTypes(it->second, actual)) {
       type_env[vt->name()] = *unified;
-      ret.type = *unified;
-      return ret;
+      return *unified;
     }
     std::stringstream ss;
     ss << "Type variable '" << vt->name() << "' previously matched to type " <<
       it->second->python_str() << " is matched to type " << actual->python_str();
-    ret.errMsg = ss.str();
-    return ret;
+    return ss.str();
   } else if(auto lt_formal = formal->cast<ListType>()) {
     if(auto lt_actual = actual->cast<ListType>()) {
       const auto innerType = matchTypeVariables(
@@ -341,20 +351,17 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
         // propagate the errMsg onward
         return innerType;
       }
-      ret.type = ListType::create(*innerType.type);
-      return ret;
+      return MatchTypeReturn(ListType::create(*innerType.type));
     } else {
       std::stringstream ss;
       ss << "Cannot match " << lt_formal->python_str() << " to "
          << actual->python_str();
-      ret.errMsg = ss.str();
-      return ret;
+      return ss.str();
     }
   } else if(auto tp_formal = formal->cast<TupleType>()) {
     if(auto tp_actual = actual->cast<TupleType>()) {
       if(tp_formal->elements().size() != tp_actual->elements().size()) {
-        ret.errMsg = "Cannot match tuples of mismatched size";
-        return ret;
+        return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
       std::vector<TypePtr> elements;
       for(size_t i = 0; i < tp_formal->elements().size(); ++i) {
@@ -367,13 +374,11 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
         }
         elements.push_back(*result.type);
       }
-      ret.type = TupleType::create(std::move(elements));
-      return ret;
+      return MatchTypeReturn(TupleType::create(std::move(elements)));
     } else {
       std::stringstream ss;
       ss << "Cannot match a tuple to " << actual->python_str();
-      ret.errMsg = ss.str();
-      return ret;
+      return MatchTypeReturn(ss.str());
     }
   } else if (auto lt_formal = formal->cast<FutureType>()) {
     if (auto lt_actual = actual->cast<FutureType>()) {
@@ -382,13 +387,11 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       if (!innerType.type) {
         return innerType;
       }
-      ret.type = FutureType::create(*innerType.type);
-      return ret;
+      return MatchTypeReturn(FutureType::create(*innerType.type));
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->python_str();
-      ret.errMsg = ss.str();
-      return ret;
+      return ss.str();
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
     if (auto opt_actual = actual->cast<OptionalType>()) {
@@ -397,8 +400,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       if (!optionedType.type) {
         return optionedType;
       }
-      ret.type = OptionalType::create(*optionedType.type);
-      return ret;
+      return MatchTypeReturn(OptionalType::create(*optionedType.type));
     } else if (!actual->isSubtypeOf(NoneType::get())) {
       // If the actual type is a non-optional, allow matching to the formal if
       // its element type matches the actual.
@@ -406,10 +408,9 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     } else {
-      ret.errMsg =
+      return MatchTypeReturn(
           "Cannot match an Optional[T] to None, because there is no "
-          "way to determine T from None.";
-      return ret;
+          "way to determine T from None");
     }
   } else if (auto dict_formal = formal->cast<DictType>()) {
     if (auto dict_actual = actual->cast<DictType>()) {
@@ -429,13 +430,12 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       if (!value_type.type) {
         return value_type;
       }
-      ret.type = DictType::create(*key_type.type, *value_type.type);
-      return ret;
+      return MatchTypeReturn(
+          DictType::create(*key_type.type, *value_type.type));
     } else {
       std::stringstream ss;
       ss << "Cannot match a dict to " << actual->python_str();
-      ret.errMsg = ss.str();
-      return ret;
+      return ss.str();
     }
   }
 
@@ -444,12 +444,17 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
 
 // change return types like List[List[t]] into List[List[int]]
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
-  if(!type->hasFreeVariables())
+  if (!type->hasFreeVariables()) {
     return type;
+  }
 
-  if(auto vt = type->cast<VarType>()) {
+  if (auto vt = type->cast<VarType>()) {
     auto it = type_env.find(vt->name());
-    AT_ASSERTM(it != type_env.end(), "schema has unbound type variable '", vt->name(), "' in its return type");
+    AT_ASSERTM(
+        it != type_env.end(),
+        "schema has unbound type variable '",
+        vt->name(),
+        "' in its return type");
     return it->second;
   } else {
     auto new_contained = fmap(type->containedTypes(), [&](TypePtr t) {
@@ -458,7 +463,6 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::strin
     return type->withContained(std::move(new_contained));
   }
 }
-
 
 const char * typeKindToString(TypeKind kind) {
 #define CASE_TYPE(T) case TypeKind::T: return #T;
@@ -470,31 +474,13 @@ const char * typeKindToString(TypeKind kind) {
 }
 
 bool Type::isSubtypeOf(const TypePtr rhs) const {
+  if (*this == *rhs) {
+    return true;
+  }
   if(auto rhs_ = rhs->cast<OptionalType>()) {
     return this->isSubtypeOf(rhs_->getElementType());
   }
-  return *this == *rhs;
-}
-
-ClassTypePtr ClassType::create(
-    QualifiedName qualifiedName,
-    std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
-}
-
-ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType(
-      QualifiedName(QualifiedName("__torch__"), "$Module"), std::move(cu)));
-}
-
-ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassTypePtr(new ClassType(name_, compilation_unit_));
-  AT_ASSERT(numAttributes() == refined_slots.size());
-  for(size_t i = 0; i < attributeNames_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
-    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
-  }
-  return ptr;
+  return false;
 }
 
 std::string ProfiledTensorType::str() const {
@@ -542,11 +528,125 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
-ClassType::ClassType(
-    QualifiedName name,
-    std::shared_ptr<CompilationUnit> cu)
-    : Type(TypeKind::ClassType),
-      name_(std::move(name)),
-      compilation_unit_(std::move(cu)) {}
+std::string NamedType::python_str() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->qualifiedName();
+}
+
+std::string NamedType::qualname() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->qualifiedName();
+}
+
+std::string NamedType::qualifier() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->prefix();
+}
+
+std::string NamedType::basename() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->name();
+}
+
+std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
+    c10::QualifiedName qualName,
+    std::vector<std::string> field_names,
+    std::vector<TypePtr> field_types) {
+  TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
+  std::vector<Argument> arguments;
+  for (size_t i = 0; i < field_names.size(); ++i) {
+    arguments.emplace_back(
+        /*name=*/field_names[i],
+        /*type=*/field_types[i],
+        /*N=*/i);
+  }
+
+  auto schema = std::make_shared<FunctionSchema>(
+      /*name=*/qualName.name(),
+      /*overload_name=*/std::string(""),
+      /*arguments=*/arguments,
+      /*returns=*/std::vector<Argument>{});
+  return schema;
+}
+
+TupleType::TupleType(std::vector<TypePtr> elements, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema)
+: NamedType(TypeKind::TupleType, std::move(name))
+, elements_(std::move(elements))
+, schema_(std::move(schema)) {
+  has_free_variables_ =
+      std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+        return v->hasFreeVariables();
+      });
+}
+
+bool TupleType::isSubtypeOf(const TypePtr rhs_) const {
+  if (Type::isSubtypeOf(rhs_))
+    return true;
+  auto rhs = rhs_->cast<TupleType>();
+  if (!rhs)
+    return false;
+  // unnamed tuple is not a subtype of nametuple
+  if (!schema() && rhs->schema())
+    return false;
+  // namedtuple may be a subtype of unnamed tuple
+  auto test_names_match = [](const std::shared_ptr<FunctionSchema>& lhs, const std::shared_ptr<FunctionSchema>& rhs) {
+    const auto& args_lhs = lhs->arguments();
+    const auto& args_rhs = rhs->arguments();
+    if (args_lhs.size() != args_rhs.size()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < args_lhs.size(); ++i) {
+      if (args_lhs[i].name() != args_rhs[i].name()) {
+        return false;
+      }
+    }
+    return true;
+  };
+  bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
+  // co-variant rules for tuples
+  return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
+    return a->isSubtypeOf(b);
+  });
+}
+
+bool TupleType::operator==(const Type& rhs) const {
+  return compare(rhs, [](const TypePtr a, const TypePtr b) {
+    return *a == *b;
+  }) && schema_ == rhs.expect<TupleType>()->schema_;
+  // `compare` guarantees that rhs is always a TupleType, so the
+  // dynamic_cast above always success.
+}
+
+std::string TupleType::str() const {
+  std::stringstream ss;
+  if (schema_ && name_) {
+    ss << qualname();
+  } else {
+    ss << "(";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->str();
+    }
+    ss << ")";
+  }
+  return ss.str();
+}
+std::string TupleType::python_str() const {
+  std::stringstream ss;
+  if (schema_ && name_) {
+    ss << qualname();
+  } else {
+    ss << "Tuple[";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->python_str();
+    }
+    ss << "]";
+  }
+  return ss.str();
+}
 
 } // namespace c10

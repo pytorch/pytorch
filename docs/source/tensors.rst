@@ -8,7 +8,7 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines eight CPU tensor types and eight GPU tensor types:
+Torch defines nine CPU tensor types and nine GPU tensor types:
 
 ========================   ===========================================   ===========================   ================================
 Data type                  dtype                                         CPU tensor                    GPU tensor
@@ -21,6 +21,7 @@ Data type                  dtype                                         CPU ten
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
+Boolean                    ``torch.bool``                                :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
 ========================   ===========================================   ===========================   ================================
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
@@ -122,7 +123,7 @@ view of a storage and defines numeric operations on it.
 
 .. warning::
    Current implementation of :class:`torch.Tensor` introduces memory overhead,
-   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors. 
+   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
    If this is your case, consider using one large structure.
 
 .. class:: Tensor()
@@ -185,6 +186,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli
    .. automethod:: bernoulli_
    .. automethod:: bincount
+   .. automethod:: bitwise_not
+   .. automethod:: bitwise_not_
    .. automethod:: bmm
    .. automethod:: bool
    .. automethod:: byte
@@ -223,6 +226,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: diag_embed
    .. automethod:: diagflat
    .. automethod:: diagonal
+   .. automethod:: fill_diagonal_
    .. automethod:: digamma
    .. automethod:: digamma_
    .. automethod:: dim
@@ -366,6 +370,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
+   .. automethod:: qscheme
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: random_

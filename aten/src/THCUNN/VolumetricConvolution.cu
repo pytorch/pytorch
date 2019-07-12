@@ -2,7 +2,7 @@
 #include <THC/THCTensor.hpp>
 #include <THCUNN/common.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
 // Kernel for fast unfold+copy

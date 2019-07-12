@@ -9,6 +9,9 @@
 #include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateBoolType.h>
 
+#include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateBFloat16Type.h>
+
 #include <ATen/native/Resize.h>
 
 #include <numeric>

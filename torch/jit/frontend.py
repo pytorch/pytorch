@@ -94,10 +94,7 @@ class FrontendError(Exception):
         self.msg = msg
 
     def __str__(self):
-        result = self.msg
-        if self.source_range is not None:
-            result += '\n' + self.source_range.highlight()
-        return result
+        return self.msg + torch._C.ErrorReport(self.source_range).what()
 
 
 class NotSupportedError(FrontendError):
@@ -400,6 +397,7 @@ class ExprBuilder(Builder):
         ast.Gt: '>',
         ast.Is: 'is',
         ast.IsNot: 'is not',
+        ast.In: 'in',
     }
 
     @staticmethod
@@ -599,6 +597,22 @@ class ExprBuilder(Builder):
         return Const(r, value)
 
     @staticmethod
+    def build_Constant(ctx, expr):
+        val = expr.value
+        if val is None or isinstance(val, bool):
+            # NB: this check has to happen before the int check because bool is
+            # a subclass of int
+            return ExprBuilder.build_NameConstant(ctx, expr)
+        if isinstance(val, (int, float)):
+            return ExprBuilder.build_Num(ctx, expr)
+        elif isinstance(val, str):
+            return ExprBuilder.build_Str(ctx, expr)
+        elif isinstance(val, type(Ellipsis)):
+            return ExprBuilder.build_Ellipsis(ctx, expr)
+        else:
+            raise RuntimeError("Unknown Constant expr type for value: ", expr.value)
+
+    @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
@@ -636,6 +650,7 @@ class ExprBuilder(Builder):
 
         elt_expr = build_expr(ctx, stmt.elt)
         target_expr = build_expr(ctx, stmt.generators[0].target)
+
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
         return ListComp(r, elt_expr, target_expr, iter_expr)
 

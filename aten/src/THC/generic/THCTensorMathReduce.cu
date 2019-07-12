@@ -53,13 +53,20 @@ void THCTensor_(min)(THCState *state,
     MinValuePair<scalar_t, int64_t>());
 }
 
-scalar_t THCTensor_(maxall)(THCState *state, THCTensor *self) {
+scalar_t THCTensor_(minall)(THCState *state, THCTensor *self) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
+  THArgCheck(
+      THTensor_(nElement)(self) > 0,
+      1,
+      "cannot perform reduction function min "
+      "on tensor with no elements because the "
+      "operation does not have an identity"
+  );
   accreal val;
   if (!THC_reduceAll<scalar_t>(state, self,
                            thrust::identity<accreal>{},
-                           ReduceMax<accreal>{},
-                           THCNumerics<accreal>::lower_bound(), &val, 0)) {
+                           ReduceMin<accreal>{},
+                           THCNumerics<accreal>::upper_bound(), &val, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
 
@@ -67,13 +74,20 @@ scalar_t THCTensor_(maxall)(THCState *state, THCTensor *self) {
   return scalar_cast<scalar_t>(val);
 }
 
-scalar_t THCTensor_(minall)(THCState *state, THCTensor *self) {
+scalar_t THCTensor_(maxall)(THCState *state, THCTensor *self) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
+  THArgCheck(
+      THTensor_(nElement)(self) > 0,
+      1,
+      "cannot perform reduction function max "
+      "on tensor with no elements because the "
+      "operation does not have an identity"
+  );
   accreal val;
   if (!THC_reduceAll<scalar_t>(state, self,
                            thrust::identity<accreal>{},
-                           ReduceMin<accreal>{},
-                           THCNumerics<accreal>::upper_bound(), &val, 0)) {
+                           ReduceMax<accreal>{},
+                           THCNumerics<accreal>::lower_bound(), &val, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }
 
@@ -365,6 +379,7 @@ accreal THCTensor_(meanall)(THCState *state, THCTensor *self)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
   return THCTensor_(sumall)(state, self)/THCTensor_(nElement)(state, self);
 }
+
 
 #endif
 

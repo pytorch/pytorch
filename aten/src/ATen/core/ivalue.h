@@ -7,14 +7,18 @@
 namespace torch {
 namespace jit {
 struct Function;
+namespace script {
+struct CompilationUnit;
+}
 } // namespace jit
 } // namespace torch
 namespace c10 {
-template<class Key, class Value> class DictPtr;
-template<class T> class ListPtr;
+template<class Key, class Value> class Dict;
+template<class T> class List;
 struct IValue;
+struct ClassType;
 namespace ivalue {
-struct TuplePtr;
+struct Tuple;
 struct Future;
 struct ConstantString;
 struct GenericDict;
@@ -145,11 +149,10 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
   // Tuple
-  IValue(ivalue::TuplePtr v);
+  IValue(c10::intrusive_ptr<ivalue::Tuple> v);
   bool isTuple() const { return Tag::Tuple == tag; }
-  ivalue::TuplePtr toTuple() &&;
-  ivalue::TuplePtr toTuple() const &;
-  c10::ArrayRef<IValue> toTupleRef() const;
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() const &;
 
   // Double
   IValue(double d)
@@ -197,12 +200,15 @@ struct CAFFE2_API IValue final {
   }
 
   // IntList
-  IValue(c10::ListPtr<int64_t> v);
+  IValue(c10::List<int64_t> v);
   IValue(c10::ArrayRef<int64_t> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<int64_t> v);
   bool isIntList() const { return Tag::IntList == tag; }
-  c10::ListPtr<int64_t> toIntList() &&;
-  c10::ListPtr<int64_t> toIntList() const &;
+  c10::List<int64_t> toIntList() &&;
+  c10::List<int64_t> toIntList() const &;
   c10::ArrayRef<int64_t> toIntListRef() const;
 
   // ConstantString
@@ -215,51 +221,65 @@ struct CAFFE2_API IValue final {
   const std::string& toStringRef() const;
 
   // DoubleList
-  IValue(c10::ListPtr<double> v);
+  IValue(c10::List<double> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
-  c10::ListPtr<double> toDoubleList() &&;
-  c10::ListPtr<double> toDoubleList() const &;
+  c10::List<double> toDoubleList() &&;
+  c10::List<double> toDoubleList() const &;
   c10::ArrayRef<double> toDoubleListRef() const;
 
   // BoolList
-  IValue(c10::ListPtr<bool> v);
+  IValue(c10::List<bool> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
-  c10::ListPtr<bool> toBoolList() &&;
-  c10::ListPtr<bool> toBoolList() const &;
+  c10::List<bool> toBoolList() &&;
+  c10::List<bool> toBoolList() const &;
 
   //TensorList
-  IValue(c10::ListPtr<at::Tensor> v);
+  IValue(c10::List<at::Tensor> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<at::Tensor> v);
   bool isTensorList() const { return Tag::TensorList == tag; }
-  c10::ListPtr<at::Tensor> toTensorList() &&;
-  c10::ListPtr<at::Tensor> toTensorList() const &;
+  c10::List<at::Tensor> toTensorList() &&;
+  c10::List<at::Tensor> toTensorList() const &;
   c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
-  IValue(std::vector<IValue> v);
-  IValue(c10::ListPtr<IValue> v);
+  IValue(c10::List<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
-  c10::ListPtr<IValue> toGenericList() &&;
-  c10::ListPtr<IValue> toGenericList() const &;
+  c10::List<IValue> toGenericList() &&;
+  c10::List<IValue> toGenericList() const &;
   c10::ArrayRef<IValue> toGenericListRef() const;
 
   template<class T>
-  IValue(c10::ListPtr<T> v);
+  IValue(c10::List<T> v);
   template<class T>
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<T> v);
 
   // GenericDict
-  IValue(c10::DictPtr<IValue, IValue> v);
+  IValue(c10::Dict<IValue, IValue> v);
   bool isGenericDict() const { return Tag::GenericDict == tag; }
-  c10::DictPtr<IValue, IValue> toGenericDict() &&;
-  c10::DictPtr<IValue, IValue> toGenericDict() const &;
+  c10::Dict<IValue, IValue> toGenericDict() &&;
+  c10::Dict<IValue, IValue> toGenericDict() const &;
 
   template<class Key, class Value>
-  IValue(c10::DictPtr<Key, Value> v);
+  IValue(c10::Dict<Key, Value> v);
 
   template<class Key, class Value>
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
+  /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
   template<class T>
@@ -333,6 +353,16 @@ struct CAFFE2_API IValue final {
   // MemoryFormat
   at::MemoryFormat toMemoryFormat() const {
     return static_cast<at::MemoryFormat>(toInt());
+  }
+
+  // QScheme
+  IValue(at::QScheme qscheme)
+  : tag(Tag::Int), is_intrusive_ptr(false) {
+    payload.as_int = static_cast<int64_t>(qscheme);
+  }
+
+  at::QScheme toQScheme() const {
+    return static_cast<at::QScheme>(toInt());
   }
 
 
@@ -468,6 +498,11 @@ struct CAFFE2_API WeakIValue final {
     std::swap(tag, rhs.tag);
   }
 
+  bool isSameIdentity(const WeakIValue& rhs) const {
+    return payload.as_int == rhs.payload.as_int && tag == rhs.tag &&
+        is_intrusive_ptr == rhs.is_intrusive_ptr;
+  }
+
   IValue lock() const {
     if (!is_intrusive_ptr) {
       return IValue(payload, tag, false);
@@ -515,6 +550,20 @@ private:
   bool is_intrusive_ptr;
 };
 
+// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
+// and its owning CU, so that the class type is guaranteed to stay alive as long
+// as we hold this object.
+struct StrongTypePtr {
+  StrongTypePtr(
+      std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+      std::shared_ptr<ClassType> type)
+      : cu_(std::move(cu)), type_(type) {
+    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(type_);
+  }
+  std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
+  std::shared_ptr<ClassType> type_;
+};
 }
 
 #include <ATen/core/ivalue_inl.h>

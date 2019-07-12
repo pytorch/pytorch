@@ -156,7 +156,8 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
         // consume tuple
         const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isTuple(), "Expected Tuple but got ", iv->tagKind());
-        auto* tup_ptr = &iv->toTupleRef()[0];
+        auto p = *reinterpret_cast<const at::ivalue::Tuple* const*>(iv);
+        auto tup_ptr = &p->elements()[0];
         // push list of tuple elements to the stack
         stack[++stack_top] = tup_ptr;
       } break;

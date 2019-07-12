@@ -29,10 +29,6 @@ Device Generator::device() const {
   return device_;
 }
 
-Generator& Generator::manualSeedAll(uint64_t seed) {
-  AT_ERROR("manualSeedAll is a CUDA only function. It will be deprecated soon.");
-}
-
 namespace detail {
 
 /**
@@ -85,3 +81,4 @@ uint64_t getNonDeterministicRandom(bool is_cuda) {
 
 } // namespace detail
 } // namespace at
+

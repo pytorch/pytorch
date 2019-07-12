@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <ATen/core/ivalue.h>
 
 namespace at {
 namespace internal {
@@ -106,6 +107,10 @@ CAFFE2_API void launch(std::function<void()> func);
 
 // Launches intra-op parallel task
 CAFFE2_API void intraop_launch(std::function<void()> func);
+
+// Launches intra-op parallel task, returns a future
+CAFFE2_API std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+    std::function<void()> func);
 
 // Returns number of intra-op threads used by default
 CAFFE2_API int intraop_default_num_threads();

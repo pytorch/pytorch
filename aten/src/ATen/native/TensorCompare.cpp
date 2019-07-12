@@ -102,6 +102,10 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   return at::_s_where(b_condition, b_self, b_other);
 }
 
+std::vector<Tensor> where(const Tensor& condition) {
+  return condition.nonzero_numpy();
+}
+
 Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
   Tensor ret = at::empty(self.sizes(), self.options());
   AT_DISPATCH_ALL_TYPES(ret.scalar_type(), "where_cpu", [&] {
@@ -146,9 +150,16 @@ std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
 }
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor max = at::empty({0}, self.options());
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::max_out(max, max_indices, self, dim, keepdim);
+  if (self.is_quantized()) {
+    Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
+    at::native::max_out(max, max_indices, self.int_repr(), dim, keepdim);
+    // TODO: qscheme
+    return std::tuple<Tensor, Tensor>(at::_per_tensor_affine_qtensor(max, self.q_scale(), self.q_zero_point()), max_indices);
+  } else {
+    Tensor  max = at::empty({0}, self.options());
+    return at::native::max_out(max, max_indices, self, dim, keepdim);
+  }
 }
 
 std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
@@ -185,9 +196,15 @@ std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
 }
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor min = at::empty({0}, self.options());
   Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::min_out(min, min_indices, self, dim, keepdim);
+  if (self.is_quantized()) {
+    Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
+    at::native::min_out(min, min_indices, self.int_repr(), dim, keepdim);
+    return std::tuple<Tensor, Tensor>(at::_per_tensor_affine_qtensor(min, self.q_scale(), self.q_zero_point()), min_indices);
+  } else {
+    Tensor min = at::empty({0}, self.options());
+    return at::native::min_out(min, min_indices, self, dim, keepdim);
+  }
 }
 
 std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,

@@ -16,14 +16,14 @@ methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
 #   'type' (type <Tensor<class 'torch._C.Type'>>)
 #
 # But the below are sufficient for now.
-methods_IO = ['node', 'offset', 'uniqueName']
+methods_IO = ['node', 'offset', 'debugName']
 
 
 class NodeBase(object):
-    def __init__(self, uniqueName=None, inputs=None, scope=None, tensor_size=None, op_type='UnSpecified', attributes=''):
+    def __init__(self, debugName=None, inputs=None, scope=None, tensor_size=None, op_type='UnSpecified', attributes=''):
         # TODO; Specify a __slots__ for this class or potentially
         # used namedtuple instead
-        self.uniqueName = uniqueName
+        self.debugName = debugName
         self.inputs = inputs
         self.tensor_size = tensor_size
         self.kind = op_type
@@ -51,7 +51,7 @@ class NodePy(NodeBase):
                 io_unique_names = []
                 io_tensor_sizes = []
                 for n in list_of_node:
-                    io_unique_names.append(n.uniqueName())
+                    io_unique_names.append(n.debugName())
                     if n.type().kind() == 'CompleteTensorType':
                         io_tensor_sizes.append(n.type().sizes())
                     else:
@@ -104,7 +104,7 @@ class GraphPy(object):
     appeared in the nodes in scope_name_appeared list for later processing.
 
     In the second pass, scope names are fully applied to all nodes.
-    uniqueNameToScopedName is a mapping from a node's ID to its fully qualified
+    debugNameToScopedName is a mapping from a node's ID to its fully qualified
     scope name. e.g. Net1/Linear[0]/1. Unfortunately torch.jit doesn't have
     totally correct scope output, so this is nontrivial. The function
     populate_namespace_from_OP_to_IO and find_common_root are used to
@@ -121,7 +121,7 @@ class GraphPy(object):
 
     def append(self, x):
         if isinstance(x, NodePyIO):
-            self.nodes_io[x.uniqueName] = x
+            self.nodes_io[x.debugName] = x
         if isinstance(x, NodePyOP):
             self.nodes_op.append(x)
             for node_output, outputSize in zip(x.outputs, x.outputstensor_size):
@@ -152,15 +152,15 @@ class GraphPy(object):
 
         for key, node in self.nodes_io.items():
             if hasattr(node, 'scope') and node.scope is not None:
-                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.uniqueName
+                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.debugName
                 if node.scope == '' and self.shallowest_scope_name:
-                    self.unique_name_to_scoped_name[node.uniqueName] = self.shallowest_scope_name + '/' + node.uniqueName
+                    self.unique_name_to_scoped_name[node.debugName] = self.shallowest_scope_name + '/' + node.debugName
 
         # replace name
         for key, node in self.nodes_io.items():
             self.nodes_io[key].inputs = [self.unique_name_to_scoped_name[node_input_id] for node_input_id in node.inputs]
-            if node.uniqueName in self.unique_name_to_scoped_name:
-                self.nodes_io[key].uniqueName = self.unique_name_to_scoped_name[node.uniqueName]
+            if node.debugName in self.unique_name_to_scoped_name:
+                self.nodes_io[key].debugName = self.unique_name_to_scoped_name[node.debugName]
 
     def to_proto(self):
         """
@@ -171,7 +171,7 @@ class GraphPy(object):
         # PyTorch supports it
         nodes = []
         for v in self.nodes_io.values():
-            nodes.append(node_proto(v.uniqueName,
+            nodes.append(node_proto(v.debugName,
                                     input=v.inputs,
                                     outputsize=v.tensor_size,
                                     op=v.kind,
