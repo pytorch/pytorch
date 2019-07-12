@@ -13,7 +13,7 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
     CyclicLR, CosineAnnealingWarmRestarts
-from torch.optim.chain_lr_scheduler import LambdaChainLR, StepChainLR, MultiStepChainLR, \
+from torch.optim.chain_lr_scheduler import StepChainLR, MultiStepChainLR, \
     ExponentialChainLR, CosineAnnealingChainLR
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm

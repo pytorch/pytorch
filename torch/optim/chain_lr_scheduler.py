@@ -1,12 +1,5 @@
-import types
 import math
-import warnings
-from torch._six import inf
-from collections import Counter
-from functools import partial, wraps
-from bisect import bisect_right
 
-from .optimizer import Optimizer
 from .lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR
 
 
@@ -67,10 +60,10 @@ class StepChainLR(StepLR):
     """
 
     def _compute_lr(self):
-       if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
-           return [group['lr'] for group in self.optimizer.param_groups]
-       return [group['lr'] * self.gamma
-               for group in self.optimizer.param_groups]
+        if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
+            return [group['lr'] for group in self.optimizer.param_groups]
+        return [group['lr'] * self.gamma
+                for group in self.optimizer.param_groups]
 
 
 class MultiStepChainLR(MultiStepLR):
