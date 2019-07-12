@@ -606,28 +606,22 @@ void TensorIterator::compute_shape() {
   }
 }
 
-static DimVector compute_stride(const Tensor& tensor, IntArrayRef shape) {
-  int ndim = shape.size();
-  auto original_shape = tensor.sizes();
-  auto original_stride = tensor.strides();
-  auto element_size_in_bytes = tensor.element_size();
-
-  auto stride = DimVector(ndim, 0);
-  auto offset = ndim - original_shape.size();
-  for (size_t i = 0; i < original_shape.size(); i++) {
-    if (original_shape[i] == 1) {
-      stride[offset + i] = 0;
-    } else {
-      stride[offset + i] = original_stride[i] * element_size_in_bytes;
-    }
-  }
-  return stride;
-}
-
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      op.stride_bytes = compute_stride(op.tensor, shape_);
+      auto original_shape = op.tensor.sizes();
+      auto original_stride = op.tensor.strides();
+      auto element_size_in_bytes = op.tensor.element_size();
+
+      op.stride_bytes.resize(ndim(), 0);
+      auto offset = ndim() - original_shape.size();
+      for (size_t i = 0; i < original_shape.size(); i++) {
+        if (original_shape[i] == 1) {
+          op.stride_bytes[offset + i] = 0;
+        } else {
+          op.stride_bytes[offset + i] = original_stride[i] * element_size_in_bytes;
+        }
+      }
     }
   }
 }
