@@ -39,8 +39,6 @@ FILE(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
 add_subdirectory(core)
 FILE(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 FILE(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
-FILE(GLOB cuda_nvrtc_stub_h "cuda/nvrtc_stub/*.h")
-FILE(GLOB cuda_nvrtc_stub_cpp "cuda/nvrtc_stub/*.cpp")
 FILE(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 FILE(GLOB cudnn_cpp "cudnn/*.cpp")
@@ -48,8 +46,6 @@ FILE(GLOB cudnn_cpp "cudnn/*.cpp")
 FILE(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh")
 FILE(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp")
 FILE(GLOB hip_hip "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip")
-FILE(GLOB hip_nvrtc_stub_h "hip/nvrtc_stub/*.h")
-FILE(GLOB hip_nvrtc_stub_cpp "hip/nvrtc_stub/*.cpp")
 FILE(GLOB miopen_h "miopen/*.h")
 FILE(GLOB miopen_cpp "miopen/*.cpp")
 
@@ -360,7 +356,6 @@ endif()
 
 if(USE_CUDA)
   set(ATen_CUDA_SRCS ${all_cuda_cpp})
-  set(ATen_NVRTC_STUB_SRCS ${cuda_nvrtc_stub_cpp})
   if(AT_LINK_STYLE STREQUAL "INTERFACE")
     # Source code can't be added to an interface library, so it is
     # passed back to be compiled into the containing library
@@ -373,9 +368,6 @@ endif()
 
 if(USE_ROCM)
   set(ATen_HIP_SRCS ${all_hip_cpp})
-  # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
-  # See NOTE [ ATen NVRTC Stub and HIP ]
-  set(ATen_NVRTC_STUB_SRCS ${hip_nvrtc_stub_cpp})
   if(AT_LINK_STYLE STREQUAL "INTERFACE")
     # Source code can't be added to an interface library, so it is
     # passed back to be compiled into the containing library
@@ -447,7 +439,6 @@ endif()
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
-set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_SRCS ${ATen_QUANTIZED_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
