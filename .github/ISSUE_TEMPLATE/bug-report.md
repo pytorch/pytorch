@@ -28,8 +28,8 @@ Please copy and paste the output from our
 [environment collection script](https://raw.githubusercontent.com/pytorch/pytorch/master/torch/utils/collect_env.py)
 (or fill out the checklist below manually).
 
-You can get the script and run it with:
-```
+If PyTorch is successfully installed, run `python -m torch.utils.collect_env`. 
+Otherwise, you can get the script and run it with:```
 wget https://raw.githubusercontent.com/pytorch/pytorch/master/torch/utils/collect_env.py
 # For security purposes, please check the contents of collect_env.py before running it.
 python collect_env.py
