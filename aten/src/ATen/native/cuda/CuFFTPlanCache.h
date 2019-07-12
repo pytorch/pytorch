@@ -109,13 +109,13 @@ public:
     if (input.scalar_type() == ScalarType::Half) {
       // cuFFT on half requires compute capability of at least SM_53
       auto dev_prop = at::cuda::getCurrentDeviceProperties();
-      AT_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
+      TORCH_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
                "cuFFT doesn't support signals of half type with compute "
                "capability less than SM_53, but the device containing input half "
                "tensor only has SM_", dev_prop->major, dev_prop->minor);
       for (int64_t i = 0; i < signal_ndim; i++) {
         auto signal_size = checked_signal_sizes[i];
-        AT_CHECK(is_pow_of_two(signal_size),
+        TORCH_CHECK(is_pow_of_two(signal_size),
                  "cuFFT doesn't support signals of half type with size at any ",
                  "dimension that is not a power of two, but got a signal size of ",
                  checked_signal_sizes);
@@ -451,9 +451,9 @@ private:
     // We check that 0 <= new_size <= CUFFT_MAX_PLAN_NUM here. Since
     // CUFFT_MAX_PLAN_NUM is of type size_t, we need to do non-negativity check
     // first.
-    AT_CHECK(new_size >= 0,
+    TORCH_CHECK(new_size >= 0,
              "cuFFT plan cache size must be non-negative, but got ", new_size);
-    AT_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
+    TORCH_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
              "cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
     _max_size = static_cast<size_t>(new_size);
   }

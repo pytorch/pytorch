@@ -1,5 +1,5 @@
 #!/bin/bash
-set -ex
+set -eux -o pipefail
 
 source "/Users/distiller/project/env"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"

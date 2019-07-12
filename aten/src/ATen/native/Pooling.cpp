@@ -12,7 +12,7 @@ static void check1d(
     const char* function_name,
     const char* argument_name,
     IntArrayRef x) {
-  AT_CHECK(
+  TORCH_CHECK(
       x.size() == 1,
       function_name, "() argument '", argument_name,
       "' should contain one int (got ", x.size(), ")");

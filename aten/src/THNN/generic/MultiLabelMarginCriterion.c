@@ -17,21 +17,21 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   int64_t t, d, dt, ddt;
   scalar_t sum;
 
-  AT_CHECK(!input->is_empty() && input->dim() <= 2,
+  TORCH_CHECK(!input->is_empty() && input->dim() <= 2,
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
   if (input->dim() <= 1)
   {
     nframe = 1;
     dim = THTensor_sizeLegacyNoScalars(input, 0);
-    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
+    TORCH_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
              "inconsistent target size");
   }
   else
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && target->dim() == 2 && (target->size(0) == nframe)
+    TORCH_CHECK(!target->is_empty() && target->dim() == 2 && (target->size(0) == nframe)
              && (target->size(1) == dim), "inconsistent target size");
   }
 
@@ -157,25 +157,25 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   int64_t t, d, dt;
   scalar_t g;
 
-  AT_CHECK(!input->is_empty() && input->dim() <= 2,
+  TORCH_CHECK(!input->is_empty() && input->dim() <= 2,
            "vector or matrix expected, got size: ", input->sizes());
 
   if (input->dim() <= 1)
   {
     nframe = 1;
     dim = THTensor_sizeLegacyNoScalars(input, 0);
-    AT_CHECK((!target->is_empty() && target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
+    TORCH_CHECK((!target->is_empty() && target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
              "inconsistent target size");
-    AT_CHECK((!isTarget->is_empty() && isTarget->dim() <= 1) && (THTensor_sizeLegacyNoScalars(isTarget, 0) == dim),
+    TORCH_CHECK((!isTarget->is_empty() && isTarget->dim() <= 1) && (THTensor_sizeLegacyNoScalars(isTarget, 0) == dim),
              "inconsistent isTarget size");
   }
   else
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() == 2) && (target->size(0) == nframe)
+    TORCH_CHECK(!target->is_empty() && (target->dim() == 2) && (target->size(0) == nframe)
              && (target->size(1) == dim), 3, "inconsistent target size");
-    AT_CHECK(!isTarget->is_empty() && (isTarget->dim() == 2) && (isTarget->size(0) == nframe)
+    TORCH_CHECK(!isTarget->is_empty() && (isTarget->dim() == 2) && (isTarget->size(0) == nframe)
              && (isTarget->size(1) == dim), 3, "inconsistent isTarget size");
   }
 

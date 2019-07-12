@@ -10,9 +10,9 @@
 #include <test/cpp/common/support.h>
 #else
 #include "c10/util/Exception.h"
-#define ASSERT_EQ(x, y) AT_ASSERT((x) == (y))
-#define ASSERT_NE(x, y) AT_ASSERT((x) != (y))
-#define ASSERT_TRUE AT_ASSERT
+#define ASSERT_EQ(x, y) TORCH_INTERNAL_ASSERT((x) == (y))
+#define ASSERT_NE(x, y) TORCH_INTERNAL_ASSERT((x) != (y))
+#define ASSERT_TRUE TORCH_INTERNAL_ASSERT
 #define ASSERT_FALSE(x) ASSERT_TRUE(!(x))
 #define ASSERT_THROWS_WITH(statement, substring)                         \
   try {                                                                  \
