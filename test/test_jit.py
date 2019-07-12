@@ -6254,21 +6254,6 @@ a")
 
         self.checkScript(test_break_true, ())
 
-    def test_break_continue_assign_after_break(self):
-        def test(x):
-            # type: (int)
-            i = 0
-            for i in range(5):
-                j = 1
-                if i == 2:
-                    break
-                    i = i + 5
-                x = x + i
-            return i
-
-        self.checkScript(test, (1,))
-
-
     def test_break_continue_error(self):
         with self.assertRaisesRegex(RuntimeError, "Syntax"):
             cu = torch.jit.CompilationUnit('''
