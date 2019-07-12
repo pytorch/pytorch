@@ -79,7 +79,7 @@ class Linear(NNLinear):
                 module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
         bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
-        out_scale: `scale` parameter of output Quantized Tensor, type: float
+        out_scale: `scale` parameter of output Quantized Tensor, type: double
         out_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
 
     Examples::
@@ -93,18 +93,20 @@ class Linear(NNLinear):
     __constants__ = ['bias', 'in_features', 'out_features']
 
     def __init__(self, in_features, out_features, bias=True):
-        assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
+        if bias:
+            del self.bias
+            qbias = torch._empty_affine_quantized(
+                [out_features], scale=1, zero_point=0, dtype=torch.qint32)
+            self.register_buffer('bias', qbias)
+        else:
+            self.register_buffer('bias', None)
         del self.weight
-        del self.bias
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0,
             dtype=torch.qint8)
-        qbias = torch._empty_affine_quantized(
-            [out_features], scale=1, zero_point=0, dtype=torch.qint32)
         self.register_buffer('_packed_weight',
                              torch.ops.quantized.fbgemm_linear_prepack(qweight))
-        self.register_buffer('bias', qbias)
         self.register_buffer('out_scale',
                              torch.Tensor([1.0]).to(torch.double))
         self.register_buffer('out_zero_point',
@@ -119,6 +121,7 @@ class Linear(NNLinear):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
     def forward(self, x):
+        # Note that we can handle self.bias == None case.
         Y_q = torch.ops.quantized.fbgemm_linear(
             x, self._packed_weight,
             self.bias,
@@ -134,9 +137,10 @@ class Linear(NNLinear):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
-        self.bias.copy_(state_dict[prefix + 'bias'])
+        if prefix + 'bias' in state_dict:
+            self.bias.copy_(state_dict[prefix + 'bias'])
+            state_dict.pop(prefix + 'bias')
         state_dict.pop(prefix + 'weight')
-        state_dict.pop(prefix + 'bias')
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
