@@ -3,6 +3,7 @@ from .quantize import *  # noqa: F401
 from .observer import *  # noqa: F401
 from .QConfig import *  # noqa: F401
 from .fake_quantize import *  # noqa: F401
+import torch
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -11,6 +12,23 @@ def default_eval_fn(model, calib_data):
     """
     for data in calib_data:
         model(data)
+
+default_loss_fn = torch.nn.MSELoss(reduction='sum')
+def default_train_fn(model, train_data, loss_fn=default_loss_fn, optimizer=None):
+    r"""
+    Default train function takes a torch.utils.data.Dataset and train the model
+    on the dataset
+    """
+    if not optimizer:
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    for i in range(10):
+        for data in train_data:
+            input, target = data
+            optimizer.zero_grad()
+            output = model(input)
+            loss = loss_fn(output, target)
+            loss.backward()
+            optimizer.step()
 
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
@@ -25,5 +43,7 @@ _all__ = [
     'Observer', 'WeightObserver', 'observer', 'default_observer',
     'default_weight_observer',
     # QConfig
-    'QConfig', 'default_qconfig'
+    'QConfig', 'default_qconfig',
+    # QAT utilities
+    'default_qat_qconfig', 'default_train_fn', 'default_loss_fn'
 ]

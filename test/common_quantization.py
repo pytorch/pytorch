@@ -135,3 +135,20 @@ class ManualQuantModel(torch.nn.Module):
         x = self.quant(x)
         x = self.fc(x)
         return self.dequant(x)
+
+class ManualQATModel(torch.nn.Module):
+    r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
+    """
+    def __init__(self):
+        super(ManualQATModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return self.dequant(x)
