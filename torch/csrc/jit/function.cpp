@@ -26,5 +26,6 @@ void Function::ensure_defined() {
   }
   check_single_output();
 }
+
 } // namespace jit
 } // namespace torch
