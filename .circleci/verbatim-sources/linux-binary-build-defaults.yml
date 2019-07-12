@@ -1,8 +1,14 @@
+
 # binary linux build defaults
 ##############################################################################
 binary_linux_build: &binary_linux_build
   resource_class: 2xlarge+
   steps:
+  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+  - attach_workspace:
+      at: ~/workspace
+  - run:
+      <<: *should_run_job
   - run:
       <<: *binary_checkout
   - run:
@@ -10,14 +16,14 @@ binary_linux_build: &binary_linux_build
   - run:
       name: Install unbuffer and ts
       command: |
-        set -ex
+        set -eux -o pipefail
         source /env
         retry yum -q -y install epel-release
         retry yum -q -y install expect moreutils
   - run:
       name: Upgrade gcc version (based on env var)
       command: |
-        set -ex
+        set -eux -o pipefail
         source /env
         if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
           source "/builder/upgrade_gcc_abi.sh"
@@ -25,6 +31,11 @@ binary_linux_build: &binary_linux_build
           # Env variables are not persisted into the next step
           echo "export PATH=$PATH" >> /env
           echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> /env
+
+          # We need to set this variable manually because
+          # https://github.com/pytorch/pytorch/blob/master/torch/abi-check.cpp
+          # sets the ABI to 0 by default
+          echo "export _GLIBCXX_USE_CXX11_ABI=1" >> /env
         else
           echo "Not upgrading gcc version"
         fi
@@ -37,7 +48,6 @@ binary_linux_build: &binary_linux_build
       root: /
       paths: final_pkgs
 
-
 # This should really just be another step of the binary_linux_build job above.
 # This isn't possible right now b/c the build job uses the docker executor
 # (otherwise they'd be really really slow) but this one uses the macine
@@ -47,15 +57,18 @@ binary_linux_test: &binary_linux_test
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+  - attach_workspace:
+      at: ~/workspace
+  # TODO: We shouldn't attach the workspace multiple times
+  - attach_workspace:
+      at: /home/circleci/project
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
-  - attach_workspace:
-      at: /home/circleci/project
-  # This checkout is only needed to access
-  # .circleci/scripts/binary_linux_test.sh, which can't be inlined because it
-  # blows up the yaml size.
   - run:
       <<: *binary_checkout
   - run:
@@ -63,8 +76,7 @@ binary_linux_test: &binary_linux_test
   - run:
       name: Prepare test code
       no_output_timeout: "1h"
-      command: |
-        source "/home/circleci/project/pytorch/.circleci/scripts/binary_linux_test.sh"
+      command: ~/workspace/.circleci/scripts/binary_linux_test.sh
   - run:
       <<: *binary_run_in_docker
 
@@ -72,17 +84,17 @@ binary_linux_upload: &binary_linux_upload
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+  - attach_workspace:
+      at: ~/workspace
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
   - attach_workspace:
       at: /home/circleci/project
-  # This checkout is only needed to access
-  # .circleci/scripts/binary_linux_upload.sh, which can't be inlined because it
-  # blows up the yaml size.
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -90,5 +102,5 @@ binary_linux_upload: &binary_linux_upload
   - run:
       name: Upload
       no_output_timeout: "1h"
-      command: |
-        source "/home/circleci/project/pytorch/.circleci/scripts/binary_linux_upload.sh"
+      command: ~/workspace/.circleci/scripts/binary_linux_upload.sh
+

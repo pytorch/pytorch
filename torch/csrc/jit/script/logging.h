@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -42,9 +41,7 @@ class TORCH_API LockingLogger : public LoggerBase {
   void addStatValue(const std::string& stat_name, int64_t val) override;
   virtual int64_t getCounterValue(const std::string& name) const;
   enum class AggregationType { SUM, AVG };
-  void setAggregationType(
-      const std::string& stat_name,
-      AggregationType type);
+  void setAggregationType(const std::string& stat_name, AggregationType type);
   ~LockingLogger() {}
 
  private:

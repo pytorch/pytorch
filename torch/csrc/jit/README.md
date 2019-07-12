@@ -57,6 +57,7 @@ Sections start with a reference to the source file where the code related to the
     + [Aliasing and mutation annotations in FunctionSchema](#aliasing-and-mutation-annotations-in-functionschema)
     + [Alias Analysis in the IR](#alias-analysis-in-the-ir)
     + [Writing optimization passes with `AliasDb`](#writing-optimization-passes-with--aliasdb-)
+- [Profiling Programs](#profiling-programs)
 - [Saving Programs](#saving-programs)
   * [PythonPrint](#pythonprint)
   * [Serialization](#serialization)
@@ -1145,6 +1146,20 @@ The intention is that if you only mutate the graph through `AliasDb`, you don't 
 TODO: differentiation, symbolic autograd,
 TODO: fusion, operators
 
+# Profiling Programs 
+
+`prim::profile` nodes are inserted on every **use** of a value by `ProfilingRecord::instrumentBlock`. Every `prim::profile` node runs a lambda that uses a captured, initial type value and the type of an incoming tensor and merges the two into `ProfiledTensorType` 
+
+`prim::profile` nodes are replaced with `prim::Guard` nodes by `InsertGuards`. `prim::Guard` nodes are inserted to guarantee that beyond the guard a guarded tensor will always be of the profiled shape. This guarantee will enable optimizations and codegens to generate more efficient code.
+
+JIT attempts to reduce the number of `prim::Guard` nodes as these nodes may interefere with optimizations. 
+* First, `GuardElimination::moveGuardsToDefs` tries to move `prim::Guards` to their definitions, so the guards guarding the same tensor follow the definition directly or another guard on the same tensor. This step is done in 
+* This ordering allows us to **coalesce** (done in `GuardElimination::coalesceGuards`) multiple guards into a single one. 
+* After guards are  **coaslesced** , `GuardElimination::eliminateGuards` attempts to eliminate more guards as follows: it inspects each operation and its inputs. It checks if inputs to the operation are guarded and also if the operation produces the consistent shapes given the guarded inputs. For example, if two inputs to `add` are guaranteed to be of shape `(2, 3) `, the output shape will also always be `(2, 3)` If this property holds, JIT is allowed to remove the guard guarding operation's output.
+
+Lastly, JIT needs to be handle cases when the assumptions about tensor shapes fail at runtime. To handle guard failures, JIT needs to be able to run the original code i.e. the code  that doesn't rely on assumptions about shapes. As guards can be inserted and moved (by Optimizer) at/to arbitrary points in a computional graph, JIT needs to be able to resume execution starting from those arbitrary points onward.
+
+`InsertBailoutNodes` builds deoptimized versions of the original computational graph, that contain the rest of computations starting from their corresponding guard failure poins and, also, captures live values needed to execute those deoptimized graphs. In other words, the pass replaces `prim::Guard` nodes with `prim::BailOut` nodes which have the`attr::Subgraph` attributes set to the deoptimized versions of the  remaining computations at their corresponding `prim::Guard`s. 
 
 # Saving Programs
 

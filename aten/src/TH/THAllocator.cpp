@@ -89,10 +89,8 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
     hfilesz.QuadPart = size;
 
     if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
-      handle_ = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
       event_ = CreateEvent(nullptr, FALSE, FALSE, eventname);
     } else if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
-      handle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
       event_ = OpenEvent(EVENT_ALL_ACCESS, FALSE, eventname);
     } else {
       AT_ERROR("Expected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
@@ -100,6 +98,14 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 
     if (event_ == nullptr) {
       AT_ERROR("Couldn't open shared event: <", eventname, ">, error code: <", GetLastError(), ">");
+    }
+
+    if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
+      handle_ = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
+    } else if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
+      handle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
+    } else {
+      AT_ERROR("Expected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
     }
 
     if (handle_ == nullptr) {

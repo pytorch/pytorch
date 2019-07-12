@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "THNN/generic/TemporalRowConvolution.c"
 #else
 
+#include <ATen/Parallel.h>
+
 static inline void THNN_(TemporalRowConvolution_shapeCheck)(
         THNNState *state,
         THTensor *input,
@@ -70,7 +72,6 @@ static void THNN_(unfolded_acc_row)(
         scalar_t *input_data = input->data<scalar_t>();
         scalar_t *finput_data = finput->data<scalar_t>();
 
-// #pragma omp parallel for private(c)
         for (c = 0; c < inputFrameSize; c++) {
                 int64_t kw, x;
                 int64_t ix = 0;
@@ -110,7 +111,6 @@ static void THNN_(unfolded_copy_row)(
         scalar_t *input_data = input->data<scalar_t>();
         scalar_t *finput_data = finput->data<scalar_t>();
 
-// #pragma omp parallel for private(k)
         for (k = 0; k < inputFrameSize * kW; k++) {
                 int64_t c = k / kW;
                 int64_t rest = k % kW;
@@ -216,7 +216,6 @@ void THNN_(TemporalRowConvolution_updateOutput)(
 
         } else {
                 int64_t T = input->size(0);
-                int64_t t;
 
                 THTensor_(resize4d)(finput, T, inputFrameSize, kW, nOutputFrame);
                 THTensor_(resize3d)(output, T, inputFrameSize, nOutputFrame);
@@ -224,20 +223,21 @@ void THNN_(TemporalRowConvolution_updateOutput)(
                 THTensor_(zero)(finput);
                 THTensor_(zero)(output);
 
-#pragma omp parallel for private(t)
-                for (t = 0; t < T; t++) {
-                        THTensor *input_t = THTensor_(newSelect)(input, 0, t);
-                        THTensor *output_t = THTensor_(newSelect)(output, 0, t);
-                        THTensor *finput_t = THTensor_(newSelect)(finput, 0, t);
+                at::parallel_for(0, T, 0, [&](int64_t start, int64_t end) {
+                  for (auto t = start; t < end; t++) {
+                          THTensor *input_t = THTensor_(newSelect)(input, 0, t);
+                          THTensor *output_t = THTensor_(newSelect)(output, 0, t);
+                          THTensor *finput_t = THTensor_(newSelect)(finput, 0, t);
 
-                        THNN_(TemporalRowConvolution_updateOutput_frame)
-                                (input_t, output_t, weight, bias, finput_t,
-                                kW, dW, padW, inputFrameSize, nInputFrame, nOutputFrame);
+                          THNN_(TemporalRowConvolution_updateOutput_frame)
+                                  (input_t, output_t, weight, bias, finput_t,
+                                  kW, dW, padW, inputFrameSize, nInputFrame, nOutputFrame);
 
-                        c10::raw::intrusive_ptr::decref(input_t);
-                        c10::raw::intrusive_ptr::decref(output_t);
-                        c10::raw::intrusive_ptr::decref(finput_t);
-                }
+                          c10::raw::intrusive_ptr::decref(input_t);
+                          c10::raw::intrusive_ptr::decref(output_t);
+                          c10::raw::intrusive_ptr::decref(finput_t);
+                  }
+                });
         }
 
         if (!featFirst) { // NOTE: output will NOT be contiguous in this case
@@ -331,24 +331,23 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
                         inputFrameSize, nInputFrame, nOutputFrame);
         } else {
                 int64_t T = input->size(0);
-                int64_t t;
 
-#pragma omp parallel for private(t)
-                for (t = 0; t < T; t++) {
+                at::parallel_for(0, T, 0, [&](int64_t start, int64_t end) {
+                  for (auto t = start; t < end; t++) {
+                          THTensor *gradInput_t = THTensor_(newSelect)(gradInput, 0, t);
+                          THTensor *gradOutput_t = THTensor_(newSelect)(gradOutput, 0, t);
+                          THTensor *fgradInput_t = THTensor_(newSelect)(fgradInput, 0, t);
 
-                        THTensor *gradInput_t = THTensor_(newSelect)(gradInput, 0, t);
-                        THTensor *gradOutput_t = THTensor_(newSelect)(gradOutput, 0, t);
-                        THTensor *fgradInput_t = THTensor_(newSelect)(fgradInput, 0, t);
+                          THNN_(TemporalRowConvolution_updateGradInput_frame)
+                                  (gradInput_t, gradOutput_t, tweight, fgradInput_t,
+                                  kW, dW, padW,
+                                  inputFrameSize, nInputFrame, nOutputFrame);
 
-                        THNN_(TemporalRowConvolution_updateGradInput_frame)
-                                (gradInput_t, gradOutput_t, tweight, fgradInput_t,
-                                kW, dW, padW,
-                                inputFrameSize, nInputFrame, nOutputFrame);
-
-                        c10::raw::intrusive_ptr::decref(gradInput_t);
-                        c10::raw::intrusive_ptr::decref(gradOutput_t);
-                        c10::raw::intrusive_ptr::decref(fgradInput_t);
-                }
+                          c10::raw::intrusive_ptr::decref(gradInput_t);
+                          c10::raw::intrusive_ptr::decref(gradOutput_t);
+                          c10::raw::intrusive_ptr::decref(fgradInput_t);
+                  }
+                });
         }
 
     c10::raw::intrusive_ptr::decref(tweight);

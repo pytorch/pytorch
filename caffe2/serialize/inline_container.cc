@@ -165,6 +165,18 @@ static std::string getPadding(size_t cursor, const std::string& filename, size_t
   return buf;
 }
 
+bool PyTorchStreamReader::hasFile(const std::string& name) {
+  std::stringstream ss;
+  ss << archive_name_ << "/" << name;
+  mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
+  bool result = ar_->m_last_error != MZ_ZIP_FILE_NOT_FOUND;
+  if (!result) {
+    ar_->m_last_error = MZ_ZIP_NO_ERROR;
+  }
+  valid("attempting to locate file");
+  return result;
+}
+
 size_t PyTorchStreamReader::getFileID(const std::string& name) {
   std::stringstream ss;
   ss << archive_name_ << "/" << name;

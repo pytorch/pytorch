@@ -182,8 +182,8 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
     auto b = SymbolicVariable::asNewInput(*graph, type);
     auto c = a * b;
     auto d = c * a;
-    c.value()->setUniqueName(cname);
-    d.value()->setUniqueName(dname);
+    c.value()->setDebugName(cname);
+    d.value()->setDebugName(dname);
     graph->registerOutput(d.value());
     torch::jit::overrideCanFuseOnCPU(true);
     FuseGraph(graph);
@@ -197,7 +197,7 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
         std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
           return node->kind() == prim::FusionGroup;
         });
-    AT_CHECK(
+    TORCH_CHECK(
         maybe_fusion_group != nodes.end(),
         "testRegisterFusionCachesKernel: could not create FusionGroup");
     return *maybe_fusion_group;

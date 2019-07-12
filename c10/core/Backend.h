@@ -275,4 +275,15 @@ static inline const char* toString(Backend b) {
   }
 }
 
+static inline bool isSparse(Backend b) {
+  switch (b) {
+    case Backend::SparseCPU:
+    case Backend::SparseCUDA:
+    case Backend::SparseHIP:
+      return true;
+    default:
+      return false;
+  }
+}
+
 } // namespace c10

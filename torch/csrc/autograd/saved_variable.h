@@ -5,7 +5,6 @@
 #include <ATen/ATen.h>
 
 #include <cstdint>
-#include <list>
 #include <memory>
 
 namespace torch { namespace autograd {

@@ -20,6 +20,15 @@ from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
+
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 BACKEND = os.environ["BACKEND"]
 TEMP_DIR = os.environ["TEMP_DIR"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
@@ -78,6 +87,7 @@ class BatchNormNet(nn.Module):
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
+ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99) 
 
 
 def get_timeout(test_id):
@@ -1527,6 +1537,49 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        model = nn.parallel.DistributedDataParallel(ONLY_SBN_NET.cuda(rank), device_ids=[rank])
+
+        input_var = []
+        for i in range(int(WORLD_SIZE)):
+            input_var_rank = torch.cat([
+                torch.ones(2, 1, 10 ** (i + 1)) * (0.1 ** (i - 1)),
+                torch.ones(2, 1, 10 ** (i + 1)) * (0.3 ** (i - 1))
+            ], dim=1)
+            input_var.append(input_var_rank)
+
+        all_input_var = torch.cat(
+            [x.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1) for x in input_var],
+            dim=1
+        ).cuda(rank)
+
+        for i in range(100):
+            y = model(input_var[rank].cuda(rank))
+            y.mean().backward()
+
+        running_mean, running_var = model.module.running_mean, model.module.running_var
+        torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
+        torch.testing.assert_allclose(running_var, all_input_var.var(1))
+
+    @skipIfNoTorchVision
+    def test_SyncBatchNorm_process_group(self):
+        # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
+        # it need to recursively pass the `process_group` in the module when the `SyncBatchNorm`
+        # is nested in a sub-module or sub-sub-module (e.g. resnet50 in torchvision.models).
+
+        process_ids = 0
+        process_group = torch.distributed.new_group([process_ids])
+        res50_model = torchvision.models.resnet50()
+        res50_model_sync = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(res50_model), process_group)
+        process_group_sync = res50_model_sync.layer1[0].bn1.process_group
+        self.assertEqual(process_group_sync, process_group)
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
