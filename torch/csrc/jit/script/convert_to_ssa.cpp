@@ -295,14 +295,14 @@ struct LoopContinuations {
   void run(Block* b) {
     {
       graph_ = b->owningGraph();
-      WithInsertPoint guard(graph_->block()->nodes().front());
+      WithInsertPoint guard(b->nodes().front());
       false_val_ = graph_->insertConstant(false);
     }
     assignExitContinuations(b);
   }
 
-  Graph* graph_;
-  Value* false_val_;
+  Graph* graph_ = nullptr;
+  Value* false_val_ = nullptr;
   Node* curr_loop_ = nullptr;
 };
 

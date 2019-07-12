@@ -38,7 +38,7 @@ void canonicalizeModifiedLoop(Node* n) {
   n->addInput(zero);
   auto new_iter = loop.bodyBlock()->addInput()->setType(IntType::get());
   // unset unique name for jitter, its replacement does not have a name
-  loop.currentTripCount()->setUniqueName("")->replaceAllUsesWith(new_iter);
+  loop.currentTripCount()->setDebugName("")->replaceAllUsesWith(new_iter);
   auto inc_iter = g->insert(aten::add, {new_iter, one});
   loop.bodyBlock()->registerOutput(inc_iter);
   auto less_than_max_trip = g->insert(aten::lt, {inc_iter, max_trip_count});
