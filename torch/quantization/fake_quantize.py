@@ -14,7 +14,7 @@ class FakeQuantize(Module):
     '''
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 quant_min=0, quant_max=255, enable_fq=True):
+                 quant_min=0, quant_max=255):
         super(FakeQuantize, self).__init__()
         assert torch.iinfo(dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_min <= quant_max, \
@@ -24,13 +24,16 @@ class FakeQuantize(Module):
         self.qscheme = qscheme
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.enable_fq = enable_fq
+        self.enable = enable
         self.observer = default_observer(dtype=dtype, qscheme=qscheme)()
         self.scale = None
         self.zero_point = None
 
     def enable(self):
-        self.enable_fq = True
+        self.enabled = True
+
+    def disable(self):
+        self.enable(False)
 
     def calculate_qparams(self):
         return self.observer.calculate_qparams()
