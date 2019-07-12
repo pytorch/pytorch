@@ -32,19 +32,28 @@ def lib_paths_from_base(base_path):
 
 
 def hotpatch_var(var, prefix='USE_'):
+    def print_warning(good_prefix, bad_prefix, var):
+        print(("The use of {bad_prefix}{var} is deprecated and will be removed on Feb 20, 2020."
+               "Please use {good_prefix}{var} instead.").format(
+                   good_prefix=good_prefix, bad_prefix=bad_prefix, var=var))
+
     if check_env_flag('NO_' + var):
+        print_warning(prefix, 'NO_', var)
         os.environ[prefix + var] = '0'
     elif check_negative_env_flag('NO_' + var):
+        print_warning(prefix, 'NO_', var)
         os.environ[prefix + var] = '1'
     elif check_env_flag('WITH_' + var):
+        print_warning(prefix, 'WITH_', var)
         os.environ[prefix + var] = '1'
     elif check_negative_env_flag('WITH_' + var):
+        print_warning(prefix, 'WITH_', var)
         os.environ[prefix + var] = '0'
 
 
 def hotpatch_build_env_vars():
-    # Before we run the setup_helpers, let's look for NO_* and WITH_*
-    # variables and hotpatch environment with the USE_* equivalent
+    # Before we run the setup_helpers, let's look for NO_* and WITH_* variables and hotpatch environment with the USE_*
+    # equivalent The use of NO_* and WITH_* is deprecated and will be removed in Feb 20, 2020.
     use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
                     'OPENCV', 'TENSORRT', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL',
                     'GLOO_IBVERBS']

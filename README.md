@@ -159,7 +159,7 @@ If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 
-If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
+If you want to disable CUDA support, export environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
 If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to [are available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)

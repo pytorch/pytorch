@@ -106,7 +106,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::CPUTensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -287,6 +287,55 @@ Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& opt
   return native::full(self.sizes(), fill_value, options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
+  int64_t nDims = self.dim();
+  TORCH_CHECK(nDims >= 2, "dimensions must larger than 1");
+
+  int64_t height = self.size(0);
+  int64_t width = self.size(1);
+
+  if (nDims > 2) {
+    int64_t dim1 = height;
+    for (int64_t i = 1; i < nDims; i++) {
+      if (self.size(i) != dim1) {
+        AT_ERROR("all dimensions of input must be of equal length");
+      }
+    }
+  }
+
+  int64_t storage_offset = self.storage_offset();
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+  int64_t size = std::min(height, width);
+
+  int64_t stride = 0;
+  for (int64_t i = 0; i < nDims; i++) {
+    stride += self.stride(i);
+  }
+  strides.push_back(stride);
+  sizes.push_back(size);
+
+  auto main_diag = self.as_strided(sizes, strides, storage_offset);
+  main_diag.fill_(fill_value);
+
+  if (wrap && nDims == 2 && height > width + 1) {
+    std::vector<int64_t> wrap_sizes;
+
+    int64_t step = width + 1;
+    int64_t wrap_size = ((self.numel() + step - 1) / step) - size;
+    wrap_sizes.push_back(wrap_size);
+
+    int64_t offset = self.stride(0) * (width + 1);
+
+    auto wrap_diag = self.as_strided(wrap_sizes, strides, storage_offset + offset);
+    wrap_diag.fill_(fill_value);
+  }
+
+  return self;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor linspace(
@@ -464,6 +513,18 @@ Tensor& randn_out(Tensor& result, IntArrayRef size, Generator* generator) {
   return result.normal_(0, 1, generator);
 }
 
+Tensor normal(double mean, double std, IntArrayRef size,
+              Generator* generator, const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  return result.normal_(mean, std, generator);
+}
+
+Tensor& normal_out(Tensor& result, double mean, double std,
+                   IntArrayRef size, Generator* generator) {
+  result.resize_(size);
+  return result.normal_(mean, std, generator);
+}
+
 Tensor randn_like(const Tensor& self) {
   return native::randn_like(self, self.options());
 }
@@ -513,11 +574,12 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
 
 Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
+  check_supported_max_int_with_precision(n, result);
   result.resize_({n});
   auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
 

@@ -100,8 +100,9 @@ struct TORCH_API SugaredValue
                            << " object is not iterable";
   }
   // expression for ith elemement for iterable value
-  virtual Value* getelem(const SourceRange&loc, Function& m, Value* i) {
-    throw ErrorReport(loc) << " cannot get the element of value " << kind();
+  virtual Value* getitem(const SourceRange& loc, Function& m, Value* idx) {
+    throw ErrorReport(loc) << "'" << kind() << "'"
+                           << " object is not subscriptable";
   }
 
   virtual ~SugaredValue() = default;
@@ -153,7 +154,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   }
 
   Value* len(const SourceRange& loc, Function& m) override;
-  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+  Value* getitem(const SourceRange& loc, Function& m, Value* idx) override;
 
  private:
   Value* value_;
@@ -246,8 +247,9 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
 };
 
 struct FunctionValue : public SugaredValue {
-  FunctionValue(std::shared_ptr<Function> callee)
-      : callee_(std::move(callee)) {}
+  FunctionValue(Function* callee) : callee_(std::move(callee)) {}
+  FunctionValue(const StrongFunctionPtr& p)
+      : callee_(p.function_), cu_(p.cu_) {}
 
   std::string kind() const override {
     return "function";
@@ -268,7 +270,9 @@ struct FunctionValue : public SugaredValue {
   }
 
  private:
-  std::shared_ptr<Function> callee_;
+  Function* callee_;
+  // TODO holding this thing is creepy
+  std::shared_ptr<CompilationUnit> cu_;
 };
 
 struct TORCH_API ClosureValue : public SugaredValue {
@@ -444,17 +448,17 @@ struct TORCH_API RangeValue : SugaredValue {
     return "range";
   }
   Value* len(const SourceRange& loc, Function& m) override;
-  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+  Value* getitem(const SourceRange& loc, Function& m, Value* idx) override;
 
-  private:
-    Value* start_;
-    Value* end_;
-    Value* step_;
-    // a flag to determine if it's a simple range() call with only end_ from
-    // arguments If true, we will not insert length calculation and index
-    // derivation nodes to simplify the graph and enable more possible
-    // optimizations
-    bool has_only_end_;
+ private:
+  Value* start_;
+  Value* end_;
+  Value* step_;
+  // a flag to determine if it's a simple range() call with only end_ from
+  // arguments If true, we will not insert length calculation and index
+  // derivation nodes to simplify the graph and enable more possible
+  // optimizations
+  bool has_only_end_;
 };
 
 // matched against for special handling of iterables like zip(), enumerate()
@@ -492,14 +496,14 @@ struct TORCH_API IterableTree : SugaredValue {
   // given a IterableTree node, get all the base iterables/leaves under the
   // IterableTree node, which are either SimpleValue or RangeValue. This enable
   // us to get all the basic SugaredValues that contains valid loop information
-  // with len() and getelem()
+  // with len() and getitem()
   std::vector<SugaredValuePtr> get_base_iterables();
 
   Value* len(const SourceRange& loc, Function& m) override;
-  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
+  Value* getitem(const SourceRange& loc, Function& m, Value* idx) override;
 
-  private:
-    std::vector<SugaredValuePtr> children_;
+ private:
+  std::vector<SugaredValuePtr> children_;
 };
 
 // This represents the "__new__" method on classes, which can't be a MethodValue
@@ -530,12 +534,20 @@ static inline std::vector<Value*> toValues(
   return fmap(nvs, [&](const NamedValue& v) { return v.value(g); });
 }
 
-static inline Self simpleSelf(const TypePtr& typ) {
-  return [typ](Value* v) {
-    v->setType(typ);
+struct SimpleSelf : public Self {
+  explicit SimpleSelf(ClassTypePtr classType)
+      : Self(), classType_(std::move(classType)) {}
+  std::shared_ptr<SugaredValue> makeSugared(Value* v) const override {
+    v->setType(classType_);
     return std::make_shared<SimpleValue>(v);
-  };
-}
+  }
+  ClassTypePtr getClassType() const override {
+    return classType_;
+  }
+
+ private:
+  ClassTypePtr classType_;
+};
 } // namespace script
 } // namespace jit
 } // namespace torch

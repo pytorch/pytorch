@@ -43,7 +43,7 @@ TORCH_API void InsertObserverNodes(
  * will be cloned into all the places where we need to add instrumentation.
  */
 TORCH_API void InsertObserverNodes(
-    std::shared_ptr<Function>& function_var,
+    Function* function_var,
     Node* observer_node);
 
 /** \brief Inserts quant-dequant nodes.

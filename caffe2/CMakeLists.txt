@@ -345,6 +345,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
     ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
@@ -352,7 +353,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
@@ -374,6 +374,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/jit_log.cpp
     ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp

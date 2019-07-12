@@ -36,6 +36,26 @@
 namespace at {
 namespace native {
 
+Tensor bitwise_not(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::bitwise_not_out(result, self);
+}
+
+Tensor& bitwise_not_(Tensor& self) {
+  return at::bitwise_not_out(self, self);
+}
+
+Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
+  checkBackend("bitwise_not", result, self.type().backend());
+  assert_no_internal_overlap(result, "bitwise_not");
+  auto iter = TensorIterator::unary_op(result, self);
+  bitwise_not_stub(iter->device_type(), *iter);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
+}
+
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
@@ -155,7 +175,7 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return at::op##_out(self, self);                            \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, {result}, Backend::CPU);                  \
+    checkBackend(#op, result, Backend::CPU);                    \
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
@@ -196,6 +216,7 @@ DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
+DEFINE_DISPATCH(bitwise_not_stub);
 DEFINE_DISPATCH(ceil_stub);
 DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
