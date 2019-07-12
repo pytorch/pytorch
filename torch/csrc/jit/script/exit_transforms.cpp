@@ -271,8 +271,11 @@ struct ExitTransformer {
           // for now, ignore loop return, once we handle returns no longer true
           transformLoop(node);
         } break;
-        default:
-          break;
+        default: {
+          for (Block* b : node->blocks()) {
+            transformExits(b);
+          }
+        } break;
       }
 
       // if we have hit a node that might exit, we need to conditionally execute
