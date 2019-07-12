@@ -1,5 +1,4 @@
 from string import Template
-import tempfile
 import torch.prototypes.nestedtensor.codegen as codegen
 import argparse
 

@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 
 
 def is_nested_tensor(obj):

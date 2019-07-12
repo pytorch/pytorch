@@ -1,21 +1,21 @@
-from common_utils import TEST_WITH_PROTOTYPES, TestCase
-
 import torch
 import unittest
+from common_utils import TEST_WITH_PROTOTYPES
 
 if TEST_WITH_PROTOTYPES:
-   import torch.prototypes.nestedtensor as nestedtensor
-   NestedTensor = nestedtensor.NestedTensor
+    import torch.prototypes.nestedtensor as nestedtensor
+    from common_utils import TestCase
+    NestedTensor = nestedtensor.NestedTensor
 else:
-   print('prototypes not available, skipping tests')
-   TestCase = object
+    print('prototypes not available, skipping tests')
+    TestCase = object
 
 
 def _shape_prod(shape_):
     shape = tuple(shape_)
     start = 1
     for s in shape:
-        start = start  * s
+        start = start * s
     return start
 
 # From torchaudio by jamarshon
@@ -44,9 +44,9 @@ def random_float_tensor(seed, size, a=22695477, c=1, m=2 ** 32):
 
 
 def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 32):
-   """ Same as random_float_tensor but integers between [low, high)
-   """
-   return torch.floor(random_float_tensor(seed, size, a, c, m) * (high - low)) + low
+    """ Same as random_float_tensor but integers between [low, high)
+    """
+    return torch.floor(random_float_tensor(seed, size, a, c, m) * (high - low)) + low
 
 
 class TestNestedTensor(TestCase):
@@ -68,8 +68,8 @@ class TestNestedTensor(TestCase):
         a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
         na = (torch.Size([1, 2]), torch.Size([2, 3]), torch.Size([4, 5]))
         assert a.nested_size() == na
-    
-    
+
+
     def test_len(self):
         a = torch.nestedtensor([torch.tensor([1, 2]), 
                                 torch.tensor([3, 4]), 
@@ -78,14 +78,14 @@ class TestNestedTensor(TestCase):
         assert(len(a) == 4)
         a = torch.nestedtensor([torch.tensor([1, 2]), 
                                 torch.tensor([7, 8])])
-    
+
         assert(len(a) == 2)
         a = torch.nestedtensor([torch.tensor([1, 2])])
         assert(len(a) == 1)
         a = torch.nestedtensor([])
         assert(len(a) == 0)
-    
-    
+
+
     def test_unbind(self):
         data = [self.gen_float_tensor(1, (2, 2)),
                 self.gen_float_tensor(2, (2, 2)),
@@ -96,8 +96,8 @@ class TestNestedTensor(TestCase):
         for t in b:
             t.add_(1)
         assert (a == c).all()
-    
-    
+
+
     def test_equal(self):
         a1 = torch.nestedtensor([torch.tensor([1, 2]), 
                                  torch.tensor([7, 8])])
@@ -110,21 +110,21 @@ class TestNestedTensor(TestCase):
         assert (a1 != a3).all()
         assert not (a1 != a2).any()
         assert not (a1 == a3).any()
-    
-    
+
+
     def test_unary(self):
         a1 = torch.nestedtensor([self.gen_float_tensor(1, (2,)),
                                  self.gen_float_tensor(2, (2,))])
         a2 = torch.nestedtensor([self.gen_float_tensor(1, (2,)).exp_(),
                                  self.gen_float_tensor(2, (2,)).exp_()])
-    
         assert (torch.exp(a1) == a2).all()
         assert not (a1 == a2).any()
         assert (a1.exp() == a2).all()
         assert not (a1 == a2).any()
         assert (a1.exp_() == a2).all()
         assert (a1 == a2).all()
-    
+
+
     def test_binary(self):
         a = self.gen_float_tensor(1, (2,))
         b = self.gen_float_tensor(2, (2,))
