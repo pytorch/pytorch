@@ -5,6 +5,54 @@ def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
 
 
+def _verify_tensors(tensors):
+    for tensor in tensors:
+        assert torch.is_tensor(tensor)
+    if len(tensors):
+        dim = tensors[0].dim()
+        layout = tensors[0].layout
+        device = tensors[0].device
+        dtype = tensors[0].dtype
+        for tensor in tensors:
+            assert(dim == tensor.dim())
+            assert(layout == tensor.layout)
+            assert(device == tensor.device)
+            assert(dtype == tensor.dtype)
+
+
+def is_contiguous_tensors(tensors):
+    assert len(tensors)
+    first_data_ptr = tensors[0].data_ptr()
+    current_offset = 0
+    is_cont = True
+    for tensor in tensors:
+        test_data_ptr = first_data_ptr + current_offset
+        is_cont = is_cont and tensor.data_ptr() == test_data_ptr
+        current_offset += tensor.numel() * tensor.element_size()
+    return is_cont
+
+
+def make_contiguous_tensors(tensors):
+    _verify_tensors(tensors)
+    assert len(tensors)
+    dtype = tensors[0].dtype
+    device = tensors[0].device
+    all_numel = 0
+    for tensor in tensors:
+        all_numel += tensor.numel()
+    memory = tensor.new_empty((all_numel,), dtype=dtype, device=device)
+    current_numel = 0
+    new_tensors = []
+    for tensor in tensors:
+        new_tensor = memory.narrow(0, current_numel, tensor.numel())
+        new_tensor = new_tensor.view(tensor.shape)
+        new_tensor.copy_(tensor)
+        new_tensors.append(new_tensor)
+        current_numel += tensor.numel()
+    assert is_contiguous_tensors(new_tensors)
+    return new_tensors
+
+
 def make_nested_tensor(obj):
     if is_nested_tensor(obj):
         return obj.clone().detach()
@@ -14,35 +62,21 @@ def make_nested_tensor(obj):
         assert isinstance(obj, list)
         if len(obj) == 0:
             return NestedTensor([])
-        for obj_ in obj:
-            assert(torch.is_tensor(obj_))
-        tensors = []
-        for obj_ in obj:
-            tensors.append(obj_.clone().detach())
-        return NestedTensor(tensors)
+        _verify_tensors(obj)
+        return NestedTensor(make_contiguous_tensors(obj))
 
 
 class NestedTensor():
     def __init__(self, tensors):
-        for tensor in tensors:
-            assert torch.is_tensor(tensor)
+        _verify_tensors(tensors)
         self.tensors = tensors
+        reference_tensor = torch.Tensor([])
         if len(tensors):
-            self.dim = tensors[0].dim()
-            self.layout = tensors[0].layout
-            self.device = tensors[0].device
-            self.dtype = tensors[0].dtype
-            for tensor in tensors:
-                assert(self.dim == tensor.dim())
-                assert(self.layout == tensor.layout)
-                assert(self.device == tensor.device)
-                assert(self.dtype == tensor.dtype)
-        else:
-            empty_tensor = torch.Tensor([])
-            self.dim = empty_tensor.dim()
-            self.layout = empty_tensor.layout
-            self.device = empty_tensor.device
-            self.dtype = empty_tensor.dtype
+            reference_tensor = tensors[0]
+        self.dim = reference_tensor.dim()
+        self.layout = reference_tensor.layout
+        self.device = reference_tensor.device
+        self.dtype = reference_tensor.dtype
 
     def __getattribute__(self, attr):
         if attr == 'shape':

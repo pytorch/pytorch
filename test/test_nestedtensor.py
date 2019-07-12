@@ -143,4 +143,7 @@ class TestNestedTensor(TestCase):
         assert (a3 == a1).all()
 
 if __name__ == "__main__":
+    a = torch.nestedtensor([random_float_tensor(1, (2, 4)),
+                            random_float_tensor(2, (3, 4))])
+    import pdb; pdb.set_trace()
     unittest.main()
