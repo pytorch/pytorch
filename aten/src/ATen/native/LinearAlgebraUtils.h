@@ -268,8 +268,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   if (!input.is_cuda()) {
     U_empty = at::empty_strided(sizes, strides, input.options());
   } else {
-    U_empty = at::empty_strided(sizes, strides,
-                                at::TensorOptions(at::kCPU).dtype(input.dtype()).pinned_memory(true));
+    U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
   sizes[input.dim() - 2] = n;
@@ -279,7 +278,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   if (!input.is_cuda()) {
     VT_empty = at::empty(sizes, input.options());
   } else {
-    VT_empty = at::empty(sizes, at::TensorOptions(at::kCPU).dtype(input.dtype()).pinned_memory(true));
+    VT_empty = at::empty(sizes, input.options().device(at::kCPU));
   }
 
   sizes.pop_back();
@@ -288,7 +287,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   if (!input.is_cuda()) {
     S_empty = at::empty(sizes, input.options());
   } else {
-    S_empty = at::empty(sizes, at::TensorOptions(at::kCPU).dtype(input.dtype()).pinned_memory(true));
+    S_empty = at::empty(sizes, input.options().device(at::kCPU));
   }
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);  
 }
