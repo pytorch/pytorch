@@ -65,11 +65,7 @@ class _LRScheduler(object):
         return self._last_computed_lr
 
     def _compute_lr(self):
-        # NOTE [LR Recursive Form] Compute the learning rate using the recursive form of the scheduler
-        raise NotImplementedError
-
-    def _compute_lr_closed_form(self):
-        # NOTE [LR Closed Form] Compute the learning rate using the closed form of the scheduler
+        # NOTE Compute learning rate
         raise NotImplementedError
 
     def step(self, epoch=None):
@@ -92,23 +88,11 @@ class _LRScheduler(object):
                               "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
 
-        compute_lr = self._compute_lr
         if epoch is None:
             epoch = self.last_epoch + 1
-        elif (
-                (self.last_epoch > 0 or epoch != 0)
-                and epoch != self.last_epoch + 1
-        ):
-            compute_lr = self._compute_lr_closed_form
-            warnings.warn(
-                "If an epoch parameter different from the current epoch is passed, "
-                "the recursive form of the scheduler is overridden by its closed form "
-                "whenever available, and will be deprecated.",
-                DeprecationWarning,
-            )
 
         self.last_epoch = epoch
-        for param_group, lr in zip(self.optimizer.param_groups, compute_lr()):
+        for param_group, lr in zip(self.optimizer.param_groups, self._compute_lr()):
             param_group['lr'] = lr
 
         self._last_computed_lr = [group['lr'] for group in self.optimizer.param_groups]
@@ -216,12 +200,6 @@ class StepLR(_LRScheduler):
         super(StepLR, self).__init__(optimizer, last_epoch)
 
     def _compute_lr(self):
-        if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
-            return [group['lr'] for group in self.optimizer.param_groups]
-        return [group['lr'] * self.gamma
-                for group in self.optimizer.param_groups]
-
-    def _compute_lr_closed_form(self):
         return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
                 for base_lr in self.base_lrs]
 
@@ -252,17 +230,12 @@ class MultiStepLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
-        self.milestones = Counter(milestones)
+        self.milestones = milestones
+        self._milestones_counter = Counter(milestones)
         self.gamma = gamma
         super(MultiStepLR, self).__init__(optimizer, last_epoch)
 
     def _compute_lr(self):
-        if self.last_epoch not in self.milestones:
-            return [group['lr'] for group in self.optimizer.param_groups]
-        return [group['lr'] * self.gamma ** self.milestones[self.last_epoch]
-                for group in self.optimizer.param_groups]
-
-    def _compute_lr_closed_form(self):
         return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
                 for base_lr in self.base_lrs]
 
@@ -282,12 +255,6 @@ class ExponentialLR(_LRScheduler):
         super(ExponentialLR, self).__init__(optimizer, last_epoch)
 
     def _compute_lr(self):
-        if self.last_epoch == 0:
-            return self.base_lrs
-        return [group['lr'] * self.gamma
-                for group in self.optimizer.param_groups]
-
-    def _compute_lr_closed_form(self):
         return [base_lr * self.gamma ** self.last_epoch
                 for base_lr in self.base_lrs]
 
@@ -334,19 +301,6 @@ class CosineAnnealingLR(_LRScheduler):
         super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
     def _compute_lr(self):
-        if self.last_epoch == 0:
-            return self.base_lrs
-        elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
-            return [group['lr'] + (base_lr - self.eta_min) *
-                    (1 - math.cos(math.pi / self.T_max)) / 2
-                    for base_lr, group in
-                    zip(self.base_lrs, self.optimizer.param_groups)]
-        return [(1 + math.cos(math.pi * self.last_epoch / self.T_max)) /
-                (1 + math.cos(math.pi * (self.last_epoch - 1) / self.T_max)) *
-                (group['lr'] - self.eta_min) + self.eta_min
-                for group in self.optimizer.param_groups]
-
-    def _compute_lr_closed_form(self):
         return [self.eta_min + (base_lr - self.eta_min) *
                 (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
                 for base_lr in self.base_lrs]

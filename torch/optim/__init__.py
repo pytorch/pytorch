@@ -17,6 +17,7 @@ from .rmsprop import RMSprop  # noqa: F401
 from .optimizer import Optimizer  # noqa: F401
 from .lbfgs import LBFGS  # noqa: F401
 from . import lr_scheduler  # noqa: F401
+from . import chain_lr_scheduler  # noqa: F401
 
 del adadelta
 del adagrad
