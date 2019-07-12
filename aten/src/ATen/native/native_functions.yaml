@@ -357,6 +357,17 @@
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
 
+- func: bitwise_not(Tensor self) -> Tensor
+  variants: function, method
+
+- func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: bitwise_not(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: bitwise_not_out
+    CUDA: bitwise_not_out
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -637,6 +648,9 @@
 
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
+
+- func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
+  variants: method
 
 - func: div(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1180,6 +1194,7 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
+# log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
@@ -1829,6 +1844,7 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
+# softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
@@ -4047,14 +4063,11 @@
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    CPU: legacy::cpu::_th_topk_out
+    CPU: topk_out_cpu
     CUDA: legacy::cuda::_th_topk_out
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_topk
-    CUDA: legacy::cuda::_th_topk
 
 - func: all(Tensor self) -> Tensor
   variants: method, function
