@@ -4,27 +4,24 @@ from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
 class Linear(NNLinear):
-    # TODO: update docs
     r"""
-    A quantized linear module with quantized tensor as inputs
-    and outputs.
+    A linear module attached with FakeQuantize modules for both output
+    activation and weight, used for quantization aware training.
+
     We adopt the same interface as `torch.nn.Linear`, please see https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
     for documentation.
 
-    Similar to `torch.nn.Linear`, attributes will be randomly initialized at
-        module creation time and will be overwritten later
+    Similar to `torch.nn.Linear`, with FakeQuantize modules initialized to
+    default.
 
     Attributes:
-        weight: the non-learnable quantized weights of the
-                module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
-        bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
-                If :attr:`bias` is ``True``, the values are initialized to zero.
-        out_scale: `scale` parameter of output Quantized Tensor, type: float
-        out_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
+        observer: fake quant module for output activation, it's called observer
+            to align with post training flow, TODO: rename?
+        weight: fake quant module for weight
 
     Examples::
 
-        >>> m = nn.quantized.Linear(20, 30)
+        >>> m = nn.qat.Linear(20, 30)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
@@ -35,6 +32,7 @@ class Linear(NNLinear):
     def __init__(self, in_features, out_features, bias=True):
         assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
+        # fake quant module for output activation
         self.observer = default_qat_qconfig.activation()
         self.weight_fake_quant = default_qat_qconfig.weight()
 

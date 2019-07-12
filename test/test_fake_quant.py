@@ -34,7 +34,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
 
     # Note:
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           Q=qtensor(shapes=array_shapes(1, 10,), dtypes=((torch.quint8, None),)))
+           Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
     def test_forward(self, device, Q):
         r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
         """
@@ -47,7 +47,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-        Q=qtensor(shapes=array_shapes(1, 10,), dtypes=((torch.quint8, None),)))
+        Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
     def test_backward(self, device, Q):
         r"""Tests the backward method. Note that this runs the reference quantization
         and thus the errors might be originating there.
@@ -66,7 +66,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           Q=qtensor(shapes=array_shapes(1, 10,), dtypes=((torch.quint8, None),)))
+           Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
     def test_numerical_consistency(self, device, Q):
         r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         """
@@ -80,7 +80,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           Q=qtensor(shapes=array_shapes(1, 10,), dtypes=((torch.quint8, None),)))
+           Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
     def test_fq_module(self, device, Q):
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point), (quant_min, quant_max), torch_type = Q
