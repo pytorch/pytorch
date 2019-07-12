@@ -36,6 +36,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_reduction, \
     get_weight, smoothl1loss_reference, kldivloss_reference, \
     ctcloss_reference, new_module_tests
+from common_utils import TEST_WITH_UBSAN
 
 from torch.nn import MultiheadAttention
 
@@ -2515,6 +2516,26 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_softmax_backward_cuda(self):
         self._test_softmax_backward(torch.device('cuda'))
+
+    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+                     'Linear_FP16_weight requires FBGEMM. FBGEMM does not play'
+                     ' well with UBSAN at the moment, so we skip the test if'
+                     ' we are in a UBSAN environment.')
+    def test_fb_fc_packed(self):
+        X = np.random.rand(16, 16).astype(np.float32) - 0.5
+        W = np.random.rand(16, 16).astype(np.float32) - 0.5
+        b = np.random.rand(16).astype(np.float32) - 0.5
+
+        def fc_op(X, W, b):
+            return np.dot(X, W.T) + b
+
+        x_tensor = torch.tensor(X)
+        w_tensor = torch.tensor(W)
+        b_tensor = torch.tensor(b)
+        packed_w_tensor = torch.fbgemm_pack_gemm_matrix_fp16(w_tensor)
+        actual_output = torch.fbgemm_linear_fp16_weight(x_tensor, packed_w_tensor, b_tensor)
+        expected_output = fc_op(X, W, b)
+        torch.testing.assert_allclose(expected_output, actual_output.cpu(), atol=1e-3, rtol=1e-3)
 
     def _test_gumbel_softmax_st_shapes(self, cuda, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float)
