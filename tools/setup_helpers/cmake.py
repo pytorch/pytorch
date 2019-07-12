@@ -247,15 +247,15 @@ class CMake:
         })
 
         for var, val in my_env.items():
-            # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
-            # because we currently have no reliable way to get the list of all build options we have specified in
-            # CMakeLists.txt. (`cmake -L` won't print dependent options when the dependency condition is not met.) We
-            # will possibly change this in the future by parsing CMakeLists.txt ourselves (then additional_options would
-            # also not be needed to be specified here).
+            # We currently pass over all environment variables that start with "BUILD_" or "USE_". This is because we
+            # currently have no reliable way to get the list of all build options we have specified in CMakeLists.txt.
+            # (`cmake -L` won't print dependent options when the dependency condition is not met.) We will possibly
+            # change this in the future by parsing CMakeLists.txt ourselves (then additional_options would also not be
+            # needed to be specified here).
             true_var = additional_options.get(var)
             if true_var is not None:
                 build_options[true_var] = val
-            elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')):
+            elif var.startswith(('USE_', 'BUILD_')):
                 build_options[var] = val
 
         # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
@@ -264,8 +264,8 @@ class CMake:
         # "BUILD_" or "USE_" and must be overwritten here.
         build_options.update({
             # Note: Do not add new build options to this dict if it is directly read from environment variable -- you
-            # only need to add one in `CMakeLists.txt`. All build options that start with "BUILD_", "USE_", or "CMAKE_"
-            # are automatically passed to CMake; For other options you can add to additional_options above.
+            # only need to add one in `CMakeLists.txt`. All build options that start with "BUILD_" or "USE_" are
+            # automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
             'USE_CUDA': USE_CUDA,
