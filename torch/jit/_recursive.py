@@ -10,11 +10,13 @@ import inspect
 from collections import OrderedDict
 
 
-def copy_module_to_script_module(original, script_module):
+def copy_module_to_script_module(original):
     """
     Copies the parameters, buffers, constants, attributes, and submodules
     of an nn.Module into itself.
     """
+    script_module = torch.jit.ScriptModule()
+
     if not hasattr(original, '_parameters'):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(type(original).__name__))
@@ -95,6 +97,9 @@ def copy_module_to_script_module(original, script_module):
         value = getattr(original, name)
         setattr(script_module, name, value)
 
+    return script_module
+
+
 def recursive_script(mod):
     """
     Makes a ScriptModule from an nn.Module. If `_methods` is provided,
@@ -131,8 +136,7 @@ def recursive_script(mod):
 
     stubs = list(map(make_stub, methods))
 
-    script_module = torch.jit.ScriptModule()
-    copy_module_to_script_module(mod, script_module)
+    script_module = copy_module_to_script_module(mod)
 
     torch.jit._create_methods_from_stubs(script_module, stubs)
 
@@ -156,16 +160,12 @@ def create_constant_iterable_module(module):
     modules = OrderedDict()
 
     for key, submodule in module._modules.items():
-        if isinstance(submodule, (ModuleList, Sequential)):
-            # Make each item in the module a constant
-            modules[key] = _create_constant_iterable_module(submodule)
-        else:
-            modules[key] = _convert_to_script_module(submodule)
+        modules[key] = recursive_script(submodule)
 
-    if isinstance(module, Sequential):
-        return _ConstSequential(Sequential(modules))
-    elif isinstance(module, ModuleList):
-        return _ConstModuleList(modules)
+    if isinstance(module, torch.jit.Sequential):
+        return torch.jit._ConstSequential(torch.jit.Sequential(modules))
+    elif isinstance(module, torch.jit.ModuleList):
+        return torch.jit._ConstModuleList(modules)
     else:
         raise RuntimeError("Only nn.ModuleList and nn.Sequential can be made "
                            "into constant modules, found {}".format(module))
@@ -177,12 +177,12 @@ def make_strong_submodule(field, module, parent):
         return None
 
     # Convert the module to a ScriptModule
-    new_strong_submodule = _convert_to_script_module(module)
+    script_submodule = recursive_script(module)
 
     # Install the ScriptModule on the python side
-    parent._modules._python_modules[field] = new_strong_submodule
+    parent._modules._python_modules[field] = script_submodule
 
-    return new_strong_submodule
+    return script_submodule
 
 
 # TODO: we are leaking these things because they don't have a distinct owner
@@ -219,7 +219,7 @@ def try_get_dispatched_fn(fn):
 
 
 def try_get_overloaded_fn(mod, field):
-    return mod._overloads.get(field, None) if isinstance(mod, ScriptModule) else None
+    return mod._overloads.get(field, None) if isinstance(mod, torch.jit.ScriptModule) else None
 
 
 def is_recursive_script_enabled(value):
