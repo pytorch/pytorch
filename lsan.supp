@@ -1,1 +1,7 @@
 leak:PyObject_Malloc
+leak:_PyImport_LoadDynamicModuleWithSpec
+leak:THPAutograd_initExtension
+leak:list_resize
+leak:PyObject_Realloc
+leak:PyThread_allocate_lock
+
