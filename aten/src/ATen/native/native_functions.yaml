@@ -1101,6 +1101,10 @@
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
 
+- func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
+
+- func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
 
 - func: fbgemm_is_cpu_supported() -> bool
@@ -1339,6 +1343,14 @@
 - func: miopen_depthwise_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_weight
+
+- func: miopen_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: miopen_rnn
+
+- func: miopen_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+  dispatch:
+    CUDA: miopen_rnn_backward
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
@@ -4063,11 +4075,14 @@
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    CPU: topk_out_cpu
+    CPU: legacy::cpu::_th_topk_out
     CUDA: legacy::cuda::_th_topk_out
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_topk
+    CUDA: legacy::cuda::_th_topk
 
 - func: all(Tensor self) -> Tensor
   variants: method, function
