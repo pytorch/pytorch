@@ -469,10 +469,9 @@ class RendezvousTCPTest(TestCase):
             gen = c10d.rendezvous('tcp://127.0.0.1:23456?rank=0')
             next(gen)
 
-    @retry_on_address_already_in_use_error
     def test_nominal(self):
         addr = 'localhost'
-        port = common.find_free_port()
+        port = 0
         url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
