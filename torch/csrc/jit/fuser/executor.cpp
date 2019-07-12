@@ -315,7 +315,7 @@ void launchFusion(
   }
   // Skip launching the kernel for zero-element tensor inputs
   // launches are skipped, empty zero-sized output is returned
-  if (numel != 0) {
+  if (numel > 0) {
     fusion.launch_raw(numel, arguments);
   }
 }
