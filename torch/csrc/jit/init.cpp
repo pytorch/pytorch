@@ -115,8 +115,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict) {
-            ConstantFoldONNX(graph->block(), paramsDict); // overload resolution
+             std::map<std::string, at::Tensor>& paramsDict,
+             int opset_version) {
+            ConstantFoldONNX(graph->block(), paramsDict, opset_version); // overload resolution
             return paramsDict;
           },
           pybind11::return_value_policy::move)
