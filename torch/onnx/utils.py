@@ -357,7 +357,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     # For ONNX opset < 9, constants only have three data types: float16, float, double.
     # In this pass transform constants of other data types to float/double + cast operator.
     if _export_onnx_opset_version < 9:
-        torch._C._jit_pass_onnx_cast_constant(graph)
+        torch._C._jit_pass_onnx_cast_all_constant_to_floating(graph)
 
     if verbose:
         print(graph)

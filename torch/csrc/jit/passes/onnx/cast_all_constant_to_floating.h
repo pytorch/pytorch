@@ -7,6 +7,6 @@
 namespace torch {
 namespace jit {
 // see .cpp for docs
-TORCH_API void CastConstant(const std::shared_ptr<Graph>& graph);
+TORCH_API void CastAllConstantToFloating(const std::shared_ptr<Graph>& graph);
 } // namespace jit
 } // namespace torch
