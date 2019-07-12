@@ -28,6 +28,7 @@ def is_contiguous_tensors(tensors):
     for tensor in tensors:
         test_data_ptr = first_data_ptr + current_offset
         is_cont = is_cont and tensor.data_ptr() == test_data_ptr
+        is_cont = is_cont and tensor.is_contiguous()
         current_offset += tensor.numel() * tensor.element_size()
     return is_cont
 
@@ -156,3 +157,26 @@ class NestedTensor():
 
     def unbind(self):
         return tuple(self.tensors)
+
+    def is_contiguous(self):
+        return is_contiguous_tensors(self.tensors)
+
+    def numel(self):
+        all_numel = 0
+        for tensor in self.tensors:
+            all_numel += tensor.numel()
+        return all_numel
+
+    def get_contiguous_buffer(self):
+        # This is shaky and makes a strong
+        # assumption that all tensors share memory
+        # and each logical element maps to a single
+        # memory location
+        assert self.is_contiguous()
+        assert len(self.tensors)
+        buf = self.tensors[0].new_empty(0)
+        buf.set_(self.tensors[0].storage(),
+                 storage_offset=0,
+                 size=(self.numel(),),
+                 stride=(1,))
+        return buf

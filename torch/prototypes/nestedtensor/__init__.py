@@ -29,8 +29,13 @@ def _unary(func_name, func, input1, out=None):
     for i in range(len(out)):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
-    list_func = getattr(nestedtensor, func_name)
-    list_func(input1.tensors, out.tensors)
+
+    if out.is_contiguous() and input1.is_contiguous():
+        func(input1.get_contiguous_buffer(),
+             out=out.get_contiguous_buffer())
+    else:
+        list_func = getattr(nestedtensor, func_name)
+        list_func(input1.tensors, out.tensors)
     return out
 
 
