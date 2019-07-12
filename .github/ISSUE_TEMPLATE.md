@@ -19,7 +19,7 @@ Please copy and paste the output from our
 (or fill out the checklist below manually).
 
 If PyTorch is successfully installed, run `python -m torch.utils.collect_env`. 
-Otherwsie, you can get the script and run it with:
+Otherwise, you can get the script and run it with:
 ```
 wget https://raw.githubusercontent.com/pytorch/pytorch/master/torch/utils/collect_env.py
 # For security purposes, please check the contents of collect_env.py before running it.
