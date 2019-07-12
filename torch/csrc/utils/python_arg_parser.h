@@ -218,7 +218,7 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (THPVariable_CheckExact(args[i])) {
+  if (args[i] && THPVariable_CheckExact(args[i])) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
   return tensor_slow(i);
