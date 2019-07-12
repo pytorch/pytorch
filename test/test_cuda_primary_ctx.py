@@ -19,17 +19,17 @@ if not TEST_CUDA:
     TestCase = object  # noqa: F811
 
 
-_caffe2_nvrtc = None
+_thnvrtc = None
 
 
 def get_is_primary_context_created(device):
     flags = ctypes.cast((ctypes.c_uint * 1)(), ctypes.POINTER(ctypes.c_uint))
     active = ctypes.cast((ctypes.c_int * 1)(), ctypes.POINTER(ctypes.c_int))
-    global _caffe2_nvrtc
-    if _caffe2_nvrtc is None:
-        path = glob.glob('{}/lib/libcaffe2_nvrtc.*'.format(os.path.dirname(torch.__file__)))[0]
-        _caffe2_nvrtc = ctypes.cdll.LoadLibrary(path)
-    result = _caffe2_nvrtc.cuDevicePrimaryCtxGetState(ctypes.c_int(device), flags, active)
+    global _thnvrtc
+    if _thnvrtc is None:
+        path = glob.glob('{}/lib/libthnvrtc.*'.format(os.path.dirname(torch.__file__)))[0]
+        _thnvrtc = ctypes.cdll.LoadLibrary(path)
+    result = _thnvrtc.cuDevicePrimaryCtxGetState(ctypes.c_int(device), flags, active)
     assert result == 0, 'cuDevicePrimaryCtxGetState failed'
     return bool(active[0])
 

@@ -916,7 +916,7 @@ class CompilationUnit(object):
     def _import(self, src, constants, op_version_set=1):
         """ test import logic for single function, use only for testing """
         src = "op_version_set = {}\n{}".format(op_version_set, src)
-        torch._C._jit_import_functions(self._c, src, constants, None)
+        torch._C._jit_import_functions(self._c, src, constants)
         return self
 
 
@@ -1094,17 +1094,17 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         if _is_recursive_script_enabled(obj):
             return _convert_to_script_module(obj)
 
+    qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
-        qualified_name = _qualified_name(obj)
         ast = get_jit_class_def(obj, obj.__name__)
         _jit_script_class_compile(qualified_name, ast, _rcb)
         _add_script_class(obj, qualified_name)
         return obj
     else:
         ast = get_jit_def(obj)
-        fn = torch._C._jit_script_compile(ast, _rcb, get_default_args(obj))
+        fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn
