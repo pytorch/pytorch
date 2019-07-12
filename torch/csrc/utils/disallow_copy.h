@@ -1,5 +1,4 @@
 #pragma once
-
-#include <ATen/Utils.h>
-
-#define TH_DISALLOW_COPY_AND_ASSIGN AT_DISALLOW_COPY_AND_ASSIGN
+#define TH_DISALLOW_COPY_AND_ASSIGN(TypeName) \
+  TypeName(const TypeName&) = delete; \
+  void operator=(const TypeName&) = delete
