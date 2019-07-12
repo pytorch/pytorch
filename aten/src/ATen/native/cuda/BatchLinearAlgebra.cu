@@ -802,11 +802,10 @@ AT_ERROR("lu: MAGMA library not found in "
     // magmaLu and magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
     // the partially-pivoted LU decomposition with / without pivots.
     // The driver routines magma_(d/s)getrf_(nopiv_)gpu accepts a tensor on the CPU for pivots.
-    // For better performance, we create a tensor with pinned_memory set to true.
     // The data is later copied back to the appropriate output tensor.
     Tensor info_tmp = at::zeros({}, at::kInt);
     if (get_pivots) {
-      Tensor piv_tmp = at::empty({n}, at::TensorOptions(at::kCPU).dtype(at::kInt).pinned_memory(true));
+      Tensor piv_tmp = at::empty({n}, at::kInt);
       magmaLu<scalar_t>(
         n, n, self_data, n, piv_tmp.data<magma_int_t>(), info_tmp.data<magma_int_t>());
       pivots.copy_(piv_tmp);
@@ -1069,8 +1068,7 @@ AT_ERROR("qr: MAGMA library not found in "
 
   // magmaGeqrf uses a hybrid CPU-GPU algorithm to compute the elementary reflectors.
   // The driver routine magma_(d/s)geqrf2_gpu accepts a tensor on the CPU for elementary reflectors.
-  // For better performance, we create a tensor with pinned_memory set to true.
-  Tensor tau = at::empty({k}, at::TensorOptions(at::kCPU).dtype(Q.dtype()).pinned_memory(true));
+  Tensor tau = at::empty({k}, Q.options().device(at::kCPU));
   Tensor work = at::empty({(2 * k + magma_roundup(n, 32)) * nb}, R.options());
   scalar_t* tau_data = tau.data<scalar_t>();
   scalar_t* work_data = work.data<scalar_t>();
@@ -1210,13 +1208,12 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 
   // magmaSymeig uses a hybrid CPU-GPU algorithm to compute the eigenvalues and eigenvectors.
   // The driver routine magma_(d/s)syev_gpu accepts a tensor on the CPU for eigvalenvalues.
-  // For better performance, we create a tensor with pinned_memory set to true.
   // The data is later moved to the appropriate device.
   // In the case where self.numel() == 0, we just return an empty tensor of
   // dimensions on the CUDA (to avoid the unnecessary "to(at::kCUDA)")
   auto eigvals_working_copy = self.numel() == 0
                               ? at::empty(self_sizes, self.options())
-                              : at::empty(self_sizes, at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
+                              : at::empty(self_sizes, self.options().device(at::kCPU));
 
   if (self.numel() == 0) {
     return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self));
