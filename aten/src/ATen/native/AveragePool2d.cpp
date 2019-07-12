@@ -145,11 +145,13 @@ void avg_pool2d_out_cpu_template(
 
   Tensor input = input_.contiguous();
 
-  if (input.scalar_type() == ScalarType::Long) {
-    int64_t *input_data = input.data<int64_t>();
-    int64_t *output_data = output.data<int64_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    "avg_pool2d_out_frame",
+    [&] {
+      scalar_t *input_data = input.data<scalar_t>();
+      scalar_t *output_data = output.data<scalar_t>();
 
-    avg_pool2d_out_frame(
+      avg_pool2d_out_frame(
         input_data,
         output_data,
         nbatch,
@@ -161,29 +163,8 @@ void avg_pool2d_out_cpu_template(
         padW, padH,
         count_include_pad,
         divisor_override);
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-       "avg_pool2d_out_frame",
-       [&] {
-         scalar_t *input_data = input.data<scalar_t>();
-         scalar_t *output_data = output.data<scalar_t>();
-
-         avg_pool2d_out_frame(
-             input_data,
-             output_data,
-             nbatch,
-             nInputPlane,
-             inputWidth, inputHeight,
-             outputWidth, outputHeight,
-             kW, kH,
-             dW, dH,
-             padW, padH,
-             count_include_pad,
-             divisor_override);
-       }
-    );
-  }
-
+    }
+  );
 }
 
 template <typename scalar_t>
@@ -322,44 +303,27 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   gradInput.zero_();
   TORCH_CHECK(gradInput.is_contiguous(), "gradInput must be contiguous");
 
-  if (input.scalar_type() == ScalarType::Long) {
-    int64_t *gradInput_data = gradInput.data<int64_t>();
-    int64_t *gradOutput_data = gradOutput.data<int64_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    "avg_pool2d_backward_out_frame",
+    [&] {
+       scalar_t *gradInput_data = gradInput.data<scalar_t>();
+       scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
-    avg_pool2d_backward_out_frame(
-        gradInput_data,
-        gradOutput_data,
-        nbatch,
-        nInputPlane,
-        inputWidth, inputHeight,
-        outputWidth, outputHeight,
-        kW, kH,
-        dW, dH,
-        padW, padH,
-        count_include_pad,
-        divisor_override);
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-      "avg_pool2d_backward_out_frame",
-      [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+       avg_pool2d_backward_out_frame(
+         gradInput_data,
+         gradOutput_data,
+         nbatch,
+         nInputPlane,
+         inputWidth, inputHeight,
+         outputWidth, outputHeight,
+         kW, kH,
+         dW, dH,
+         padW, padH,
+         count_include_pad,
+         divisor_override);
+    }
+  );
 
-        avg_pool2d_backward_out_frame(
-            gradInput_data,
-            gradOutput_data,
-            nbatch,
-            nInputPlane,
-            inputWidth, inputHeight,
-            outputWidth, outputHeight,
-            kW, kH,
-            dW, dH,
-            padW, padH,
-            count_include_pad,
-            divisor_override);
-      }
-    );
-  }
   return gradInput;
 }
 

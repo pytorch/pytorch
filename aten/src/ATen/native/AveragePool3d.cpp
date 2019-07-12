@@ -163,11 +163,13 @@ void avg_pool3d_out_cpu_template(
     /* resize output */
     output.resize_({nslices, otime, oheight, owidth});
 
-    if (input.scalar_type() == ScalarType::Long) {
-      int64_t *input_data = input.data<int64_t>();
-      int64_t *output_data = output.data<int64_t>();
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+      "avg_pool3d_out_frame",
+      [&] {
+        scalar_t *input_data = input.data<scalar_t>();
+        scalar_t *output_data = output.data<scalar_t>();
 
-      avg_pool3d_out_frame(
+        avg_pool3d_out_frame(
           input_data, output_data, nslices,
           itime, iwidth, iheight,
           otime, owidth, oheight,
@@ -176,24 +178,7 @@ void avg_pool3d_out_cpu_template(
           padT, padW, padH,
           count_include_pad,
           divisor_override);
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-        "avg_pool3d_out_frame",
-        [&] {
-          scalar_t *input_data = input.data<scalar_t>();
-          scalar_t *output_data = output.data<scalar_t>();
-
-          avg_pool3d_out_frame(
-              input_data, output_data, nslices,
-              itime, iwidth, iheight,
-              otime, owidth, oheight,
-              kT, kW, kH,
-              dT, dW, dH,
-              padT, padW, padH,
-              count_include_pad,
-              divisor_override);
-        });
-    }
+    });
   }
   else  /* batch mode */
   {
@@ -204,13 +189,15 @@ void avg_pool3d_out_cpu_template(
     /* resize output */
     output.resize_({nbatch, nslices, otime, oheight, owidth});
 
-    if (input.scalar_type() == ScalarType::Long) {
-      int64_t *input_data = input.data<int64_t>();
-      int64_t *output_data = output.data<int64_t>();
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+      "avg_pool3d_out_frame",
+      [&] {
+        scalar_t *input_data = input.data<scalar_t>();
+        scalar_t *output_data = output.data<scalar_t>();
 
-      at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (auto p = start; p < end; p++) {
-          avg_pool3d_out_frame(
+        at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+          for (auto p = start; p < end; p++) {
+            avg_pool3d_out_frame(
               input_data + p * istride, output_data + p * ostride, nslices,
               itime, iwidth, iheight,
               otime, owidth, oheight,
@@ -219,32 +206,10 @@ void avg_pool3d_out_cpu_template(
               padT, padW, padH,
               count_include_pad,
               divisor_override
-          );
-        }
-      });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-        "avg_pool3d_out_frame",
-        [&] {
-          scalar_t *input_data = input.data<scalar_t>();
-          scalar_t *output_data = output.data<scalar_t>();
-
-          at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-            for (auto p = start; p < end; p++) {
-              avg_pool3d_out_frame(
-                  input_data + p * istride, output_data + p * ostride, nslices,
-                  itime, iwidth, iheight,
-                  otime, owidth, oheight,
-                  kT, kW, kH,
-                  dT, dW, dH,
-                  padT, padW, padH,
-                  count_include_pad,
-                  divisor_override
-              );
-            }
-          });
+            );
+          }
         });
-    }
+    });
   }
 }
 
@@ -406,39 +371,23 @@ Tensor& avg_pool3d_backward_out_cpu_template(
   /* backprop */
   if (input.ndimension() == 4) /* non-batch mode*/
   {
-    if (input.scalar_type() == ScalarType::Long) {
-      int64_t *gradInput_data = gradInput.data<int64_t>();
-      int64_t *gradOutput_data = gradOutput.data<int64_t>();
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+      "avg_pool3d_backward_out_frame",
+      [&] {
+       scalar_t *gradInput_data = gradInput.data<scalar_t>();
+       scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
-      avg_pool3d_backward_out_frame(
-          gradInput_data, gradOutput_data,
-          nslices,
-          itime, iwidth, iheight,
-          otime, owidth, oheight,
-          kT, kW, kH,
-          dT, dW, dH,
-          padT, padW, padH,
-          count_include_pad,
-          divisor_override);
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-       "avg_pool3d_backward_out_frame",
-       [&] {
-         scalar_t *gradInput_data = gradInput.data<scalar_t>();
-         scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-
-         avg_pool3d_backward_out_frame(
-             gradInput_data, gradOutput_data,
-             nslices,
-             itime, iwidth, iheight,
-             otime, owidth, oheight,
-             kT, kW, kH,
-             dT, dW, dH,
-             padT, padW, padH,
-             count_include_pad,
-             divisor_override);
-       });
-    }
+       avg_pool3d_backward_out_frame(
+         gradInput_data, gradOutput_data,
+         nslices,
+         itime, iwidth, iheight,
+         otime, owidth, oheight,
+         kT, kW, kH,
+         dT, dW, dH,
+         padT, padW, padH,
+         count_include_pad,
+         divisor_override);
+    });
   }
   else /* batch mode */
   {
@@ -446,14 +395,16 @@ Tensor& avg_pool3d_backward_out_cpu_template(
     const int64_t istride = nslices * itime * iwidth * iheight;
     const int64_t ostride = nslices * otime * owidth * oheight;
 
-    if (input.scalar_type() == ScalarType::Long) {
-      int64_t *gradInput_data = gradInput.data<int64_t>();
-      int64_t *gradOutput_data = gradOutput.data<int64_t>();
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+      "avg_pool3d_backward_out_frame",
+      [&] {
+        scalar_t *gradInput_data = gradInput.data<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
-      at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (auto p = start; p < end; p++)
-        {
-          avg_pool3d_backward_out_frame(
+        at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+          for (auto p = start; p < end; p++)
+          {
+            avg_pool3d_backward_out_frame(
               gradInput_data  + p * istride, gradOutput_data + p * ostride, nslices,
               itime, iwidth, iheight,
               otime, owidth, oheight,
@@ -462,33 +413,10 @@ Tensor& avg_pool3d_backward_out_cpu_template(
               padT, padW, padH,
               count_include_pad,
               divisor_override
-          );
-        }
-      });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-       "avg_pool3d_backward_out_frame",
-       [&] {
-         scalar_t *gradInput_data = gradInput.data<scalar_t>();
-         scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-
-         at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-           for (auto p = start; p < end; p++)
-           {
-             avg_pool3d_backward_out_frame(
-                 gradInput_data  + p * istride, gradOutput_data + p * ostride, nslices,
-                 itime, iwidth, iheight,
-                 otime, owidth, oheight,
-                 kT, kW, kH,
-                 dT, dW, dH,
-                 padT, padW, padH,
-                 count_include_pad,
-                 divisor_override
-             );
-           }
-         });
-       });
-    }
+            );
+          }
+        });
+    });
   }
 
   return gradInput;
