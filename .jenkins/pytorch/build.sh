@@ -111,7 +111,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 
   if [ -e /opt/rocm/hcc/bin/clang-7.0_original ]; then
     # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-    mv /opt/rocm/hcc/bin/clang-7.0_original /opt/rocm/hcc/bin/clang-9
+    # note that the wrapping always names the compiler "clang-7.0_original"
+    WRAPPED=/opt/rocm/hcc/bin/clang-[0-99]
+    mv /opt/rocm/hcc/bin/clang-7.0_original $WRAPPED
+
   fi
   exit 0
 fi
