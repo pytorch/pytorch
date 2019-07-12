@@ -6139,13 +6139,13 @@ a")
                 if y == 1:
                     x = 5
                     break
-                    assert False
+                    assert 1 == 2
                 else:
                     x = x + 1
                     break
-                    assert False
+                    assert 1 == 2
                 x = -30
-                assert False
+                assert 1 == 2
             return x
 
         self.checkScript(assign_after_break_nested, (1,))
@@ -6216,7 +6216,7 @@ a")
                     break
                 a -= 1
                 break
-                assert False
+                assert 1 == 2
                 a -= -100
             return a
 
