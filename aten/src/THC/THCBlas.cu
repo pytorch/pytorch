@@ -213,6 +213,7 @@ static void checkCuda90Bug(int i_m, int i_n, int i_k)
 /* Level 3 */
 void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, float alpha, float *a, int64_t lda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
+  checkCuda90Bug((int)m, (int)n, (int)k);
   at::cuda::blas::gemm<float>(THCState_getCurrentStream(state), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -223,6 +224,7 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 
 void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::Half alpha, at::Half *a, int64_t lda, at::Half *b, int64_t ldb, at::Half beta, at::Half *c, int64_t ldc)
 {
+  checkCuda90Bug((int)m, (int)n, (int)k);
   at::cuda::blas::gemm<at::Half>(THCState_getCurrentStream(state), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
