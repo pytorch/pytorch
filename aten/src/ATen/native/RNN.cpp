@@ -7,6 +7,15 @@ namespace at { namespace native {
 
 namespace {
 
+// Check if pytorch is compiled with MIOpen.
+bool use_miopen(const at::Tensor& input, const double dropout_state) {
+    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) && 
+                                (detail::getCUDAHooks().compiledWithMIOpen()) &&
+                                (input.is_cuda()) &&
+                                (dropout_state == 0.0);
+    return is_miopen_acceptable;
+}
+
 template<typename T>
 using pair_of = std::pair<T, T>;
 
@@ -704,9 +713,13 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
 
 #define ONE_HIDDEN_RNN(NAME, CELL)                                             \
 DEFINE_DISPATCH(NAME##_cudnn_stub);                                            \
+DEFINE_DISPATCH(NAME##_miopen_stub);                                           \
 DEFINE_DISPATCH(NAME##_packed_cudnn_stub);                                     \
+DEFINE_DISPATCH(NAME##_packed_miopen_stub);                                    \
 REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub, rnn_fn);                           \
+REGISTER_NO_CPU_DISPATCH(NAME##_miopen_stub, rnn_fn);                          \
 REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub, rnn_packed_fn);             \
+REGISTER_NO_CPU_DISPATCH(NAME##_packed_miopen_stub, rnn_packed_fn);            \
                                                                                \
 std::tuple<Tensor, Tensor> NAME(                                               \
       const Tensor& _input, const Tensor& hx,                                  \
@@ -718,7 +731,13 @@ std::tuple<Tensor, Tensor> NAME(                                               \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
-  check_device(_input, _params, hx);                                        \
+  if (use_miopen(_input, dropout_p)) {                                         \
+    Tensor output, hy;                                                         \
+    NAME##_miopen_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+            num_layers, dropout_p, train, bidirectional, batch_first);         \
+    return std::make_tuple(output, hy);                                        \
+  }                                                                            \
+  check_device(_input, _params, hx);                                           \
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
   auto params = gather_params(_params, has_biases);                            \
   auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
@@ -739,6 +758,12 @@ std::tuple<Tensor, Tensor> NAME(                                               \
             _params, has_biases, num_layers, dropout_p, train, bidirectional); \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
+  if (use_miopen(data, dropout_p)) {                                           \
+    Tensor output, hy;                                                         \
+    NAME##_packed_miopen_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
+            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
+    return std::make_tuple(output, hy);                                        \
+  }                                                                            \
   PackedSequence input { data, batch_sizes };                                  \
   auto params = gather_params(_params, has_biases);                            \
   auto result = _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
@@ -755,8 +780,12 @@ ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
 
 DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
+DEFINE_DISPATCH(lstm_miopen_stub);
+DEFINE_DISPATCH(lstm_packed_miopen_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
+REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
+REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -767,6 +796,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
+    return std::make_tuple(output, hy, cy);
+  } 
+
+  if (use_miopen(_input, dropout_p)) {
+    Tensor output, hy, cy;
+    lstm_miopen_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
+              num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
   }
   check_device(_input, _params, hx);
@@ -790,7 +826,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
+  } 
+
+  if (use_miopen(data, dropout_p)) {
+    Tensor output, hy, cy;
+    lstm_packed_miopen_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
+            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+    return std::make_tuple(output, hy, cy);
   }
+  
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
