@@ -43,7 +43,9 @@ Tensor fake_quantize_per_tensor_affine_cpu(
     float inv_scale = 1.0f / scale;
     auto iter = TensorIterator::unary_op(Y, self);
     cpu_kernel(*iter, [&](float self) -> float {
-      return (std::fmin(std::fmax(static_cast<int64_t>(std::nearbyint(self * inv_scale + zero_point)),
+      return (std::fmin(std::fmax(
+          static_cast<int64_t>(
+            std::nearbyint(self * inv_scale + zero_point)),
               quant_min), quant_max) - zero_point) * scale;
     });
 
@@ -92,7 +94,8 @@ Tensor fake_quantize_per_tensor_affine_backward_cpu(
     auto iter = TensorIterator::binary_op(dX, X, dY);
     float inv_scale = 1.0f / scale;
     cpu_kernel(*iter, [&](float x, float dy) -> float {
-      int64_t xq = std::nearbyint(x * inv_scale + zero_point);
+      int64_t xq =
+        static_cast<int64_t>(std::nearbyint(x * inv_scale + zero_point));
       return dy * (xq >= quant_min && xq <= quant_max);
     });
     return dX;

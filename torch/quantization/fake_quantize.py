@@ -3,12 +3,6 @@ import torch
 from torch.nn import Module
 from .observer import default_observer
 
-DTYPE_RANGE = {
-    torch.quint8: [0, 255],
-    torch.qint8: [-128, 127],
-    torch.qint32: [-2**31, 2**31-1]
-}
-
 class FakeQuantize(Module):
     ''' Simulate the quantize and dequantize operations in training time.
     Args:
@@ -22,11 +16,10 @@ class FakeQuantize(Module):
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
                  quant_min=0, quant_max=255, enable_fq=True):
         super(FakeQuantize, self).__init__()
-        range = torch.iinfo(dtype).min, torch.iinfo(dtype).max #DTYPE_RANGE[dtype]
-        assert range[0] <= quant_min, 'quant_min out of bound'
+        assert torch.iinfo(dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_min <= quant_max, \
             'quant_min must be less than or equal to quant_max'
-        assert quant_max <= range[1], 'quant_max out of bound'
+        assert quant_max <= torch.iinfo(dtype).max, 'quant_max out of bound'
         self.dtype = dtype
         self.qscheme = qscheme
         self.quant_min = quant_min
