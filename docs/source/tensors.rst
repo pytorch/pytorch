@@ -191,9 +191,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bmm
    .. automethod:: bool
    .. automethod:: byte
-   .. automethod:: btrifact
-   .. automethod:: btrifact_with_info
-   .. automethod:: btrisolve
    .. automethod:: cauchy_
    .. automethod:: ceil
    .. automethod:: ceil_
@@ -271,7 +268,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: geometric_
    .. automethod:: geqrf
    .. automethod:: ger
-   .. automethod:: gesv
    .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
@@ -361,13 +357,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
-   .. automethod:: potrf
-   .. automethod:: potri
-   .. automethod:: potrs
    .. automethod:: pow
    .. automethod:: pow_
    .. automethod:: prod
-   .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
    .. automethod:: qscheme
@@ -456,7 +448,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tril_
    .. automethod:: triu
    .. automethod:: triu_
-   .. automethod:: trtrs
    .. automethod:: trunc
    .. automethod:: trunc_
    .. automethod:: type
