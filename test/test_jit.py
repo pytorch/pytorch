@@ -4077,10 +4077,6 @@ a")
         self.run_pass('constant_propagation', func2.graph)
         g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         g2 = _propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        self.assertTrue(g.findNode("aten::sum").output().type().kind()
-                        == "DimensionedTensorType")
-        self.assertTrue(g2.findNode("aten::sum").output().type().kind()
-                        == "DimensionedTensorType")
 
     def test_cat(self):
         @torch.jit.script
@@ -6867,14 +6863,9 @@ a")
                     FileCheck().check("aten::tensor").check(expect).run(graph)
 
     def test_dtype_op_shape(self):
-        ops = ['sum', 'mean', 'prod']
+        ops = ['prod']
         self._test_dtype_op_shape(ops, args=[])
         self._test_dtype_op_shape(ops, args=[0, False])
-
-        ops = ['sum', 'mean']
-        self._test_dtype_op_shape(ops, args=[[0, 1], False], input_dims=4)
-
-        ops = ['prod']
         self._test_dtype_op_shape(ops, args=[0, False])
         self._test_dtype_op_shape(ops, args=[0, True])
 
