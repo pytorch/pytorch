@@ -457,7 +457,7 @@ void Reducer::initialize_buckets(
         // This must be a Variable because as of Apr 2019 there is still
         // a distinction between the Tensor and Variable types, and it
         // is not recommended (or sometimes even possible) to mix and match.
-        replica.contents = torch::autograd::make_variable(
+        replica.contents = torch::autograd::make_variable_consuming(
             at::empty({static_cast<long>(offset)}, options));
       }
 
