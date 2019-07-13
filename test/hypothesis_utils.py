@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from collections import defaultdict
 import numpy as np
 import torch
 
@@ -15,76 +16,58 @@ from hypothesis.searchstrategy import SearchStrategy
 # The tuples are (torch_quantized_dtype, zero_point_enforce), where the last
 # element is enforced zero_point. If None, any zero_point point within the
 # range of the data type is OK.
-ALL_QINT_TYPES = (
-    (torch.quint8, None),
-    (torch.qint8, None),
-    (torch.qint32, 0),  # We enforce zero_point = 0 for this case.
+
+# Tuple with all quantized data types.
+_ALL_QINT_TYPES = (
+    torch.quint8,
+    torch.qint8,
+    torch.qint32,
 )
 
-UNDERLYING_TYPE = {
+# Map from torch data type to its underlying non-quantized data type.
+_UNDERLYING_TYPE = {
     torch.quint8: torch.uint8,
     torch.qint8: torch.int8,
     torch.qint32: torch.int32
 }
 
-"""Strategy for generating test cases for quantized tensors.
-The resulting tensor is in float32 format.
+# Enforced zero point for every quantized data type.
+# If None, any zero_point point within the range of the data type is OK.
+_ENFORCED_ZERO_POINT = defaultdict(lambda: None, {
+    torch.quint8: None,
+    torch.qint8: None,
+    torch.qint32: 0
+})
 
-Args:
-    shapes: A list of shapes to generate.
-    dtypes: A list of data types to generate. See note below.
-    float_min, float_max: Min and max FP value for the output.
-Generates:
-    Xhy: Tensor of type `float32` and shape drawn from the `shapes`.
-    (scale, zero_point): Drawn from valid ranges derived from the dtypes
-    (qmin, qmax): Valid quantization ranges derived from the dtypes.
-    quantized_type: Data types for conversion in test.
-Note:
-    - The `dtypes` argument is used to infer the ranges. The elements should be
-    of length 1 or 2:
-        If the length is 1 -- The zero_point is not enforced.
-        If the length is 2 -- Argument 0 is torch dtype,
-            the zero_point is also enforced by argument 1
-"""
 @st.composite
-def qtensor(draw, shapes, dtypes=None, float_min=None, float_max=None):
-    # In case shape is a strategy
-    if isinstance(shapes, SearchStrategy):
-        shape = draw(shapes)
-    else:
-        shape = draw(st.sampled_from(shapes))
-    # Resolve types
+def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
+            zero_point_min=None, zero_point_max=None):
     if dtypes is None:
-        dtypes = ALL_QINT_TYPES
-    _dtypes = draw(st.sampled_from(dtypes))
-    assert len(_dtypes) in [1, 2]
-    if len(_dtypes) == 1:
-        quantized_type = _dtypes[0]
-        _zp_enforce = None
-    elif len(_dtypes) == 2:
-        quantized_type, _zp_enforce = _dtypes[:2]
-    _type_info = torch.iinfo(UNDERLYING_TYPE[quantized_type])
+        dtypes = _ALL_QINT_TYPES
+    if not isinstance(dtypes, (list, tuple)):
+        dtypes = (dtypes,)
+    quantized_type = draw(st.sampled_from(dtypes))
+    _underlying_type = _UNDERLYING_TYPE[quantized_type]
+
+    _type_info = torch.iinfo(_underlying_type)
     qmin, qmax = _type_info.min, _type_info.max
-    # Resolve zero_point
-    if _zp_enforce is not None:
-        zero_point = _zp_enforce
+
+    _zp_enforced = _ENFORCED_ZERO_POINT[quantized_type]
+    if _zp_enforced is not None:
+        zero_point = _zp_enforced
     else:
-        zero_point = draw(st.integers(min_value=qmin, max_value=qmax))
-    if float_min is None or float_max is None:
-        _float_type_info = torch.finfo(torch.float)
-        float_min = _float_type_info.min
-        float_max = _float_type_info.max
-    else:
-        assert float_min <= float_max, 'float_min must be <= float_max'
-    float_eps = _float_type_info.eps
-    # Resolve scale
-    scale = draw(st.floats(min_value=float_eps,
-                           max_value=float_max))
-    # Resolve the tensor
-    Xhy = draw(stnp.arrays(dtype=np.float32,
-                           elements=st.floats(min_value=float_min, max_value=float_max),
-                           shape=shape))
-    return Xhy, (scale, zero_point), (qmin, qmax), quantized_type
+        _zp_min = qmin if zero_point_min is None else zero_point_min
+        _zp_max = qmax if zero_point_max is None else zero_point_max
+        zero_point = draw(st.integers(min_value=_zp_min, max_value=_zp_max))
+
+    _long_type_info = torch.iinfo(torch.long)
+    if scale_min is None:
+        scale_min = 1e-3
+    if scale_max is None:
+        scale_max = 1e3
+    scale = draw(st.floats(min_value=scale_min, max_value=scale_max))
+
+    return (scale, zero_point), (qmin, qmax), quantized_type
 
 """Strategy to create different shapes.
 
@@ -106,8 +89,40 @@ def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None):
         st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims
     ).map(tuple))
 
-"""Strategy for generating test cases for quantized tensors.
+
+"""Strategy for generating test cases for tensors.
 The resulting tensor is in float32 format.
+
+Args:
+    shapes
+Generates:
+    (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
+        X: (`nbatch, iChannels, H, W`)
+        w: (`oChannels, iChannels // groups, kH, kW)
+        b: `(oChannels,)`
+        g: Number of groups the input is divided into
+"""
+@st.composite
+def tensor(draw, shapes=None, float_min=-1e6, float_max=1e6):
+    if isinstance(shapes, SearchStrategy):
+        _shape = draw(shapes)
+    else:
+        _shape = draw(st.sampled_from(shapes))
+
+    _float_type_info = torch.finfo(torch.float)
+    if float_min is None:
+        float_min = _float_type_info.min + _float_type_info.eps
+    if float_max is None:
+        float_max = _float_type_info.max - _float_type_info.eps
+
+    X = draw(stnp.arrays(dtype=np.float32,
+                         elements=st.floats(min_value=float_min,
+                                            max_value=float_max),
+                         shape=_shape))
+    return X
+
+"""Strategy for generating test cases for tensors used in Conv2D.
+The resulting tensors is in float32 format.
 
 Args:
     min_batch, max_batch: Range to generate `nbatch`
@@ -118,34 +133,23 @@ Args:
     kH_range, kW_range: Ranges to generate kernel height and width. Must be
                         tuples of `(min, max)`
     max_groups: Maximum number of groups to generate
-    dtypes: A list of data types to generate. See note below.
 Generates:
     (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
         X: (`nbatch, iChannels, H, W`)
         w: (`oChannels, iChannels // groups, kH, kW)
         b: `(oChannels,)`
         g: Number of groups the input is divided into
-    (scale, zero_point): Drawn from valid ranges derived from the dtypes
-    (qmin, qmax): Valid quantization ranges derived from the dtypes.
-    quantized_type: Data types for conversion in test.
-Note:
-    - The `dtypes` argument is used to infer the ranges. The elements should be
-    of length 1 or 2:
-        If the length is 1 -- The zero_point is not enforced.
-        If the length is 2 -- Argument 0 is torch dtype,
-            the zero_point is also enforced by argument 1
 """
 @st.composite
-def qtensors_conv(draw, min_batch=1, max_batch=3,
+def tensor_conv2d(draw,
+                  min_batch=1, max_batch=3,
                   min_in_channels=3, max_in_channels=7,
                   min_out_channels=3, max_out_channels=7,
                   H_range=(6, 12), W_range=(6, 12),
                   kH_range=(3, 7), kW_range=(3, 7),
                   max_groups=1, dtypes=None):
-    _float_type_info = torch.finfo(torch.float)
-    float_min = _float_type_info.min
-    float_max = _float_type_info.max
-    float_eps = _float_type_info.eps
+    _float_min = -1e6
+    _float_max = 1e6
     # Resolve the minibatch, in_channels, out_channels, iH/iW, iK/iW
     _minibatch = draw(st.integers(min_batch, max_batch))
     _in_channels = draw(st.integers(min_in_channels, max_in_channels))
@@ -161,35 +165,12 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
 
     # Resolve the tensors
     X = draw(stnp.arrays(dtype=np.float32,
-                         elements=st.floats(float_min, float_max),
+                         elements=st.floats(_float_min, _float_max),
                          shape=(_minibatch, _in_channels, _iH, _iW)))
     w = draw(stnp.arrays(dtype=np.float32,
-                         elements=st.floats(float_min, float_max),
-                         shape=(_out_channels, _in_channels // g,
-                                _kH, _kW)))
+                         elements=st.floats(_float_min, _float_max),
+                         shape=(_out_channels, _in_channels // g, _kH, _kW)))
     b = draw(stnp.arrays(dtype=np.float32,
-                         elements=st.floats(float_min, float_max),
+                         elements=st.floats(_float_min, _float_max),
                          shape=(_out_channels,)))
-
-    # Resolve types
-    if dtypes is None:
-        dtypes = ALL_QINT_TYPES
-    _dtypes = draw(st.sampled_from(dtypes))
-    assert len(_dtypes) in [1, 2]
-    if len(_dtypes) == 1:
-        quantized_type = _dtypes[0]
-        _zp_enforce = None
-    elif len(_dtypes) == 2:
-        quantized_type, _zp_enforce = _dtypes[:2]
-    _type_info = torch.iinfo(UNDERLYING_TYPE[quantized_type])
-    qmin, qmax = _type_info.min, _type_info.max
-    # Resolve zero_point
-    if _zp_enforce is not None:
-        zero_point = _zp_enforce
-    else:
-        zero_point = draw(st.integers(min_value=qmin, max_value=qmax))
-    # Resolve scale
-    scale = draw(st.floats(min_value=float_eps,
-                           max_value=float_max))
-    return ((X, w, b, g), (scale, zero_point), (qmin, qmax),
-            quantized_type)
+    return X, w, b, g
