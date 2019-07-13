@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 from typing import Tuple, Optional, List  # noqa: F401
 
@@ -240,6 +242,7 @@ class QuantizedGRUCell(QuantizedRNNCellBase):
             self.zero_point_hh
         )
 
+
 @torch.jit.script
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
@@ -258,7 +261,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         self.num_layers = other.num_layers
         self.bias = other.bias
         self.batch_first = other.batch_first
-        assert not self.batch_first
+        if self.mode != 'GRU':
+            assert not self.batch_first
         self.dropout = other.dropout
         self.bidirectional = other.bidirectional
         num_directions = 2 if self.bidirectional else 1
@@ -266,8 +270,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         assert self.bias
 
         # TODO: support more than just LSTM
-        if self.mode != 'LSTM':
-            raise RuntimeError('Only LSTM is supported for QuantizedRNN')
+        if self.mode != 'LSTM' and self.mode != 'GRU':
+            raise RuntimeError('Only LSTM or GRU is supported for QuantizedRNN')
 
         self._all_weights = []
         packed_weights = []
@@ -340,9 +344,23 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
-        # type: (Tensor, Tuple[int, int, int], str) -> None
-        if hx.size() != expected_hidden_size:
+        # type: (Optional[Tensor], Tuple[int, int, int], str) -> None
+        if hx is not None and hx.size() != expected_hidden_size:
             raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+
+    @torch.jit.script_method
+    def check_forward_args(self, input, hidden, batch_sizes):
+        # type: (Tensor, Tensor, Optional[Tensor]) -> None
+        self.check_input(input, batch_sizes)
+        expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
+        self.check_hidden_size(hidden, expected_hidden_size, msg='Expected hidden size {}, got {}')
+
+    @torch.jit.script_method
+    def permute_hidden(self, hx, permutation):
+        # type: (Tensor, Optional[Tensor]) -> Tensor
+        if permutation is None:
+            return hx
+        return apply_permutation(hx, permutation)
 
     @property
     def all_weights(self):
@@ -384,7 +402,6 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
             packed.set_(torch.fbgemm_pack_quantized_matrix(
                 quantized, quantized.size(1), quantized.size(0)))
 
-    # @torch._jit_internal.torch.jit.script_method
     @torch.jit.script_method
     def _pack(self):
         for weight in self._get_packed_weights():
@@ -414,7 +431,6 @@ class QuantizedLSTM(QuantizedRNNBase):
         result = _VF.quantized_lstm(input, hx, self._get_all_weights(), self.bias, self.num_layers,
                                     float(self.dropout), self.training, self.bidirectional,
                                     self.batch_first)
-
         output = result[0]
         hidden = result[1:]
 
@@ -470,6 +486,66 @@ class QuantizedLSTM(QuantizedRNNBase):
             return self.forward_tensor(input, hx)
 
 
+class QuantizedGRU(QuantizedRNNBase):
+    __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
+
+    @torch.jit.script_method
+    def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            hx = torch.zeros(self.num_layers * num_directions,
+                             max_batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
+
+        self.check_forward_args(input, hx, batch_sizes)
+        if batch_sizes is None:
+            result = _VF.quantized_gru(input, hx, self._get_all_weights(), self.bias, self.num_layers,
+                                       float(self.dropout), self.training, self.bidirectional,
+                                       self.batch_first)
+        else:
+            result = _VF.quantized_gru(input, batch_sizes, hx, self._get_all_weights(), self.bias, self.num_layers,
+                                       float(self.dropout), self.training, self.bidirectional)
+
+        output = result[0]
+        hidden = result[1]
+
+        return output, hidden
+
+    @torch.jit.script_method
+    def forward_tensor(self, input, hx=None):
+        # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        batch_sizes = None
+        max_batch_size = input.size(0) if self.batch_first else input.size(1)
+        sorted_indices = None
+        unsorted_indices = None
+
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @torch.jit.script_method
+    def forward_packed(self, input, hx=None):
+        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tensor]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tensor]  # noqa
+        input, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = batch_sizes[0]
+        max_batch_size = int(max_batch_size)
+
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    def forward(self, input, hx=None):
+        if isinstance(input, PackedSequence):
+            return self.forward_packed(input, hx)
+        else:
+            return self.forward_tensor(input, hx)
+
+
 def quantize_rnn_cell_modules(module):
     reassign = {}
     for name, mod in module.named_modules():
@@ -481,12 +557,11 @@ def quantize_rnn_cell_modules(module):
     for name, mod in reassign.items():
         setattr(module, name, mod)
     if isinstance(module, torch.nn.LSTMCell):
-        return QuantizedLSTMCell(mod)
+        return QuantizedLSTMCell(module)
     if isinstance(module, torch.nn.GRUCell):
-        return QuantizedGRUCell(mod)
+        return QuantizedGRUCell(module)
     if isinstance(module, torch.nn.RNNCell):
-        return QuantizedRNNCell(mod)
-
+        return QuantizedRNNCell(module)
     return module
 
 
@@ -501,12 +576,12 @@ def quantize_linear_modules(module, dtype=torch.uint8):
 
     for name, mod in reassign.items():
         setattr(module, name, mod)
-    if isinstance(mod, torch.nn.Linear):
+    if isinstance(module, torch.nn.Linear):
         if dtype == torch.uint8:
-            return QuantizedLinear(mod)
+            return QuantizedLinear(module)
         elif dtype == torch.float16:
-            return QuantizedLinearFP16(mod)
-        else: 
+            return QuantizedLinearFP16(module)
+        else:
             raise RuntimeError(
                 "Unsupported dtype: {}".format(dtype))
     return module
@@ -523,6 +598,8 @@ def quantize_rnn_modules(module):
 
     for name, mod in reassign.items():
         setattr(module, name, mod)
-    if isinstance(mod, torch.nn.LSTM):
-        return QuantizedLSTM(mod)
+    if isinstance(module, torch.nn.LSTM):
+        return QuantizedLSTM(module)
+    if isinstance(module, torch.nn.GRU):
+        return QuantizedGRU(module)
     return module
