@@ -709,15 +709,9 @@ REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub, rnn_fn);                           \
 REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub, rnn_packed_fn);             \
                                                                                \
 std::tuple<Tensor, Tensor> NAME(                                               \
-    const Tensor& _input, \
-    const Tensor& hx, \
-    TensorList _params, \
-    bool has_biases, \
-    int64_t num_layers, \
-    double dropout_p, \
-    bool train, \
-    bool bidirectional, \
-    bool batch_first) { \
+      const Tensor& _input, const Tensor& hx,                                  \
+      TensorList _params, bool has_biases,                                     \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
     NAME##_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
@@ -730,21 +724,15 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
           input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
   if (batch_first) {                                                           \
-    std::get<0>(results).transpose_(0, 1);               \
+    std::get<0>(results) = std::get<0>(results).transpose(0, 1);               \
   }                                                                            \
   return results;                                                              \
 }                                                                              \
                                                                                \
 std::tuple<Tensor, Tensor> NAME(                                               \
-    const Tensor& data, \
-    const Tensor& batch_sizes, \
-    const Tensor& hx, \
-    TensorList _params, \
-    bool has_biases, \
-    int64_t num_layers, \
-    double dropout_p, \
-    bool train, \
-    bool bidirectional) {  \
+      const Tensor& data, const Tensor& batch_sizes, const Tensor& hx,         \
+      TensorList _params, bool has_biases,                                     \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {  \
   if (at::cudnn_is_acceptable(data)) {                                         \
     Tensor output, hy;                                                         \
     NAME##_packed_cudnn_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
@@ -759,60 +747,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   return std::make_tuple(packed_output.data, std::get<1>(result));             \
 }
 
-#define ONE_HIDDEN_QRNN(NAME, CELL)                                             \
-std::tuple<Tensor, Tensor> NAME(                                               \
-    const Tensor& _input, \
-    const Tensor& hx, \
-    TensorList _params, \
-    bool has_biases, \
-    int64_t num_layers, \
-    double dropout_p,  \
-    bool train, \
-    bool bidirectional, \
-    bool batch_first) { \
-  if (at::cudnn_is_acceptable(_input)) {                                       \
-    Tensor output, hy;                                                         \
-    gru_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
-            num_layers, dropout_p, train, bidirectional, batch_first);         \
-    return std::make_tuple(output, hy);                                        \
-  }                                                                            \
-  check_device(_input, _params, hx); \
-  auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
-  auto params = gather_quantized_params(_params);                            \
-  auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
-      input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
-  if (batch_first) {                                                           \
-    std::get<0>(results).transpose_(0, 1);               \
-  }                                                                            \
-  return results;                                                              \
-}                                                                              \
-                                                                               \
-std::tuple<Tensor, Tensor> NAME(                                               \
-    const Tensor& data, \
-    const Tensor& batch_sizes, \
-    const Tensor& hx, \
-    TensorList _params, \
-    bool has_biases, \
-    int64_t num_layers, \
-    double dropout_p, \
-    bool train, \
-    bool bidirectional) {  \
-  if (at::cudnn_is_acceptable(data)) {                                         \
-    Tensor output, hy;                                                         \
-    gru_packed_cudnn_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
-            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
-    return std::make_tuple(output, hy);                                        \
-  }                                                                            \
-  PackedSequence input { data, batch_sizes };                                  \
-  auto params = gather_quantized_params(_params);                            \
-  auto result = _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
-          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
-  auto & packed_output = std::get<0>(result);                                  \
-  return std::make_tuple(packed_output.data, std::get<1>(result));             \
-}
-
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
-ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QuantizedCellParams>)
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
