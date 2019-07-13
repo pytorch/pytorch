@@ -102,7 +102,7 @@ class PackageFormatConfigNode(ConfigNode):
         self.props["package_format"] = package_format
 
     def get_children(self):
-        if self.find_prop("os_name") == "linux" and self.find_prop("package_format") != "conda":
+        if self.find_prop("os_name") == "linux":
             return [LinuxGccConfigNode(self, v) for v in DEVTOOLSET_VERSIONS]
         else:
             return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
