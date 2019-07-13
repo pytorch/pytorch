@@ -13,12 +13,12 @@ from ..._jit_internal import weak_module, weak_script_method, List
 class _ConvNd(Module):
 
     __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias',
-                     'padding_mode', 'padding_is_static', 'output_padding', 'in_channels',
+                     'padding_mode', 'output_padding', 'in_channels',
                      'out_channels', 'kernel_size']
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
-                 groups, bias, padding_mode, padding_is_static):
+                 groups, bias, padding_mode):
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -34,7 +34,6 @@ class _ConvNd(Module):
         self.output_padding = output_padding
         self.groups = groups
         self.padding_mode = padding_mode
-        self.padding_is_static = padding_is_static
         if transposed:
             self.weight = Parameter(torch.Tensor(
                 in_channels, out_channels // groups, *kernel_size))
@@ -53,27 +52,6 @@ class _ConvNd(Module):
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
-
-    def _is_padding_static(self, kernel_size, stride, dilation):
-        def is_static(filter, stride, dilation):
-            return stride == 1 and ((filter - 1) * dilation) % 2 == 0
-
-        return all([is_static(i[0], i[1], i[2]) for i in zip(kernel_size, stride, dilation)])
-
-    def _compute_padding_same(self, input_size, dim):
-        # type: (List[int], int) -> int
-        # When calculating convolutions, we can examine each dimension independently
-        input_size = input_size[dim + 2]  # Ignoring batch size + channel dims
-        filter_size = self.weight.size(dim + 2)
-        # Here we calculate the equivalent filter size factoring in dilation
-        effective_filter_size = (filter_size - 1) * self.dilation[dim] + 1
-        out_size = math.ceil(input_size / self.stride[dim])
-        # We calculate the starting position of the last filter
-        last_start = (out_size - 1) * self.stride[dim]
-        # The final necessary input size is equal to the starting position of the last filter +
-        # the effective filter size. Padding is equal to the difference
-        total_padding = max(0, last_start + effective_filter_size - input_size)
-        return total_padding
 
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
@@ -119,8 +97,6 @@ class Conv1d(_ConvNd):
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both sides
       for :attr:`padding` number of points.
-      If `padding` == `same`, padding will be inserted such that
-      `output shape = ceil(input shape/stride)` for each dimension.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
@@ -164,7 +140,7 @@ class Conv1d(_ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int, string, or tuple, optional): Zero-padding added to both sides of
+        padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
         padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
         dilation (int or tuple, optional): Spacing between kernel
@@ -210,16 +186,11 @@ class Conv1d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
+        padding = _single(padding)
         dilation = _single(dilation)
-        padding_is_static = padding != "same" or (padding == "same" and self._is_padding_static(kernel_size, stride, dilation))
-        init_padding = padding if isinstance(padding, str) else _single(padding)
         super(Conv1d, self).__init__(
-            in_channels, out_channels, kernel_size, stride, init_padding, dilation,
-            False, _single(0), groups, bias, padding_mode, padding_is_static)
-        if padding_is_static and padding == "same":
-            self.padding = (
-                self._compute_padding_same([0, 0, 0], dim=0) // 2,
-            )
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            False, _single(0), groups, bias, padding_mode)
 
     @weak_script_method
     def forward(self, input):
@@ -228,15 +199,8 @@ class Conv1d(_ConvNd):
             return F.conv1d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
-        if not self.padding_is_static:
-            padding_rows = self._compute_padding_same(input.size(), 0)
-            if padding_rows % 2:
-                input = F.pad(input, [0, padding_rows % 2])
-            return F.conv1d(input, self.weight, self.bias, self.stride,
-                            (padding_rows // 2), self.dilation, self.groups)
-        else:
-            return F.conv1d(input, self.weight, self.bias, self.stride,
-                            self.padding, self.dilation, self.groups)
+        return F.conv1d(input, self.weight, self.bias, self.stride,
+                        self.padding, self.dilation, self.groups)
 
 
 @weak_module
@@ -263,8 +227,6 @@ class Conv2d(_ConvNd):
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension.
-      If `padding` == `same`, padding will be inserted such that
-      `output shape = ceil(input shape/stride)` for each dimension.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
@@ -313,7 +275,7 @@ class Conv2d(_ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int, string, or tuple, optional): Zero-padding added to both sides of the input. Default: 0
+        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
@@ -365,17 +327,11 @@ class Conv2d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
+        padding = True if isinstance(padding, bool) else _pair(padding)
         dilation = _pair(dilation)
-        padding_is_static = padding != "same" or (padding == "same" and self._is_padding_static(kernel_size, stride, dilation))
-        init_padding = _pair(0) if isinstance(padding, str) else _pair(padding)
         super(Conv2d, self).__init__(
-            in_channels, out_channels, kernel_size, stride, init_padding, dilation,
-            False, _pair(0), groups, bias, padding_mode, padding_is_static)
-        if padding_is_static and padding == "same":
-            self.padding = (
-                self._compute_padding_same([0, 0, 0, 0], dim=0) // 2,
-                self._compute_padding_same([0, 0, 0, 0], dim=1) // 2,
-            )
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            False, _pair(0), groups, bias, padding_mode)
 
     @weak_script_method
     def forward(self, input):
@@ -385,16 +341,8 @@ class Conv2d(_ConvNd):
             return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
-        if not self.padding_is_static:
-            padding_rows = self._compute_padding_same(input.size(), 0)
-            padding_cols = self._compute_padding_same(input.size(), 1)
-            if padding_rows % 2 or padding_cols % 2:
-                input = F.pad(input, [0, padding_cols % 2, 0, padding_rows % 2])
-            return F.conv2d(input, self.weight, self.bias, self.stride,
-                            (padding_rows // 2, padding_cols // 2), self.dilation, self.groups)
-        else:
-            return F.conv2d(input, self.weight, self.bias, self.stride,
-                            self.padding, self.dilation, self.groups)
+        return F.conv2d(input, self.weight, self.bias, self.stride,
+                        self.padding, self.dilation, self.groups)
 
 
 @weak_module
@@ -415,8 +363,6 @@ class Conv3d(_ConvNd):
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension.
-      If `padding` == `same`, padding will be inserted such that
-      `output shape = ceil(input shape/stride)` for each dimension.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -464,7 +410,7 @@ class Conv3d(_ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int, string, or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
+        padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
         padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
@@ -518,18 +464,11 @@ class Conv3d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
+        padding = _triple(padding)
         dilation = _triple(dilation)
-        padding_is_static = padding != "same" or (padding == "same" and self._is_padding_static(kernel_size, stride, dilation))
-        init_padding = _triple(0) if isinstance(padding, str) else _triple(padding)
         super(Conv3d, self).__init__(
-            in_channels, out_channels, kernel_size, stride, init_padding, dilation,
-            False, _triple(0), groups, bias, padding_mode, padding_is_static)
-        if self.padding_is_static and padding == "same":
-            self.padding = (
-                self._compute_padding_same([0] * 5, dim=0) // 2,
-                self._compute_padding_same([0] * 5, dim=1) // 2,
-                self._compute_padding_same([0] * 5, dim=2) // 2,
-            )
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            False, _triple(0), groups, bias, padding_mode)
 
     @weak_script_method
     def forward(self, input):
@@ -540,18 +479,8 @@ class Conv3d(_ConvNd):
             return F.conv3d(F.pad(input, expanded_padding, mode='circular'),
                             self.weight, self.bias, self.stride, _triple(0),
                             self.dilation, self.groups)
-        if not self.padding_is_static:
-            padding = [self._compute_padding_same(input.size(), 0),
-                       self._compute_padding_same(input.size(), 1),
-                       self._compute_padding_same(input.size(), 2)]
-
-            if padding[0] % 2 or padding[1] % 2 or padding[2] % 2:
-                input = F.pad(input, [0, padding[0] % 2, 0, padding[1] % 2, 0, padding[2] % 2])
-            return F.conv3d(input, self.weight, self.bias, self.stride,
-                            (padding[0] // 2, padding[1] // 2, padding[2] // 2), self.dilation, self.groups)
-        else:
-            return F.conv3d(input, self.weight, self.bias, self.stride,
-                            self.padding, self.dilation, self.groups)
+        return F.conv3d(input, self.weight, self.bias, self.stride,
+                        self.padding, self.dilation, self.groups)
 
 
 @weak_module
@@ -707,7 +636,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         output_padding = _single(output_padding)
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias, padding_mode, True)
+            True, output_padding, groups, bias, padding_mode)
 
     @weak_script_method
     def forward(self, input, output_size=None):
@@ -855,7 +784,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         output_padding = _pair(output_padding)
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias, padding_mode, True)
+            True, output_padding, groups, bias, padding_mode)
 
     @weak_script_method
     def forward(self, input, output_size=None):
@@ -1000,7 +929,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         output_padding = _triple(output_padding)
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias, padding_mode, True)
+            True, output_padding, groups, bias, padding_mode)
 
     @weak_script_method
     def forward(self, input, output_size=None):
