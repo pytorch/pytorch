@@ -6,7 +6,6 @@ import unittest
 import torch
 import torch.jit
 import torch.nn.functional as F
-import torch.nn.quantized.functional as qF
 
 import hypothesis as hy
 from hypothesis import strategies as st
