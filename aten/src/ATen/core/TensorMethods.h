@@ -1043,14 +1043,6 @@ inline QScheme Tensor::qscheme() const {
     static auto table = globalATenDispatch().getOpTable("aten::qscheme(Tensor self) -> QScheme");
     return table->getOp<QScheme (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
-inline Tensor Tensor::fake_quantize_per_tensor_affine(double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max) const {
-    static auto table = globalATenDispatch().getOpTable("aten::fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, double, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, scale, zero_point, quant_min, quant_max);
-}
-inline Tensor Tensor::fake_quantize_per_tensor_affine_backward(const Tensor & grad, double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max) const {
-    static auto table = globalATenDispatch().getOpTable("aten::fake_quantize_per_tensor_affine_backward(Tensor grad, Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, const Tensor &, double, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(grad, *this, scale, zero_point, quant_min, quant_max);
-}
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     static auto table = globalATenDispatch().getOpTable("aten::to(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const TensorOptions &, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, options, non_blocking, copy);
