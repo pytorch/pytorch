@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 from torch._six import inf
 from itertools import product
-import warnings
 
 __all__ = [
     'broadcast_tensors',
