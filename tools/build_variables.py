@@ -117,6 +117,9 @@ libtorch_sources = [
     "torch/csrc/jit/script/logging.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
     "torch/csrc/jit/script/convert_to_ssa.cpp",
+    "torch/csrc/jit/script/exit_transforms.cpp",
+    "torch/csrc/jit/script/inline_loop_condition.cpp",
+    "torch/csrc/jit/script/canonicalize_modified_loop.cpp",
     "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
@@ -138,6 +141,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/codegen.cpp",
     "torch/csrc/jit/fuser/fallback.cpp",
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
+    "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
     "test/cpp/jit/test.cpp",
@@ -147,6 +151,7 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
+    "torch/csrc/jit/fuser/cuda/thnvrtc.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp"
 ]
@@ -230,6 +235,7 @@ def add_torch_libs():
         "torch/csrc/jit/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
+        "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
         "torch/csrc/jit/passes/onnx/constant_fold.cpp",
         "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
         "torch/csrc/jit/passes/onnx/peephole.cpp",
@@ -349,9 +355,6 @@ def add_torch_libs():
         # TODO: putting USE_CUDA in propagated_pp_flags is error-prone
         propagated_pp_flags=propagated_pp_flags + [
             "-DUSE_CUDA",
-            # The dynamically loaded NVRTC trick doesn't work in fbcode,
-            # and it's not necessary anyway, because we have a stub
-            # nvrtc library which we load canonically anyway
             "-DUSE_DIRECT_NVRTC",
         ],
         deps=[
