@@ -186,6 +186,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli
    .. automethod:: bernoulli_
    .. automethod:: bincount
+   .. automethod:: bitwise_not
+   .. automethod:: bitwise_not_
    .. automethod:: bmm
    .. automethod:: bool
    .. automethod:: byte
@@ -224,6 +226,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: diag_embed
    .. automethod:: diagflat
    .. automethod:: diagonal
+   .. automethod:: fill_diagonal_
    .. automethod:: digamma
    .. automethod:: digamma_
    .. automethod:: dim

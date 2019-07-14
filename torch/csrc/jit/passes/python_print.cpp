@@ -582,6 +582,18 @@ struct PythonPrintPass {
     stmt << end;
   }
 
+  void printValueIndex(TaggedStringStream& stmt, at::ArrayRef<Value*> inputs) {
+    const std::string val_name = useOf(inputs[0])->str();
+    if (isValidIdentifier(val_name)) {
+      stmt << val_name;
+    } else {
+      stmt << "(" << val_name << ")";
+    }
+    stmt << "[";
+    stmt << useOf(inputs[1]);
+    stmt << "]";
+  }
+
   void printDict(
       TaggedStringStream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
@@ -628,45 +640,20 @@ struct PythonPrintPass {
     }
   }
 
-  // our way of encoding loops makes them difficult to turn back into python
-  // syntax. we have to check properties of the condition and trip count inputs
-  // to figure out which one it initially was
-  static bool shouldEmitAsForLoop(LoopView stmt) {
-    auto trip_count = toIValue(stmt.maxTripCount());
-    auto cond_input = toIValue(stmt.inputCond());
-    auto cond_next = toIValue(stmt.nextCond());
-
-    bool condition_is_always_true =
-        cond_input && cond_input->toBool() && cond_next && cond_next->toBool();
-    bool trip_count_is_specified = !trip_count || // trip is not a constant
-        trip_count->toInt() !=
-            std::numeric_limits<int64_t>::max() || // it is a constant but not
-                                                   // the default one
-        stmt.currentTripCount()->uses().size() >
-            0; // it is actually being used in the body.
-
-    if (condition_is_always_true) {
-      // if the trip count was not specified this was a user-written while True:
-      return trip_count_is_specified;
-    } else {
-      // this must be a while loop, but check that there isn't _also_ a trip
-      // count
-      if (trip_count_is_specified) {
-        throw script::ErrorReport(stmt.node()->sourceRange())
-            << "loop cannot be printed as python "
-            << "because it has gone through an optimization "
-            << "that combined while and for loops. File a bug.";
-      }
-      return false;
-    }
-  }
-
   void printLoop(LoopView stmt) {
     // Loop carried dependencies are handled by assigning their initial
     // values to the node->outputs() before the loop,
     // and assign node->outputs() to the new values at the end of each trip.
 
-    bool emit_as_for_loop = shouldEmitAsForLoop(stmt);
+    auto loop_type = stmt.loopType();
+    if (loop_type == LoopView::ModifiedLoop) {
+      throw script::ErrorReport(stmt.node()->sourceRange())
+          << "loop cannot be printed as python "
+          << "because it has gone through an optimization "
+          << "that combined while and for loops. File a bug.";
+    }
+
+    bool emit_as_for_loop = loop_type == LoopView::For;
 
     assignValuesToTheirUniqueNames(stmt.carriedOutputs());
     // Add aliases for loop-carried dependencies
@@ -1014,6 +1001,9 @@ struct PythonPrintPass {
       case aten::str: {
         printValueList(stmt, node->inputs(), "str(", ")");
       } break;
+      case aten::__getitem__: {
+        printValueIndex(stmt, node->inputs());
+      } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
@@ -1058,10 +1048,6 @@ struct PythonPrintPass {
         } else {
           printDict(stmt, node->inputs());
         }
-      } break;
-      case prim::DictIndex: {
-        stmt << "(" << useOf(node->inputs().at(0)) << ")["
-             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
@@ -1337,7 +1323,6 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::PythonOp,
       prim::TupleConstruct,
       prim::TupleIndex,
-      prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::CreateObject,

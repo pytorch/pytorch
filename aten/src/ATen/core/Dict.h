@@ -45,8 +45,9 @@ struct DictImpl final : public c10::intrusive_ptr_target {
 
   explicit DictImpl(dict_map_type dict_, optional<DictElementTypes> elementTypes_)
   : dict(std::move(dict_))
-  , elementTypes(std::move(elementTypes_))
-  {}
+  , elementTypes(std::move(elementTypes_)) {
+    TORCH_INTERNAL_ASSERT(!elementTypes.has_value() || (nullptr != elementTypes->keyType.get() && nullptr != elementTypes->valueType.get()), "Key and value type must not be nullptr");
+  }
 
   dict_map_type dict;
 
@@ -162,6 +163,7 @@ inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const Dict
 
 template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue> dict);
 template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value> dict);
+struct deprecatedUntypedDict final {};
 }
 
 /**
@@ -218,6 +220,14 @@ public:
    * but only supposed to be used internally by PyTorch.
    */
   explicit Dict(TypePtr keyType, TypePtr valueType);
+
+  /**
+   * Creates an untyped dict, i.e. a Dict that doesn't know its types and
+   * doesn't do type checking.
+   * Please don't use this if you can avoid it. We want to get rid of untyped
+   * dicts.
+   */
+  explicit Dict(impl::deprecatedUntypedDict);
 
   ~Dict() = default;
 

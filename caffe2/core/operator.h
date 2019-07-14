@@ -997,7 +997,7 @@ class Operator : public OperatorBase {
 #ifdef __GNU_LIBRARY__
       // If glibc is available, use feenableexcept that will raise exception
       // right away.
-      int old_enabled_exceptions;
+      int old_enabled_exceptions = 0;
       if (FLAGS_caffe2_operator_throw_on_first_occurrence_if_fp_exceptions) {
         if (FLAGS_caffe2_operator_throw_if_fp_exceptions ||
             FLAGS_caffe2_operator_throw_if_fp_overflow_exceptions) {

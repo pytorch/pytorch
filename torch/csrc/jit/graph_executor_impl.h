@@ -30,6 +30,18 @@
 namespace torch {
 namespace jit {
 
+void packGradient(const Gradient& gradient, Node* dnode);
+bool needsGradient(const std::shared_ptr<const Graph>& graph);
+void runOptimization(std::shared_ptr<Graph>& graph);
+void runNondiffOptimization(std::shared_ptr<Graph>& graph);
+void debugSetAutodiffSubgraphInlining(bool state);
+bool getAutodiffSubgraphInlining();
+
+// Tunable parameters for deciding when to create/keep subgraphs of
+// differentiable code
+const size_t autodiffSubgraphNodeThreshold = 2;
+const size_t autodiffSubgraphInlineThreshold = 5;
+
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
 // and different requires_grad states, and handles specializations for each
@@ -77,7 +89,17 @@ struct GraphExecutorImplBase {
     // been set.
     auto local_graph = this->graph->copy();
     for (size_t i = 0; i < input_values.size(); ++i) {
-      local_graph->inputs().at(i)->setType(input_values.at(i)->type());
+      // propagate tensor types
+      if (input_values.at(i)->type()->cast<TensorType>()) {
+        local_graph->inputs().at(i)->setType(input_values.at(i)->type());
+      }
+
+      // None does not subtype Optional[T], schema matching relies on
+      // None values being set to Optional[T] so update type here
+      // see logic for Nones in tryConvertToType
+      if (input_values.at(i)->type() == NoneType::get()) {
+        input_values.at(i)->setType(local_graph->inputs().at(i)->type());
+      }
     }
     PropagateInputShapes(local_graph);
     auto output_values =

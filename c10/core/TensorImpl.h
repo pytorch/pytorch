@@ -187,23 +187,27 @@ struct C10_API NamedTensorMetaInterface {
 // pass in multi-thread scenarios, thus making the forward pass not thread-safe anymore,
 // which breaks the invariant.
 struct C10_API VariableVersion {
+ private:
+  struct VersionCounter : intrusive_ptr_target {
+    VersionCounter(uint32_t version) : version_(version) {}
+    std::atomic<uint32_t> version_;
+  };
+  c10::intrusive_ptr<VersionCounter> version_counter_;
+
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version = 0)
-      : version_block_(std::make_shared<std::atomic<uint32_t>>(version)) {}
+      : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
 
   void bump() noexcept {
-    version_block_->fetch_add(1);
+    ++version_counter_->version_;
   }
 
   uint32_t current_version() const noexcept {
-    return version_block_->load();
+    return version_counter_->version_;
   }
-
- private:
-  std::shared_ptr<std::atomic<uint32_t>> version_block_;
 };
 
 /**
@@ -1614,8 +1618,7 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
-//    version counter (word 0)
-//    version counter (word 1)
+//    version counter pointer
 //    PyObject pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
@@ -1640,9 +1643,9 @@ protected:
 //    miscellaneous bitfield
 //
 #ifdef BUILD_NAMEDTENSOR
-#define NWORDS 30
-#else
 #define NWORDS 29
+#else
+#define NWORDS 28
 #endif
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               sizeof(TensorImpl) == sizeof(int64_t) * NWORDS,

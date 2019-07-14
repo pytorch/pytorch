@@ -627,5 +627,54 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
   throw TypeError("%s", msg.c_str());
 }
 
+at::Tensor PythonArgs::tensor_slow(int i) {
+  PyObject* obj = args[i];
+  if (!obj) {
+    return at::Tensor();
+  }
+  if (THPVariable_Check(obj)) {
+    return reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+
+  at::Scalar scalar;
+  if (THPUtils_checkLong(obj)) {
+    scalar = at::Scalar(THPUtils_unpackLong(obj));
+  } else if (THPUtils_checkDouble(obj)) {
+    scalar = at::Scalar(THPUtils_unpackDouble(obj));
+  } else {
+    // NB: Are you here because you passed None to a Variable method,
+    // and you expected an undefined tensor to be returned?   Don't add
+    // a test for Py_None here; instead, you need to mark the argument
+    // as *allowing none*; you can do this by writing 'Tensor?' instead
+    // of 'Tensor' in the ATen metadata.
+    throw TypeError("expected Tensor as argument %d, but got %s", i,
+        Py_TYPE(obj)->tp_name);
+  }
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return autograd::make_variable(tensor);
+}
+
+at::Scalar PythonArgs::scalar_slow(int i) {
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::NumberType::get());
+  }
+
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(args[i])) {
+    return ((THPVariable*)args[i])->cdata.item();
+  }
+  if (THPUtils_checkLong(args[i])) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+
+  if (PyComplex_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
+  }
+  return at::Scalar(THPUtils_unpackDouble(args[i]));
+}
 
 } // namespace torch
