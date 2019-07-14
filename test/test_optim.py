@@ -1035,10 +1035,15 @@ class TestLRScheduler(TestCase):
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
 
     def test_onecycle_lr_cosine_annealing(self):
-        lr_target = [1, 13, 25, 23.786868631804634, 20.387750072769485, 15.475881440964852, 10.024118559035148,
-                     5.112249927230515, 1.7131313681953668, 0.5]
-        momentum_target = [22, 11.5, 1, 2.0398268870245992, 4.953357080483297, 9.1635301934587, 13.8364698065413,
-                           18.046642919516703, 20.9601731129754, 22]
+        def annealing_cos(start, end, pct):
+            cos_out = math.cos(math.pi * pct) + 1
+            return end + (start - end) / 2 * cos_out
+        lr_target = [1, 13, 25, annealing_cos(25, 0.5, 1 / 7.0), annealing_cos(25, 0.5, 2 / 7.0),
+                     annealing_cos(25, 0.5, 3 / 7.0), annealing_cos(25, 0.5, 4 / 7.0), annealing_cos(25, 0.5, 5 / 7.0),
+                     annealing_cos(25, 0.5, 6 / 7.0), 0.5]
+        momentum_target = [22, 11.5, 1, annealing_cos(1, 22, 1 / 7.0), annealing_cos(1, 22, 2 / 7.0),
+                           annealing_cos(1, 22, 3 / 7.0), annealing_cos(1, 22, 4 / 7.0), annealing_cos(1, 22, 5 / 7.0),
+                           annealing_cos(1, 22, 6 / 7.0), 22]
         lr_targets = [lr_target, lr_target]
         momentum_targets = [momentum_target, momentum_target]
         scheduler = OneCycleLR(self.opt, max_lr=25, final_div_factor=2, base_momentum=1, max_momentum=22,
