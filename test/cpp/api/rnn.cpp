@@ -247,3 +247,41 @@ TEST_F(RNNTest, BidirectionalFlattenParameters) {
   GRU gru(GRUOptions(100, 256).layers(2).bidirectional(true));
   gru->flatten_parameters();
 }
+
+// This test is a port of python code introduced here:
+// https://towardsdatascience.com/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
+// Reverse forward of bidrectional GRU should act
+// as regular forward of unidirectional GRU
+TEST_F(RNNTest, BidirectionalGRUReverseForward) {
+  auto options = torch::TensorOptions()
+                        .dtype(torch::kFloat32).requires_grad(false);
+  auto input =
+              torch::tensor({1, 2, 3, 4, 5}, options).reshape({5, 1, 1});
+  auto input_reversed =
+              torch::tensor({5, 4, 3, 2, 1}, options).reshape({5, 1, 1});
+
+  GRU bi_grus {GRUOptions(1, 1)
+                  .layers(1).batch_first(false).bidirectional(true)};
+  GRU reverse_gru {GRUOptions(1, 1)
+                  .layers(1).batch_first(false).bidirectional(false)};
+
+  // Now make sure the weights of the reverse gru layer match
+  // ones of the (reversed) bidirectional's:
+  reverse_gru->w_ih[0].set_requires_grad(false).copy_(bi_grus->w_ih[1]);
+  reverse_gru->w_hh[0].set_requires_grad(false).copy_(bi_grus->w_hh[1]);
+  reverse_gru->b_ih[0].set_requires_grad(false).copy_(bi_grus->b_ih[1]);
+  reverse_gru->b_hh[0].set_requires_grad(false).copy_(bi_grus->b_hh[1]);
+
+  auto bi_output = bi_grus->forward(input);
+  auto reverse_output = reverse_gru->forward(input_reversed);
+  ASSERT_EQ(bi_output.output.size(0), reverse_output.output.size(0));
+  auto size = bi_output.output.size(0);
+  for (int i = 0; i < size; i++) {
+    ASSERT_EQ(bi_output.output[i][0][1].item<float>(),
+              reverse_output.output[size - 1 - i][0][0].item<float>());
+  }
+  // The hidden states of the reversed GRUs sits
+  // in the odd indices in the first dimension.
+  ASSERT_EQ(bi_output.state[1][0][0].item<float>(),
+            reverse_output.state[0][0][0].item<float>());
+}
