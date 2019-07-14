@@ -61,7 +61,9 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
         - X_zp * col_offsets_ref
         + input_channels * X_zp * W_zp
     )
-    Y_q_ref = _quantize(Prod_XqWq_ref + b_q, Y_scale / (X_scale * W_scale), Y_zp)
+    if b_q is not None:
+        Prod_XqWq_ref += b_q
+    Y_q_ref = _quantize(Prod_XqWq_ref, Y_scale / (X_scale * W_scale), Y_zp)
     return Y_q_ref
 
 
@@ -208,15 +210,20 @@ class TestQuantizedOps(TestCase):
     " we are in a UBSAN environment.",
 )
 class TestQuantizedLinear(unittest.TestCase):
-    """Tests the correctness of the quantized::fbgemm_linear op."""
-
-    def test_qlinear(self):
+    """Tests the correctness of the quantized linear and linear_relu op."""
+    @given(
+        batch_size=st.integers(1, 4),
+        input_channels=st.integers(16, 32),
+        output_channels=st.integers(4, 8),
+        use_bias=st.booleans(),
+        use_relu=st.booleans(),
+    )
+    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias, use_relu):
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qlinear = torch.ops.quantized.fbgemm_linear
-
-        batch_size = 4
-        input_channels = 16
-        output_channels = 8
+        if use_relu:
+            qlinear = torch.ops.quantized.fbgemm_linear_relu
+        else:
+            qlinear = torch.ops.quantized.fbgemm_linear
 
         X_scale = 1.5
         X_zp = 5
@@ -241,7 +248,7 @@ class TestQuantizedLinear(unittest.TestCase):
         b_value_max = 10
         b_q0 = np.round(
             np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
-        ).astype(np.int32)
+        ).astype(np.int32) if use_bias else None
 
         avoid_vpmaddubsw_overflow_linear(
             batch_size,
@@ -257,11 +264,11 @@ class TestQuantizedLinear(unittest.TestCase):
 
         X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
-        b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float)
+        b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float) if use_bias else None
 
         X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
         W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
         # Y_scale * 255 (max for uint8).
@@ -270,6 +277,8 @@ class TestQuantizedLinear(unittest.TestCase):
 
         # Reference quantized Linear operator
         Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
+        if use_relu:
+            Y_q_ref[Y_q_ref < Y_zp] = Y_zp
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
@@ -285,94 +294,10 @@ class TestQuantizedLinear(unittest.TestCase):
         # Reference quantized result from PyTorch Linear operator
         W_fp32 = W_q.dequantize().to(dtype=torch.float)
         X_fp32 = X_q.dequantize().to(dtype=torch.float)
-        b_fp32 = b_q.dequantize().to(dtype=torch.float)
+        b_fp32 = b_q.dequantize().to(dtype=torch.float) if use_bias else None
         Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-        Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
-
-        # Assert equal
-        np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
-
-
-    """Tests the correctness of the quantized::fbgemm_linear_relu op."""
-    def test_qlinear_relu(self):
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qlinear_relu = torch.ops.quantized.fbgemm_linear_relu
-
-        batch_size = 4
-        input_channels = 16
-        output_channels = 8
-
-        X_scale = 1.5
-        X_zp = 5
-        X_value_min = 0
-        X_value_max = 225
-        X_q0 = np.round(
-            np.random.rand(batch_size, input_channels) * (X_value_max - X_value_min)
-            + X_value_min
-        ).astype(np.uint8)
-
-        W_scale = 0.4
-        W_zp = 2
-        W_value_min = -128
-        W_value_max = 127
-        W_q0 = np.round(
-            np.random.rand(output_channels, input_channels)
-            * (W_value_max - W_value_min)
-            + W_value_min
-        ).astype(np.int8)
-
-        b_value_min = -10
-        b_value_max = 10
-        b_q0 = np.round(
-            np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
-        ).astype(np.int32)
-
-        avoid_vpmaddubsw_overflow_linear(
-            batch_size,
-            input_channels,
-            output_channels,
-            X_q0,
-            X_value_min,
-            X_value_max,
-            W_q0,
-            W_value_min,
-            W_value_max,
-        )
-
-        X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
-        W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
-        b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float)
-
-        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
-
-        # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
-        # Y_scale * 255 (max for uint8).
-        Y_scale = 125.1234
-        Y_zp = 5
-
-        # Reference quantized Linear operator
-        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
-        Y_q_ref[Y_q_ref < Y_zp] = Y_zp
-
-        # Weight prepacking operator for quantized Linear
-        W_prepack = qlinear_prepack(W_q)
-        # Quantized Linear operator with prepacked weight
-        Y_q = qlinear_relu(X_q, W_prepack, b_q, Y_scale, Y_zp)
-
-        # Y_q_ref_real = _dequantize(Y_q_ref, Y_scale, Y_zp)
-        # Y_q_real = Y_q.dequantize()
-
-        # Assert equal
-        np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
-
-        # Reference quantized result from PyTorch Linear operator
-        W_fp32 = W_q.dequantize().to(dtype=torch.float)
-        X_fp32 = X_q.dequantize().to(dtype=torch.float)
-        b_fp32 = b_q.dequantize().to(dtype=torch.float)
-        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-        Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+        if use_relu:
+            Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
         Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
 
         # Assert equal
