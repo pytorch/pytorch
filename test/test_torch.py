@@ -8222,6 +8222,36 @@ class _TestTorchMixin(object):
             # test non-contiguous case
             self.assertEqual(torch.tensor([1, 0, 0.5, 0.6]).view(2, 2), data.t().hardshrink(0.3))
 
+    def test_hardshrink_edge_cases(self):
+        def test(t, values, l_expected):
+            for l, expected in l_expected.items():
+                values_tensor = torch.tensor([float(v) for v in values]).type(t)
+                expected_tensor = torch.tensor([float(v) for v in expected]).type(t)
+                self.assertEqual(expected_tensor == values_tensor.hardshrink(l),
+                                 torch.ones_like(values_tensor))
+
+        double_min = torch.finfo(torch.double).tiny
+        double_max = torch.finfo(torch.double).max
+
+        float_min = torch.finfo(torch.float).tiny
+        float_max = torch.finfo(torch.float).max
+
+        test(torch.DoubleTensor, [0.0, double_min, -double_min, 0.1, -0.1, 1.0, -1.0, double_max, -double_max, inf, -inf],
+            {0.0:                [0.0, double_min, -double_min, 0.1, -0.1, 1.0, -1.0, double_max, -double_max, inf, -inf],
+             double_min:         [0.0,        0.0,         0.0, 0.1, -0.1, 1.0, -1.0, double_max, -double_max, inf, -inf],
+             0.1:                [0.0,        0.0,         0.0, 0.0,  0.0, 1.0, -1.0, double_max, -double_max, inf, -inf],
+             1.0:                [0.0,        0.0,         0.0, 0.0,  0.0, 0.0,  0.0, double_max, -double_max, inf, -inf],
+             double_max:         [0.0,        0.0,         0.0, 0.0,  0.0, 0.0,  0.0,        0.0,         0.0, inf, -inf],
+             inf:                [0.0,        0.0,         0.0, 0.0,  0.0, 0.0,  0.0,        0.0,         0.0, 0.0,  0.0]})
+
+        test(torch.FloatTensor,  [0.0,  float_min,  -float_min, 0.1, -0.1, 1.0, -1.0,  float_max,  -float_max, inf, -inf],
+            {0.0:                [0.0,  float_min,  -float_min, 0.1, -0.1, 1.0, -1.0,  float_max,  -float_max, inf, -inf],
+             float_min:          [0.0,        0.0,         0.0, 0.1, -0.1, 1.0, -1.0,  float_max,  -float_max, inf, -inf],
+             0.1:                [0.0,        0.0,         0.0, 0.0,  0.0, 1.0, -1.0,  float_max,  -float_max, inf, -inf],
+             1.0:                [0.0,        0.0,         0.0, 0.0,  0.0, 0.0,  0.0,  float_max,  -float_max, inf, -inf],
+             float_max:          [0.0,        0.0,         0.0, 0.0,  0.0, 0.0,  0.0,        0.0,         0.0, inf, -inf],
+             inf:                [0.0,        0.0,         0.0, 0.0,  0.0, 0.0,  0.0,        0.0,         0.0, 0.0,  0.0]})
+
     def test_unbiased(self):
         tensor = torch.randn(100)
         self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
