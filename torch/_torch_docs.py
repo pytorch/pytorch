@@ -2109,8 +2109,8 @@ batched outputs `solution, LU`.
 
     Irrespective of the original strides, the returned matrices
     `solution` and `LU` will be transposed, i.e. with strides like
-    `B.contiguous().transpose(-1, -2).strides()` and
-    `A.contiguous().transpose(-1, -2).strides()` respectively.
+    `B.contiguous().transpose(-1, -2).stride()` and
+    `A.contiguous().transpose(-1, -2).stride()` respectively.
 
 Args:
     B (Tensor): input matrix of size :math:`(*, m, k)` , where :math:`*`
@@ -2278,7 +2278,7 @@ individual inverses.
 .. note::
 
     Irrespective of the original strides, the returned tensors will be
-    transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).strides()`
+    transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).stride()`
 
 Args:
     input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
@@ -4873,7 +4873,7 @@ of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some
           `gesdd` as well.
 
 .. note:: Irrespective of the original strides, the returned matrix `U`
-          will be transposed, i.e. with strides :code:`U.contiguous().transpose(-2, -1).strides()`
+          will be transposed, i.e. with strides :code:`U.contiguous().transpose(-2, -1).stride()`
 
 .. note:: Extra care needs to be taken when backward through `U` and `V`
           outputs. Such operation is really only stable when :attr:`input` is
@@ -4899,8 +4899,12 @@ Args:
 Example::
 
     >>> a = torch.randn(5, 3)
-    >>> torch.svd(a).__class__
-    <class 'torch.return_types.svd'>
+    >>> a
+    tensor([[ 0.2364, -0.7752,  0.6372],
+            [ 1.7201,  0.7394, -0.0504],
+            [-0.3371, -1.0584,  0.5296],
+            [ 0.3550, -0.4022,  1.5569],
+            [ 0.2445, -0.0158,  1.1414]])
     >>> u, s, v = torch.svd(a)
     >>> u
     tensor([[ 0.4027,  0.0287,  0.5434],
@@ -4945,7 +4949,7 @@ only the upper triangular portion is used by default.
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 .. note:: Irrespective of the original strides, the returned matrix `V` will
-          be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).strides()`.
+          be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
 
 .. note:: Extra care needs to be taken when backward through outputs. Such
           operation is really only stable when all eigenvalues are distinct.
