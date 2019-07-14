@@ -285,3 +285,42 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward) {
   ASSERT_EQ(bi_output.state[1][0][0].item<float>(),
             reverse_output.state[0][0][0].item<float>());
 }
+
+// Reverse forward of bidrectional LSTM should act
+// as regular forward of unidirectional LSTM
+TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
+  auto options = torch::TensorOptions()
+                        .dtype(torch::kFloat32).requires_grad(false);
+  auto input =
+              torch::tensor({1, 2, 3, 4, 5}, options).reshape({5, 1, 1});
+  auto input_reversed =
+              torch::tensor({5, 4, 3, 2, 1}, options).reshape({5, 1, 1});
+
+  LSTM bi_lstm {LSTMOptions(1, 1)
+                  .layers(1).batch_first(false).bidirectional(true)};
+  LSTM reverse_lstm {LSTMOptions(1, 1)
+                  .layers(1).batch_first(false).bidirectional(false)};
+
+  // Now make sure the weights of the reverse lstm layer match
+  // ones of the (reversed) bidirectional's:
+  reverse_lstm->w_ih[0].set_requires_grad(false).copy_(bi_lstm->w_ih[1]);
+  reverse_lstm->w_hh[0].set_requires_grad(false).copy_(bi_lstm->w_hh[1]);
+  reverse_lstm->b_ih[0].set_requires_grad(false).copy_(bi_lstm->b_ih[1]);
+  reverse_lstm->b_hh[0].set_requires_grad(false).copy_(bi_lstm->b_hh[1]);
+
+  auto bi_output = bi_lstm->forward(input);
+  auto reverse_output = reverse_lstm->forward(input_reversed);
+  ASSERT_EQ(bi_output.output.size(0), reverse_output.output.size(0));
+  auto size = bi_output.output.size(0);
+  for (int i = 0; i < size; i++) {
+    ASSERT_EQ(bi_output.output[i][0][1].item<float>(),
+              reverse_output.output[size - 1 - i][0][0].item<float>());
+  }
+
+  // The hidden states of the reversed LSTM sits
+  // in the odd indices in the first dimension.
+  ASSERT_EQ(bi_output.state[0][1][0][0].item<float>(),
+            reverse_output.state[0][0][0][0].item<float>());
+  ASSERT_EQ(bi_output.state[1][1][0][0].item<float>(),
+            reverse_output.state[1][0][0][0].item<float>());
+}
