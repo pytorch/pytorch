@@ -11,6 +11,22 @@ void LoadOp<CPUContext>::SetCurrentDevice(BlobProto* proto) {
   }
 }
 
+template <int VALUE_TYPE = TensorProto_DataType_FLOAT>
+std::vector<TensorShape> LoadTensorInference(
+    const OperatorDef& def,
+    const vector<TensorShape>& /* unused */) {
+  vector<TensorShape> out(1);
+  ArgumentHelper helper(def);
+  out[0].set_data_type(static_cast<TensorProto_DataType>(
+      helper.GetSingleArgument<int>("dtype", VALUE_TYPE)));
+
+  auto shape = helper.GetRepeatedArgument<int64_t>("shape");
+  for (auto d : shape) {
+    out[0].add_dims(d);
+  }
+  return out;
+}
+
 REGISTER_CPU_OPERATOR(DBExists, DBExistsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Load, LoadOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Save, SaveOp<CPUContext>);
@@ -70,6 +86,7 @@ print("exists:", workspace.FetchBlob("exists"))
 OPERATOR_SCHEMA(Load)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
+    .TensorInferenceFunction(LoadTensorInference<>)
     .SetDoc(R"DOC(
 The Load operator loads a set of serialized blobs from a db or multiple dbs. It
 takes $[0, \infty)$ number of inputs and $[0, \infty)$ number of outputs, using

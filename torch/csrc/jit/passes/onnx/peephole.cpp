@@ -351,7 +351,7 @@ void hackFixupPadPackedShapes(Block* graph) {
   }
 }
 
-void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
+void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_version) {
   auto initial_state = n->inputs()[input_index];
 
   // The RNN code in pytorch accepts an optional hidden state. When it
@@ -420,21 +420,29 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
   concated_dims->addInput(unsqueezed_batch_size->outputs()[0]);
   concated_dims->addInput(hidden_size->outputs()[0]);
 
-  Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);
-  constant_of_shape->insertBefore(n);
-  constant_of_shape->addInput(concated_dims->outputs()[0]);
-  n->replaceInput(input_index, constant_of_shape->outputs()[0]);
+  if (opset_version < 9) {
+    Node* constant_fill = graph->create(onnx::ConstantFill, 1);
+    constant_fill->insertBefore(n);
+    constant_fill->i_(attr::input_as_shape, 1);
+    constant_fill->addInput(concated_dims->outputs()[0]);
+    n->replaceInput(input_index, constant_fill->outputs()[0]);
+  } else {
+    Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);
+    constant_of_shape->insertBefore(n);
+    constant_of_shape->addInput(concated_dims->outputs()[0]);
+    n->replaceInput(input_index, constant_of_shape->outputs()[0]);
+  }
 
   if (initial_state->uses().size() == 0) {
     initial_state->node()->destroy();
   }
 }
 
-void fixDefaultRnnHiddenState(Block* b) {
+void fixDefaultRnnHiddenState(Block* b, int opset_version) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
     for (auto* child_block : n->blocks()) {
-      fixDefaultRnnHiddenState(child_block);
+      fixDefaultRnnHiddenState(child_block, opset_version);
     }
 
     if (!isRNN(n)) {
@@ -445,15 +453,15 @@ void fixDefaultRnnHiddenState(Block* b) {
     if (n->inputs().size() < 6) {
       continue;
     }
-    fixDefaultRNNState(b->owningGraph(), n, 5);
+    fixDefaultRNNState(b->owningGraph(), n, 5, opset_version);
   }
 }
 
-void fixDefaultLstmCellState(Block* b) {
+void fixDefaultLstmCellState(Block* b, int opset_version) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
     for (auto* child_block : n->blocks()) {
-      fixDefaultLstmCellState(child_block);
+      fixDefaultLstmCellState(child_block, opset_version);
     }
 
     if (n->kind() != onnx::LSTM) {
@@ -464,7 +472,7 @@ void fixDefaultLstmCellState(Block* b) {
     if (n->inputs().size() < 7) {
       continue;
     }
-    fixDefaultRNNState(b->owningGraph(), n, 6);
+    fixDefaultRNNState(b->owningGraph(), n, 6, opset_version);
   }
 }
 
@@ -625,15 +633,15 @@ void removeMaxPoolUnusedOutput(Block* b) {
 // writing your optimization in jit/passes/peephole.cpp rather than
 // here, as it will be generally applicable to the JIT as well.  The
 // optimizations here are ONLY applied on ONNX update
-void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
+void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version) {
   // TODO: decide on fixpoint strategy
   // TODO: make it easier not to do O(k) iterations over the graph, where
   // k is the number of distinct peephole optimizations
   hackFixupPadPackedShapes(graph->block());
   pushPackingPastRnn(graph->block());
   removeNopPacking(graph->block());
-  fixDefaultRnnHiddenState(graph->block());
-  fixDefaultLstmCellState(graph->block());
+  fixDefaultRnnHiddenState(graph->block(), opset_version);
+  fixDefaultLstmCellState(graph->block(), opset_version);
   fuseBroadcast(graph->block());
   fuseConsecutiveTransposes(graph->block());
   eliminateNopTranspose(graph->block());
