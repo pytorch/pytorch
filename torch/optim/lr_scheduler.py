@@ -814,12 +814,12 @@ class OneCycleLR(_LRScheduler):
         cycle_momentum (bool): If ``True``, momentum is cycled inversely
             to learning rate between 'base_momentum' and 'max_momentum'.
             Default: True
-        base_momentum (float): Lower momentum boundaries in the cycle
+        base_momentum (float or list): Lower momentum boundaries in the cycle
             for each parameter group. Note that momentum is cycled inversely
             to learning rate; at the peak of a cycle, momentum is
             'base_momentum' and learning rate is 'max_lr'.
             Default: 0.85
-        max_momentum (float): Upper momentum boundaries in the cycle
+        max_momentum (float or list): Upper momentum boundaries in the cycle
             for each parameter group. Functionally,
             it defines the cycle amplitude (max_momentum - base_momentum).
             Note that momentum is cycled inversely
@@ -867,13 +867,13 @@ class OneCycleLR(_LRScheduler):
                  final_div_factor=1e4,
                  last_epoch=-1):
 
+        # Validate optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
         self.optimizer = optimizer
 
-        max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
-
+        # Validate total_steps
         if total_steps is None and num_epochs is None and train_dl is None:
             raise ValueError("You must define either total_steps OR (num_epochs AND train_dl)")
         elif total_steps is not None:
@@ -889,9 +889,11 @@ class OneCycleLR(_LRScheduler):
         self.step_size_up = float(pct_start * self.total_steps) - 1
         self.step_size_down = float(self.total_steps - self.step_size_up) - 1
 
+        # Validate pct_start
         if pct_start < 0 or pct_start > 1 or not isinstance(pct_start, float):
             raise ValueError("Expected float between 0 and 1 pct_start, but got {}".format(pct_start))
 
+        # Validate anneal_strategy
         if anneal_strategy not in ['cos', 'linear']:
             raise ValueError("anneal_strategy must by one of 'cos' or 'linear', instead got {}".format(anneal_strategy))
         elif anneal_strategy == 'cos':
@@ -899,28 +901,31 @@ class OneCycleLR(_LRScheduler):
         elif anneal_strategy == 'linear':
             self.anneal_func = self._annealing_linear
 
-        self.cycle_momentum = cycle_momentum
-        if self.cycle_momentum:
-            if 'momentum' not in self.optimizer.defaults and 'betas' not in self.optimizer.defaults:
-                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
-            self.use_beta1 = 'betas' in self.optimizer.defaults
-
+        # Initialize learning rate variables
+        max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
         if last_epoch == -1:
             for idx, group in enumerate(self.optimizer.param_groups):
                 group['lr'] = max_lrs[idx] / div_factor
                 group['max_lr'] = max_lrs[idx]
                 group['min_lr'] = group['lr'] / final_div_factor
-                if self.cycle_momentum:
-                    if self.use_beta1:
-                        beta1, beta2 = group['betas']
-                        group['betas'] = (max_momentum, beta2)
-                    else:
-                        group['momentum'] = max_momentum
 
+        # Initialize momentum variables
+        self.cycle_momentum = cycle_momentum
         if self.cycle_momentum:
-            self.initial_momentum = max_momentum
-            self.min_momentum = base_momentum
-            self.max_momentum = max_momentum
+            if 'momentum' not in self.optimizer.defaults and 'betas' not in self.optimizer.defaults:
+                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+            self.use_beta1 = 'betas' in self.optimizer.defaults
+            max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
+            base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
+            if last_epoch == -1:
+                for m_momentum, b_momentum, group in zip(max_momentums, base_momentums, optimizer.param_groups):
+                    if self.use_beta1:
+                        _, beta2 = group['betas']
+                        group['betas'] = (m_momentum, beta2)
+                    else:
+                        group['momentum'] = m_momentum
+                    group['max_momentum'] = m_momentum
+                    group['base_momentum'] = b_momentum
 
         super(OneCycleLR, self).__init__(optimizer, last_epoch)
 
@@ -937,7 +942,7 @@ class OneCycleLR(_LRScheduler):
     def _annealing_cos(self, start, end, pct):
         "Cosine anneal from `start` to `end` as pct goes from 0.0 to 1.0."
         cos_out = math.cos(math.pi * pct) + 1
-        return end + (start - end) / 2 * cos_out
+        return end + (start - end) / 2.0 * cos_out
 
     def _annealing_linear(self, start, end, pct):
         "Linearly anneal from `start` to `end` as pct goes from 0.0 to 1.0."
@@ -955,17 +960,19 @@ class OneCycleLR(_LRScheduler):
             if step_num <= self.step_size_up:
                 computed_lr = self.anneal_func(group['initial_lr'], group['max_lr'], step_num / self.step_size_up)
                 if self.cycle_momentum:
-                    computed_momentum = self.anneal_func(self.initial_momentum, self.min_momentum, step_num / self.step_size_up)
+                    computed_momentum = self.anneal_func(group['max_momentum'], group['base_momentum'],
+                                                         step_num / self.step_size_up)
             else:
                 down_step_num = step_num - self.step_size_up
                 computed_lr = self.anneal_func(group['max_lr'], group['min_lr'], down_step_num / self.step_size_down)
                 if self.cycle_momentum:
-                    computed_momentum = self.anneal_func(self.min_momentum, self.max_momentum, down_step_num / self.step_size_down)
+                    computed_momentum = self.anneal_func(group['base_momentum'], group['max_momentum'],
+                                                         down_step_num / self.step_size_down)
 
             lrs.append(computed_lr)
             if self.cycle_momentum:
                 if self.use_beta1:
-                    beta1, beta2 = group['betas']
+                    _, beta2 = group['betas']
                     group['betas'] = (computed_momentum, beta2)
                 else:
                     group['momentum'] = computed_momentum

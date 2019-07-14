@@ -1037,7 +1037,7 @@ class TestLRScheduler(TestCase):
     def test_onecycle_lr_cosine_annealing(self):
         def annealing_cos(start, end, pct):
             cos_out = math.cos(math.pi * pct) + 1
-            return end + (start - end) / 2 * cos_out
+            return end + (start - end) / 2.0 * cos_out
         lr_target = [1, 13, 25, annealing_cos(25, 0.5, 1 / 7.0), annealing_cos(25, 0.5, 2 / 7.0),
                      annealing_cos(25, 0.5, 3 / 7.0), annealing_cos(25, 0.5, 4 / 7.0), annealing_cos(25, 0.5, 5 / 7.0),
                      annealing_cos(25, 0.5, 6 / 7.0), 0.5]
