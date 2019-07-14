@@ -1050,6 +1050,21 @@ class TestLRScheduler(TestCase):
                                total_steps=10)
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
 
+    def test_cycle_lr_with_adam(self):
+        old_opt = self.opt
+        self.opt = optim.Adam(
+            [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
+            lr=0.05)
+
+        lr_target = [1, 13, 25, 21.5, 18, 14.5, 11, 7.5, 4, 0.5]
+        momentum_target = [22, 11.5, 1, 4, 7, 10, 13, 16, 19, 22]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = OneCycleLR(self.opt, max_lr=25, final_div_factor=2, base_momentum=1, max_momentum=22,
+                               total_steps=10, anneal_strategy='linear')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10, use_beta1=True)
+        self.opt = old_opt  # set optimizer back to SGD
+
     def test_lambda_lr(self):
         epochs = 10
         self.opt.param_groups[0]['lr'] = 0.05
@@ -1243,13 +1258,16 @@ class TestLRScheduler(TestCase):
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
 
-    def _test_cycle_lr(self, scheduler, lr_targets, momentum_targets, batch_iterations, verbose=False):
+    def _test_cycle_lr(self, scheduler, lr_targets, momentum_targets, batch_iterations, verbose=False, use_beta1=False):
         for batch_num in range(batch_iterations):
             scheduler.step(batch_num)
             if verbose:
                 if 'momentum' in self.opt.param_groups[0].keys():
                     print('batch{}:\tlr={},momentum={}'.format(batch_num, self.opt.param_groups[0]['lr'],
                                                                self.opt.param_groups[0]['momentum']))
+                elif use_beta1 and 'betas' in self.opt.param_groups[0].keys():
+                    print('batch{}:\tlr={},beta1={}'.format(batch_num, self.opt.param_groups[0]['lr'],
+                                                               self.opt.param_groups[0]['betas'][0]))
                 else:
                     print('batch{}:\tlr={}'.format(batch_num, self.opt.param_groups[0]['lr']))
 
@@ -1259,7 +1277,12 @@ class TestLRScheduler(TestCase):
                     msg='LR is wrong in batch_num {}: expected {}, got {}'.format(
                         batch_num, lr_target[batch_num], param_group['lr']), delta=1e-5)
 
-                if 'momentum' in param_group.keys():
+                if use_beta1 and 'betas' in param_group.keys():
+                    self.assertAlmostEqual(
+                        momentum_target[batch_num], param_group['betas'][0],
+                        msg='Beta1 is wrong in batch_num {}: expected {}, got {}'.format(
+                            batch_num, momentum_target[batch_num], param_group['betas'][0]), delta=1e-5)
+                elif 'momentum' in param_group.keys():
                     self.assertAlmostEqual(
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
