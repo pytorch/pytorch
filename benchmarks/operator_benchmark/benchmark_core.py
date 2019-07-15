@@ -22,7 +22,7 @@ An example input is:
 TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
     tag='long', run_backward=False)
 """
-TestConfig = namedtuple("TestConfig", "test_name input_config tag use_jit run_backward")
+TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
 
 
 BENCHMARK_TESTER = {}
@@ -65,6 +65,7 @@ class BenchmarkRunner(object):
         self.multiplier = 2
         self.predefined_minimum_secs = 4
         self.max_iters = 1e6
+        self.use_jit = args.use_jit
         if self.args.iterations:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
@@ -112,7 +113,7 @@ class BenchmarkRunner(object):
                      "{} Execution Time (us) : {:.3f}\n"
             if test_case.framework == "PyTorch":
                 output = "# Mode: {}\n". \
-                    format("JIT" if test_case.test_config.use_jit else "Eager") + output
+                    format("JIT" if self.use_jit else "Eager") + output
             print(output.format(
                 test_case.test_config.test_name,
                 test_case.test_config.input_config,
@@ -136,9 +137,9 @@ class BenchmarkRunner(object):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
         func = test_case.run_forward
-        if test_case.test_config.use_jit:
+        if self.use_jit:
             func = test_case.run_jit_forward
-        forward_time = timeit.timeit(functools.partial(test_case.run_forward, iters), number=1)
+        forward_time = timeit.timeit(functools.partial(func, iters), number=1)
         return forward_time
 
     def _launch_backward(self, test_case, iters):

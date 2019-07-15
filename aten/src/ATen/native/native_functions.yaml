@@ -357,6 +357,17 @@
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
 
+- func: bitwise_not(Tensor self) -> Tensor
+  variants: function, method
+
+- func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: bitwise_not(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: bitwise_not_out
+    CUDA: bitwise_not_out
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -601,27 +612,15 @@
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: cumsum(Tensor self, int dim, *, ScalarType dtype) -> Tensor
+- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: cumsum(Tensor self, int dim) -> Tensor
+- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
+- func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: cumsum(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: cumsum(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: cumprod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: cumprod(Tensor self, int dim) -> Tensor
-  variants: function, method
-
-- func: cumprod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+- func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
 
@@ -649,6 +648,9 @@
 
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
+
+- func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
+  variants: method
 
 - func: div(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1099,6 +1101,10 @@
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
 
+- func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
+
+- func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
 
 - func: fbgemm_is_cpu_supported() -> bool
@@ -1192,11 +1198,8 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: log_softmax(Tensor self, int dim, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: log_softmax(Tensor self, int dim) -> Tensor
+# log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
+- func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -1250,27 +1253,13 @@
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: mean(Tensor self, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self) -> Tensor
+- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: mean(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: mean(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: mean(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: median(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -1354,6 +1343,14 @@
 - func: miopen_depthwise_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_weight
+
+- func: miopen_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: miopen_rnn
+
+- func: miopen_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+  dispatch:
+    CUDA: miopen_rnn_backward
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
@@ -1454,9 +1451,14 @@
   dispatch:
     CUDA: batch_norm_elemt_cuda
 
+# for backward compatibility
 - func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_gather_stats_cuda
+
+- func: batch_norm_gather_stats_with_counts(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int[] counts) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_gather_stats_with_counts_cuda
 
 - func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -1854,11 +1856,8 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: softmax(Tensor self, int dim, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: softmax(Tensor self, int dim) -> Tensor
+# softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
+- func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -1956,27 +1955,13 @@
   variants: function, method
   device_guard: False
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: sum(Tensor self, *, ScalarType dtype) -> Tensor
+- func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: sum(Tensor self) -> Tensor
+- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: sum(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
@@ -2013,27 +1998,13 @@
 
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: prod(Tensor self, *, ScalarType dtype) -> Tensor
+- func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self) -> Tensor
+- func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: prod(Tensor self, int dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: prod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: prod(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: prod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+- func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False
@@ -2231,6 +2202,9 @@
 - func: where(Tensor condition, Tensor self, Tensor other) -> Tensor
   variants: function, method
 
+- func: where(Tensor condition) -> Tensor[]
+  variants: function
+
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   variants: function
   dispatch:
@@ -2361,6 +2335,7 @@
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
+    QuantizedCPU: quantized_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   variants: function, method
@@ -2896,6 +2871,12 @@
 
 # Quantized RNN layers
 - func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
+
+# Quantized GRU layers
+
+- func: quantized_gru(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+
+- func: quantized_gru(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
 
 # Quantized RNN cells
 - func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
@@ -4188,6 +4169,10 @@
   dispatch:
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
+
+- func: normal(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
+- func: normal(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function

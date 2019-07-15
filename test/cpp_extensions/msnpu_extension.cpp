@@ -27,7 +27,7 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 void init_msnpu_extension() {
   globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
+    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
     &empty_override);
   globalATenDispatch().registerOp(
     Backend::MSNPU,

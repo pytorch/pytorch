@@ -4,11 +4,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from .. import functional as F
-from ...modules.module import Module
-from ...._jit_internal import weak_module, weak_script_method
+from ...modules.activation import ReLU as NNReLU
 
-@weak_module
-class ReLU(Module):
+class ReLU(NNReLU):
     r"""Applies quantized rectified linear unit function element-wise:
 
     :math:`\text{ReLU}(x)= \max(x_0, x)`, where :math:`x_0` is the zero point.
@@ -37,7 +35,6 @@ class ReLU(Module):
         assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
 
 
-    @weak_script_method
     def forward(self, input):
         return F.relu(input)
 

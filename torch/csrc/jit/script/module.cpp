@@ -163,8 +163,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(ModulePtr owner, std::shared_ptr<Function> function)
-    : owner_(std::move(owner)), function_(std::move(function)) {}
+Method::Method(ModulePtr owner, Function* function)
+    : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);
@@ -192,11 +192,14 @@ std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_grap
   return std::make_pair(result.first, loadTensors(result.second));
 }
 
+static void clearMethods(c10::ivalue::Object* self) {
+  self->compilation_unit()->drop_all_functions();
+}
+
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
+  const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
-      src,
-      resolver ? resolver : script::nativeResolver(),
-      simpleSelf(module_object()->type()));
+      name(), src, resolver ? resolver : script::nativeResolver(), &self);
 }
 
 void Module::copy_into(
@@ -221,13 +224,13 @@ void Module::copy_into(
   }
 
   for (auto& fn : class_compilation_unit()->get_functions()) {
-    curr.clone_method(*this, fn->name(), type_remap);
+    curr.clone_method(*this, fn->qualname(), type_remap);
   }
 }
 
 void Module::clone_method(
     const Module& orig,
-    const std::string& name,
+    const QualifiedName& orig_method_name,
     const std::unordered_map<TypePtr, TypePtr>& type_remap) {
   // type remapping - when we copy method implementations from one module
   // singleton to another, we need to update the types of the self arguments
@@ -245,11 +248,14 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  const Function& fn = orig.class_compilation_unit()->get_function(name);
+  const Function& fn =
+      orig.class_compilation_unit()->get_function(orig_method_name);
   auto graph = fn.graph()->copy();
   graph->remapTypes(type_remap_fn);
   auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
-  auto copied = class_compilation_unit()->create_function(fn.name(), graph);
+  const auto this_method_name = getNameForMethod(orig_method_name.name());
+  auto copied =
+      class_compilation_unit()->create_function(this_method_name, graph);
   copied->setSchema(std::move(schema));
 }
 
@@ -265,7 +271,8 @@ void Module::clone_method(const Module& orig, const std::string& name) {
       to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
     }
   }
-  return clone_method(orig, name, type_remap);
+  const auto orig_method_name = QualifiedName(orig.name(), name);
+  return clone_method(orig, orig_method_name, type_remap);
 }
 
 void Module::train(bool on) {
@@ -292,7 +299,8 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
   // Create a bare object with correct number of slots
   const size_t numAttrs = classType->numAttributes();
-  auto obj = c10::ivalue::Object::create(classType, numAttrs);
+  auto obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(class_compilation_unit(), classType), numAttrs);
 
   // Invoke the `__init__()` of the class with the arguments provided.
   Stack stackWithSelf = {obj};
