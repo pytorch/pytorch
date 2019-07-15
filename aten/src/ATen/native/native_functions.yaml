@@ -357,6 +357,17 @@
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
 
+- func: bitwise_not(Tensor self) -> Tensor
+  variants: function, method
+
+- func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: bitwise_not(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: bitwise_not_out
+    CUDA: bitwise_not_out
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -637,6 +648,9 @@
 
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
+
+- func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
+  variants: method
 
 - func: div(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1087,6 +1101,10 @@
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
 
+- func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
+
+- func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
 
 - func: fbgemm_is_cpu_supported() -> bool
@@ -1180,6 +1198,7 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
+# log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
@@ -1324,6 +1343,14 @@
 - func: miopen_depthwise_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_weight
+
+- func: miopen_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: miopen_rnn
+
+- func: miopen_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+  dispatch:
+    CUDA: miopen_rnn_backward
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
@@ -1829,6 +1856,7 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
+# softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
@@ -2843,6 +2871,12 @@
 
 # Quantized RNN layers
 - func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
+
+# Quantized GRU layers
+
+- func: quantized_gru(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+
+- func: quantized_gru(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
 
 # Quantized RNN cells
 - func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
