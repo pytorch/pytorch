@@ -49,7 +49,7 @@ class SoftmaxBenchmark(op_bench.TorchBenchmarkBase):
         return self.op_func(self.input_one)
 
 
-op_bench.generate_pt_tests_from_list(softmax_ops_list, softmax_configs, SoftmaxBenchmark)
+op_bench.generate_pt_tests_from_op_list(softmax_ops_list, softmax_configs, SoftmaxBenchmark)
 
 
 if __name__ == "__main__":
