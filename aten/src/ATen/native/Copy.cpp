@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
+#include <ATen/quantized/Quantizer.h>
 
 namespace {
 
