@@ -210,6 +210,28 @@ class TestQuantizedOps(TestCase):
     " we are in a UBSAN environment.",
 )
 class TestQuantizedLinear(unittest.TestCase):
+    def test_dynamic_qlinear(self):
+        batch_size = 1
+        input_channels = 2
+        output_channels = 2
+        X = torch.rand(batch_size, input_channels).float()
+        W = torch.rand(output_channels, input_channels).float()
+        b = torch.rand(output_channels).float()
+
+        # Weight prepacking operator for quantized Linear
+        W_int8, col_offsets, scale, zero_point = torch.fbgemm_linear_quantize_weight(W)
+        W_prepack = torch.fbgemm_pack_quantized_matrix(W_int8.clone(), W_int8.size(1), W_int8.size(0))
+        # Quantized Linear operator with prepacked weight
+        Y_dq = torch.fbgemm_linear_int8_weight(
+            X, W, W_prepack, col_offsets,
+            scale, zero_point, b)
+
+        Y_ref = F.linear(X, W, b)
+
+        # Assert close: FP32 computation vs. INT8 computation with dynamic quantization
+        torch.testing.assert_allclose(Y_dq, Y_ref, rtol=0.1, atol=1e-3)
+
+
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(
         batch_size=st.integers(1, 4),

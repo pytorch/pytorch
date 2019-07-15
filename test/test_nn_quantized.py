@@ -32,6 +32,28 @@ class FunctionalAPITest(TestCase):
 
 
 class ModuleAPITest(TestCase):
+    def test_dynamic_linear_api(self):
+        """test API functionality for nn.quantized.DynamicLinear"""
+        batch_size = 1
+        in_features = 2
+        out_features = 2
+        W = torch.rand(out_features, in_features).float()
+        W_int8, col_offsets, scale, zero_point = torch.fbgemm_linear_quantize_weight(W)
+        W_pack = torch.fbgemm_pack_quantized_matrix(W_int8.clone(), W_int8.size(1), W_int8.size(0))
+        X = torch.rand(batch_size, in_features).float()
+        B = torch.rand(out_features).float()
+        qlinear = nnq.DynamicLinear(in_features, out_features)
+        qlinear._packed_weight = W_pack
+        qlinear.bias = B
+        qlinear.col_offsets = col_offsets
+        qlinear.scale = scale
+        qlinear.zero_point = zero_point
+        Z_dq = qlinear(X)
+        Z_ref = torch.fbgemm_linear_int8_weight(
+            X, W, W_pack, col_offsets,
+            scale, zero_point, B)
+        self.assertEqual(Z_ref, Z_dq)
+
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),

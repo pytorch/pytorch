@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
+from torch.nn.parameter import Parameter
 from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
 
@@ -171,3 +172,54 @@ class Linear(NNLinear):
         qlinear.out_scale = torch.tensor([act_qparams[0]])
         qlinear.out_zero_point = torch.tensor([act_qparams[1]])
         return qlinear
+
+
+class DynamicLinear(NNLinear):
+    r"""
+    A dynamic quantized linear module with quantized tensor as inputs
+    and outputs.
+    We adopt the same interface as `torch.nn.Linear`, please see
+    https://pytorch.org/docs/stable/nn.html#torch.nn.Linear for documentation.
+
+    Similar to `torch.nn.Linear`, attributes will be randomly initialized at
+        module creation time and will be overwritten later
+
+    Attributes:
+        weight: the non-learnable quantized weights of the
+                module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
+        bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
+                If :attr:`bias` is ``True``, the values are initialized to zero.
+        out_scale: `scale` parameter of output Quantized Tensor, type: double
+        out_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
+
+    Examples::
+
+        >>> m = nn.quantized.DynamicLinear(20, 30)
+        >>> input = torch.randn(128, 20)
+        >>> output = m(input)
+        >>> print(output.size())
+        torch.Size([128, 30])
+    """
+
+    __constants__ = ['bias', 'in_features', 'out_features', 'scale', 'zero_point']
+
+    def __init__(self, in_features, out_features, bias=True):
+        super(DynamicLinear, self).__init__(in_features, out_features, bias)
+        del self.weight
+        weight_fp32 = torch.Tensor(out_features, in_features).float()
+        self.register_buffer('weight', weight_fp32)
+        del self.bias
+        bias_fp32 = torch.Tensor(out_features).float()
+        self.register_buffer('bias', bias_fp32)
+
+        weight_prepack, col_offsets, self.scale, self.zero_point = torch.fbgemm_linear_quantize_weight(weight_fp32)
+        self.register_buffer(
+            '_packed_weight',
+            torch.fbgemm_pack_quantized_matrix(weight_prepack, weight_fp32.size(1), weight_fp32.size(0)))
+        self.register_buffer('col_offsets', col_offsets)
+
+    def forward(self, x):
+        Y = torch.fbgemm_linear_int8_weight(
+            x.float(), self.weight, self._packed_weight, self.col_offsets,
+            self.scale, self.zero_point, self.bias)
+        return Y.to(x.dtype)
