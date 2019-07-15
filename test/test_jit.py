@@ -13132,6 +13132,18 @@ class TestRecursiveScript(JitTestCase):
 
         return sm
 
+    def test_module_name(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.x = 2
+
+            def forward(self, t):
+                return t + self.x
+
+        m = torch.jit.script(MyModule())
+        FileCheck().check("ClassType<MyModule>").run(m.graph)
+
     @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
         class M(torch.nn.Module):
