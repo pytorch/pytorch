@@ -745,11 +745,11 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
   // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.class_compilation_unit()->find_function("__setstate__");
-  if (setstate == nullptr) {
+  auto setstate = module.find_method("__setstate__");
+  if (!setstate) {
     return false;
   }
-  auto set_schema = setstate->getSchema();
+  auto set_schema = setstate->function().getSchema();
 
   TORCH_CHECK(
       set_schema.arguments().size() == 2,
@@ -908,15 +908,14 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.class_compilation_unit()->get_functions().size() > 0) {
+  if (module.type()->methods().size() > 0) {
     std::ostringstream methods;
     SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
         source_ranges,
-        *module.class_compilation_unit(),
-        /*is_method=*/true,
+        module,
         tensor_table_,
         class_table_,
         /*enforce_importable=*/true);

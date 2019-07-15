@@ -25,7 +25,7 @@ IValue deepCopy(const IValue& self) {
 
   // Lists of ivalues should recursively deep copy their contents
   if (self.isGenericList()) {
-    c10::List<IValue> newList;
+    auto newList = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
     newList.reserve(self.toGenericListRef().size());
     for (const IValue& value : self.toGenericListRef()) {
       newList.push_back(deepCopy(value));

@@ -534,12 +534,20 @@ static inline std::vector<Value*> toValues(
   return fmap(nvs, [&](const NamedValue& v) { return v.value(g); });
 }
 
-static inline Self simpleSelf(const TypePtr& typ) {
-  return [typ](Value* v) {
-    v->setType(typ);
+struct SimpleSelf : public Self {
+  explicit SimpleSelf(ClassTypePtr classType)
+      : Self(), classType_(std::move(classType)) {}
+  std::shared_ptr<SugaredValue> makeSugared(Value* v) const override {
+    v->setType(classType_);
     return std::make_shared<SimpleValue>(v);
-  };
-}
+  }
+  ClassTypePtr getClassType() const override {
+    return classType_;
+  }
+
+ private:
+  ClassTypePtr classType_;
+};
 } // namespace script
 } // namespace jit
 } // namespace torch

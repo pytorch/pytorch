@@ -10,30 +10,32 @@ from torch.nn.quantized.modules.conv import _conv_output_shape
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import qtensors_conv
+import hypothesis_utils as hu
 
 from common_utils import TestCase, run_tests
 
 
 class FunctionalAPITest(TestCase):
-    @given(Q=qtensors_conv(min_batch=1, max_batch=3,
-                           min_in_channels=1, max_in_channels=7,
-                           min_out_channels=1, max_out_channels=7,
-                           H_range=(6, 12), W_range=(6, 12),
-                           kH_range=(3, 5), kW_range=(3, 5),
-                           dtypes=((torch.quint8, 0),),
-                           max_groups=4),
+    @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
+                              min_in_channels=1, max_in_channels=7,
+                              min_out_channels=1, max_out_channels=7,
+                              H_range=(6, 12), W_range=(6, 12),
+                              kH_range=(3, 5), kW_range=(3, 5),
+                              max_groups=4),
+           qparams=hu.qparams(dtypes=torch.quint8,
+                              zero_point_min=0,
+                              zero_point_max=0),
            padH=st.integers(1, 3), padW=st.integers(1, 3),
            sH=st.integers(1, 3), sW=st.integers(1, 3),
-           dH=st.integers(1, 1), dW=st.integers(1, 1))  # No dilation for quant!
-    def test_conv_api(self, Q, padH, padW, sH, sW, dH, dW):
+           dH=st.integers(1, 2), dW=st.integers(1, 2))
+    def test_conv_api(self, X, qparams, padH, padW, sH, sW, dH, dW):
         """Tests the correctness of the conv functional.
 
         The correctness is defined by the behavior being similar to the
         `quantized._ops` implementation.
         """
-        # Random iunputs
-        X, (scale, zero_point), (qmin, qmax), torch_type = Q
+        # Random inputs
+        (scale, zero_point), (qmin, qmax), torch_type = qparams
         (inputs, filters, bias, groups) = X
 
         iC, oC = inputs.shape[1], filters.shape[0]

@@ -25,8 +25,9 @@ struct ListImpl final : public c10::intrusive_ptr_target {
 
   explicit ListImpl(list_type list_, optional<TypePtr> elementType_)
   : list(std::move(list_))
-  , elementType(std::move(elementType_))
-  {}
+  , elementType(std::move(elementType_)) {
+    TORCH_INTERNAL_ASSERT(!elementType.has_value() || nullptr != elementType->get(), "Element type must not be nullptr");
+  }
 
   list_type list;
 
@@ -181,6 +182,7 @@ template<class T> List<IValue> toGenericList(List<T> list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
 template<class T> List<T> toList(std::vector<T> list);
 template<class T> const std::vector<T>& toVector(const List<T>& list);
+struct deprecatedUntypedList final {};
 }
 template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 
@@ -250,6 +252,14 @@ public:
    * but only supposed to be used internally by PyTorch.
    */
   explicit List(TypePtr elementType);
+
+  /**
+   * Creates an untyped list, i.e. a List that doesn't know its type and
+   * doesn't do type checking.
+   * Please don't use this if you can avoid it. We want to get rid of untyped
+   * lists.
+   */
+  explicit List(impl::deprecatedUntypedList);
 
   List(const List&) = default;
   List& operator=(const List&) = default;
