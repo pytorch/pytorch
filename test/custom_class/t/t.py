@@ -19,6 +19,7 @@ class Bar:
     def display(self, z):
         print(self.x, self.y, z)
 
+print(torch._C.Foo(1, 2))
 @torch.jit.script
 def f(x):
     val = torch._C.Foo(5, 3)

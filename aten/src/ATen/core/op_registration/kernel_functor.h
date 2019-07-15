@@ -40,7 +40,7 @@ namespace detail {
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
     assert_is_valid_input_type() {
-      TORCH_CHECK(tmap.find<T>() != tmap.end(), "Tried to use undefined class as input argument");
+      TORCH_CHECK(tmap.find(typeid(T).name()) != tmap.end(), "Tried to use undefined class as input argument");
     }
   };
 
@@ -103,7 +103,7 @@ namespace detail {
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_output_type {
     assert_is_valid_output_type() {
-      TORCH_CHECK(tmap.find<T>() != tmap.end(), "Tried to use undefined class as output");
+      TORCH_CHECK(tmap.find(typeid(T).name()) != tmap.end(), "Tried to use undefined class as output");
     }
   };
 

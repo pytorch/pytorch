@@ -68,10 +68,10 @@ class class_ {
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute.
     classCu = std::make_shared<script::CompilationUnit>();
-    tmap.put<CurClass*>(ClassType::create(
+    tmap[typeid(CurClass*).name()] =  ClassType::create(
         c10::QualifiedName("__torch__." + parentModule + "." + className),
-        classCu));
-    classTypePtr = tmap.find<CurClass*>()->second;
+        classCu);
+    classTypePtr = tmap.find(typeid(CurClass*).name())->second;
     classTypePtr->addAttribute("capsule", CapsuleType::get());
     script::CompilationUnit::_get_python_cu().register_class(classTypePtr);
   }

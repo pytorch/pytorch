@@ -4,60 +4,60 @@
 #include <unordered_map>
 #include <atomic>
 
-template <class ValueType>
-class TypeMap {
-  // Internally, we'll use a hash table to store mapping from type
-  // IDs to the values.
-  typedef std::unordered_map<int, ValueType> InternalMap;
-public:
-  typedef typename InternalMap::iterator iterator;
-  typedef typename InternalMap::const_iterator const_iterator;
-  typedef typename InternalMap::value_type value_type;
+// template <class ValueType>
+// class TypeMap {
+//   // Internally, we'll use a hash table to store mapping from type
+//   // IDs to the values.
+//   typedef std::unordered_map<int, ValueType> InternalMap;
+// public:
+//   typedef typename InternalMap::iterator iterator;
+//   typedef typename InternalMap::const_iterator const_iterator;
+//   typedef typename InternalMap::value_type value_type;
 
-  const_iterator begin() const { return m_map.begin(); }
-  const_iterator end() const { return m_map.end();  }
-  iterator begin() { return m_map.begin();  }
-  iterator end() { return m_map.end(); }
+//   const_iterator begin() const { return m_map.begin(); }
+//   const_iterator end() const { return m_map.end();  }
+//   iterator begin() { return m_map.begin();  }
+//   iterator end() { return m_map.end(); }
 
-  // Finds the value associated with the type "Key" in the type map.
-  template <class Key>
-  iterator find() { return m_map.find(getTypeId<Key>());  }
+//   // Finds the value associated with the type "Key" in the type map.
+//   template <class Key>
+//   iterator find() { return m_map.find(getTypeId<Key>());  }
 
-  // Same as above, const version
-  template <class Key>
-  const_iterator find() const { return m_map.find(getTypeId<Key>()); }
+//   // Same as above, const version
+//   template <class Key>
+//   const_iterator find() const { return m_map.find(getTypeId<Key>()); }
 
-  // Associates a value with the type "Key"
-  template <class Key>
-  void put(ValueType &&value) {
-    m_map[getTypeId<Key>()] = std::forward<ValueType>(value);
-  }
-  int size() {
-      return m_map.size();
-  }
+//   // Associates a value with the type "Key"
+//   template <class Key>
+//   void put(ValueType &&value) {
+//     m_map[getTypeId<Key>()] = std::forward<ValueType>(value);
+//   }
+//   int size() {
+//       return m_map.size();
+//   }
 
-private:
-  template <class Key>
-  inline static int getTypeId() {
-    static const int id = LastTypeId++;
-    return id;
-  }
+// private:
+//   template <class Key>
+//   inline static int getTypeId() {
+//     static const int id = LastTypeId++;
+//     return id;
+//   }
 
-  static std::atomic_int LastTypeId;
-  InternalMap m_map;
-};
+//   static std::atomic_int LastTypeId;
+//   InternalMap m_map;
+// };
 
-template <class ValueType>
-std::atomic_int TypeMap<ValueType>::LastTypeId(0);
+// template <class ValueType>
+// std::atomic_int TypeMap<ValueType>::LastTypeId(0);
 
-static TypeMap<c10::ClassTypePtr> tmap;
+static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
 
 namespace c10 {
 namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
-    auto res = tmap.find<T>();
+    auto res = tmap.find(typeid(T).name());
     if (res == tmap.end()) {
         throw c10::Error("Trying to convert a class that's not registered.", "");
     }
@@ -200,7 +200,7 @@ namespace ivalue {
   IValue from(c10::optional<T> v) { return IValue(v); }
   template <typename T>
   IValue from(T x) {
-    auto res = tmap.find<T>();
+    auto res = tmap.find(typeid(T).name());
     if (res == tmap.end()) {
       throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
     }
