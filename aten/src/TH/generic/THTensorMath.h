@@ -50,8 +50,6 @@ TH_API void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(bitxor)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src);
 
-TH_API void THTensor_(sign)(THTensor *r_, THTensor *t);
-
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 void THTensor_(preserveReduceDimSemantics)(THTensor *r_, int in_dims, int reduce_dimension, int keepdim);
 

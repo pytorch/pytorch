@@ -3300,12 +3300,6 @@
     CPU: lerp_cpu_tensor_
     CUDA: lerp_cuda_tensor_
 
-- func: sign_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_sign_
-    CUDA: legacy::cuda::_th_sign_
-
 - func: fmod_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
@@ -3967,16 +3961,18 @@
     CPU: legacy::cpu::_th_histc
     CUDA: _histc_cuda
 
-- func: sign(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_sign_out
-    CUDA: legacy::cuda::_th_sign_out
-
 - func: sign(Tensor self) -> Tensor
   variants: method, function
+
+- func: sign_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
   dispatch:
-    CPU: legacy::cpu::_th_sign
-    CUDA: legacy::cuda::_th_sign
+    CPU: _sign__cpu
+    
+- func: sign(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  dispatch:
+    CPU: _sign_out_cpu
 
 - func: fmod(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
