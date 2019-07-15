@@ -8,48 +8,47 @@ import torch
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules.conv import _conv_output_shape
 
-import hypothesis as hy
+from hypothesis import assume, given
 from hypothesis import strategies as st
-import hypothesis_utils as hyut
+import hypothesis_utils as hu
 
 from common_utils import TestCase, run_tests
 
 
 class FunctionalAPITest(TestCase):
-    @hy.given(X=hyut.tensor_conv2d(min_batch=1, max_batch=3,
-                                   min_in_channels=1, max_in_channels=7,
-                                   min_out_channels=1, max_out_channels=7,
-                                   H_range=(6, 12), W_range=(6, 12),
-                                   kH_range=(3, 5), kW_range=(3, 5),
-                                   max_groups=4),
-              qparams=hyut.qparams(dtypes=torch.quint8,
-                                   zero_point_min=0,
-                                   zero_point_max=0),
-              padH=st.integers(1, 3), padW=st.integers(1, 3),
-              sH=st.integers(1, 3), sW=st.integers(1, 3),
-              dH=st.integers(1, 2), dW=st.integers(1, 2),
-              prepacked=st.booleans())
+    @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
+                              min_in_channels=1, max_in_channels=7,
+                              min_out_channels=1, max_out_channels=7,
+                              H_range=(6, 12), W_range=(6, 12),
+                              kH_range=(3, 5), kW_range=(3, 5),
+                              max_groups=4),
+           qparams=hu.qparams(dtypes=torch.quint8,
+                              zero_point_min=0,
+                              zero_point_max=0),
+           padH=st.integers(1, 3), padW=st.integers(1, 3),
+           sH=st.integers(1, 3), sW=st.integers(1, 3),
+           dH=st.integers(1, 2), dW=st.integers(1, 2),
+           prepacked=st.booleans())
     def test_conv_api(self, X, qparams, padH, padW, sH, sW, dH, dW, prepacked):
         """Tests the correctness of the conv functional.
 
         The correctness is defined by the behavior being similar to the
         `quantized._ops` implementation.
         """
-        # Random iunputs
+        # Random inputs
         (scale, zero_point), (qmin, qmax), torch_type = qparams
-        hy.assume(zero_point == 0)
         (inputs, filters, bias, groups) = X
 
         iC, oC = inputs.shape[1], filters.shape[0]
 
         iH, iW = inputs.shape[2:]
         kH, kW = filters.shape[2:]
-        hy.assume(kH // 2 >= padH)
-        hy.assume(kW // 2 >= padW)
+        assume(kH // 2 >= padH)
+        assume(kW // 2 >= padW)
         oH = _conv_output_shape(iH, kH, padH, sH, dH)
-        hy.assume(oH > 0)
+        assume(oH > 0)
         oW = _conv_output_shape(iW, kW, padW, sW, dW)
-        hy.assume(oW > 0)
+        assume(oW > 0)
 
         inputs = torch.from_numpy(inputs).to(torch.float)
         filters = torch.from_numpy(filters).to(torch.float)

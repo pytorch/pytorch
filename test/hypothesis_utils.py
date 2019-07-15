@@ -39,6 +39,53 @@ _ENFORCED_ZERO_POINT = defaultdict(lambda: None, {
     torch.qint32: 0
 })
 
+"""Hypothesis filter to avoid overflows with quantized tensors.
+
+Args:
+    tensor: Tensor of floats to filter
+    qparams: Quantization parameters as returned by the `qparams`.
+
+Returns:
+    True
+
+Raises:
+    hypothesis.UnsatisfiedAssumption
+
+Note: This filter is slow. Use it only when filtering of the test cases is
+      absolutely necessary!
+"""
+def assume_not_overflowing(tensor, qparams):
+    (scale, zero_point), (qmin, qmax), quantized_type = qparams
+    adjustment = 1 + torch.finfo(torch.float).eps
+    float_min = tensor.min()
+    float_max = tensor.max()
+
+    _long_type_info = torch.iinfo(torch.long)
+    long_min, long_max = _long_type_info.min / adjustment, _long_type_info.max / adjustment
+    # make sure intermediate results are within the range of long
+    min_value = max((long_min - zero_point) * scale, (long_min / scale + zero_point), float_min)
+    max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point), float_max)
+
+    assume((tensor >= min_value).all())
+    assume((tensor <= max_value).all())
+    return True
+
+
+"""Strategy for generating the quantization parameters.
+
+Args:
+    dtypes: quantized data types to sample from.
+    scale_min / scale_max: Min and max scales. If None, set to 1e-3 / 1e3.
+    zero_point_min / zero_point_max: Min and max for the zero point. If None,
+        set to the minimum and maximum of the quantized data type.
+        Note: The min and max are only valid if the zero_point is not enforced
+              by the data type itself.
+
+Generates:
+    (scale, zero_point): Sampled dcale and zero_point.
+    (qmin, qmax): Quantized minimum and maximum (depends on `quantized_type`).
+    quantized_type: Sampled quantized type.
+"""
 @st.composite
 def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
             zero_point_min=None, zero_point_max=None):
@@ -70,6 +117,12 @@ def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
     return (scale, zero_point), (qmin, qmax), quantized_type
 
 """Strategy to create different shapes.
+Args:
+    min_dims / max_dims: minimum and maximum rank.
+    min_side / max_side: minimum and maximum dimensions per rank.
+
+Generates:
+    Possibe shapes for a tensor, constrained to the rank and dimensionality.
 
 Example:
     # Generates 3D and 4D tensors.
@@ -94,51 +147,57 @@ def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None):
 The resulting tensor is in float32 format.
 
 Args:
-    shapes
+    shapes: Shapes under test for the tensor. Could be either a hypothesis
+            strategy, or an iterable of different shapes to sample from.
+    elements: Elements to generate from for the returned data type.
+              If None, the strategy resolves to float within range [-1e6, 1e6].
+
 Generates:
-    (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
-        X: (`nbatch, iChannels, H, W`)
-        w: (`oChannels, iChannels // groups, kH, kW)
-        b: `(oChannels,)`
-        g: Number of groups the input is divided into
+    X: Tensor of type float32. Note that NaN and +/-inf is not included.
 """
 @st.composite
-def tensor(draw, shapes=None, float_min=-1e6, float_max=1e6):
+def tensor(draw, shapes=None, elements=None):
     if isinstance(shapes, SearchStrategy):
         _shape = draw(shapes)
     else:
         _shape = draw(st.sampled_from(shapes))
-
-    _float_type_info = torch.finfo(torch.float)
-    if float_min is None:
-        float_min = _float_type_info.min + _float_type_info.eps
-    if float_max is None:
-        float_max = _float_type_info.max - _float_type_info.eps
-
-    X = draw(stnp.arrays(dtype=np.float32,
-                         elements=st.floats(min_value=float_min,
-                                            max_value=float_max),
-                         shape=_shape))
+    if elements is None:
+        elements = st.floats(-1e6, 1e6)
+    X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
+    assume(not (np.isnan(X).any() or np.isinf(X).any()))
     return X
 
 """Strategy for generating test cases for tensors used in Conv2D.
 The resulting tensors is in float32 format.
 
 Args:
-    min_batch, max_batch: Range to generate `nbatch`
-    min_in_channels, max_in_channels: Range to generate `iChannels`
-    min_out_channels, max_out_channels: Range to generate `oChannels`
+    min_batch, max_batch: Range to generate `nbatch`.
+    min_in_channels, max_in_channels: Range to generate `iChannels`.
+    min_out_channels, max_out_channels: Range to generate `oChannels`.
     H_range, W_range: Ranges to generate height and width of matrix. Must be
-                      tuples of `(min, max)`
+                      tuples of `(min, max)`.
     kH_range, kW_range: Ranges to generate kernel height and width. Must be
-                        tuples of `(min, max)`
-    max_groups: Maximum number of groups to generate
+                        tuples of `(min, max)`.
+    max_groups: Maximum number of groups to generate.
+    elements: Elements to generate from for the returned data type.
+              If None, the strategy resolves to float within range [-1e6, 1e6].
 Generates:
     (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
         X: (`nbatch, iChannels, H, W`)
         w: (`oChannels, iChannels // groups, kH, kW)
         b: `(oChannels,)`
         g: Number of groups the input is divided into
+
+Example:
+    @given(tensor_conv2d(
+        min_batch=1, max_batch=3,
+        min_in_channels=1, max_in_channels=7,
+        min_out_channels=1, max_out_channels=7,
+        H_range=(6, 12), W_range=(6, 12),
+        kH_range=(3, 5), kW_range=(3, 5),
+        max_groups=4,
+        elements=st.floats(-1.0, 1.0)
+    ))
 """
 @st.composite
 def tensor_conv2d(draw,
@@ -147,9 +206,8 @@ def tensor_conv2d(draw,
                   min_out_channels=3, max_out_channels=7,
                   H_range=(6, 12), W_range=(6, 12),
                   kH_range=(3, 7), kW_range=(3, 7),
-                  max_groups=1, dtypes=None):
-    _float_min = -1e6
-    _float_max = 1e6
+                  max_groups=1, elements=None):
+
     # Resolve the minibatch, in_channels, out_channels, iH/iW, iK/iW
     _minibatch = draw(st.integers(min_batch, max_batch))
     _in_channels = draw(st.integers(min_in_channels, max_in_channels))
@@ -164,13 +222,9 @@ def tensor_conv2d(draw,
     _kW = draw(st.integers(kW_range[0], kW_range[1]))
 
     # Resolve the tensors
-    X = draw(stnp.arrays(dtype=np.float32,
-                         elements=st.floats(_float_min, _float_max),
-                         shape=(_minibatch, _in_channels, _iH, _iW)))
-    w = draw(stnp.arrays(dtype=np.float32,
-                         elements=st.floats(_float_min, _float_max),
-                         shape=(_out_channels, _in_channels // g, _kH, _kW)))
-    b = draw(stnp.arrays(dtype=np.float32,
-                         elements=st.floats(_float_min, _float_max),
-                         shape=(_out_channels,)))
+    X = draw(tensor(shapes=((_minibatch, _in_channels, _iH, _iW),),
+                    elements=elements))
+    w = draw(tensor(shapes=((_out_channels, _in_channels // g, _kH, _kW),),
+                    elements=elements))
+    b = draw(tensor(shapes=(_out_channels,), elements=elements))
     return X, w, b, g
