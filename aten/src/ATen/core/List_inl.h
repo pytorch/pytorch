@@ -16,35 +16,33 @@ template<class T>
 List<T>::List()
 : List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>(
   typename detail::ListImpl<typename List<T>::StorageT>::list_type(),
-  getTypePtr<T>())) {}
+  getTypePtr<T>())) {
+  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType) instead, or if you absolutely have to, use c10::impl::GenericList(c10::impl::deprecatedUntypedList()).");
+}
 
-template<>
-inline List<IValue>::List()
+template<class T>
+inline List<T>::List(c10::impl::deprecatedUntypedList)
 : List(make_intrusive<detail::ListImpl<IValue>>(
-  typename detail::ListImpl<IValue>::list_type(),
-  c10::nullopt)) {}
+    typename detail::ListImpl<IValue>::list_type(),
+    c10::nullopt)) {
+}
 
 template<class T>
 List<T>::List(ArrayRef<T> values)
 : List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>(
     typename detail::ListImpl<typename List<T>::StorageT>::list_type(),
     getTypePtr<T>())) {
+  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType) instead, or if you absolutely have to, use c10::impl::GenericList(c10::impl::deprecatedUntypedList()).");
   impl_->list.reserve(values.size());
   for (const T& element : values) {
     impl_->list.push_back(element);
   }
 }
 
-template<>
-inline List<IValue>::List(ArrayRef<IValue> values)
-: List(make_intrusive<detail::ListImpl<IValue>>(
-    values.vec(),
-    c10::nullopt)) {
-}
-
 template<class T>
 List<T>::List(std::initializer_list<T> initial_values)
 : List(ArrayRef<T>(initial_values)) {
+  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType) instead, or if you absolutely have to, use c10::impl::GenericList(c10::impl::deprecatedUntypedList()).");
 }
 
 template<class T>
