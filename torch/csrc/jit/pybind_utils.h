@@ -39,6 +39,13 @@ namespace jit {
 // locations in libtorch code rather than user code.
 
 using tracer::TypedStack;
+
+inline std::shared_ptr<script::CompilationUnit> get_python_cu() {
+  return py::module::import("torch.jit")
+      .attr("_python_cu")
+      .cast<std::shared_ptr<script::CompilationUnit>>();
+}
+
 struct TypedIValue : public std::pair<IValue, TypePtr> {
   using pair::pair;
 
@@ -559,7 +566,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
-    auto pyCu = script::CompilationUnit::_get_python_cu();
+    auto pyCu = get_python_cu();
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
