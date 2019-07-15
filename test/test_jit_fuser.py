@@ -276,7 +276,6 @@ class TestFuser(JitTestCase):
             self.assertAllFused(graph)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
     def test_dropout(self):
         def func(x):
             x = torch.nn.functional.dropout(x)
