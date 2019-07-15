@@ -21,12 +21,6 @@ ALL_QINT_TYPES = (
     (torch.qint32, 0),  # We enforce zero_point = 0 for this case.
 )
 
-UNDERLYING_TYPE = {
-    torch.quint8: torch.uint8,
-    torch.qint8: torch.int8,
-    torch.qint32: torch.int32
-}
-
 """Strategy for generating test cases for quantized tensors.
 The resulting tensor is in float32 format.
 
@@ -63,8 +57,8 @@ def qtensor(draw, shapes, dtypes=None, float_min=None, float_max=None):
         _zp_enforce = None
     elif len(_dtypes) == 2:
         quantized_type, _zp_enforce = _dtypes[:2]
-    _type_info = torch.iinfo(UNDERLYING_TYPE[quantized_type])
-    qmin, qmax = _type_info.min, _type_info.max
+    _qtype_info = torch.iinfo(quantized_type)
+    qmin, qmax = _qtype_info.min, _qtype_info.max
     # Resolve zero_point
     if _zp_enforce is not None:
         zero_point = _zp_enforce
@@ -80,9 +74,16 @@ def qtensor(draw, shapes, dtypes=None, float_min=None, float_max=None):
     # Resolve scale
     scale = draw(st.floats(min_value=float_eps,
                            max_value=float_max))
+
+    adjustment = 1 + float_eps
+    _long_type_info = torch.iinfo(torch.long)
+    long_min, long_max = _long_type_info.min / adjustment, _long_type_info.max / adjustment
+    # make sure intermediate results are within the range of long
+    min_value = max((long_min - zero_point) * scale, (long_min / scale + zero_point), float_min)
+    max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point), float_max)
     # Resolve the tensor
     Xhy = draw(stnp.arrays(dtype=np.float32,
-                           elements=st.floats(min_value=float_min, max_value=float_max),
+                           elements=st.floats(min_value=min_value, max_value=max_value),
                            shape=shape))
     return Xhy, (scale, zero_point), (qmin, qmax), quantized_type
 
