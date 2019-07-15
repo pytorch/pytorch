@@ -1413,8 +1413,8 @@ struct CAFFE2_API ClassType : public NamedType {
     methods_.push_back(method);
   }
 
-  std::weak_ptr<CompilationUnit> compilation_unit();
-  std::weak_ptr<const CompilationUnit> compilation_unit() const;
+  std::shared_ptr<CompilationUnit> compilation_unit();
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
   size_t numAttributes() const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());

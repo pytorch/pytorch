@@ -438,9 +438,7 @@ inline IValue toIValue(
       auto classType = type->expect<ClassType>();
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
-      auto cu = classType->compilation_unit().lock();
-      // TODO this should be python cu
-      TORCH_INTERNAL_ASSERT(cu);
+      auto cu = classType->compilation_unit();
       auto userObj = c10::ivalue::Object::create(
           c10::StrongTypePtr(cu, classType), numAttrs);
 
