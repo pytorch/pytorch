@@ -87,7 +87,7 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
-        if divisor_override.node().kind() != 'prim::Constant':
+        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
             return _unimplemented(name, "divisor_override")
         if not stride:
             stride = kernel_size
