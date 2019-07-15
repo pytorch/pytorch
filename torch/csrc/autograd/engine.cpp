@@ -51,6 +51,11 @@ static thread_local bool checkpoint_valid = true;
 // engine thread affinity to the device can break this invariant, and we depend
 // on it in a few places (e.g. AccumulateGrad function).
 
+// Number of nested reentrant backwards calls currently on this thread
+static thread_local int current_depth = 0;
+// Total nested reentrant backwards calls over all threads for workder_device
+static thread_local int total_depth = 0;
+
 struct FunctionTask {
   GraphTask* base_;
   std::shared_ptr<Function> fn_;
@@ -61,6 +66,8 @@ struct FunctionTask {
   // When worker receives a task with isShutdownTask = true, it will immediately
   // exit. The engine sends a shutdown task to every queue upon its destruction.
   bool isShutdownTask_;
+
+  int getReentrantDepth() const;
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
     : base_(base)
@@ -79,8 +86,10 @@ struct CompareFunctionTaskTime {
       return false;
     } else if (!t2.fn_) {
       return true;
-    } else {
+    } else if (t1.getReentrantDepth() == t2.getReentrantDepth()) {
       return t1.fn_->sequence_nr() < t2.fn_->sequence_nr();
+    } else {
+      return t1.getReentrantDepth() < t2.getReentrantDepth();
     }
   }
 };
@@ -117,22 +126,15 @@ struct ReadyQueue {
 // because then all of our backward executions (including the one we
 // just started) will deadlock!
 //
-// Here's our cunning idea: instead of blocking, just get back to work
-// on whatever task queue you should have been working on previously
-// (this is saved via the thread local variable worker_device)!  There are
-// "simply" two things you have to arrange for:
+// We maintain a pool of threads waiting for work to do
+// When a reentrant backwards call occurs, the current thread blocks
+// and a thread from the pool is woken up to complete the blocking tasks and an
+// any other tasks that would have been assigned to that worker. If there are no
+// threads available, a new thread is spawned. The new thread will continue
+// processing tasks from the same ReadyQueue as the parent worker
 //
-//  - We have to promptly kick ourselves out of the thread_main() loop
-//    when our graph_task complete, because we need to unblock the
-//    parent function tasks that started the reentrant execution in
-//    the first place.  This is why thread_main() takes an optional
-//    graph_task as input.
-//
-//  - When we finish a GraphTask, we have to make sure we wake up the worker
-//    thread so that it actually has a chance to exit the thread_main()
-//    loop.  Thus the faffing about in thread_main() after
-//    evaluate_function() completes.
-
+// When the GraphTask is finished, the parent worker thread that is waiting on
+// the task is notified and the current thread returns to the pool.
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
@@ -181,20 +183,27 @@ struct GraphTask {
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
-  // Safe to read owner_ without synchronizaton
+  // Safe to read owner_ and reentrant_depth_ without synchronizaton
   int owner_;
+  // The number of parent graph tasks for this graph task
+  const int reentrant_depth_;
 
   bool can_checkpoint() {
     return exec_info_.empty();
   }
 
-  GraphTask(bool keep_graph, bool grad_mode)
+  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth)
     : has_error_(false)
     , outstanding_tasks_(0)
     , keep_graph_(keep_graph)
     , grad_mode_(grad_mode)
-    , owner_(NO_DEVICE) {}
+    , owner_(NO_DEVICE)
+    , reentrant_depth_(reentrant_depth) {}
 };
+
+int FunctionTask::getReentrantDepth() const {
+  return base_->reentrant_depth_;
+}
 
 auto ReadyQueue::push(FunctionTask item) -> void {
   {
@@ -223,7 +232,8 @@ auto ReadyQueue::pop() -> FunctionTask {
   return task;
 }
 
-Engine::Engine() = default;
+// This limit is based on the default python recursion limit which is 1000
+Engine::Engine() : max_recursion_depth_(100) {}
 
 // Send shutdown tasks to all ReadyQueues if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest
@@ -240,6 +250,26 @@ Engine::~Engine() {
     }
   }
   // Othewise threads are leaked
+}
+
+void Engine::set_device(int device) {
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with cuda, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  //
+  // Don't use DeviceGuard here because its destructor may be called before the
+  // device is reset. This is fine because the device is thread local.
+  if (device != -1) {
+    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      if (impl && device < impl->deviceCount()) {
+        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
+      }
+    }
+  }
+  worker_device = device;
 }
 
 auto Engine::thread_init(int device) -> void {
@@ -261,31 +291,7 @@ auto Engine::thread_init(int device) -> void {
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
-  //
-  // NB: We MUST NOT construct the guard for device -1,
-  // as in some settings we compile with cuda, but
-  // have lazy stubs for CUDA functionality (so actually
-  // attempting to setup a guard(-1) will cause an
-  // error, because it will still query cudaGetDevice).
-  //
-  // NB: These are not OptionalCUDAGuard/etc because engine.cpp
-  // is built as part of the CPU-only library; so we need to
-  // dynamic dispatch.
-  //
-  // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
-  // are movable.
-
-  // Don't use DeviceGuard here because its destructor may be called before the
-  // device is reset. This is fine because the device is thread local.
-  if (device != -1) {
-    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
-      auto* impl = c10::impl::device_guard_impl_registry[i].load();
-      if (impl && device < impl->deviceCount()) {
-        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
-      }
-    }
-  }
-  worker_device = device;
+  set_device(device);
   thread_main(nullptr);
 }
 
@@ -351,6 +357,33 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         }
       }
     }
+  }
+
+  // When current_depth is 0 this worker thread is done and we need to notify
+  // the parent thread waiting on the graph_task
+  // NOTE: An edge case for this is when reentrant calls are repeatedly made in
+  // a thread which is at its maximum stack depth and they keep exiting right
+  // after. We will always switch to a new thread for each call, so, we'll keep
+  // oscillating between the two threads.
+  if (graph_task && current_depth == 0) {
+    graph_task->not_done_.notify_all();
+  }
+}
+
+void Engine::reentrant_thread_init() {
+  at::init_num_threads();
+  auto tp_shared= thread_pool_shared_;
+  while(true) {
+    std::unique_lock<std::mutex> lk(tp_shared->mutex_);
+    ++thread_pool_shared_->num_workers_;
+    tp_shared->work_.wait(lk, [&tp_shared]{ return !tp_shared->graphtasks_queue_.empty();});
+    --thread_pool_shared_->num_workers_;
+    auto graph_task = tp_shared->graphtasks_queue_.front();
+    tp_shared->graphtasks_queue_.pop();
+    lk.unlock();
+    set_device(graph_task->owner_);
+    total_depth = graph_task->reentrant_depth_;
+    thread_main(graph_task);
   }
 }
 
@@ -623,7 +656,7 @@ auto Engine::execute(const edge_list& roots,
   // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
-  GraphTask graph_task(keep_graph, create_graph);
+  GraphTask graph_task(keep_graph, create_graph, worker_device == NO_DEVICE ? 0 : total_depth+1);
   // Lock mutex while GraphTask is being set up
   std::unique_lock<std::mutex> lock(graph_task.mutex_);
 
@@ -642,12 +675,24 @@ auto Engine::execute(const edge_list& roots,
       return graph_task.outstanding_tasks_.load() == 0;
     });
   } else {
-    // Get back to work while we wait for our new graph_task to
-    // complete!
-    // See Note [Reentrant backwards]
     graph_task.owner_ = worker_device;
-    lock.unlock();
-    thread_main(&graph_task);
+    ++total_depth;
+    if(current_depth >= max_recursion_depth_){
+      // See Note [Reentrant backwards]
+      // If reached the max depth, switch to a different thread
+      add_thread_pool_task(&graph_task);
+      graph_task.not_done_.wait(lock, [&graph_task]{
+        return graph_task.outstanding_tasks_.load() == 0;
+      });
+    } else {
+      // Get back to work while we wait for our new graph_task to
+      // complete!
+      ++current_depth;
+      lock.unlock();
+      thread_main(&graph_task);
+      --current_depth;
+    }
+    --total_depth;
   }
 
   // Check for an exception while running backwards
@@ -736,10 +781,31 @@ auto Engine::start_threads() -> void {
   ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues_)
     queue.reset(new ReadyQueue());
+
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+
   for (int i = 0; i < num_threads; ++i) {
     std::thread t(&Engine::thread_init, this, i - 1);
     t.detach();
   }
+}
+
+void Engine::add_thread_pool_task(GraphTask *graph_task) {
+  std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
+  // There may already be some items on the graphtasks_queue_ added by other
+  // threads but not enough workers to get to the the new task that will be
+  // added
+  bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
+  thread_pool_shared_->graphtasks_queue_.push(graph_task);
+  // Don't need to be holding the lock while actually creating the thread
+  lck.unlock();
+  if (create_thread) {
+    std::thread t(&Engine::reentrant_thread_init, this);
+    t.detach();
+  }
+  // This works even if new thread is created because wait() will test the
+  // predicate before waiting
+  thread_pool_shared_->work_.notify_one();
 }
 
 void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) {

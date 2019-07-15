@@ -131,9 +131,7 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
-  auto& default_type = torch::tensors::get_default_tensor_type();
-  auto default_scalar_type = torch::tensors::get_default_scalar_type();
-  auto tensor = torch::utils::legacy_tensor_ctor(default_type, default_scalar_type, args, kwargs);
+  auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_tensor_type_id(), torch::tensors::get_default_scalar_type(), args, kwargs);
   return THPVariable_NewWithVar(type, std::move(tensor));
   END_HANDLE_TH_ERRORS
 }
@@ -150,8 +148,18 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = as_variable_ref(r.tensor(1)).tensor_data();
-  auto var = make_variable(data, r.toBool(2));
+  auto data = as_variable_ref(r.tensor(1)).detach();
+  // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
+  // allow the following use case for backward compatibility:
+  //
+  // ```python
+  // rnn = torch.nn.RNN(100, 100, 2)
+  // # The following calls `torch._cudnn_rnn_flatten_weight(rnn._flat_weights, ...)`,
+  // # which changes storage of `rnn`'s weights in-place
+  // rnn.flatten_parameters()
+  // ```
+  data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
+  auto var = data.set_requires_grad(r.toBool(2));
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
   END_HANDLE_TH_ERRORS
 }
@@ -254,15 +262,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
       "can't assign Variable as its own grad");
 
   auto& grad = ((THPVariable*)py_grad)->cdata;
-  bool gradIsSparse = false;
-  auto backend = var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU;
-  auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.scalar_type());
-  if (typeOpt) {
-       auto& sparseType = at::globalContext().getNonVariableType(backend, var.scalar_type());
-       auto& gradType = at::globalContext().getNonVariableType(grad.type().backend(), grad.scalar_type());
-       gradIsSparse = gradType == sparseType;
-  }
-
+  bool gradIsSparse = var.dtype() == grad.dtype() && toSparse(tensorTypeIdToBackend(var.type_id())) == tensorTypeIdToBackend(grad.type_id());
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
       "assigned grad has data of a different type");
   if (var.is_cuda()) {
@@ -311,7 +311,7 @@ PyObject *THPVariable_get_ndim(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 PyObject *THPVariable_get_names(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -430,6 +430,14 @@ PyObject *THPVariable_is_sparse(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_mkldnn(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_mkldnn());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_quantized(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -478,12 +486,13 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
+  {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   {"names", (getter)THPVariable_get_names, nullptr, nullptr, nullptr},
 #endif
   {nullptr}
@@ -552,10 +561,14 @@ void initTensorImplConversion(PyObject* module) {
     auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
-    TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
-    return py::cast(torch::autograd::Variable(
-        torch::autograd::make_variable(std::move(tensor), false)));
+    // For now, there is no guarantee that the tensors returned from Caffe2 ops
+    // are not Variables, because inputs to Caffe2 ops can be Variables.
+    //
+    // In the near future, once we make every tensor a Variable, we can remove
+    // the `tensor.is_variable()` check and directly return `tensor` as a Variable.
+    return py::cast(tensor.is_variable() ? torch::autograd::Variable(tensor) :
+      torch::autograd::make_variable(std::move(tensor), false));
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions
   m.def("_tensor_impl_raw_handle", [](torch::autograd::Variable* t) -> void* {

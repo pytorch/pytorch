@@ -19,4 +19,4 @@ std::ostream& operator<<(
                 << options.requires_grad() << ")";
 }
 
-} // namespace at 
+} // namespace at

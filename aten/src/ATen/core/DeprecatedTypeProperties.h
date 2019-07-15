@@ -12,7 +12,6 @@
 namespace at {
 
 class Tensor;
-struct Type;
 
 // This class specifies a Backend and a ScalarType. Currently, it primarily
 // serves as a replacement return value for Tensor::type(). Previously,
@@ -133,8 +132,6 @@ class CAFFE2_API DeprecatedTypeProperties {
   Tensor copy(const Tensor & src, bool non_blocking=false, c10::optional<Device> to_device={}) const;
 
  private:
-  Type & getDispatchType() const;
-
   Backend backend_;
   ScalarType scalar_type_;
   bool is_variable_;

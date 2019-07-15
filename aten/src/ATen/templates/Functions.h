@@ -3,8 +3,6 @@
 // ${generated_comment}
 
 #include <c10/core/Scalar.h>
-#include <ATen/Type.h>
-#include <ATen/TypeExtendedInterface.h>
 #include <ATen/Tensor.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/Generator.h>

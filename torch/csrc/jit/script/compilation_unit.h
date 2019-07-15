@@ -30,7 +30,11 @@ struct SugaredValue;
 struct Resolver;
 
 using ResolverPtr = std::shared_ptr<Resolver>;
-using Self = std::function<std::shared_ptr<SugaredValue>(Value*)>;
+struct Self {
+  virtual ~Self() {}
+  virtual std::shared_ptr<SugaredValue> makeSugared(Value* v) const = 0;
+  virtual ClassTypePtr getClassType() const = 0;
+};
 
 // A CompilationUnit is a list of named Functions
 // with helper methods to iterate the list, or invoke the function.
@@ -44,17 +48,24 @@ struct TORCH_API CompilationUnit {
   explicit CompilationUnit(const std::string& source);
   CompilationUnit() = default;
 
-  std::shared_ptr<Function> find_function(const std::string& name) const {
+  CompilationUnit& operator=(CompilationUnit&&) = default;
+  CompilationUnit(CompilationUnit&&) = default;
+  CompilationUnit& operator=(const CompilationUnit&) = delete;
+  CompilationUnit(const CompilationUnit&) = delete;
+
+  Function* find_function(const c10::QualifiedName& name) const {
     auto it = dict_.find(name);
-    if (it == dict_.end())
+    if (it == dict_.end()) {
       return nullptr;
-    return functions_[it->second];
+    }
+    return functions_[it->second].get();
   }
 
-  Function& get_function(const std::string& name) const {
-    if (auto r = find_function(name))
+  Function& get_function(const c10::QualifiedName& name) const {
+    if (auto r = find_function(name)) {
       return *r;
-    AT_ERROR("attempted to get undefined function ", name);
+    }
+    TORCH_CHECK(false, "attempted to get undefined function ", name.name());
   }
 
   void set_optimized(bool o) {
@@ -66,31 +77,39 @@ struct TORCH_API CompilationUnit {
   }
 
   // for historic reasons, these are defined in compiler.cpp
-  void define(
+  // Returns the list of Function's just defined.
+  std::vector<Function*> define(
+      const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Def>& definitions,
       const std::vector<ResolverPtr>&
           resolvers, /* determines how we handle free
                      variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
-      const Self& self);
+      const Self* self);
 
   // same as above but parse the definitions from source
-  void define(
+  // Returns the list of Function's just defined.
+  std::vector<Function*> define(
+      // prefix namespace to put all the defined functions into
+      const c10::optional<c10::QualifiedName>& prefix,
       const std::string& source,
       const ResolverPtr& resolver,
-      const Self& self);
+      const Self* self);
 
-  std::shared_ptr<Function> create_function(
-      std::string name,
+  Function* create_function(
+      c10::QualifiedName name,
       std::shared_ptr<Graph> graph) {
-    auto fn = std::make_shared<Function>(
+    auto fn = torch::make_unique<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
-    register_function(fn);
-    return fn;
+    auto ret = fn.get();
+    register_function(std::move(fn));
+    return ret;
   }
 
-  const std::vector<std::shared_ptr<Function>>& get_functions() const {
-    return functions_;
+  std::vector<Function*> get_functions() const {
+    return fmap(functions_, [](const std::unique_ptr<Function>& fn) {
+      return fn.get();
+    });
   }
 
   /// Run a method from this compilation.
@@ -107,7 +126,7 @@ struct TORCH_API CompilationUnit {
   /// @return An IValue containing the return value (or values if it is a tuple)
   /// from the method
   template <typename... Types>
-  IValue run_method(const std::string& method_name, Types&&... args) {
+  IValue run_method(const c10::QualifiedName& method_name, Types&&... args) {
     return get_function(method_name)({IValue(std::forward<Types>(args))...});
   }
 
@@ -156,40 +175,42 @@ struct TORCH_API CompilationUnit {
    * Right now there is a single compilation unit that owns all ScriptClasses
    * defined in Python. Below are accessors methods for it.
    */
-  static const CompilationUnit& _get_python_cu_const() {
+  static std::shared_ptr<CompilationUnit> _get_python_cu_const() {
     return _get_python_cu();
   }
-  static CompilationUnit& _get_python_cu() {
-    static CompilationUnit pyCu;
+  static std::shared_ptr<CompilationUnit> _get_python_cu() {
+    static auto pyCu = std::make_shared<CompilationUnit>();
     return pyCu;
   }
   // For testing: clear all Python-defined classes to ensure that unit tests
   // have isolation.
   static void _clear_python_cu() {
-    _get_python_cu().classes_.clear();
+    _get_python_cu()->classes_.clear();
+    _get_python_cu()->functions_.clear();
+    _get_python_cu()->dict_.clear();
   }
 
  private:
-  std::shared_ptr<Function> define(
+  std::unique_ptr<Function> define(
+      const c10::optional<c10::QualifiedName>& prefix,
       const Def& def,
       const ResolverPtr& resolver,
-      const Self& self,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>&
-          function_table) const;
+      const Self* self,
+      const std::unordered_map<std::string, Function*>& function_table) const;
 
-  Function& register_function(std::shared_ptr<Function> fn) {
+  Function& register_function(std::unique_ptr<Function> fn) {
     TORCH_CHECK(
-        0 == dict_.count(fn->name()),
+        0 == dict_.count(fn->qualname()),
         "method '",
-        fn->name(),
+        fn->qualname().qualifiedName(),
         "' already defined.");
     functions_.emplace_back(std::move(fn));
-    dict_[functions_.back()->name()] = functions_.size() - 1;
+    dict_[functions_.back()->qualname()] = functions_.size() - 1;
     return *functions_.back();
   }
-  std::vector<std::shared_ptr<Function>> functions_;
+  std::vector<std::unique_ptr<Function>> functions_;
   // for fast lookup
-  std::unordered_map<std::string, size_t> dict_;
+  std::unordered_map<c10::QualifiedName, size_t> dict_;
   bool optimized_ = true;
 
   // [class owernship] Right now there aree two relationships between classes
@@ -201,5 +222,20 @@ struct TORCH_API CompilationUnit {
 };
 
 } // namespace script
+
+// An owning pointer to a Function. Just a pair of a raw Function ptr and it's
+// owning CU. We need this because pybind requires a ref-counted way to refer to
+// Functions.
+struct StrongFunctionPtr {
+  StrongFunctionPtr(
+      std::shared_ptr<script::CompilationUnit> cu,
+      Function* function)
+      : cu_(std::move(cu)), function_(function) {
+    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(function_);
+  }
+  std::shared_ptr<script::CompilationUnit> cu_;
+  Function* function_;
+};
 } // namespace jit
 } // namespace torch

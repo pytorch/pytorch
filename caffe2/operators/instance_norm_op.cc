@@ -1,127 +1,112 @@
 #include "caffe2/operators/instance_norm_op.h"
+
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
-// Here lives two separate implementations of the forward and backward passes of
-// instance normalization, one for NHWC order and the other for NCHW order.
-// Two implementations allow us to make use of Eigen vectorized operations
-// without an expensive tensor transpose operation.
+namespace {
 
-template <typename T, typename Context>
-bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  const auto& X = Input(INPUT);
+template <typename T>
+void ComputeFusedParams(
+    const int64_t N,
+    const int64_t C,
+    const T* mean,
+    const T* rstd,
+    const T* gamma,
+    const T* beta,
+    T* scale,
+    T* bias) {
+  ConstEigenArrayMap<T> mean_arr(mean, C, N);
+  ConstEigenArrayMap<T> rstd_arr(rstd, C, N);
+  ConstEigenVectorArrayMap<T> gamma_arr(gamma, C);
+  ConstEigenVectorArrayMap<T> beta_arr(beta, C);
+  EigenArrayMap<T> scale_arr(scale, C, N);
+  EigenArrayMap<T> bias_arr(bias, C, N);
+  scale_arr = rstd_arr.colwise() * gamma_arr;
+  bias_arr = (-scale_arr * mean_arr).colwise() + beta_arr;
+}
 
-  CAFFE_ENFORCE(
-      !IsInputOutputAlias(INPUT, OUTPUT),
-      "Can't run InstanceNorm NHWC in-place");
-
-  const int N = X.dim32(0);
-  const int H = X.dim32(1);
-  const int W = X.dim32(2);
-  const int C = X.dim32(3);
-  const size_t offset = H * W * C;
-  CAFFE_ENFORCE_EQ(Input(SCALE).numel(), C);
-  CAFFE_ENFORCE_EQ(Input(BIAS).numel(), C);
-
-  auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
-  Tensor* mean;
-  if (OutputSize() >= 2) {
-    mean = Output(MEAN, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-  } else {
-    ReinitializeTensor(&mean_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-    mean = &mean_;
+template <typename T>
+void InstanceNormForwardNHWC(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y) {
+  ConstEigenArrayMap<T> scale_arr(scale, C, N);
+  ConstEigenArrayMap<T> bias_arr(bias, C, N);
+  for (int64_t i = 0; i < N; ++i) {
+    ConstEigenArrayMap<T> X_arr(X + i * HxW * C, C, HxW);
+    EigenArrayMap<T> Y_arr(Y + i * HxW * C, C, HxW);
+    Y_arr = (X_arr.colwise() * scale_arr.col(i)).colwise() + bias_arr.col(i);
   }
-  Tensor* inv_stdev;
-  if (OutputSize() >= 3) {
-    inv_stdev = Output(INV_STDEV, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-  } else {
-    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-    inv_stdev = &inv_stdev_;
-  }
+}
 
-  ConstEigenVectorArrayMap<T> scale(Input(SCALE).template data<T>(), C);
-  ConstEigenVectorArrayMap<T> bias(Input(BIAS).template data<T>(), C);
-  for (int n = 0; n < N; ++n) {
-    ConstEigenArrayMap<T> Xmat(X.template data<T>() + offset * n, C, H * W);
-    EigenArrayMap<T> Ymat(Y->template mutable_data<T>() + offset * n, C, H * W);
-    EigenVectorArrayMap<T> mean_arr(
-        mean->template mutable_data<T>() + n * C, C);
-    EigenVectorArrayMap<T> inv_stdev_arr(
-        inv_stdev->template mutable_data<T>() + n * C, C);
+} // namespace
 
-    // The following effectively does the row wise mean computation:
-    //   mean_arr = Xmat.rowwise().mean();
-    // but manually vectorizes over columns.
-    mean_arr = Xmat.col(0);
-    for (int i = 1; i < H * W; ++i) {
-      mean_arr += Xmat.col(i);
+template <>
+bool InstanceNormOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const float* X,
+    const float* gamma,
+    const float* beta,
+    float* Y,
+    float* mean,
+    float* rstd) {
+  ConstEigenArrayMap<float> X_arr(X, HxW, N * C);
+  for (int64_t i = 0; i < N * C; ++i) {
+    const float mean_val = X_arr.col(i).mean();
+    float rstd_val =
+        std::max(X_arr.col(i).square().mean() - mean_val * mean_val, 0.0f);
+    rstd_val = 1.0f / std::sqrt(rstd_val + epsilon_);
+    const int64_t c = i % C;
+    const float scale = gamma[c] * rstd_val;
+    const float bias = beta[c] - scale * mean_val;
+    for (int64_t j = 0; j < HxW; ++j) {
+      Y[i * HxW + j] = scale * X[i * HxW + j] + bias;
     }
-    mean_arr *= 1. / (H * W);
-    Ymat = Xmat.colwise() - mean_arr;
-    // The following effectively does row wise squared norm computation,
-    // but manually vectorizes over columns similar to the mean case.
-    inv_stdev_arr = Ymat.col(0) * Ymat.col(0);
-    for (int i = 1; i < H * W; ++i) {
-      inv_stdev_arr += Ymat.col(i) * Ymat.col(i);
-    }
-    inv_stdev_arr = (inv_stdev_arr / (H * W) + epsilon_).sqrt().inverse();
-    Ymat = (Ymat.colwise() * (inv_stdev_arr * scale)).colwise() + bias;
+    mean[i] = mean_val;
+    rstd[i] = rstd_val;
   }
   return true;
 }
 
-template <typename T, typename Context>
-bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const auto& X = Input(INPUT);
-  const auto& scale = Input(SCALE);
-  const auto& bias = Input(BIAS);
-
-  const int N = X.dim32(0);
-  const int C = X.dim32(1);
-  const int H = X.dim32(2);
-  const int W = X.dim32(3);
-  CAFFE_ENFORCE_EQ(scale.numel(), C);
-  CAFFE_ENFORCE_EQ(bias.numel(), C);
-
-  auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
-  Tensor* mean;
-  if (OutputSize() >= 2) {
-    mean = Output(MEAN, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-  } else {
-    ReinitializeTensor(&mean_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-    mean = &mean_;
+template <>
+bool InstanceNormOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const float* X,
+    const float* gamma,
+    const float* beta,
+    float* Y,
+    float* mean,
+    float* rstd) {
+  ReinitializeTensor(&scale_, {N, C}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&bias_, {N, C}, at::dtype<float>().device(CPU));
+  float* scale_data = scale_.template mutable_data<float>();
+  float* bias_data = bias_.template mutable_data<float>();
+  const float c = 1.0f / static_cast<float>(HxW);
+  EigenArrayMap<float> mean_arr(mean, C, N);
+  EigenArrayMap<float> rstd_arr(rstd, C, N);
+  for (int64_t n = 0; n < N; ++n) {
+    ConstEigenArrayMap<float> X_arr(X + n * HxW * C, C, HxW);
+    mean_arr.col(n) = X_arr.col(0);
+    rstd_arr.col(n) = X_arr.col(0).square();
+    for (int64_t i = 1; i < HxW; ++i) {
+      mean_arr.col(n) += X_arr.col(i);
+      rstd_arr.col(n) += X_arr.col(i).square();
+    }
   }
-
-  Tensor* inv_stdev;
-  if (OutputSize() >= 3) {
-    inv_stdev = Output(INV_STDEV, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-  } else {
-    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-    inv_stdev = &inv_stdev_;
-  }
-
-  const auto* Xdata = X.template data<T>();
-  auto* Ydata = Y->template mutable_data<T>();
-  const auto* scale_data = scale.template data<T>();
-  const auto* bias_data = bias.template data<T>();
-  auto* mean_data = mean->template mutable_data<T>();
-  auto* inv_stdev_data = inv_stdev->template mutable_data<T>();
-
-  // TODO: benchmark parallelization strategies.
-  for (auto i = 0; i < N * C; ++i) {
-    ConstEigenVectorArrayMap<T> Xi(Xdata + H * W * i, H * W);
-    const T Xi_mean = Xi.mean();
-    const T squared_norm = (Xi - Xi_mean).matrix().squaredNorm();
-    const T inv_stdev = 1.0 / std::sqrt(squared_norm / (H * W) + epsilon_);
-    mean_data[i] = Xi_mean;
-    inv_stdev_data[i] = inv_stdev;
-    EigenVectorArrayMap<T> Yi(Ydata + H * W * i, H * W);
-    const T channel_scale = inv_stdev * scale_data[i % C];
-    const T channel_shift = bias_data[i % C] - Xi_mean * channel_scale;
-    Yi = Xi * channel_scale + channel_shift;
-  }
-
+  mean_arr *= c;
+  rstd_arr = ((rstd_arr * c - mean_arr.square()).max(0.0f) + epsilon_).rsqrt();
+  ComputeFusedParams<float>(
+      N, C, mean, rstd, gamma, beta, scale_data, bias_data);
+  InstanceNormForwardNHWC<float>(N, C, HxW, X, scale_data, bias_data, Y);
   return true;
 }
 
@@ -130,7 +115,7 @@ REGISTER_CPU_OPERATOR(InstanceNorm, InstanceNormOp<float, CPUContext>);
 OPERATOR_SCHEMA(InstanceNorm)
     .NumInputs(3)
     .NumOutputs(1, 3)
-    .AllowInplace({{0,0}})
+    .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 The *InstanceNorm* op applies Instance Normalization over a 4D input as described in [Instance Normalization: The Missing Ingredient for Fast Stylization](https://arxiv.org/abs/1607.08022).
 
@@ -206,8 +191,12 @@ output:
 </details>
 
 )DOC")
-    .Arg("epsilon", "*(type: float; default: 1e-5)* The epsilon value to use to avoid division by zero.")
-    .Arg("order", "*(type: string; default: \"NCHW\")* Specifies the order of the input data blob, where $N$ is batch size, $C$ is number of channels, $H$ is spatial height, and $W$ is spatial width. The only other valid option is \"NHWC\".")
+    .Arg(
+        "epsilon",
+        "*(type: float; default: 1e-5)* The epsilon value to use to avoid division by zero.")
+    .Arg(
+        "order",
+        "*(type: string; default: \"NCHW\")* Specifies the order of the input data blob, where $N$ is batch size, $C$ is number of channels, $H$ is spatial height, and $W$ is spatial width. The only other valid option is \"NHWC\".")
     .Input(0, "input", "The input 4-dimensional NCHW tensor to be operated on.")
     .Input(1, "scale", "The input 1-dimensional scale tensor of size *C*.")
     .Input(2, "bias", "The input 1-dimensional bias tensor of size *C*.")

@@ -398,7 +398,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
-Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, ScalarType dtype) {
+Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, optional<ScalarType> dtype) {
   return cumprod_backward(grad.to(input.scalar_type()), input, dim);
 }
 
@@ -423,10 +423,6 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
-}
-
-Tensor cumsum_backward(const Tensor &x, int64_t dim, ScalarType input_dtype) {
-  return cumsum_backward(x.to(input_dtype), dim);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
@@ -1711,28 +1707,28 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     auto glambda = grads[0];
     auto gv = grads[1];
 
-    auto vt = v.t();
+    auto vt = v.transpose(-2, -1);
 
     Tensor result;
     if (gv.defined()) {
-        Tensor F = lambda.unsqueeze(0).expand_as(self).clone();
-        F.sub_(at::unsqueeze(lambda, 1));
-        F.diagonal().fill_(INFINITY);
+        Tensor F = lambda.unsqueeze(-2).expand_as(self).clone();
+        F.sub_(at::unsqueeze(lambda, -1));
+        F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
         F.pow_(-1);
 
-        F.mul_(vt.mm(gv));
-        result = v.mm(F.mm(vt));
+        F.mul_(at::matmul(vt, gv));
+        result = at::matmul(v, at::matmul(F, vt));
     } else {
         result = at::zeros_like(self);
     }
 
     if (glambda.defined()) {
-        result.add_((v * glambda).mm(vt));
+        result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
     }
     if (upper) {
-        result = at::triu(result) + at::triu(result.t(), 1);
+        result = at::triu(result) + at::triu(result.transpose(-2, -1), 1);
     } else {
-        result = at::tril(result) + at::tril(result.t(), -1);
+        result = at::tril(result) + at::tril(result.transpose(-2, -1), -1);
     }
     return result;
 }

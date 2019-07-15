@@ -40,6 +40,7 @@ import onnx
 import caffe2.python.onnx.backend as c2
 
 from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
+from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 import verify
 
 skip = unittest.skip
@@ -51,7 +52,6 @@ def skipIfEmbed(func):
             raise unittest.SkipTest("Skip embed_params verify test")
         return func(self)
     return wrapper
-
 
 # def import_model(proto, input, workspace=None, use_gpu=True):
 #    model_def = onnx.ModelProto.FromString(proto)
@@ -116,7 +116,9 @@ model_urls = {
 }
 
 
-class TestCaffe2Backend(unittest.TestCase):
+class TestCaffe2Backend_opset9(unittest.TestCase):
+    from torch.onnx.symbolic_helper import _export_onnx_opset_version
+    opset_version = _export_onnx_opset_version
     embed_params = False
 
     def setUp(self):
@@ -153,7 +155,8 @@ class TestCaffe2Backend(unittest.TestCase):
 
         onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
                                       example_outputs=example_outputs,
-                                      do_constant_folding=False)
+                                      do_constant_folding=False,
+                                      opset_version=self.opset_version)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -183,7 +186,9 @@ class TestCaffe2Backend(unittest.TestCase):
 
         # Verify the model runs the same in Caffe2
         verify.verify(model, input, c2, rtol=rtol, atol=atol,
-                      example_outputs=example_outputs, do_constant_folding=do_constant_folding)
+                      example_outputs=example_outputs,
+                      do_constant_folding=do_constant_folding,
+                      opset_version=self.opset_version)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -549,15 +554,19 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(model, train=False, input=(x, model.hidden),
                             batch_size=batchsize, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_RNN_RELU(self):
         self.run_word_language_model("RNN_RELU")
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_LSTM(self):
         self.run_word_language_model("LSTM")
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_GRU(self):
         self.run_word_language_model("GRU")
 
@@ -601,12 +610,15 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_index_1d(self):
         self._test_index_generic(lambda input: input[0])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_1dimslice(self):
         self._test_index_generic(lambda input: input[0:1, :])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_sliceint(self):
         self._test_index_generic(lambda input: input[1, :])
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
@@ -652,6 +664,7 @@ class TestCaffe2Backend(unittest.TestCase):
         input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_erf(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -727,16 +740,19 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.MaxPool2d(5, padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_maxpool1d_ceil(self):
         model = nn.MaxPool1d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_maxpool2d_ceil(self):
         model = nn.MaxPool2d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 32, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_maxpool3d_ceil(self):
         model = nn.MaxPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
@@ -759,16 +775,19 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_avg_pool1D_ceil(self):
         model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
         x = torch.randn(1, 1, 7, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_avg_pool2D_ceil(self):
         model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 32, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_avg_pool3D_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
@@ -789,16 +808,19 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_adaptive_max_pool1D(self):
         model = torch.nn.AdaptiveMaxPool1d((5))
         x = torch.randn(20, 16, 50, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_adaptive_max_pool2D(self):
         model = torch.nn.AdaptiveMaxPool2d((5, 4))
         x = torch.randn(20, 16, 50, 32, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_adaptive_max_pool3D(self):
         model = torch.nn.AdaptiveMaxPool3d((5, 4, 3))
         x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
@@ -877,20 +899,6 @@ class TestCaffe2Backend(unittest.TestCase):
             x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
-    def test_layer_norm(self):
-        shape = (20, 5, 10, 10)
-
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-                self.ln = torch.nn.LayerNorm([5, 10, 10])
-
-            def forward(self, x):
-                return self.ln(x)
-
-        x = torch.randn(*shape)
-        self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
-
     def test_cosine_similarity(self):
         shape = (100, 128)
         x = torch.randn(*shape)
@@ -898,6 +906,7 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
                             input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_lstm_constant_folding(self):
         class LstmNet(nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -924,6 +933,7 @@ class TestCaffe2Backend(unittest.TestCase):
         model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_actual_test(model2, train=False, batch_size=batch_size2, input=input2, use_gpu=False, do_constant_folding=True)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_gru_constant_folding(self):
         class GruNet(nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -961,12 +971,14 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 3, 2, 1, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         model = nn.Upsample(size=[v * 2 for v in x.size()[2:]], mode='nearest')
         self.run_model_test(model, train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_interpolate_upsample(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -985,6 +997,7 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(model, train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([7, 8, 10])
     def test_interpolate_upsample_dynamic_sizes(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -1169,6 +1182,7 @@ class TestCaffe2Backend(unittest.TestCase):
         model = c2.prepare_zip_archive(f)
         model.run(X)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_neg_slice(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
@@ -1177,6 +1191,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(3, 4, 5)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_neg_slice_large(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
@@ -1186,6 +1201,7 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
     @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
+    @skipIfUnsupportedOpsetVersion([10])
     def test_neg_slice_large_negone(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
@@ -1194,6 +1210,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_dynamic_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1205,6 +1222,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_dynamic_slice_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1216,6 +1234,7 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(DynamicSliceModel(), train=False, input=(x,),
                             batch_size=BATCH_SIZE, use_gpu=False, example_outputs=example_output)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_dynamic_slice_to_the_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1257,6 +1276,15 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=(torch.ones(x.size()),))
 
+    def test_full(self):
+        class FullModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.full((3, 4), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        self.run_model_test(FullModel(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False)
+
     def test_full_script(self):
         class FullClass(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1267,6 +1295,7 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=FullClass()(x))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):
             def forward(self, x):
@@ -1275,6 +1304,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_model_test(WhereFunctional(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_where_method(self):
         class WhereMethod(torch.nn.Module):
             def forward(self, x):
@@ -1307,6 +1337,14 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(ReduceSumNegativeIndices(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_reduce_sum_multi_dim(self):
+        class ReduceSumMultipleAxes(torch.nn.Module):
+            def forward(self, x):
+                return x.sum(dim=(2, 3), keepdim=True)
+
+        x = torch.randn(16, 3, 256, 256)
+        self.run_model_test(ReduceSumMultipleAxes(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_group_norm(self):
         c = torch.randn(BATCH_SIZE, 6, 224)
         model = nn.GroupNorm(3, 6)
@@ -1321,6 +1359,7 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(RsubModel(), train=False, input=(x,),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_isnan(self):
         class IsNaNModel(torch.nn.Module):
             def forward(self, input):
@@ -1329,6 +1368,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.tensor([1.0, float('nan'), 2.0])
         self.run_model_test(IsNaNModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
@@ -1363,6 +1403,23 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(4, 4, requires_grad=True)
         self.run_model_test(MaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_max_keepdim(self):
+        class MaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.max(input, dim=1, keepdim=True)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(MaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_max_tensors(self):
+        class MaxModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.max(input, other)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(MaxModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
 
     def test_min(self):
         class MinModel(torch.nn.Module):
@@ -1421,6 +1478,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, requires_grad=True)
         self.run_model_test(ReshapeAsModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedOpsetVersion([10])
     def test_narrow(self):
         class NarrowModel(torch.nn.Module):
             def forward(self, input):
@@ -1808,6 +1866,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(1, 2, 3)
         self.run_model_test(DropoutModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_while(self):
         class WhileModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1868,6 +1927,7 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
                             example_outputs=(outputs,))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_nested_loops(self):
         class NestedLoopsModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1908,6 +1968,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
         variable_length[1], dropout[1]
     ]))
 
+    @skipIfUnsupportedOpsetVersion([10])
     def f(self):
         self._dispatch_rnn_test(
             base,
@@ -1919,7 +1980,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
             **extra_kwargs)
 
     f.__name__ = test_name
-    setattr(TestCaffe2Backend, f.__name__, f)
+    setattr(TestCaffe2Backend_opset9, f.__name__, f)
 
 
 def setup_rnn_tests():
@@ -1966,7 +2027,7 @@ def setup_rnn_tests():
             test_count += 1
 
     # sanity check that a representative example does exist
-    TestCaffe2Backend.test_gru_trilayer_forward_with_initial_state_without_sequence_lengths_with_dropout
+    TestCaffe2Backend_opset9.test_gru_trilayer_forward_with_initial_state_without_sequence_lengths_with_dropout
 
     # make sure no one accidentally disables all the tests without
     # noticing
@@ -1975,9 +2036,37 @@ setup_rnn_tests()
 
 # add the same test suite as above, but switch embed_params=False
 # to embed_params=True
-TestCaffe2BackendEmbed = type(str("TestCaffe2BackendEmbed"),
-                              (unittest.TestCase,),
-                              dict(TestCaffe2Backend.__dict__, embed_params=True))
+TestCaffe2BackendEmbed_opset9 = type(str("TestCaffe2BackendEmbed_opset9"),
+                                     (unittest.TestCase,),
+                                     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True))
+
+# opset 7 tests
+TestCaffe2Backend_opset7 = type(str("TestCaffe2Backend_opset7"),
+                                (unittest.TestCase,),
+                                dict(TestCaffe2Backend_opset9.__dict__, opset_version=7))
+TestCaffe2BackendEmbed_opset7 = type(str("TestCaffe2BackendEmbed_opset7"),
+                                     (unittest.TestCase,),
+                                     dict(TestCaffe2Backend_opset9.__dict__,
+                                          embed_params=True, opset_version=7))
+
+# opset 8 tests
+TestCaffe2Backend_opset8 = type(str("TestCaffe2Backend_opset8"),
+                                (unittest.TestCase,),
+                                dict(TestCaffe2Backend_opset9.__dict__, opset_version=8))
+TestCaffe2BackendEmbed_opset8 = type(str("TestCaffe2BackendEmbed_opset8"),
+                                     (unittest.TestCase,),
+                                     dict(TestCaffe2Backend_opset9.__dict__,
+                                          embed_params=True, opset_version=8))
+
+# opset 10 tests
+TestCaffe2Backend_opset10 = type(str("TestCaffe2Backend_opset10"),
+                                 (unittest.TestCase,),
+                                 dict(TestCaffe2Backend_opset9.__dict__, opset_version=10))
+
+TestCaffe2BackendEmbed_opset10 = type(str("TestCaffe2BackendEmbed_opset10"),
+                                      (unittest.TestCase,),
+                                      dict(TestCaffe2Backend_opset9.__dict__,
+                                           embed_params=True, opset_version=10))
 
 
 if __name__ == '__main__':
