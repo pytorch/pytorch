@@ -30,7 +30,8 @@ install_ubuntu() {
                    rocsparse \
                    hipsparse \
                    rocrand \
-                   hip-thrust \
+                   hipcub \
+                   rocthrust \
                    rccl
 
     # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
@@ -77,7 +78,8 @@ install_centos() {
                    hipsparse \
                    rocrand \
                    rccl \
-                   hip-thrust
+                   hipcub \
+                   rocthrust
 }
  
 # Install Python packages depending on the base OS
