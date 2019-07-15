@@ -1957,6 +1957,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
 
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, x):
