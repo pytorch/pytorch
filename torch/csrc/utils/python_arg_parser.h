@@ -158,6 +158,10 @@ struct PythonArgs {
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
+
+private:
+  at::Tensor tensor_slow(int i);
+  at::Scalar scalar_slow(int i);
 };
 
 struct FunctionSignature {
@@ -214,60 +218,25 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  PyObject* obj = args[i];
-  if (!obj) return at::Tensor();
-  if (!THPVariable_Check(obj)) {
-    at::Scalar scalar;
-    if (THPUtils_checkLong(obj)) {
-      scalar = at::Scalar(THPUtils_unpackLong(obj));
-    } else if (THPUtils_checkDouble(obj)) {
-      scalar = at::Scalar(THPUtils_unpackDouble(obj));
-    } else {
-      // NB: Are you here because you passed None to a Variable method,
-      // and you expected an undefined tensor to be returned?   Don't add
-      // a test for Py_None here; instead, you need to mark the argument
-      // as *allowing none*; you can do this by writing 'Tensor?' instead
-      // of 'Tensor' in the ATen metadata.
-      throw TypeError("expected Tensor as argument %d, but got %s", i,
-          Py_TYPE(obj)->tp_name);
-    }
-    auto tensor = scalar_to_tensor(scalar);
-    tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-    return autograd::make_variable(tensor);
+  if (args[i] && THPVariable_CheckExact(args[i])) {
+    return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
-  return reinterpret_cast<THPVariable*>(obj)->cdata;
+  return tensor_slow(i);
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
   if (!args[i]) return signature.params[i].default_scalar;
-  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
-    jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::NumberType::get());
-  }
-  return scalarWithDefault(i, signature.params[i].default_scalar);
+  return scalar_slow(i);
 }
 
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
   if (!args[i]) return default_scalar;
-  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
-  // handle most NumPy scalar types except np.float64.
-  if (THPVariable_Check(args[i])) {
-    return ((THPVariable*)args[i])->cdata.item();
-  }
-  if (THPUtils_checkLong(args[i])) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
-  }
-
-  if (PyComplex_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
-  }
-  return at::Scalar(THPUtils_unpackDouble(args[i]));
+  return scalar_slow(i);
 }
 
 inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
   if (!args[i]) return c10::nullopt;
-  return scalar(i);
+  return scalar_slow(i);
 }
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
@@ -388,11 +357,6 @@ inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& de
   if (!args[i]) return default_layout;
   return layout(i);
 }
-
-static std::string cuda_str = "cuda";
-static std::string cpu_str = "cpu";
-static std::string cuda_prefix = "cuda:";
-static std::string cpu_prefix = "cpu:";
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
