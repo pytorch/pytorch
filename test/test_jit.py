@@ -2,7 +2,7 @@ from __future__ import division
 
 # Torch
 from torch import Tensor
-from torch._C import TensorType, parse_ir, _propagate_shapes, _jit_python_print
+from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes, _jit_python_print
 from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
@@ -4077,10 +4077,6 @@ a")
         self.run_pass('constant_propagation', func2.graph)
         g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         g2 = _propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        self.assertTrue(g.findNode("aten::sum").output().type().kind()
-                        == "DimensionedTensorType")
-        self.assertTrue(g2.findNode("aten::sum").output().type().kind()
-                        == "DimensionedTensorType")
 
     def test_cat(self):
         @torch.jit.script
@@ -6008,6 +6004,267 @@ a")
 
         self.assertEqual(script_output, eager_output)
 
+    def test_nested_breaks(self):
+        def no_bool_loop_outputs(g):
+            # testing that the "did exit" transform values are not loop block
+            # outputs (and thus not affecting one loop from another)
+            loops = g.findAllNodes("prim::Loop")
+            for loop in loops:
+                for out in loop.outputs():
+                    self.assertTrue(out.type() != BoolType.get())
+
+        def test(y):
+            # type: (int)
+            ret = 0
+            tensor = torch.tensor(0)
+            while int(tensor.add_(1)) < 4:
+                if y == 1:
+                    continue
+                for i in range(y):
+                    continue
+                    ret += 1
+                ret += 1
+            return ret, int(tensor)
+
+        self.checkScript(test, (1,))
+        self.checkScript(test, (2,))
+        no_bool_loop_outputs(torch.jit.script(test).graph)
+
+        def foo():
+            y = torch.tensor(0)
+            z = 0
+            while int(y.add_(1)) < 20:
+                if int(y) < 10:
+                    for i in range(6):
+                        if i == 3:
+                            continue
+                        else:
+                            if i > 3:
+                                break
+                        z += 2
+                if int(y) == 18:
+                    break
+                if int(y) == 15:
+                    continue
+                z += 1
+            return int(y), z
+
+        no_bool_loop_outputs(torch.jit.script(foo).graph)
+        self.checkScript(foo, ())
+
+        def test_nested_two():
+            i = 0
+            k = 0
+            while i < 5:
+                for j in range(5):
+                    k += 1
+                    if j == 3:
+                        continue
+                i += 1
+                k += 1
+                if i == 4:
+                    break
+            return i, k
+
+        self.checkScript(test_nested_two, ())
+        no_bool_loop_outputs(torch.jit.script(test_nested_two).graph)
+
+    def test_breaks_continues(self):
+        def foo_continue(cond):
+            # type: (int)
+            j = 1
+            for i in range(5):
+                if i == cond:
+                    continue
+                j += 1
+            return j
+
+        def foo_break(cond):
+            # type: (int)
+            j = 1
+            for i in range(5):
+                if i == cond:
+                    break
+                j += 1
+            return j
+
+        for i in range(1, 4):
+            self.checkScript(foo_continue, (i,))
+            self.checkScript(foo_break, (i,))
+
+        def test_refine_outside_loop():
+            if True:
+                x = None
+            else:
+                x = 1
+            i = 0
+            j = 0
+            while (x is None or torch.jit._unwrap_optional(x) > 3):
+                if i < 3:
+                    if i < 3:
+                        x = torch.jit.annotate(Optional[int], None)
+                        i += 1
+                        continue
+                    x = 1
+                else:
+                    x = 1 if x is None else x
+                x = x + 1
+                j = x + x
+
+            return x, j
+
+        self.checkScript(test_refine_outside_loop, ())
+
+        def assign_after_break(y):
+            # type: (int)
+            x = 0
+            for i in range(y):
+                x = y * 2 + i
+                break
+                x = 4
+            return x
+
+        self.checkScript(assign_after_break, (1,))
+        self.checkScript(assign_after_break, (2,))
+        self.checkScript(assign_after_break, (3,))
+
+        def assign_after_break_nested(y):
+            # type: (int)
+            x = 0
+            for i in range(y):
+                if y == 1:
+                    x = 5
+                    break
+                    assert 1 == 2
+                else:
+                    x = x + 1
+                    break
+                    assert 1 == 2
+                x = -30
+                assert 1 == 2
+            return x
+
+        self.checkScript(assign_after_break_nested, (1,))
+        self.checkScript(assign_after_break_nested, (2,))
+        self.checkScript(assign_after_break_nested, (3,))
+
+        def may_break(y):
+            # type: (int)
+            x = 0
+            for i in range(y):
+                if y == 1:
+                    x = 5
+                else:
+                    x = x + 1
+                    break
+                x = -30
+            return x
+
+        self.checkScript(may_break, (1,))
+        self.checkScript(may_break, (2,))
+        self.checkScript(may_break, (3,))
+
+        def test(x, y):
+            # type: (int, int)
+            a = 1
+            while (x > 0):
+                if y == 3:
+                    for i in range(y):
+                        a += (1 % (i + 1))
+                        x -= 1
+                if x == 3:
+                    a = x * 3
+                    break
+                if x < 3:
+                    if x == 1:
+                        a -= 2
+                        x -= 1
+                        break
+                a -= 1
+                x -= 3
+            return a, x
+
+        self.checkScript(test, (10, 3))
+        self.checkScript(test, (10, 2))
+        self.checkScript(test, (3, 2))
+        self.checkScript(test, (5, 3))
+        self.checkScript(test, (2, 3))
+
+        def test_delete_after_break(x):
+            # type: (int)
+            a = 1
+            b = 1
+            for i in range(x):
+                a = i * 3
+                break
+                b = i * 5
+            return a, b
+
+        self.checkScript(test_delete_after_break, (0,))
+        self.checkScript(test_delete_after_break, (1,))
+
+        def test_will_break_after_guard(x):
+            # type: (int)
+            a = 1
+            for i in range(x):
+                if i == 4:
+                    a = 3
+                    break
+                a -= 1
+                break
+                assert 1 == 2
+                a -= -100
+            return a
+
+        self.checkScript(test_will_break_after_guard, (0,))
+        self.checkScript(test_will_break_after_guard, (2,))
+        self.checkScript(test_will_break_after_guard, (4,))
+
+        def test_varexit(cond):
+            # type: (int)
+            m = 0
+            for i in range(3):
+                if cond == 2:
+                    if cond == 2:
+                        m = 2
+                        break
+                    k = 1
+                else:
+                    k = 2
+                m += k
+            return m
+
+        # use of k tests the pathway where we have to insert unitialized
+        self.checkScript(test_varexit, (3,))
+        self.checkScript(test_varexit, (2,))
+
+        def test_break_true():
+            i = 0
+            while True:
+                i += 1
+                if i == 3:
+                    break
+            while False:
+                i += 1
+            return i
+
+        self.checkScript(test_break_true, ())
+
+    def test_break_continue_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Syntax"):
+            cu = torch.jit.CompilationUnit('''
+            def other_func(a):
+                break
+                ''')
+
+        with self.assertRaisesRegex(RuntimeError, "Syntax"):
+            cu = torch.jit.CompilationUnit('''
+            def other_func(a):
+                for i in range(5):
+                    def foo():
+                        break
+                ''')
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
@@ -6220,82 +6477,105 @@ a")
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
-        cell = torch.nn.LSTM(d_in, d_hid).float()
+        for cell in [
+            torch.nn.LSTM(d_in, d_hid).float(),
+            torch.nn.GRU(d_in, d_hid).float(),
+        ]:
 
-        # Replace parameter values s.t. the range of values is exactly
-        # 255, thus we will have 0 quantization error in the quantized
-        # GEMM call. This i s for testing purposes.
-        #
-        # Note that the current implementation does not support
-        # accumulation values outside of the range representable by a
-        # 16 bit integer, instead resulting in a saturated value. We
-        # must take care that in our test we do not end up with a dot
-        # product that overflows the int16 range, e.g.
-        # (255*127+255*127) = 64770. So, we hardcode the test values
-        # here and ensure a mix of signedness.
-        vals = [[100, -155],
-                [100, -155],
-                [-155, 100],
-                [-155, 100],
-                [100, -155],
-                [-155, 100],
-                [-155, 100],
-                [100, -155]]
-        num_chunks = 4  # TODO:change when we support more than just LSTM
-        vals = vals[:d_hid * num_chunks]
-        cell.weight_ih_l0 = torch.nn.Parameter(
-            torch.tensor(vals, dtype=torch.float),
-            requires_grad=False)
-        cell.weight_hh_l0 = torch.nn.Parameter(
-            torch.tensor(vals, dtype=torch.float),
-            requires_grad=False)
+            # Replace parameter values s.t. the range of values is exactly
+            # 255, thus we will have 0 quantization error in the quantized
+            # GEMM call. This i s for testing purposes.
+            #
+            # Note that the current implementation does not support
+            # accumulation values outside of the range representable by a
+            # 16 bit integer, instead resulting in a saturated value. We
+            # must take care that in our test we do not end up with a dot
+            # product that overflows the int16 range, e.g.
+            # (255*127+255*127) = 64770. So, we hardcode the test values
+            # here and ensure a mix of signedness.
+            vals = [[100, -155],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155]]
+            if isinstance(cell, torch.nn.LSTM):
+                num_chunks = 4
+            elif isinstance(cell, torch.nn.GRU):
+                num_chunks = 3
+            print(num_chunks)
+            vals = vals[:d_hid * num_chunks]
+            cell.weight_ih_l0 = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
+            cell.weight_hh_l0 = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
 
-        ref = copy.deepcopy(cell)
-        cell = torch.jit.quantized.quantize_rnn_modules(cell)
+            ref = copy.deepcopy(cell)
+            cell = torch.jit.quantized.quantize_rnn_modules(cell)
 
-        niter = 10
-        x = torch.tensor([[100, -155],
-                          [-155, 100],
-                          [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
-        h0_vals = [[-155, 100],
-                   [-155, 155],
-                   [100, -155]]
-        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
-        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
-        hiddens = (hx, cx)
+            niter = 10
+            x = torch.tensor([[100, -155],
+                              [-155, 100],
+                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+            h0_vals = [[-155, 100],
+                       [-155, 155],
+                       [100, -155]]
+            hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+            cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
 
-        # Compare quantized to unquantized
-        output, final_hiddens = cell(x, hiddens)
-        ref_out, ref_hid = ref(x, hiddens)
+            if isinstance(ref, torch.nn.LSTM):
+                hiddens = (hx, cx)
+            elif isinstance(ref, torch.nn.GRU):
+                hiddens = hx
 
-        torch.testing.assert_allclose(output, ref_out)
-        for out, ref in zip(final_hiddens, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+            # Compare quantized to unquantized
+            output, final_hiddens = cell(x, hiddens)
+            ref_out, ref_hid = ref(x, hiddens)
 
-        class ScriptWrapper(torch.jit.ScriptModule):
-            def __init__(self, cell):
-                super(ScriptWrapper, self).__init__()
-                self.cell = cell
+            torch.testing.assert_allclose(output, ref_out)
+            for out, ref in zip(final_hiddens, ref_hid):
+                torch.testing.assert_allclose(out, ref)
 
-            @torch.jit.script_method
-            def forward(self, x, hiddens):
-                # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-                return self.cell(x, hiddens)
+            if isinstance(cell, torch.jit.quantized.QuantizedLSTM):
+                class ScriptWrapper(torch.jit.ScriptModule):
+                    def __init__(self, cell):
+                        super(ScriptWrapper, self).__init__()
+                        self.cell = cell
 
-        wrapper = ScriptWrapper(cell)
+                    @torch.jit.script_method
+                    def forward(self, x, hiddens):
+                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                        #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                        return self.cell(x, hiddens)
+            elif isinstance(cell, torch.jit.quantized.QuantizedGRU):
+                class ScriptWrapper(torch.jit.ScriptModule):
+                    def __init__(self, cell):
+                        super(ScriptWrapper, self).__init__()
+                        self.cell = cell
 
-        # Compare quantize scripted module to unquantized
-        script_out, script_hid = wrapper(x, hiddens)
-        torch.testing.assert_allclose(script_out, ref_out)
-        for out, ref in zip(script_hid, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+                    @torch.jit.script_method
+                    def forward(self, x, hiddens):
+                        # type: (torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+                        return self.cell(x, hiddens)
 
-        # Compare export/import to unquantized
-        export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
-        ei_out, ei_hid = export_import_wrapper(x, hiddens)
-        torch.testing.assert_allclose(ei_out, ref_out)
-        for out, ref in zip(ei_hid, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+            wrapper = ScriptWrapper(cell)
+
+            # Compare quantize scripted module to unquantized
+            script_out, script_hid = wrapper(x, hiddens)
+            torch.testing.assert_allclose(script_out, ref_out)
+            for out, ref in zip(script_hid, ref_hid):
+                torch.testing.assert_allclose(out, ref)
+
+            # Compare export/import to unquantized
+            export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
+            ei_out, ei_hid = export_import_wrapper(x, hiddens)
+            torch.testing.assert_allclose(ei_out, ref_out)
+            for out, ref in zip(ei_hid, ref_hid):
+                torch.testing.assert_allclose(out, ref)
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
@@ -6606,14 +6886,9 @@ a")
                     FileCheck().check("aten::tensor").check(expect).run(graph)
 
     def test_dtype_op_shape(self):
-        ops = ['sum', 'mean', 'prod']
+        ops = ['prod']
         self._test_dtype_op_shape(ops, args=[])
         self._test_dtype_op_shape(ops, args=[0, False])
-
-        ops = ['sum', 'mean']
-        self._test_dtype_op_shape(ops, args=[[0, 1], False], input_dims=4)
-
-        ops = ['prod']
         self._test_dtype_op_shape(ops, args=[0, False])
         self._test_dtype_op_shape(ops, args=[0, True])
 
@@ -8324,6 +8599,32 @@ a")
         x = torch.zeros(1, 1, 14, 14)
         # constants not baked in
         self.assertEqual(g(x), f(x))
+
+    def test_trace_optional(self):
+        @torch.jit.script
+        def test(x):
+            # type: (Optional[Tensor])
+            if x is None:
+                return torch.zeros(1)
+            else:
+                return x
+
+        def test_none():
+            return test(None)
+
+        def test_tensor():
+            return test(torch.zeros(2))
+
+        f_none = torch.jit.trace(test_none, ())
+        self.assertEqual(f_none(), torch.zeros(1))
+
+        f_tensor = torch.jit.trace(test_tensor, ())
+        self.assertEqual(f_tensor(), torch.zeros(2))
+
+        graph = f_tensor.graph
+        f = str(graph)
+        # tensor type correctly set as graph input
+        FileCheck().check("Double(2) = prim:").run(f)
 
     def test_trace_nested_datatypes(self):
         @torch.jit.script
@@ -10454,7 +10755,7 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "only supported on List, Dict, Tensor, Tuple, and str"):
+        with self.assertRaisesRegex(RuntimeError, "'int' object is not subscriptable"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8
@@ -10842,7 +11143,7 @@ a")
     # These tests don't work because UBSAN has a false positive about accessing
     # out of bounds on a dynamically sized struct internal to asmjit
     if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
-        def test_int8_quantization_module(self):
+        def test_quantization_modules(self):
             K1, N1 = 2, 2
 
             class FooBar(torch.nn.Module):
@@ -10858,19 +11159,24 @@ a")
             fb.linear1.weight = torch.nn.Parameter(
                 torch.tensor([[-150, 100], [100, -150]], dtype=torch.float), requires_grad=False)
             fb.linear1.bias = torch.nn.Parameter(torch.zeros_like(fb.linear1.bias), requires_grad=False)
-            fb_ref = FooBar()
-            fb_ref.linear1.weight = torch.nn.Parameter(fb.linear1.weight.clone(), requires_grad=False)
-            fb_ref.linear1.bias = torch.nn.Parameter(fb.linear1.bias.clone(), requires_grad=False)
-            fb = torch.jit.quantized.quantize_linear_modules(fb)
 
             x = (torch.rand(1, K1).float() - 0.5) / 10.0
-            traced = torch.jit.trace(fb, (x,))
-            fb = self.getExportImportCopyWithPacking(traced)
+            value = torch.tensor([[100, -150]], dtype=torch.float)
 
-            x = torch.tensor([[100, -150]], dtype=torch.float)
-            y = fb(x)
-            y_ref = fb_ref(x)
-            torch.testing.assert_allclose(y, y_ref, rtol=0.0001, atol=1e-3)
+            y_ref = fb(value)
+
+            fb_int8 = torch.jit.quantized.quantize_linear_modules(fb)
+            traced_int8 = torch.jit.trace(fb_int8, (x,))
+            fb_int8 = self.getExportImportCopyWithPacking(traced_int8)
+            y_int8 = fb_int8(value)
+
+            fb_fp16 = torch.jit.quantized.quantize_linear_modules(fb, torch.float16)
+            traced_fp16 = torch.jit.trace(fb_fp16, (x,))
+            fb_fp16 = self.getExportImportCopyWithPacking(traced_fp16)
+            y_fp16 = fb_fp16(value)
+
+            torch.testing.assert_allclose(y_int8, y_ref, rtol=0.0001, atol=1e-3)
+            torch.testing.assert_allclose(y_fp16, y_ref, rtol=0.0001, atol=1e-3)
 
     def checkTracerWarning(self, *args, **kwargs):
         with warnings.catch_warnings(record=True) as warns:
@@ -11760,7 +12066,7 @@ a")
                 i += 1
             return b
 
-        FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::select") \
+        FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::__getitem__") \
             .check_count("aten::rand", 1, exactly=True).run(str(foo.graph))
 
     def test_mutable_dce_wildcards(self):

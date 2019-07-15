@@ -382,6 +382,8 @@ class CAFFE2_API Tensor {
   Tensor & bernoulli_(double p=0.5, Generator * generator=nullptr);
   Tensor bernoulli(double p, Generator * generator=nullptr) const;
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
+  Tensor bitwise_not() const;
+  Tensor & bitwise_not_();
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
   Tensor & ceil_();
@@ -404,6 +406,7 @@ class CAFFE2_API Tensor {
   Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;
   Tensor diagonal(int64_t offset=0, int64_t dim1=0, int64_t dim2=1) const;
+  Tensor & fill_diagonal_(Scalar fill_value, bool wrap=false);
   Tensor div(const Tensor & other) const;
   Tensor & div_(const Tensor & other);
   Tensor div(Scalar other) const;
