@@ -1447,7 +1447,7 @@ class _DistTestBase(object):
 
         # DDP-CPU training setup
         model_DDP = copy.deepcopy(model_base)
-        model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
+        model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
 
         # dummy data initialization
         local_bs = 2
