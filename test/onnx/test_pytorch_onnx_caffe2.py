@@ -330,7 +330,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False, atol=1e-7)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input)
+        variable_batch_size_init_input = make_input(1)
+        onnxir, _ = do_export(model, variable_batch_size_init_input)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -370,7 +371,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input)
+        variable_batch_size_init_input = make_input(1)
+        onnxir, _ = do_export(model, variable_batch_size_init_input)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -408,7 +410,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input)
+        variable_batch_size_init_input = make_input(1)
+        onnxir, _ = do_export(model, variable_batch_size_init_input)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
