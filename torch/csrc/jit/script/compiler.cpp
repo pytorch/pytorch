@@ -2935,12 +2935,31 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
+// Mangle a qualified name so that it is globally unique.
+std::string CompilationUnit::mangle(const std::string& name) const {
+  static const std::string manglePrefix = "___torch_mangle_";
+
+  std::string mangledName;
+  auto pos = name.find(manglePrefix);
+  if (pos != std::string::npos) {
+    // If the name is already mangled, avoid re-appending the prefix.
+    mangledName.reserve(name.size());
+    // Append the part of the name up to the end of the prefix
+    mangledName.append(name, 0, pos);
+    mangledName.append(std::to_string(mangleIndex_++));
+  } else {
+    mangledName = c10::str(name, manglePrefix, std::to_string(mangleIndex_++));
+  }
+  return mangledName;
+}
+
 std::unique_ptr<Function> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
     const Self* self,
-    const std::unordered_map<std::string, Function*>& function_table) const {
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -2960,15 +2979,29 @@ std::unique_ptr<Function> CompilationUnit::define(
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
                      : QualifiedName(def.name().name());
-  return torch::make_unique<Function>(
+  if (shouldMangle) {
+    // If `shouldMangle` is set, we should generate a unique name for this
+    // function if there is already an existing one.
+    if (auto fn = find_function(name)) {
+      auto newBase = mangle(name.name());
+      name = QualifiedName(name.prefix(), newBase);
+    }
+  }
+  auto fn = torch::make_unique<Function>(
       std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
+  if (self) {
+    // Register this as a method on `self`'s type
+    self->getClassType()->addMethod(fn.get());
+  }
+  return fn;
 }
 
 std::vector<Function*> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
-    const Self* self) {
+    const Self* self,
+    bool shouldMangle) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
@@ -2990,7 +3023,8 @@ std::vector<Function*> CompilationUnit::define(
         definitions[*init_idx],
         resolvers[*init_idx],
         self,
-        function_table);
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
     functions.push_back(fn.get());
@@ -3003,8 +3037,13 @@ std::vector<Function*> CompilationUnit::define(
       continue;
     }
 
-    auto fn =
-        define(prefix, definitions[i], resolvers[i], self, function_table);
+    auto fn = define(
+        prefix,
+        definitions[i],
+        resolvers[i],
+        self,
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
     functions.push_back(fn.get());

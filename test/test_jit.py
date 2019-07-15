@@ -2631,13 +2631,22 @@ graph(%Ra, %Rb):
         self.assertExpected(cu.foo.code)
 
     def test_import_method(self):
-        @torch.jit.script
-        def foo(x, y):
-            return 2 * x + y
+        with torch.jit._disable_emit_hooks():
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
 
-        r, _ = _jit_python_print(foo)
-        cu = torch.jit.CompilationUnit()._import(r, [])
-        self.assertExpected(cu.foo.code)
+                @torch.jit.script_method
+                def forward(self, x, y):
+                    return 2 * x + y
+
+            foo = Foo()
+            buffer = io.BytesIO()
+            torch.jit.save(foo, buffer)
+
+            buffer.seek(0)
+            foo_loaded = torch.jit.load(buffer)
+            self.assertExpected(foo_loaded.forward.code)
 
     def test_import_way_too_new(self):
         @torch.jit.script
@@ -3133,14 +3142,23 @@ def foo(x):
         mod.nan = float("nan")
 
         with torch.jit._disable_emit_hooks():
-            @torch.jit.script
-            def foo():
-                return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
 
-            pp, table = _jit_python_print(foo)
-            sm = torch.jit.CompilationUnit()._import(pp, table)
+                @torch.jit.script_method
+                def forward(self):
+                    return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
+
+            foo = Foo()
+            buffer = io.BytesIO()
+            torch.jit.save(foo, buffer)
+
+            buffer.seek(0)
+            foo_loaded = torch.jit.load(buffer)
+
             r = foo()
-            r2 = sm.foo()
+            r2 = foo_loaded()
             # use precise assert, we are checking floating point details
             self.assertTrue(r[:-1] == r2[:-1])
             self.assertTrue(math.isnan(r[-1]) and math.isnan(r2[-1]))
@@ -10009,16 +10027,6 @@ a")
                 for *a in [1, 2, 3]:
                     x = x + 1
                 return x
-            ''')
-
-    def test_duplicate(self):
-        with self.assertRaisesRegex(RuntimeError, 'method \'test\' already defined'):
-            cu = torch.jit.CompilationUnit('''
-            def test():
-                return 1
-
-            def test():
-                return 2
             ''')
 
     def test_call_ge(self):
