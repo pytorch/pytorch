@@ -38,7 +38,7 @@ PyMethodDef* python_functions() {
 
 def build_unary_functions():
     cpp_template = """
-void nestedtensor_${op}(std::vector<at::Tensor>& input1,
+void nestedtensor_${op}(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::${op}_out(out[i], input1[i]);
@@ -52,8 +52,8 @@ void nestedtensor_${op}(std::vector<at::Tensor>& input1,
 
 def build_binary_functions():
     cpp_template = """
-void nestedtensor_${op}(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_${op}(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::${op}_out(out[i], input1[i], input2[i]);
@@ -67,8 +67,8 @@ void nestedtensor_${op}(std::vector<at::Tensor>& input1,
 
 def build_comparison_functions():
     cpp_template = """
-void nestedtensor_${op}(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_${op}(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::${op}_out(out[i], input1[i], input2[i]);

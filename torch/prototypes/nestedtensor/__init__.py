@@ -6,7 +6,7 @@ def is_available():
     return hasattr(torch._C, "_nestedtensor_init")
 
 if is_available() and not torch._C._nestedtensor_init():
-    raise RuntimeError("Failed to initialize PyTorch distributed support")
+    raise RuntimeError("Failed to initialize PyTorch nestedtensor support")
 
 import torch.prototypes.nestedtensor as nestedtensor
 

@@ -57,7 +57,7 @@
 #endif
 #endif
 
-#ifdef USE_PROTOTYPES
+#ifdef BUILD_PROTOTYPES
 #include <torch/csrc/prototypes/nestedtensor/nestedtensor.h>
 #endif
 
@@ -633,7 +633,7 @@ PyObject* initModule() {
 #endif
 #endif
 
-#ifdef USE_PROTOTYPES
+#ifdef BUILD_PROTOTYPES
   THPUtils_addPyMethodDefs(methods, torch::prototypes::nestedtensor::python_functions());
 #endif
 

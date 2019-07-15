@@ -329,7 +329,7 @@ def check_env_flag(name, default=''):
     return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
 
 # Prototypes overwrites torch builtins with functions!
-if check_env_flag('USE_PROTOTYPES'):
+if check_env_flag('BUILD_PROTOTYPES'):
     import torch.prototypes
 
 def compiled_with_cxx11_abi():

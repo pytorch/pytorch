@@ -12,282 +12,282 @@
 namespace torch {
 namespace prototypes {
 namespace nestedtensor {
-void nestedtensor_abs(std::vector<at::Tensor>& input1,
+void nestedtensor_abs(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::abs_out(out[i], input1[i]);
   }
 }
-void nestedtensor_acos(std::vector<at::Tensor>& input1,
+void nestedtensor_acos(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::acos_out(out[i], input1[i]);
   }
 }
-void nestedtensor_asin(std::vector<at::Tensor>& input1,
+void nestedtensor_asin(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::asin_out(out[i], input1[i]);
   }
 }
-void nestedtensor_atan(std::vector<at::Tensor>& input1,
+void nestedtensor_atan(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::atan_out(out[i], input1[i]);
   }
 }
-void nestedtensor_ceil(std::vector<at::Tensor>& input1,
+void nestedtensor_ceil(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::ceil_out(out[i], input1[i]);
   }
 }
-void nestedtensor_clamp(std::vector<at::Tensor>& input1,
+void nestedtensor_clamp(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::clamp_out(out[i], input1[i]);
   }
 }
-void nestedtensor_cos(std::vector<at::Tensor>& input1,
+void nestedtensor_cos(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::cos_out(out[i], input1[i]);
   }
 }
-void nestedtensor_cosh(std::vector<at::Tensor>& input1,
+void nestedtensor_cosh(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::cosh_out(out[i], input1[i]);
   }
 }
-void nestedtensor_digamma(std::vector<at::Tensor>& input1,
+void nestedtensor_digamma(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::digamma_out(out[i], input1[i]);
   }
 }
-void nestedtensor_erf(std::vector<at::Tensor>& input1,
+void nestedtensor_erf(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::erf_out(out[i], input1[i]);
   }
 }
-void nestedtensor_erfc(std::vector<at::Tensor>& input1,
+void nestedtensor_erfc(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::erfc_out(out[i], input1[i]);
   }
 }
-void nestedtensor_erfinv(std::vector<at::Tensor>& input1,
+void nestedtensor_erfinv(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::erfinv_out(out[i], input1[i]);
   }
 }
-void nestedtensor_exp(std::vector<at::Tensor>& input1,
+void nestedtensor_exp(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::exp_out(out[i], input1[i]);
   }
 }
-void nestedtensor_expm1(std::vector<at::Tensor>& input1,
+void nestedtensor_expm1(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::expm1_out(out[i], input1[i]);
   }
 }
-void nestedtensor_floor(std::vector<at::Tensor>& input1,
+void nestedtensor_floor(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::floor_out(out[i], input1[i]);
   }
 }
-void nestedtensor_frac(std::vector<at::Tensor>& input1,
+void nestedtensor_frac(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::frac_out(out[i], input1[i]);
   }
 }
-void nestedtensor_lgamma(std::vector<at::Tensor>& input1,
+void nestedtensor_lgamma(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::lgamma_out(out[i], input1[i]);
   }
 }
-void nestedtensor_log(std::vector<at::Tensor>& input1,
+void nestedtensor_log(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::log_out(out[i], input1[i]);
   }
 }
-void nestedtensor_log10(std::vector<at::Tensor>& input1,
+void nestedtensor_log10(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::log10_out(out[i], input1[i]);
   }
 }
-void nestedtensor_log1p(std::vector<at::Tensor>& input1,
+void nestedtensor_log1p(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::log1p_out(out[i], input1[i]);
   }
 }
-void nestedtensor_log2(std::vector<at::Tensor>& input1,
+void nestedtensor_log2(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::log2_out(out[i], input1[i]);
   }
 }
-void nestedtensor_neg(std::vector<at::Tensor>& input1,
+void nestedtensor_neg(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::neg_out(out[i], input1[i]);
   }
 }
-void nestedtensor_nonzero(std::vector<at::Tensor>& input1,
+void nestedtensor_nonzero(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::nonzero_out(out[i], input1[i]);
   }
 }
-void nestedtensor_reciprocal(std::vector<at::Tensor>& input1,
+void nestedtensor_reciprocal(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::reciprocal_out(out[i], input1[i]);
   }
 }
-void nestedtensor_round(std::vector<at::Tensor>& input1,
+void nestedtensor_round(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::round_out(out[i], input1[i]);
   }
 }
-void nestedtensor_rsqrt(std::vector<at::Tensor>& input1,
+void nestedtensor_rsqrt(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::rsqrt_out(out[i], input1[i]);
   }
 }
-void nestedtensor_sigmoid(std::vector<at::Tensor>& input1,
+void nestedtensor_sigmoid(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::sigmoid_out(out[i], input1[i]);
   }
 }
-void nestedtensor_sign(std::vector<at::Tensor>& input1,
+void nestedtensor_sign(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::sign_out(out[i], input1[i]);
   }
 }
-void nestedtensor_sin(std::vector<at::Tensor>& input1,
+void nestedtensor_sin(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::sin_out(out[i], input1[i]);
   }
 }
-void nestedtensor_sinh(std::vector<at::Tensor>& input1,
+void nestedtensor_sinh(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::sinh_out(out[i], input1[i]);
   }
 }
-void nestedtensor_sqrt(std::vector<at::Tensor>& input1,
+void nestedtensor_sqrt(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::sqrt_out(out[i], input1[i]);
   }
 }
-void nestedtensor_tan(std::vector<at::Tensor>& input1,
+void nestedtensor_tan(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::tan_out(out[i], input1[i]);
   }
 }
-void nestedtensor_tanh(std::vector<at::Tensor>& input1,
+void nestedtensor_tanh(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::tanh_out(out[i], input1[i]);
   }
 }
-void nestedtensor_tril(std::vector<at::Tensor>& input1,
+void nestedtensor_tril(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::tril_out(out[i], input1[i]);
   }
 }
-void nestedtensor_triu(std::vector<at::Tensor>& input1,
+void nestedtensor_triu(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::triu_out(out[i], input1[i]);
   }
 }
-void nestedtensor_trunc(std::vector<at::Tensor>& input1,
+void nestedtensor_trunc(const std::vector<at::Tensor>& input1,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::trunc_out(out[i], input1[i]);
   }
 }
 
-void nestedtensor_add(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_add(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::add_out(out[i], input1[i], input2[i]);
   }
 }
-void nestedtensor_mul(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_mul(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::mul_out(out[i], input1[i], input2[i]);
   }
 }
-void nestedtensor_sub(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_sub(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::sub_out(out[i], input1[i], input2[i]);
   }
 }
-void nestedtensor_div(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_div(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::div_out(out[i], input1[i], input2[i]);
   }
 }
 
-void nestedtensor_eq(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_eq(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::eq_out(out[i], input1[i], input2[i]);
   }
 }
-void nestedtensor_ge(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_ge(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::ge_out(out[i], input1[i], input2[i]);
   }
 }
-void nestedtensor_gt(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_gt(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::gt_out(out[i], input1[i], input2[i]);
   }
 }
-void nestedtensor_le(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_le(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::le_out(out[i], input1[i], input2[i]);
   }
 }
-void nestedtensor_ne(std::vector<at::Tensor>& input1,
-                       std::vector<at::Tensor>& input2,
+void nestedtensor_ne(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
                        std::vector<at::Tensor>& out) {
   for (int64_t i = 0; i < input1.size(); i++) {
     at::ne_out(out[i], input1[i], input2[i]);

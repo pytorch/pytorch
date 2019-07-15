@@ -33,10 +33,13 @@ class NestedTensor():
             self.device = tensors[0].device
             self.dtype = tensors[0].dtype
             for tensor in tensors:
-                assert(self.dim == tensor.dim())
-                assert(self.layout == tensor.layout)
-                assert(self.device == tensor.device)
-                assert(self.dtype == tensor.dtype)
+                if not (self.dim == tensor.dim() and
+                        self.layout == tensor.layout and
+                        self.device == tensor.device and
+                        self.dtype == tensor.dtype):
+                    raise ValueError("Each passed Tensor "
+                            "must match in dim, layout, "
+                            "device and dtype")
         else:
             empty_tensor = torch.Tensor([])
             self.dim = empty_tensor.dim()
