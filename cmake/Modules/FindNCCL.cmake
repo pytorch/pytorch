@@ -18,7 +18,11 @@ set(NCCL_INCLUDE_DIR $ENV{NCCL_INCLUDE_DIR} CACHE PATH "Folder contains NVIDIA N
 set(NCCL_LIB_DIR $ENV{NCCL_LIB_DIR} CACHE PATH "Folder contains NVIDIA NCCL libraries")
 set(NCCL_VERSION $ENV{NCCL_VERSION} CACHE STRING "Version of NCCL to build with")
 
-list(APPEND NCCL_ROOT ${NCCL_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR})
+# NCCL_ROOT_DIR is deprecated in favor of NCCL_ROOT.
+if ($ENV{NCCL_ROOT_DIR})
+  message(WARNING "NCCL_ROOT_DIR is deprecated. Set NCCL_ROOT instead.")
+endif ()
+list(APPEND NCCL_ROOT $ENV{NCCL_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR})
 # Compatible layer for CMake <3.12. NCCL_ROOT will be accounted in for searching paths and libraries for CMake >=3.12.
 list(APPEND CMAKE_PREFIX_PATH ${NCCL_ROOT})
 
