@@ -598,7 +598,7 @@ def isend(tensor,
         tag (int, optional): Tag to match send with remote recv
 
     Returns:
-        A distributed request object.
+        Async work handle, call wait() on the handle to wait until it finishes.
         None, if not part of the group
 
     """
@@ -628,7 +628,7 @@ def irecv(tensor,
         tag (int, optional): Tag to match recv with remote send
 
     Returns:
-        A distributed request object.
+        Async work handle, call wait() on the handle to wait until it finishes.
         None, if not part of the group
 
     """
@@ -747,7 +747,8 @@ def broadcast_multigpu(tensor_list,
         src_tensor (int, optional): Source tensor rank within ``tensor_list``
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -789,7 +790,8 @@ def broadcast(tensor,
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -844,7 +846,8 @@ def all_reduce_multigpu(tensor_list,
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -885,7 +888,8 @@ def all_reduce(tensor,
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -938,7 +942,8 @@ def reduce_multigpu(tensor_list,
                                     ``tensor_list``
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, otherwise
 
     """
@@ -985,7 +990,8 @@ def reduce(tensor,
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -1050,7 +1056,8 @@ def all_gather_multigpu(output_tensor_lists,
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -1084,7 +1091,8 @@ def all_gather(tensor_list,
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -1123,7 +1131,8 @@ def gather(tensor,
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -1184,7 +1193,8 @@ def scatter(tensor,
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
 
     """
@@ -1265,7 +1275,8 @@ def reduce_scatter_multigpu(output_tensor_list,
         async_op (bool, optional): Whether this op should be an async op.
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group.
 
     """
@@ -1310,7 +1321,8 @@ def reduce_scatter(output,
         async_op (bool, optional): Whether this op should be an async op.
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group.
 
     """
@@ -1339,15 +1351,17 @@ def barrier(group=group.WORLD,
     """
     Synchronizes all processes.
 
-    This collective blocks processes until the whole group enters this function,
-    if async_op is False, or if async work handle is called on wait().
+    If async_op is False, this collective blocks processes until the whole group
+    enters this function. Otherwise, it returns an async work handle which
+    provides a wait() API.
 
     Arguments:
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
-        Async work handle, if async_op is set to True.
+        Async work handle, if async_op is set to True. Call wait() on the handle
+        to wait until the async work finishes.
         None, if not async_op or if not part of the group
     """
     if _rank_not_in_group(group):
