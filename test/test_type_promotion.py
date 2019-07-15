@@ -29,10 +29,12 @@ class TestTypePromotion(TestCase):
         long_tensor = torch.ones([4, 4, 4], dtype=torch.int64, device=self.device)
         int_tensor.add_(long_tensor)
         int_tensor.add_(1)
-        self.assertEqual(int_tensor, expected + 2)
+        three = expected + 2
+        self.assertEqual(int_tensor, three)
+        self.assertEqual(int_tensor.dtype, torch.int32)
 
-        byte_tensor = torch.ByteTensor([1, 1, 1])
-        half_tensor = torch.HalfTensor([1, 1, 1])
+        byte_tensor = torch.tensor([1, 1, 1], dtype=torch.uint8)
+        half_tensor = torch.tensor([1, 1, 1], dtype=torch.half)
         # byte is unsigned, half is signed.
         self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: byte_tensor.add_(half_tensor))
 
@@ -114,6 +116,15 @@ class TestTypePromotion(TestCase):
         s = (tens + 2).sum()
         s.backward()
         self.assertEqual(f.grad, tens)
+
+        # If we handle the gradient wrong we get an error like:
+        # RuntimeError: Function SubBackward0 returned an invalid gradient at index 0 - expected type torch.FloatTensor but got torch.DoubleTensor
+        for f in ['add', 'sub', 'rsub', 'mul', 'div']:
+            x = torch.randn(10, requires_grad=True, dtype=torch.float)
+            y = torch.randn(10, dtype=torch.double)
+
+            func = getattr(torch, f)
+            func(x, y).sum().backward()
 
     # verifies that a.add(b) is the same as a.to(b.dtype).add(b) in cases
     # where that should hold.

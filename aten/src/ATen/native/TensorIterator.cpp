@@ -128,7 +128,6 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
   return result_type;
 }
 
-// just checks for safe promotion.
 static bool can_cast(const ScalarType& from, const ScalarType& to) {
   // we disallow float -> integral, e.g., float_tensor *= int is disallowed.
   if (isFloatingType(from) && isIntegralType(to)) {

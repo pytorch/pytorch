@@ -218,8 +218,19 @@ static inline bool isIntegralType(ScalarType t) {
 }
 
 static inline bool isSignedType(ScalarType t) {
-  return (
-    t != ScalarType::Byte && t != ScalarType::Char && t != ScalarType::QUInt8);
+  if (t == ScalarType::Half) {
+    return true;
+  }
+  #define CASE_SIGNED(ctype, name, _2) \
+    case ScalarType::name:                       \
+      return std::is_signed<ctype>();
+
+    switch (t) {
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CASE_SIGNED)
+      default:
+        AT_ERROR("Unknown ScalarType");
+    }
+  #undef CASE_SIGNED
 }
 
 static inline bool isFloatingType(ScalarType t) {

@@ -27,7 +27,7 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
             raise ValueError("rtol and atol must both be specified or both be unspecified")
         rtol, atol = _get_default_tolerance(actual, expected)
 
-    close = torch.isclose(actual.to(torch.double), expected.to(torch.double), rtol, atol, equal_nan)
+    close = torch.isclose(actual, expected, rtol, atol, equal_nan)
     if close.all():
         return
 

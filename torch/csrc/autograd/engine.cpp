@@ -452,10 +452,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected type ";
-      ss << metadata.type() << " but got " << grads[i].type();
-      AT_ERROR(format_error(ss.str()));
+      grads[i] = grads[i].to(metadata.type());
     }
     auto output_device = output.device();
     if (output_device != metadata.device()) {

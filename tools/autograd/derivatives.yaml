@@ -100,11 +100,11 @@
   self: grad * -((-self * self + 1).rsqrt())
 
 - name: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  self: grad.to(self.scalar_type())
-  other: maybe_multiply(grad, alpha).to(other.scalar_type())
+  self: grad
+  other: maybe_multiply(grad, alpha)
 
 - name: add(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  self: grad.to(self.scalar_type())
+  self: grad
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
@@ -549,11 +549,11 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul(Tensor self, Tensor other) -> Tensor
-  self: (grad * other).to(self.scalar_type())
-  other: (grad * self).to(other.scalar_type())
+  self: (grad * other)
+  other: (grad * self)
 
 - name: mul(Tensor self, Scalar other) -> Tensor
-  self: (grad * other).to(self.scalar_type())
+  self: (grad * other)
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec)
@@ -593,11 +593,11 @@
   self: norm_backward(grad, self, p, result, dim, keepdim)
 
 - name: norm(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
-  self: norm_backward(grad, self.to(grad.scalar_type()), p, result).to(self.scalar_type())
+  self: norm_backward(grad, self.to(grad.scalar_type()), p, result)
 
 
 - name: norm(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim).to(self.scalar_type())
+  self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
   self: _pdist_backward(grad, self, p, result)
@@ -656,10 +656,10 @@
   exponent: pow_backward_exponent(grad, self, exponent)
 
 - name: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: prod_backward(grad, self.to(grad.scalar_type()), result).to(self.scalar_type())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result)
 
 - name: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim).to(self.scalar_type())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
 
 - name: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
   self: not_implemented("pstrf")
@@ -795,10 +795,10 @@
   self: -grad * alpha
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes()).to(self.scalar_type())
+  self: grad.expand(self.sizes())
 
 - name: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type())
+  self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
