@@ -11,8 +11,8 @@ class Flatten(Module):
         end_dim: last dim to flatten (default = -1).
 
     Shape:
-        - Input: :math:`(N, *dims)
-        - Output: :math:`(N, \prod_{i=\text{start\_dim}}^{\text{end\_dim+1}} \text{dims[i]}, \text{*dims[end\_dim+1:]})`
+        - Input: :math:`(N, *dims)`
+        - Output: :math:`(N, \prod *dims)` (for the default case).
 
 
     Examples::
