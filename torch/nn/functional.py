@@ -274,7 +274,7 @@ Args:
     count_include_pad: when True, will include the zero-padding in the
         averaging calculation. Default: ``True``
     divisor_override: if specified, it will be used as divisor, otherwise
-        attr:`kernel_size` will be used. Default: None
+         size of the pooling region will be used. Default: None
 """)
 
 avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
@@ -299,7 +299,7 @@ Args:
     count_include_pad: when True, will include the zero-padding in the
         averaging calculation
     divisor_override: if specified, it will be used as divisor, otherwise
-        attr:`kernel_size` will be used. Default: None
+        size of the pooling region will be used. Default: None
 """)
 
 

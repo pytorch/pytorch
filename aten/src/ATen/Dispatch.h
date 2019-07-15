@@ -60,7 +60,7 @@ struct ScalarTypeToCType<at::ScalarType::Bool> {
 
 template<>
 struct ScalarTypeToCType<at::ScalarType::Long> {
-  using type = int64_t ;
+  using type = int64_t;
 
   // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
   // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.

@@ -609,7 +609,7 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and input.type().kind() != "CompleteTensorType":
             return _unimplemented(name, "input size not accesible")
-        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
+        if divisor_override:
             return _unimplemented(name, "divisor_override")
         if not stride:
             stride = kernel_size
