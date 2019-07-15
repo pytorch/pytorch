@@ -42,7 +42,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     throw TypeError("_grad_fn has to be a Function object or None, but got %s",
         Py_TYPE(grad_fn)->tp_name);
   }
-  Variable var;
+  Tensor tensor;
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
@@ -52,28 +52,22 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
         .device(computeDeviceType(type_id))
         .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
         .is_variable(true);
-    var = at::empty({0}, options);
+    auto var = at::empty({0}, options);
+    tensor = static_cast<Variable&>(var).tensor_data();
   } else if (THPVariable_Check(data)) {
-    var = ((THPVariable*)data)->cdata.detach();
+    tensor = ((THPVariable*)data)->cdata.tensor_data();
   } else {
     throw torch::TypeError("Variable data has to be a tensor, but got %s",
         Py_TYPE(data)->tp_name);
   }
-  // We set `tensor`'s `allow_tensor_metadata_change` to true here, because we want to
-  // allow the following use case for backward compatibility:
-  //
-  // ```python
-  // var = Variable(torch.randn(2, 3))
-  // var.resize_(4, 5)
-  // ```
-  var.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
 
+  Variable var;
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    Edge edge(grad_fn_, grad_fn_->add_input_metadata(var));
-    var.set_gradient_edge(std::move(edge));
+    Edge edge(grad_fn_, grad_fn_->add_input_metadata(tensor));
+    var = make_variable(std::move(tensor), std::move(edge));
   } else {
-    var.set_requires_grad(requires_grad);
+    var = make_variable(std::move(tensor), requires_grad);
   }
 
   if (name) {
