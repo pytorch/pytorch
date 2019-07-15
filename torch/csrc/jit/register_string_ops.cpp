@@ -122,8 +122,8 @@ auto reg_str_ops_2 = torch::RegisterOperators()
               "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
           c10::List<std::string> splits;
 
-          auto prev_pos = 0;
-          auto pos = 0;
+          std::string::size_type prev_pos = 0;
+          std::string::size_type pos = 0;
           while ((pos = string.find_first_of(delimiters, pos)) !=
                  std::string::npos) {
             splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
@@ -209,23 +209,23 @@ auto reg_str_ops_2 = torch::RegisterOperators()
             throw std::runtime_error(
                 "TypeError: The fill character must be exactly one character long");
           }
-          if (string.size() > width) {
+          if (string.size() > static_cast<std::string::size_type>(width)) {
             return string;
           }
           std::stringstream ss;
-          auto full_padding = width - string.size();
-          auto l_pad = full_padding / 2;
-          auto r_pad = (full_padding + 1) / 2;
+          std::string::size_type full_padding = width - string.size();
+          std::string::size_type l_pad = full_padding / 2;
+          std::string::size_type r_pad = (full_padding + 1) / 2;
           if (width % 2) {
             auto tmp = r_pad;
             r_pad = l_pad;
             l_pad = tmp;
           }
-          for (auto i = 0; i < l_pad; ++i) {
+          for (std::string::size_type i = 0; i < l_pad; ++i) {
             ss << fillchar;
           }
           ss << string;
-          for (auto i = 0; i < r_pad; ++i) {
+          for (std::string::size_type i = 0; i < r_pad; ++i) {
             ss << fillchar;
           }
           return ss.str();
@@ -249,7 +249,7 @@ auto reg_str_ops_2 = torch::RegisterOperators()
           int64_t occurrences = 0;
           std::string::size_type pos = start;
           while ((pos = string.find(substr, pos)) != std::string::npos) {
-            if (pos < end) {
+            if (pos < static_cast<std::string::size_type>(end)) {
               ++occurrences;
             } else {
               break;
