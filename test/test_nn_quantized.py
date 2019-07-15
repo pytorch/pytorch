@@ -8,6 +8,9 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from common_utils import TestCase, run_tests, tempfile
+from hypothesis import given
+from hypothesis import strategies as st
+
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -29,23 +32,26 @@ class FunctionalAPITest(TestCase):
 
 
 class ModuleAPITest(TestCase):
-    def test_linear_api(self):
+    @given(
+        batch_size=st.integers(1, 5),
+        in_features=st.integers(16, 32),
+        out_features=st.integers(4, 8),
+        use_bias=st.booleans(),
+    )
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias):
         """test API functionality for nn.quantized.linear"""
-        in_features = 10
-        out_features = 20
-        batch_size = 5
         W = torch.rand(out_features, in_features).float()
         W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
         W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
-        B = torch.rand(out_features).float()
-        B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32)
+        B = torch.rand(out_features).float() if use_bias else None
+        B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32) if use_bias else None
         out_scale = 0.5
         out_zero_point = 3
         qlinear = nnq.Linear(in_features, out_features)
         qlinear._packed_weight = W_pack
-        qlinear.bias = B_q
+        qlinear.bias = B_q if use_bias else None
         qlinear.out_scale = torch.tensor([out_scale])
         qlinear.out_zero_point = torch.tensor([out_zero_point])
         Z_q = qlinear(X_q)
@@ -57,7 +63,8 @@ class ModuleAPITest(TestCase):
         # Test serialization of quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
         self.assertEqual(model_dict['weight'], W_q)
-        self.assertEqual(model_dict['bias'], B_q)
+        if use_bias:
+            self.assertEqual(model_dict['bias'], B_q)
         with tempfile.NamedTemporaryFile() as f:
             torch.save(model_dict, f)
             f.seek(0)
@@ -70,7 +77,8 @@ class ModuleAPITest(TestCase):
         linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
         self.assertEqual(linear_unpack(qlinear._packed_weight),
                          linear_unpack(loaded_qlinear._packed_weight))
-        self.assertEqual(qlinear.bias, loaded_qlinear.bias)
+        if use_bias:
+            self.assertEqual(qlinear.bias, loaded_qlinear.bias)
         self.assertEqual(qlinear.out_scale, loaded_qlinear.out_scale)
         self.assertEqual(qlinear.out_zero_point, loaded_qlinear.out_zero_point)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))

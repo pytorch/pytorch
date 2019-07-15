@@ -598,8 +598,6 @@ class CAFFE2_API Tensor {
   int64_t q_zero_point() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
-  Tensor fake_quantize_per_tensor_affine(double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max) const;
-  Tensor fake_quantize_per_tensor_affine_backward(const Tensor & grad, double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max) const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;

@@ -13,7 +13,7 @@ struct QualifiedName {
 
   // `name` can be a dotted string, like "foo.bar.baz", or just a bare name.
   /* implicit */ QualifiedName(const std::string& name) {
-    AT_ASSERT(!name.empty());
+    TORCH_CHECK(!name.empty());
     // split the string into its atoms.
     size_t startSearchFrom = 0;
     size_t pos = name.find(delimiter_, startSearchFrom);

@@ -47,7 +47,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-        Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
+           Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
     def test_backward(self, device, Q):
         r"""Tests the backward method. Note that this runs the reference quantization
         and thus the errors might be originating there.

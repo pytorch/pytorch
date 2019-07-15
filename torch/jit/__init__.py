@@ -57,6 +57,11 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_class_compile = torch._C._jit_script_class_compile
 
+# The Python CompilationUnit. All functions and modules defined in Python will
+# live in here. It's defined in Python because doing in cpp creates static
+# destruction order issues.
+_python_cu = torch._C.CompilationUnit()
+
 Future = torch._C.Future
 _fork = torch._C.fork
 _wait = torch._C.wait
@@ -771,7 +776,7 @@ def trace(func,
         raise AttributeError("trace doesn't support compiling individual module's functions.\n"
                              "Please use trace_module")
 
-    name = getattr(func, '__name__', 'forward')
+    name = _qualified_name(func)
     if name == '<lambda>':
         name = '_lambda'  # make name a valid identifier
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
@@ -967,11 +972,7 @@ def _make_strong_submodule(field, module, parent):
     return new_strong_submodule
 
 
-# TODO: we are leaking these things because they don't have a distinct owner
-# right now.
-_delete_me_recursive_compile_holder = []
 def _try_compile_fn(fn, loc):
-    global _delete_me_recursive_compile_holder
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
@@ -990,8 +991,7 @@ def _try_compile_fn(fn, loc):
     # extract the necessary info from the closed over variables on the function
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
-    _delete_me_recursive_compile_holder.append(torch.jit.script(fn, _rcb=rcb))
-    return _delete_me_recursive_compile_holder[-1]
+    return torch.jit.script(fn, _rcb=rcb)
 
 
 @contextlib.contextmanager
@@ -1040,6 +1040,10 @@ def whichmodule(obj):
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
+    # short-circuit in cases where the object already has a known qualified name
+    if isinstance(obj, torch._C.Function):
+        return obj.qualified_name
+
     name = obj.__name__
     module_name = obj.__module__
 
@@ -1483,8 +1487,10 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
+        def __init__(self, optimize=True, _name=None):
+            if _name is None:
+                _name = type(self).__name__
+            self.__dict__['_c'] = torch._C.ScriptModule(_name)
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
@@ -1618,7 +1624,7 @@ if _enabled:
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
-            super(WeakScriptModuleProxy, self).__init__()
+            super(WeakScriptModuleProxy, self).__init__(_name=type(original).__name__)
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
