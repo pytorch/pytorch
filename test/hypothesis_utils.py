@@ -118,8 +118,11 @@ def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
 
 """Strategy to create different shapes.
 Args:
+    min_dims / max_dims: minimum and maximum rank.
+    min_side / max_side: minimum and maximum dimensions per rank.
 
 Generates:
+    Possibe shapes for a tensor, constrained to the rank and dimensionality.
 
 Example:
     # Generates 3D and 4D tensors.
@@ -150,11 +153,7 @@ Args:
               If None, the strategy resolves to float within range [-1e6, 1e6].
 
 Generates:
-    (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
-        X: (`nbatch, iChannels, H, W`)
-        w: (`oChannels, iChannels // groups, kH, kW)
-        b: `(oChannels,)`
-        g: Number of groups the input is divided into
+    X: Tensor of type float32. Note that NaN and +/-inf is not included.
 """
 @st.composite
 def tensor(draw, shapes=None, elements=None):
