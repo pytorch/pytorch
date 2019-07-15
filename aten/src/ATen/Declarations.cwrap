@@ -2266,6 +2266,8 @@
   cname: addcmul
   variants:
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2283,6 +2285,8 @@
   options:
     - cname: addcmul
       variants: function
+      backends:
+        - CUDA
       return: argument 0
       arguments:
         - THTensor* self
