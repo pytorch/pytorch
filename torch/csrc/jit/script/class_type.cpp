@@ -14,11 +14,15 @@ Function* ClassType::getMethod(const std::string& name) const {
   return cu->find_function(qualname);
 }
 
-std::weak_ptr<CompilationUnit> ClassType::compilation_unit() {
-  return compilation_unit_;
+std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
-std::weak_ptr<const CompilationUnit> ClassType::compilation_unit() const {
-  return compilation_unit_;
+std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
 
 ClassTypePtr ClassType::create(
