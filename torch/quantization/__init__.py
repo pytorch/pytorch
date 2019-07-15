@@ -10,25 +10,13 @@ def default_eval_fn(model, calib_data):
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
-    for data in calib_data:
-        model(data)
-
-default_loss_fn = torch.nn.MSELoss(reduction='sum')
-def default_train_fn(model, train_data, loss_fn=default_loss_fn, optimizer=None):
-    r"""
-    Default train function takes a torch.utils.data.Dataset and train the model
-    on the dataset
-    """
-    if not optimizer:
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    for i in range(10):
-        for data in train_data:
-            input, target = data
-            optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
-            loss.backward()
-            optimizer.step()
+    total, correct = 0, 0
+    for data, target in calib_data:
+        output = model(data)
+        _, predicted = torch.max(output, 1)
+        total += target.size(0)
+        correct += (predicted == target).sum().item()
+    return correct / total
 
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
@@ -45,5 +33,5 @@ _all__ = [
     # QConfig
     'QConfig', 'default_qconfig',
     # QAT utilities
-    'default_qat_qconfig', 'default_train_fn', 'default_loss_fn'
+    'default_qat_qconfig',
 ]

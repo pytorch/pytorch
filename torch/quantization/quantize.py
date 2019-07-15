@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.qat as nnqat
+import torch.nn.qat as qat
 import torch
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
@@ -94,7 +94,7 @@ class QuantWrapper(nn.Module):
         super(QuantWrapper, self).__init__()
         qconfig = module.qconfig if hasattr(module, 'qconfig') else None
         self.add_module('quant', QuantStub(qconfig))
-        self.add_module('dequant', DeQuantStub())
+        self.add_module('dequant', DeQuantStub(qconfig))
         self.add_module('module', module)
         self.train(module.training)
 
@@ -144,7 +144,7 @@ def prepare(model, qconfig_dict=None):
         model = add_quant_dequant(model)
     add_observer(model)
     if model.training:
-        model = convert(model, DEFAULT_QAT_MODULE_MAPPING, False)
+        model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
     return model
 
 class QuantStub(nn.Module):
@@ -167,17 +167,19 @@ class DeQuantStub(nn.Module):
     r"""Dequantize stub module, before calibration, this is same as identity,
     this will be swapped as `nnq.DeQuantize` in `convert`.
     """
-    def __init__(self):
+    def __init__(self, qconfig=None):
         super(DeQuantStub, self).__init__()
+        if qconfig:
+            self.qconfig = qconfig
 
     def forward(self, x):
         return x
 
-def quantize(model, eval_fn, eval_args, qconfig_dict=None):
+def quantize(model, run_fn, run_args, qconfig_dict=None):
     r"""Converts a float model to quantized model.
 
     First it will prepare the model for calibration or training, then it calls
-    `eval_fn` which will run the calibration step or training step,
+    `run_fn` which will run the calibration step or training step,
     after that we will call `convert` which will convert the model to a
     quantized model.
 
@@ -188,9 +190,9 @@ def quantize(model, eval_fn, eval_args, qconfig_dict=None):
 
     Args:
         model: input model
-        eval_fn: a function for evaluating the prepared model, can be a
+        run_fn: a function for evaluating the prepared model, can be a
             function that simply runs the prepared model or a training loop
-        eval_args: positional arguments for `eval_fn`
+        run_args: positional arguments for `run_fn`
         qconfig_dict: dictionary that maps from name of submodule to quantization
             configuration, qconfig applies to all submodules of a given
             model unless qconfig for the submodules are specified(when the
@@ -201,7 +203,7 @@ def quantize(model, eval_fn, eval_args, qconfig_dict=None):
         A quantized model
     """
     model = prepare(model, qconfig_dict)
-    eval_fn(model, eval_args)
+    run_fn(model, run_args)
     convert(model)
     return model
 
@@ -210,16 +212,17 @@ DEFAULT_MODULE_MAPPING = {
     torch.nn.Linear: nnq.Linear,
     torch.nn.ReLU: nnq.ReLU,
     QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize,
     # QAT modules:
-    nnqat.Linear: nnq.Linear,
+    qat.Linear: nnq.Linear,
 }
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
-    torch.nn.Linear: nnqat.Linear,
+    torch.nn.Linear: qat.Linear,
 }
 
-def convert(module, mapping=DEFAULT_MODULE_MAPPING, swap_dequant=True):
+def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
     parameters) to a quantized module.
     Args:
@@ -229,11 +232,11 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING, swap_dequant=True):
     Return:
         A quantized module
     """
-    module_swapped = swap_module(module, mapping, swap_dequant)
+    module_swapped = swap_module(module, mapping)
 
     reassign = {}
     for name, mod in module.named_children():
-        new_mod = convert(mod, mapping, swap_dequant)
+        new_mod = convert(mod, mapping)
         if new_mod is not mod:
             reassign[name] = new_mod
 
@@ -242,7 +245,7 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING, swap_dequant=True):
 
     return module_swapped
 
-def swap_module(mod, mapping, swap_dequant=True):
+def swap_module(mod, mapping):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
 
@@ -257,8 +260,5 @@ def swap_module(mod, mapping, swap_dequant=True):
     if hasattr(mod, 'observer'):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
-
-    if swap_dequant and type(mod) == DeQuantStub:
-        new_mod = nnq.DeQuantize.from_float(mod)
 
     return new_mod

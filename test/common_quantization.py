@@ -6,6 +6,29 @@ import torch.nn.quantized as nnq
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, default_qconfig
 
+default_loss_fn = torch.nn.CrossEntropyLoss()
+def default_train_fn(model, train_data, loss_fn=default_loss_fn):
+    r"""
+    Default train function takes a torch.utils.data.Dataset and train the model
+    on the dataset
+    """
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    train_loss, correct, total = 0, 0, 0
+    for i in range(10):
+        model.train()
+        for data, target in train_data:
+            optimizer.zero_grad()
+            output = model(data)
+            print(output.size(), target.size())
+            loss = loss_fn(output, target)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+            _, predicted = torch.max(output, 1)
+            total += target.size(0)
+            correct += (predicted == target).sum().item()
+
+
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
 
@@ -145,7 +168,7 @@ class ManualQATModel(torch.nn.Module):
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
-        self.fc2 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(5, 10).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.quant(x)

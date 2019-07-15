@@ -1,16 +1,16 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import torch.nn.quantized as nnq
-from torch.quantization import default_eval_fn, default_train_fn, QConfig, \
+from torch.quantization import default_eval_fn, QConfig, \
     default_qconfig, default_qat_qconfig, default_observer, quantize, prepare, \
     convert
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
-    ManualQATModel
+    ManualQATModel, default_train_fn
 
-calib_data = [torch.rand(20, 5, dtype=torch.float) for _ in range(20)]
-train_data = [(torch.rand(20, 5, dtype=torch.float), torch.rand(20, 1, dtype=torch.float)) for _ in range(20)]
+calib_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
+train_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
 
 class PostTrainingQuantTest(QuantizationTestCase):
 
@@ -268,10 +268,10 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = ManualQATModel()
         model.qconfig = default_qat_qconfig
 
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
 
-        default_eval_fn(model, calib_data)
+        default_train_fn(model, train_data)
         convert(model)
 
         def checkQuantized(model):
@@ -283,6 +283,16 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model.qconfig = default_qat_qconfig
         model = quantize(model, default_train_fn, train_data)
         checkQuantized(model)
+
+    def test_eval_only_fake_quant(self):
+        model = ManualQATModel()
+        model.qconfig = default_qat_qconfig
+
+        model = prepare(model)
+        self.checkObservers(model)
+
+        model.eval()
+        default_eval_fn(model, calib_data)
 
 if __name__ == '__main__':
     run_tests()
