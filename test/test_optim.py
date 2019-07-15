@@ -1267,7 +1267,7 @@ class TestLRScheduler(TestCase):
                                                                self.opt.param_groups[0]['momentum']))
                 elif use_beta1 and 'betas' in self.opt.param_groups[0].keys():
                     print('batch{}:\tlr={},beta1={}'.format(batch_num, self.opt.param_groups[0]['lr'],
-                                                               self.opt.param_groups[0]['betas'][0]))
+                                                            self.opt.param_groups[0]['betas'][0]))
                 else:
                     print('batch{}:\tlr={}'.format(batch_num, self.opt.param_groups[0]['lr']))
 
