@@ -2,7 +2,7 @@ if (NOT __NCCL_INCLUDED)
   set(__NCCL_INCLUDED TRUE)
 
   if (USE_SYSTEM_NCCL)
-    # NCCL_LIB_DIR, NCCL_ROOT_DIR, NCCL_INCLUDE_DIR will be accounted in the following line.
+    # NCCL_ROOT, NCCL_LIB_DIR, NCCL_INCLUDE_DIR will be accounted in the following line.
     find_package(NCCL REQUIRED)
     if (NCCL_FOUND)
       add_library(__caffe2_nccl INTERFACE)
