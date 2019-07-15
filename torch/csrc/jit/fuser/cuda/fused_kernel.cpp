@@ -118,11 +118,7 @@ FusedKernelCUDA::FusedKernelCUDA(
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
-#ifdef __HIP_PLATFORM_HCC__
-  if (result != HIPRTC_SUCCESS) {
-#else
-  if (result == NVRTC_ERROR_COMPILATION) {
-#endif
+  if (result != NVRTC_SUCCESS) {
     size_t logsize;
     nvrtc().nvrtcGetProgramLogSize(program, &logsize);
     std::vector<char> log(logsize);
