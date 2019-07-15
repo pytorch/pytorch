@@ -118,7 +118,8 @@ class TestTypePromotion(TestCase):
         self.assertEqual(f.grad, tens)
 
         # If we handle the gradient wrong we get an error like:
-        # RuntimeError: Function SubBackward0 returned an invalid gradient at index 0 - expected type torch.FloatTensor but got torch.DoubleTensor
+        # RuntimeError: Function SubBackward0 returned an invalid gradient at index 0 - expected type \
+        # torch.FloatTensor but got torch.DoubleTensor
         for f in ['add', 'sub', 'rsub', 'mul', 'div']:
             x = torch.randn(10, requires_grad=True, dtype=torch.float)
             y = torch.randn(10, dtype=torch.double)
