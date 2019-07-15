@@ -772,13 +772,11 @@ class OneCycleLR(_LRScheduler):
     The 1cycle learning rate policy changes the learning rate after every batch.
     `step` should be called after a batch has been used for training.
 
-    This class has three built-in annealing strategies:
+    This class has two built-in annealing strategies:
     "cos":
         Cosine annealing
     "linear":
         Linear annealing
-    "exp":
-        Exponential annealing
 
     Note also that the total number of steps in the cycle can be determined in one
     of two ways (listed in order of precedence):
