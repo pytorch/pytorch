@@ -111,6 +111,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 
  public:
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
+    TORCH_INTERNAL_ASSERT(nullptr != type_.get(), "Type cannot be nullptr");
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
   C10_DEPRECATED_MESSAGE("Creating tuples without type information is deprecated. Please use Tuple::create(elements, type) instead.")
