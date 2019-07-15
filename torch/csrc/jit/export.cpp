@@ -745,11 +745,11 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
   // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.class_compilation_unit()->find_function("__setstate__");
-  if (setstate == nullptr) {
+  auto setstate = module.find_method("__setstate__");
+  if (!setstate) {
     return false;
   }
-  auto set_schema = setstate->getSchema();
+  auto set_schema = setstate->function().getSchema();
 
   TORCH_CHECK(
       set_schema.arguments().size() == 2,
