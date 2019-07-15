@@ -94,11 +94,11 @@ def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
     if not isinstance(dtypes, (list, tuple)):
         dtypes = (dtypes,)
     quantized_type = draw(st.sampled_from(dtypes))
-    _underlying_type = _UNDERLYING_TYPE[quantized_type]
 
-    _type_info = torch.iinfo(_underlying_type)
+    _type_info = torch.iinfo(quantized_type)
     qmin, qmax = _type_info.min, _type_info.max
 
+    # TODO: Maybe embed the enforced zero_point in the `torch.iinfo`.
     _zp_enforced = _ENFORCED_ZERO_POINT[quantized_type]
     if _zp_enforced is not None:
         zero_point = _zp_enforced
@@ -107,11 +107,10 @@ def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
         _zp_max = qmax if zero_point_max is None else zero_point_max
         zero_point = draw(st.integers(min_value=_zp_min, max_value=_zp_max))
 
-    _long_type_info = torch.iinfo(torch.long)
     if scale_min is None:
-        scale_min = 1e-3
+        scale_min = torch.finfo(torch.float).eps
     if scale_max is None:
-        scale_max = 1e3
+        scale_max = torch.finfo(torch.float).max
     scale = draw(st.floats(min_value=scale_min, max_value=scale_max))
 
     return (scale, zero_point), (qmin, qmax), quantized_type

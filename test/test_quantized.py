@@ -171,8 +171,6 @@ class TestQuantizedOps(TestCase):
            dilation=st.integers(1, 2),
            padding=st.integers(0, 2))
     def test_max_pool2d(self, X, qparams, kernel, stride, dilation, padding):
-        hu.assume_not_overflowing(X, qparams)
-
         (scale, zero_point), (qmin, qmax), torch_type = qparams
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
@@ -508,7 +506,6 @@ class TestQNNPackOps(TestCase):
         Y = X.clone()
 
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch_type)
-        print(qX)
         qY_hat = relu(qX)
 
         Y[Y < 0] = 0
