@@ -26,7 +26,7 @@ struct ListImpl final : public c10::intrusive_ptr_target {
   explicit ListImpl(list_type list_, optional<TypePtr> elementType_)
   : list(std::move(list_))
   , elementType(std::move(elementType_)) {
-    TORCH_INTERNAL_ASSERT(!elementType.has_value() || nullptr != elementType->get(), "Key and value type must not be nullptr");
+    TORCH_INTERNAL_ASSERT(!elementType.has_value() || nullptr != elementType->get(), "Element type must not be nullptr");
   }
 
   list_type list;

@@ -112,16 +112,6 @@ struct TORCH_API Variable : public at::Tensor {
       bool requires_grad,
       bool allow_tensor_metadata_change);
 
-  /// Creates a `Variable` from the given `Tensor`, consuming its underlying `TensorImpl`.
-  /// This is intended to be used from functions that immediately create a `Tensor`,
-  /// convert it to a `Variable`, and then free it; it has been found to
-  /// decrease the overhead of those operations, in some situations.
-  /// The comments about `requires_grad` and `data` on the above version also apply to this one.
-  friend Variable make_variable_consuming(
-      at::Tensor data,
-      bool requires_grad,
-      bool allow_tensor_metadata_change);
-
   /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
   /// `gradient_edge` should be a (function, input_nr) pair specifying the function
   /// in the autograd graph, and what particular input of that function, this
@@ -535,29 +525,19 @@ inline Variable make_variable(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-      /*version_counter=*/0,
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
-      data_impl_copy.get(), requires_grad));
-    return Variable(data_impl_copy);
-  }
-  return Variable();
-}
-
-inline Variable make_variable_consuming(
-    at::Tensor data,
-    bool requires_grad = false,
-    bool allow_tensor_metadata_change = true) {
-  TORCH_CHECK(
-      !data.is_variable(),
-      "Must not create a new variable from a variable, use its .tensor_data()");
-  if (data.defined()) {
-    AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
-    auto data_impl = data.getIntrusivePtr();
-    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
-    return Variable(std::move(data_impl));
+    if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
+      auto data_impl = data.getIntrusivePtr();
+      data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
+      return Variable(std::move(data_impl));
+    } else {
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
+        data_impl_copy.get(), requires_grad));
+      return Variable(data_impl_copy);
+    }
   }
   return Variable();
 }

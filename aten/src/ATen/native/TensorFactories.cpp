@@ -106,7 +106,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::CPUTensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -525,11 +525,12 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
 
 Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
+  check_supported_max_int_with_precision(n, result);
   result.resize_({n});
   auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
 
