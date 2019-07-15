@@ -1,0 +1,90 @@
+trigger:
+- master
+
+jobs:
+- job: consistent_circleci
+  displayName: "Ensure consistent CircleCI YAML"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.7"
+  - script: pip install -r requirements.txt
+  - script: cd .circleci && ./ensure-consistency.py
+
+- job: shellcheck_jenkins
+  displayName: "Shellcheck Jenkins scripts"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - script: sudo apt-get install -y shellcheck
+  - script: .jenkins/run-shellcheck.sh
+
+- job: ensure_no_tabs
+  displayName: "Ensure no tabs"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "2.7"
+  - script: (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
+
+- job: python_27_lint
+  displayName: "Python 2.7 Lint"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "2.7"
+  - script: pip install flake8
+  - script: |
+      rm -rf .circleci
+      flake8
+
+- job: python_37_lint
+  displayName: "Python 3.7 Lint"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.7"
+  - script: pip install flake8 flake8-bugbear flake8-mypy flake8-comprehensions flake8-pyi mccabe pycodestyle pyflakes
+  - script: flake8
+
+- job: mypy_typecheck
+  displayName: "MyPy typecheck"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.6"
+  - script: pip install mypy mypy-extensions
+  - script: mypy @mypy-files.txt
+
+- job: cpp_doc_check
+  displayName: "CPP doc check"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.6"
+  - script: sudo apt-get install -y doxygen && pip install -r requirements.txt
+  - script: cd docs/cpp/source && ./check-doxygen.sh
+
+- job: clang_tidy
+  displayName: "clang tidy"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.6"
+  - script: git branch master origin/master
+  - script: pip install pyyaml
+  - script: tools/run-clang-tidy-in-ci.sh
