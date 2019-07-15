@@ -1487,8 +1487,10 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
+        def __init__(self, optimize=True, _name=None):
+            if _name is None:
+                _name = type(self).__name__
+            self.__dict__['_c'] = torch._C.ScriptModule(_name)
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
@@ -1622,7 +1624,7 @@ if _enabled:
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
-            super(WeakScriptModuleProxy, self).__init__()
+            super(WeakScriptModuleProxy, self).__init__(_name=type(original).__name__)
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
