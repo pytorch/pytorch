@@ -843,7 +843,6 @@ class TestFuser(JitTestCase):
         self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
     def test_grad_sum_to_size_elimination(self):
 
         def my_broadcasted_cell(a, b, c):
