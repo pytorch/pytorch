@@ -21,7 +21,7 @@ class FunctionalAPITest(TestCase):
                            min_out_channels=1, max_out_channels=7,
                            H_range=(6, 12), W_range=(6, 12),
                            kH_range=(3, 5), kW_range=(3, 5),
-                           dtypes=((torch.quint8, np.uint8, 0),),
+                           dtypes=((torch.quint8, 0),),
                            max_groups=4),
            padH=st.integers(1, 3), padW=st.integers(1, 3),
            sH=st.integers(1, 3), sW=st.integers(1, 3),
@@ -34,7 +34,7 @@ class FunctionalAPITest(TestCase):
         `quantized._ops` implementation.
         """
         # Random iunputs
-        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
+        X, (scale, zero_point), (qmin, qmax), torch_type = Q
         (inputs, filters, bias, groups) = X
 
         iC, oC = inputs.shape[1], filters.shape[0]

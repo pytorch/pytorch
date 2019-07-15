@@ -55,6 +55,7 @@ pytest "${args[@]}" \
   'not (TestOperators and test_full_like) and not (TestOperators and test_zeros_like) and not (TestOperators and test_ones_like) and not (TestModels and test_vgg16) and not (TestModels and test_vgg16_bn) and not (TestModels and test_vgg19) and not (TestModels and test_vgg19_bn)' \
   --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
   --ignore "$top_dir/test/onnx/test_custom_ops.py" \
+  --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
   "${test_paths[@]}"
 
 # onnxruntime only support py3
@@ -63,5 +64,6 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   pip install --user onnxruntime
   pytest "${args[@]}" "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
   pytest "${args[@]}" "$top_dir/test/onnx/test_custom_ops.py"
+  pytest "${args[@]}" "$top_dir/test/onnx/test_models_onnxruntime.py"
 fi
 
