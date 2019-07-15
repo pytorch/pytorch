@@ -2131,7 +2131,7 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
-- func: _has_same_tensorimpl_type(Tensor self, Tensor other) -> bool
+- func: _has_compatible_shallow_copy_type(Tensor self, Tensor from) -> bool
   variants: function
 
 - func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
