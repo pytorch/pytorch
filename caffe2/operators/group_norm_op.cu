@@ -139,12 +139,12 @@ __global__ void ComputeInternalGradientsNCHWCUDAKernel(
 // Math:
 // Y = gamma * (X - mu) * rsig + beta
 // let s = gamma * rsig
-// let b = beta - mu * rsig
+// let b = beta - gamma * mu * rsig
 // Y = s * X + b
 // let n = K * HxW
 // dL/dX = dL/dY * dY/dX = dL/dY * (d(s * X)/dX + db/dX)
 // d(s * X)/dX = s + X * ds/dX = s + gamma * X * drsig/dX
-// db/dX = -u * drsig/dX - rsig * dmu/dX
+// db/dX = -gamma * u * drsig/dX - gamma * rsig * dmu/dX
 // drsig/dX = -rsig^3 * (X - mu) / n
 // dmu/dX = 1 / n
 template <typename T>

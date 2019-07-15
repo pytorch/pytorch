@@ -1,41 +1,39 @@
 #pragma once
 
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/script/tree.h>
 
 namespace torch {
 namespace jit {
 namespace script {
 
-struct ErrorReport : public std::exception {
+
+struct CAFFE2_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e)
       : ss(e.ss.str()), context(e.context), the_message(e.the_message) {}
 
-  ErrorReport() : context(nullptr) {}
-  explicit ErrorReport(const SourceRange& r)
-      : context(std::make_shared<SourceRange>(r)) {}
-  explicit ErrorReport(std::shared_ptr<SourceLocation> loc)
-      : context(std::move(loc)) {}
+  ErrorReport() : context(c10::nullopt) {}
+  explicit ErrorReport(SourceRange r) : context(std::move(r)) {}
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
-  const char* what() const noexcept override {
-    std::stringstream msg;
-    msg << "\n" << ss.str();
-    if (context != nullptr) {
-      msg << ":\n";
-      context->highlight(msg);
-    } else {
-      msg << ".\n";
-    }
-    the_message = msg.str();
-    return the_message.c_str();
-  }
+
+  const char* what() const noexcept override;
+
+  struct CallStack {
+    // These functions are used to report why a function was being compiled (i.e.
+    // what was the call stack of user functions at compilation time that led to
+    // this error)
+    static void update_pending_range(const SourceRange& range);
+    static void push_function(const std::string& name);
+    static void pop_function();
+  };
 
  private:
   template <typename T>
   friend const ErrorReport& operator<<(const ErrorReport& e, const T& t);
 
   mutable std::stringstream ss;
-  std::shared_ptr<SourceLocation> context;
+  c10::optional<SourceRange> context;
   mutable std::string the_message;
 };
 
@@ -45,11 +43,6 @@ const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
   return e;
 }
 
-#define JIT_SCRIPT_ASSERT(ctx, cond)                                       \
-  if (!(cond)) {                                                           \
-    throw ::torch::jit::script::ErrorReport(ctx)                           \
-        << __FILE__ << ":" << __LINE__ << ": assertion failed: " << #cond; \
-  }
 } // namespace script
 } // namespace jit
 } // namespace torch

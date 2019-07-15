@@ -3,7 +3,6 @@
 #include <memory>
 
 #include <fbgemm/Fbgemm.h>
-#include <fbgemm/src/FbgemmI8DepthwiseAvx2.h>
 
 #include "caffe2/quantization/server/dnnlowp.h"
 
@@ -16,7 +15,7 @@ struct Int8FCDNNLowPPackedWeightBlob {
   std::vector<dnnlowp::TensorQuantizationParams> qparams;
   std::shared_ptr<std::vector<std::int32_t>> column_offsets;
 
-  // The original tensor before packing
+  // The original tensor before packing but only with meta information
   Tensor original_tensor{CPU};
 
   std::shared_ptr<std::vector<std::int32_t>> bias;

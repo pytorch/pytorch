@@ -5,9 +5,13 @@
 #include <string.h>
 #include <assert.h>
 
+#ifdef _MSC_VER
+#include <cstdio>
+#undef min
+#else
 /* POSIX headers */
-#include <pthread.h>
 #include <unistd.h>
+#endif
 
 /* Library header */
 #include "caffe2/core/logging.h"
@@ -57,12 +61,10 @@ void pthreadpool_compute_1d_tiled(
   } else {
     /* Execute in parallel on the thread pool using linearized index */
     const size_t tile_range = divide_round_up(range, tile);
-    struct compute_1d_tiled_context context = {
-      .function = function,
-      .argument = argument,
-      .range = range,
-      .tile = tile
-    };
+    struct compute_1d_tiled_context context = {/*.function = */ function,
+                                               /*.argument = */ argument,
+                                               /*.range = */ range,
+                                               /*.tile = */ tile};
     pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_1d_tiled, &context, tile_range);
   }
 }
@@ -101,9 +103,9 @@ void pthreadpool_compute_2d(
     DCHECK_LE(range_i * range_j, (size_t)std::numeric_limits<int32_t>::max());
     /* Execute in parallel on the thread pool using linearized index */
     struct compute_2d_context context = {
-        .function = function,
-        .argument = argument,
-        .range_j = caffe2::FixedDivisor<int32_t>(range_j)};
+        /*.function = */ function,
+        /*.argument = */ argument,
+        /*.range_j = */ caffe2::FixedDivisor<int32_t>(range_j)};
     pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_2d, &context, range_i * range_j);
   }
 }
@@ -157,13 +159,13 @@ void pthreadpool_compute_2d_tiled(
         tile_range_i * tile_range_j,
         (size_t)std::numeric_limits<int32_t>::max());
     struct compute_2d_tiled_context context = {
-        .function = function,
-        .argument = argument,
-        .tile_range_j = caffe2::FixedDivisor<int32_t>(tile_range_j),
-        .range_i = range_i,
-        .range_j = range_j,
-        .tile_i = tile_i,
-        .tile_j = tile_j};
+        /*.function = */ function,
+        /*.argument = */ argument,
+        /*.tile_range_j = */ caffe2::FixedDivisor<int32_t>(tile_range_j),
+        /*.range_i = */ range_i,
+        /*.range_j = */ range_j,
+        /*.tile_i = */ tile_i,
+        /*.tile_j = */ tile_j};
     pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_2d_tiled, &context, tile_range_i * tile_range_j);
   }
 }
@@ -239,16 +241,16 @@ void pthreadpool_compute_3d_tiled(
         tile_range_i * tile_range_j * tile_range_k,
         (size_t)std::numeric_limits<int>::max());
     struct compute_3d_tiled_context context = {
-        .function = function,
-        .argument = argument,
-        .tile_range_j = caffe2::FixedDivisor<int>(tile_range_j),
-        .tile_range_k = caffe2::FixedDivisor<int>(tile_range_k),
-        .range_i = range_i,
-        .range_j = range_j,
-        .range_k = range_k,
-        .tile_i = tile_i,
-        .tile_j = tile_j,
-        .tile_k = tile_k};
+        /*.function = */ function,
+        /*.argument = */ argument,
+        /*.tile_range_j = */ caffe2::FixedDivisor<int>(tile_range_j),
+        /*.tile_range_k = */ caffe2::FixedDivisor<int>(tile_range_k),
+        /*.range_i = */ range_i,
+        /*.range_j = */ range_j,
+        /*.range_k = */ range_k,
+        /*.tile_i = */ tile_i,
+        /*.tile_j = */ tile_j,
+        /*.tile_k = */ tile_k};
     pthreadpool_compute_1d(
         threadpool,
         (pthreadpool_function_1d_t)compute_3d_tiled,
@@ -351,19 +353,20 @@ void pthreadpool_compute_4d_tiled(
         tile_range_i * tile_range_j * tile_range_k * tile_range_l,
         (size_t)std::numeric_limits<int>::max());
     struct compute_4d_tiled_context context = {
-        .function = function,
-        .argument = argument,
-        .tile_range_kl = caffe2::FixedDivisor<int>(tile_range_k * tile_range_l),
-        .tile_range_j = caffe2::FixedDivisor<int>(tile_range_j),
-        .tile_range_l = caffe2::FixedDivisor<int>(tile_range_l),
-        .range_i = range_i,
-        .range_j = range_j,
-        .range_k = range_k,
-        .range_l = range_l,
-        .tile_i = tile_i,
-        .tile_j = tile_j,
-        .tile_k = tile_k,
-        .tile_l = tile_l};
+        /*.function = */ function,
+        /*.argument = */ argument,
+        /*.tile_range_kl = */
+        caffe2::FixedDivisor<int>(tile_range_k * tile_range_l),
+        /*.tile_range_j = */ caffe2::FixedDivisor<int>(tile_range_j),
+        /*.tile_range_l = */ caffe2::FixedDivisor<int>(tile_range_l),
+        /*.range_i = */ range_i,
+        /*.range_j = */ range_j,
+        /*.range_k = */ range_k,
+        /*.range_l = */ range_l,
+        /*.tile_i = */ tile_i,
+        /*.tile_j = */ tile_j,
+        /*.tile_k = */ tile_k,
+        /*.tile_l = */ tile_l};
     pthreadpool_compute_1d(
         threadpool,
         (pthreadpool_function_1d_t)compute_4d_tiled,

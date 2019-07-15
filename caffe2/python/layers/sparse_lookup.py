@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.python.optimizer import FP16_ENGINES, Optimizer
 from caffe2.python.helpers.arg_scope import get_current_scope
 from caffe2.python import schema
 from caffe2.python.layers.layers import (
@@ -12,14 +13,35 @@ from caffe2.python.layers.layers import (
     get_key,
     IdList,
     IdScoreList,
+    IdListWithEvicted,
+    IdScoreListWithEvicted,
     LayerPsParam,
     ModelLayer,
+    almost_equal_schemas,
 )
 import collections
 import functools
+import logging
 import math
 import numpy as np
 import operator
+
+logger = logging.getLogger(__name__)
+
+
+def get_trainer_version_based_on_optim(optim_def):
+    if isinstance(optim_def, Optimizer) and hasattr(optim_def, "engine"):
+        logger.info(
+            "Attempting to set trainer version for engine {}".format(optim_def.engine)
+        )
+        if optim_def.engine in FP16_ENGINES:
+            logger.info("Setting FP16 trainer for engine {}".format(optim_def.engine))
+            return "fp16"
+        else:
+            logger.info("Setting FP32 trainer for engine {}".format(optim_def.engine))
+            return "fp32"
+    else:
+        return "fp32"
 
 
 def get_sparse_lookup_predictor_version(version):
@@ -33,13 +55,12 @@ def get_sparse_lookup_trainer_version(version):
         "Unexpected version of sparse_lookup layer {0}".format(version)
     return version
 
-
 def _is_id_list(input_record):
-    return schema.equal_schemas(input_record, IdList)
+    return almost_equal_schemas(input_record, IdList)
 
 
 def _is_id_score_list(input_record):
-    return schema.equal_schemas(input_record,
+    return almost_equal_schemas(input_record,
                                 IdScoreList,
                                 check_field_types=False)
 
@@ -52,6 +73,14 @@ class SparseLookup(ModelLayer):
     _id_score_list_supported_reducers = [
         'PositionWeighted', 'RecencyWeighted', 'Mean', 'Sum', 'WeightedSum',
         'WeightedMean', 'None'
+    ]
+
+    _fp16_compatible_init_op_types = [
+        'Float16UniformFill'
+    ]
+
+    _fp16_compatible_reducers = [
+        'Sum', 'Mean', 'Sqrt', 'PositionWeighted', 'RecencyWeighted',
     ]
 
     def __init__(self, model, input_record, inner_shape, reducer,
@@ -72,25 +101,57 @@ class SparseLookup(ModelLayer):
                 "PositionWeighted only support IdScoreList, but got {} " +
                 "please use PositionWeighted layer to convert IdList " +
                 "to IdScoreList").format(repr(self.input_record))
-            self.external_weights = input_record.values()
+            self.external_weights = self.input_record.values()
 
         elif reducer == "RecencyWeighted":
             assert _is_id_score_list(self.input_record), (
                 "RecencyWeighted only supports IdScoreList.")
-            self.external_weights = input_record.values()
+            self.external_weights = self.input_record.values()
         self.reducer = reducer
 
-        input_dim = get_categorical_limit(input_record)
+        input_dim = get_categorical_limit(self.input_record)
         assert input_dim > 0, (
             "{} should have categorical limit > 0, but got {}".format(
-                get_key(input_record)(), input_dim))
+                get_key(self.input_record)(), input_dim))
 
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
 
+        self.trainer_version = get_trainer_version_based_on_optim(
+            weight_optim
+        )
+
         default_init_op = self._get_default_init_op()
 
         self.weight_init = weight_init or default_init_op
+
+        self.evicted_values = None
+        if schema.equal_schemas(self.input_record, IdListWithEvicted) or \
+            schema.equal_schemas(self.input_record, IdScoreListWithEvicted,
+                                 check_field_types=False):
+            self.evicted_values = self.input_record._evicted_values
+
+        # If fp16 is used, make sure fp16 init op is used
+        if self.trainer_version == "fp16":
+            assert self.reducer in self._fp16_compatible_reducers, (
+                "Fp16 training is enabled. The reducer specified is not supported. "
+                "Got {}. Supported reducers: {}. Right now, in general, sum, mean, "
+                "positional pooling are supported. Attention is not. Please check "
+                "if there is fp16 trained sparse features using advanced pooling.".format(
+                    self.reducer, self._fp16_compatible_reducers)
+            )
+
+            # if init op is UniformFill, we replace it directly
+            if self.weight_init[0] == "UniformFill":
+                self.weight_init = ("Float16UniformFill", self.weight_init[1])
+            assert self.weight_init[0] in self._fp16_compatible_init_op_types, (
+                "Fp16 training is enabled. Init op for weight parameter must be fp16 "
+                "compatibale. Got {}. Supported ops: {}".format(
+                    self.weight_init[0],
+                    self._fp16_compatible_init_op_types)
+            )
+
+            assert regularizer is None, "Regularizer is not compatible with fp16"
 
         if _is_id_list(self.input_record):
             sparse_key = self.input_record.items()
@@ -114,6 +175,14 @@ class SparseLookup(ModelLayer):
                 average_length=avg_length),
             regularizer=regularizer
         )
+        if self.evicted_values:
+            self.reinit_vec = self.create_param(
+                param_name="reinit_vec",
+                shape=inner_shape,
+                initializer=self.weight_init,
+                optimizer=model.NoOptim,
+                regularizer=None,
+            )
 
         self.scale_bias_init = ('ConstantFill', {'value': 0.0})
 
@@ -159,21 +228,14 @@ class SparseLookup(ModelLayer):
     def _get_default_init_op(self):
         scale = math.sqrt(1.0 / self.input_dim)
 
-        cur_scope = get_current_scope()
-        trainer_version = get_sparse_lookup_trainer_version(
-            **cur_scope.get(get_sparse_lookup_trainer_version.__name__,
-                            {'version': 'fp32'}))
-
-        if trainer_version == 'fp32':
+        if self.trainer_version == 'fp32':
             default_weight_init = ('UniformFill', {'min': -scale, 'max': scale})
-        elif trainer_version == 'fp16':
+        elif self.trainer_version == 'fp16':
             default_weight_init = ("Float16UniformFill", {'min': -scale, 'max': scale})
         else:
             raise NotImplementedError(
                 "Train version {} is not currently supported".format(trainer_version)
             )
-
-        self.trainer_version = trainer_version
 
         return default_weight_init
 
@@ -359,6 +421,9 @@ class SparseLookup(ModelLayer):
                 "Trying to create with {}".format(self.reducer)
 
     def _add_ops(self, net, version='fp32'):
+        if self.evicted_values:
+            net.CopyRowsToTensor(
+                [self.w, self.evicted_values.get(), self.reinit_vec], [self.w])
         if _is_id_list(self.input_record):
             self._add_ops_id_list(net, version=version)
         elif _is_id_score_list(self.input_record):

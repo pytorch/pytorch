@@ -8,7 +8,7 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines eight CPU tensor types and eight GPU tensor types:
+Torch defines nine CPU tensor types and nine GPU tensor types:
 
 ========================   ===========================================   ===========================   ================================
 Data type                  dtype                                         CPU tensor                    GPU tensor
@@ -21,6 +21,7 @@ Data type                  dtype                                         CPU ten
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
+Boolean                    ``torch.bool``                                :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
 ========================   ===========================================   ===========================   ================================
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
@@ -120,6 +121,11 @@ view of a storage and defines numeric operations on it.
     To change an existing tensor's :class:`torch.device` and/or :class:`torch.dtype`, consider using
     :meth:`~torch.Tensor.to` method on the tensor.
 
+.. warning::
+   Current implementation of :class:`torch.Tensor` introduces memory overhead,
+   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
+   If this is your case, consider using one large structure.
+
 .. class:: Tensor()
 
    There are a few main ways to create a tensor, depending on your use case.
@@ -142,6 +148,8 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: is_cuda
    .. autoattribute:: device
    .. autoattribute:: grad
+   .. autoattribute:: ndim
+   .. autoattribute:: T 
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -178,7 +186,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli
    .. automethod:: bernoulli_
    .. automethod:: bincount
+   .. automethod:: bitwise_not
+   .. automethod:: bitwise_not_
    .. automethod:: bmm
+   .. automethod:: bool
    .. automethod:: byte
    .. automethod:: btrifact
    .. automethod:: btrifact_with_info
@@ -188,6 +199,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil_
    .. automethod:: char
    .. automethod:: cholesky
+   .. automethod:: cholesky_inverse
    .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
@@ -214,6 +226,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: diag_embed
    .. automethod:: diagflat
    .. automethod:: diagonal
+   .. automethod:: fill_diagonal_
    .. automethod:: digamma
    .. automethod:: digamma_
    .. automethod:: dim
@@ -277,6 +290,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
    .. automethod:: int
+   .. automethod:: int_repr
    .. automethod:: inverse
    .. automethod:: irfft
    .. automethod:: is_contiguous
@@ -308,6 +322,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu
+   .. automethod:: lu_solve
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter
@@ -355,7 +370,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
-   .. automethod:: quantize_linear
+   .. automethod:: qscheme
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: random_
@@ -450,6 +465,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unfold
    .. automethod:: uniform_
    .. automethod:: unique
+   .. automethod:: unique_consecutive
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values

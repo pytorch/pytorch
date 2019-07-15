@@ -18,6 +18,10 @@
 #include <TH/THGenerateHalfType.h>
 
 #include <torch/csrc/generic/utils.cpp>
+#include <TH/THGenerateBFloat16Type.h>
+
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateBoolType.h>
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {

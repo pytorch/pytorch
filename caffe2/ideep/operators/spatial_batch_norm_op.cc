@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPSpatialBNOp final : public IDEEPOperator {
  public:
@@ -99,4 +101,4 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(SpatialBN, IDEEPSpatialBNOp);
 REGISTER_IDEEP_OPERATOR(SpatialBNGradient, IDEEPSpatialBNGradientOp)
 
-}  // namespace caffe2
+}  // namespace

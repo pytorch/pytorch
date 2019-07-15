@@ -120,7 +120,7 @@ public:
     auto device_index = static_cast<DeviceIndex>(bits) & 0xFFFFull;
     bits >>= 16;
     auto device_type = static_cast<DeviceType>(bits);
-    AT_CHECK(isValidDeviceType(device_type));
+    TORCH_CHECK(isValidDeviceType(device_type));
     // Unfortunately, we can't check if the StreamId is valid here; it
     // will be checked upon first use.
     return Stream(UNSAFE, Device(device_type, device_index), stream_id);

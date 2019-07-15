@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <torch/csrc/autograd/variable.h>
@@ -15,8 +17,6 @@
 
 #include <torch/csrc/utils/variadic.h>
 #include <torch/csrc/autograd/functions/utils.h>
-
-#include <ATen/core/VariableHooksInterface.h>
 
 #include <array>
 #include <cstddef>
@@ -39,8 +39,6 @@ using namespace at;
 using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
-
-extern std::vector<std::unique_ptr<Type>> type_to_variable_type;
 
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
@@ -147,13 +145,24 @@ inline std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
       return SavedVariable{tensor, false /* is output */}; });
 }
 
+// NOTE: For now, there is no guarantee that the tensors returned from
+// out-of-place ATen ops are not Variables. For example, the following operators:
+//
+// 1. `coalesce()` (called from `VariableType::coalesce()`)
+// 2. `_embedding_bag_cpu()` (called from `VariableType::_embedding_bag()`)
+//
+// can return its input or tensors created using the input's options, which can
+// potentially be Variables because inputs to ATen ops can be Variables.
+//
+// In the near future, once we make every tensor a Variable, these two
+// `as_variable()` functions are no-op and we can remove them.
 inline Tensor as_variable(Tensor tensor) {
-  return make_variable(std::move(tensor), /*requires_grad=*/false);
+  return tensor.is_variable() ? tensor : make_variable(std::move(tensor), /*requires_grad=*/false);
 }
 
 inline std::vector<Tensor> as_variable(TensorList tl) {
   return fmap(tl, [](const Tensor& t) -> Tensor {
-      return make_variable(t, /*requires_grad=*/false);
+      return t.is_variable() ? t : make_variable(t, /*requires_grad=*/false);
   });
 }
 

@@ -40,6 +40,9 @@ TYPE_MAP = {
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
     'Scalar': 'Scalar',
+    'MemoryFormat': 'MemoryFormat',
+    'MemoryFormat?': 'MemoryFormat?',
+    'QScheme': 'QScheme',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
     'Tensor?': 'Tensor?',
@@ -59,6 +62,7 @@ TYPE_MAP = {
     'int64_t?': 'int?',
     'double': 'float',
     'bool': 'bool',
+    'bool?': 'bool?',
     'Generator': 'Generator?',
 }
 
@@ -92,9 +96,12 @@ def jit_type_of(arg):
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
-    'IntArrayRef': '{}.toIntList()->elements()',
+    'IntArrayRef': '{}.toIntListRef()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
+    'MemoryFormat': '{}.toMemoryFormat()',
+    'MemoryFormat?': '{}.toOptional<c10::MemoryFormat>()',
+    'QScheme': '{}.toQScheme()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
@@ -102,16 +109,17 @@ FROM_IVALUE = {
     'Tensor': '{}.toTensor()',
     'Tensor?': 'toOptionalTensor({})',
     'Tensor?[]': 'toListOfOptionalTensor({})',
-    'TensorList': '{}.toTensorList()->elements()',
+    'TensorList': '{}.toTensorListRef()',
     'bool': '{}.toBool()',
+    'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
-    'std::string': '{}.toString()->string()',
+    'std::string': '{}.toStringRef()',
     'Generator': 'nullptr',
-    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolListRef())',
-    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolListRef())',
-    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolListRef())',
+    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
+    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
+    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolList())',
 }
 
 
@@ -134,20 +142,21 @@ CALL_NAMESPACE_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
-        .device(${device});
+        .device(${device})
+        .pinned_memory(${pin_memory});
 auto result_ = torch::${name}(${args_with_tensor_options});
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
-        .device(${device});
+        .device(${device})
+        .pinned_memory(${pin_memory});;
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
-    autograd::profiler::RecordFunction record("${name}");
     ${lvalues}
     ${call}
     drop(stack, ${num_inputs});
@@ -164,7 +173,13 @@ Operator(
 """)
 
 
-blacklisted_types = {'SparseTensorRef', 'Storage', 'void*'}
+blacklisted_types = {
+    'Storage',
+    'DimnameList?',
+    'ConstQuantizerPtr',
+    'Dimname',
+}
+
 default_only_types = {'Generator'}
 
 
@@ -243,15 +258,18 @@ def gen_jit_dispatch(declarations, out, template_path):
             dtype = args[tensor_options_arg_index]
             layout = args[tensor_options_arg_index + 1]
             device = args[tensor_options_arg_index + 2]
+            pin_memory = args[tensor_options_arg_index + 3]
             args_with_tensor_options = args[:tensor_options_arg_index] + \
-                ['options'] + args[(tensor_options_arg_index + 3):]
+                ['options'] + args[(tensor_options_arg_index + 4):]
             if is_namespace_function:
                 return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], dtype=dtype, layout=layout, device=device,
+                    name=decl['name'], dtype=dtype, layout=layout,
+                    device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options))
             else:
                 return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], dtype=dtype, layout=layout, device=device,
+                    name=decl['name'], dtype=dtype, layout=layout,
+                    device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
         else:
@@ -350,21 +368,19 @@ def gen_jit_dispatch(declarations, out, template_path):
             {'name': 'layout', 'simple_type': 'Layout'},
             # device is specified as an IntArrayRef of { at::Device::Type, device_id }
             {'name': 'device', 'simple_type': 'Device'},
+            # pin_memory is specified as a boolean
+            {'name': 'pin_memory', 'simple_type': 'bool', 'default': False},
         ]
         # TODO: Don't repack this into TensorOptions. Needs various changes in downstream code.
         if 'default' in arg:
-            tensor_options_expansion[0]['simple_type'] += '?'
-            tensor_options_expansion[1]['simple_type'] += '?'
-            tensor_options_expansion[2]['simple_type'] += '?'
-            tensor_options_expansion[0]['default'] = 'None'
-            tensor_options_expansion[1]['default'] = 'None'
-            tensor_options_expansion[2]['default'] = 'None'
+            for el in tensor_options_expansion:
+                el['simple_type'] += '?'
+                el['default'] = 'None'
         if 'default' in arg and arg['default'] == 'at::kLong':
             tensor_options_expansion[0]['default'] = 'long'
         if 'kwarg_only' in arg and arg['kwarg_only']:
-            tensor_options_expansion[0]['kwarg_only'] = True
-            tensor_options_expansion[1]['kwarg_only'] = True
-            tensor_options_expansion[2]['kwarg_only'] = True
+            for el in tensor_options_expansion:
+                el['kwarg_only'] = True
         return tensor_options_expansion
 
     additional_jit_decls = []
@@ -479,6 +495,8 @@ def signature(decl, should_match_schema=True):
                 .replace('true', 'True') \
                 .replace('false', 'False') \
                 .replace('Reduction::Mean', 'Mean') \
+                .replace('MemoryFormat::Contiguous', 'contiguous_format') \
+                .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
                 .replace('}', ']')

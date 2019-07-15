@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -37,14 +36,12 @@ class NoopLogger : public LoggerBase {
 //
 // NOTE: this is not written in a scalable way and should probably only be used
 // in the single-threaded case or for testing.
-class LockingLogger : public LoggerBase {
+class TORCH_API LockingLogger : public LoggerBase {
  public:
-  TORCH_API void addStatValue(const std::string& stat_name, int64_t val) override;
-  TORCH_API virtual int64_t getCounterValue(const std::string& name) const;
+  void addStatValue(const std::string& stat_name, int64_t val) override;
+  virtual int64_t getCounterValue(const std::string& name) const;
   enum class AggregationType { SUM, AVG };
-  TORCH_API void setAggregationType(
-      const std::string& stat_name,
-      AggregationType type);
+  void setAggregationType(const std::string& stat_name, AggregationType type);
   ~LockingLogger() {}
 
  private:

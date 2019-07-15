@@ -40,8 +40,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       if (auto input_type = node->namedInput(attr::self)
                                 ->type()
                                 ->cast<CompleteTensorType>()) {
-        auto expanded_sizes = node->get<std::vector<int64_t>>(attr::size);
-        if (expanded_sizes == input_type->sizes()) {
+        auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
+        if (!expanded_sizes.has_value() || c10::impl::toVector(*expanded_sizes) == input_type->sizes()) {
           node->output()->replaceAllUsesWith(node->namedInput(attr::self));
         }
       }
@@ -149,7 +149,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if (
-        node->kind() == prim::Float || node->kind() == prim::Int ||
+        node->kind() == aten::Float || node->kind() == aten::Int ||
         node->kind() == prim::ImplicitTensorToNum) {
       Node* input_node = node->input()->node();
       if (input_node->kind() == prim::NumToTensor) {
@@ -157,12 +157,17 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       }
     } else if (
         node->matches(
-            "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
-      auto uses = node->output()->uses();
-      for (Use u : uses) {
-        if (u.user->matches(
-                "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
-          u.user->replaceInput(0, node->inputs().at(0));
+            "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
+      if (node->input(1)->mustBeNone()) {
+        node->output()->replaceAllUsesWith(node->input(0));
+      } else {
+        auto uses = node->output()->uses();
+        for (Use u : uses) {
+          if (u.user->matches(
+                  "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
+              u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
+            u.user->replaceInput(0, node->inputs().at(0));
+          }
         }
       }
     } else if (node->kind() == prim::If) {

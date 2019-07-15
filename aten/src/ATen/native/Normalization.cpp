@@ -15,7 +15,7 @@ namespace at { namespace native {
 
 namespace {
   void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
-    AT_CHECK(actual == expected,
+    TORCH_CHECK(actual == expected,
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
@@ -54,6 +54,77 @@ struct Var {
   }
 };
 
+/// A fast path for CPU inference when all tensors are contiguous.
+/// This code achieves machine bandwidth peak without AVX support.
+/// If this changes for future architectures, we can move it to the cpu/
+/// directory.
+template<typename scalar_t>
+void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
+    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
+    const Tensor& mean, const Tensor& variance, double eps) {
+  int64_t n_batch = input.size(0);
+  int64_t n_channel = input.size(1);
+  int64_t image_size = input.numel() / n_batch / n_channel;
+
+  scalar_t* output_data = output.data<scalar_t>();
+  const scalar_t* input_data = input.data<scalar_t>();
+  const scalar_t* weight_data = weight.defined() ? weight.data<scalar_t>() : nullptr;
+  const scalar_t* bias_data = bias.defined() ? bias.data<scalar_t>() : nullptr;
+  const scalar_t* mean_data = mean.data<scalar_t>();
+  const scalar_t* var_data = variance.data<scalar_t>();
+
+  /// Collect the linear and constant terms regarding the input.
+  /// output(n, c, h, w)
+  ///     = (input(n, c, h, w) - mean(c)) / sqrt(var(c) + eps) * weight(c)
+  ///         + bias(c)
+  ///     = input(n, c, h, w) * inv_var(c) * weight(c) +
+  ///         - mean(c) * inv_var(c) * weight(c) + bias(c),
+  /// where inv_var(c) = 1 / sqrt(var(c) + eps).
+  /// So the linear term, alpha(c) = inv_var(c) * weight(c),
+  ///   the constant term beta(c) = bias(c) - mean(c) * inv_var(c) * weight(c)
+  /// Note that this is only a good idea if (input_size >> c), in degenerate
+  /// cases where image_size == 1 && batch_size == 1, it is slow.
+  Tensor alpha = at::empty_like(mean);
+  Tensor beta = at::empty_like(mean);
+  scalar_t* alpha_data = alpha.data<scalar_t>();
+  scalar_t* beta_data = beta.data<scalar_t>();
+  for (int64_t c = 0; c < n_channel; c++) {
+    scalar_t inv_var = 1 / std::sqrt(var_data[c] + static_cast<scalar_t>(eps));
+    scalar_t weight_v = weight_data ? weight_data[c] : 1;
+    scalar_t bias_v = bias_data ? bias_data[c] : 0;
+    alpha_data[c] = inv_var * weight_v;
+    beta_data[c] = bias_v - mean_data[c] * inv_var * weight_v;
+  }
+
+  // Apply the linear terms to the input,
+  // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
+  // No need to use parallel_for as this function is supposed to be
+  // memory-limited.
+  // Keep the loop struture simple to make sure compiler vetorization kicks in.
+  if (image_size != 1) {
+    for (int64_t n = 0; n < n_batch; ++n) {
+      for (int64_t c = 0; c < n_channel; ++c) {
+        for (int64_t i = 0; i < image_size; ++i) {
+          // Keep all the offset calculation within the inner loop for
+          // simplicity. Compilers are very good at hoisting the common part
+          // outside.
+          int64_t offset = n * n_channel * image_size + c * image_size + i;
+          output_data[offset] = input_data[offset] * alpha_data[c] +
+              beta_data[c];
+        }
+      }
+    }
+  } else {
+    // image_size == 1
+    for (int64_t n = 0; n < n_batch; ++n) {
+      for (int64_t c = 0; c < n_channel; ++c) {
+        int64_t offset = n * n_channel + c;
+        output_data[offset] = input_data[offset] * alpha_data[c] + beta_data[c];
+      }
+    }
+  }
+}
+
 template<typename scalar_t>
 std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
@@ -63,6 +134,16 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   Tensor output = at::empty_like(input);
 
+  // Check if we should use the fast path.
+  if (!train && input.is_contiguous()
+      && (!weight.defined() || weight.is_contiguous())
+      && (!bias.defined() || bias.is_contiguous())
+      && running_mean.is_contiguous()
+      && running_var.is_contiguous()) {
+    batch_norm_cpu_inference_contiguous<scalar_t>(output, input, weight, bias,
+      running_mean, running_var, eps);
+    return std::make_tuple(output, save_mean, save_invstd);
+  }
   int64_t n_input = input.size(1);
 
   auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
@@ -353,7 +434,7 @@ Tensor instance_norm(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool use_input_stats, double momentum, double eps, bool cudnn_enabled) {
-  AT_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
+  TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
   std::vector<int64_t> shape = input.sizes().vec();
   int64_t b = input.size(0);
@@ -381,64 +462,6 @@ Tensor instance_norm(
   return out.view(input.sizes());
 }
 
-Tensor layer_norm(const Tensor& input, IntArrayRef normalized_shape,
-    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    double eps, bool cudnn_enabled) {
-  
-    int64_t normalized_ndim = normalized_shape.size();
-
-    AT_CHECK(normalized_ndim >= 1,
-             "Expected normalized_shape to be at least 1-dimensional, i.e., ",
-             "containing at least one element, but got normalized_shape=",
-             normalized_shape);
-
-    AT_CHECK(!weight.defined() || weight.sizes().equals(normalized_shape),
-             "Expected weight to be of same shape as normalized_shape, but got ",
-             "weight of shape ", weight.sizes(), " and normalized_shape=",
-             normalized_shape);
-    AT_CHECK(!bias.defined() || bias.sizes().equals(normalized_shape),
-             "Expected bias to be of same shape as normalized_shape, but got ",
-             "bias of shape ", bias.sizes(), " and normalized_shape=",
-             normalized_shape);
-
-    auto input_shape = input.sizes();
-    auto input_ndim = input.dim();
-
-    if (input_ndim < normalized_ndim ||
-        !input_shape.slice(input_ndim - normalized_ndim).equals(normalized_shape)) {
-      std::stringstream ss;
-      ss << "Given normalized_shape=" << normalized_shape
-         << ", expected input with shape [*";
-      for (auto size : normalized_shape) {
-        ss << ", " << size;
-      }
-      ss << "], but got input of size" << input_shape;
-      AT_ERROR(ss.str());
-    }
-
-    int64_t n = 1;
-    for (int64_t i = 0; i < input_ndim - normalized_ndim; i++) {
-      n *= input_shape[i];
-    }
-
-    // Apply layer norm
-    auto input_reshaped = input.contiguous().view({1, n, -1});
-
-    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps,
-                              cudnn_enabled);
-    out = out.view(input_shape);
-
-    if (weight.defined() && bias.defined()) {
-      return bias.addcmul(out, weight, 1);
-    } else if (weight.defined()) {
-      return out.mul(weight);
-    } else if (bias.defined()) {
-      return out.add(bias);
-    } else {
-      return out;
-    }
-}
-
 Tensor group_norm(const Tensor& input, int64_t num_groups,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     double eps, bool cudnn_enabled) {
@@ -447,16 +470,16 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
     int64_t b = input.size(0);
     int64_t c = input.size(1);
 
-    AT_CHECK(c % num_groups == 0,
+    TORCH_CHECK(c % num_groups == 0,
              "Expected number of channels in input to be divisible by ",
              "num_groups, but got input of shape ", input.sizes(), " and "
              "num_groups=", num_groups);
 
-    AT_CHECK(!weight.defined() || (weight.dim() == 1 && weight.numel() == c),
+    TORCH_CHECK(!weight.defined() || (weight.dim() == 1 && weight.numel() == c),
              "Expected weight to be a vector of size equal to the number of ",
              "channels in input, but got weight of shape ", weight.sizes(),
              " and input of shape ", input.sizes());
-    AT_CHECK(!bias.defined() || (bias.dim() == 1 && bias.numel() == c),
+    TORCH_CHECK(!bias.defined() || (bias.dim() == 1 && bias.numel() == c),
              "Expected bias to be a vector of size equal to the number of ",
              "channels in input, but got bias of shape ", weight.sizes(),
              " and input of shape ", input.sizes());

@@ -211,7 +211,7 @@ struct AllocatorRegisterer {
 
 #define REGISTER_ALLOCATOR(t, f)                    \
   namespace {                                       \
-  static AllocatorRegisterer<t> g_allocator_##d(f); \
+  static AllocatorRegisterer<t> g_allocator_d(f); \
   }
 
 } // namespace c10

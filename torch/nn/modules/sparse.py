@@ -4,10 +4,8 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 from .. import init
-from torch._jit_internal import weak_module, weak_script_method
 
 
-@weak_module
 class Embedding(Module):
     r"""A simple lookup table that stores embeddings of a fixed dictionary and size.
 
@@ -77,7 +75,7 @@ class Embedding(Module):
                  [-0.1655,  0.9897,  0.0635]]])
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
-                     'norm_type', 'scale_grad_by_freq', 'sparse', '_weight']
+                     'norm_type', 'scale_grad_by_freq', 'sparse']
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
@@ -110,7 +108,6 @@ class Embedding(Module):
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
-    @weak_script_method
     def forward(self, input):
         return F.embedding(
             input, self.weight, self.padding_idx, self.max_norm,
@@ -173,12 +170,11 @@ class Embedding(Module):
         return embedding
 
 
-@weak_module
 class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length, this class
+    For bags of constant length and no :attr:`per_sample_weights`, this class
 
         * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=0)``,
         * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=0)``,
@@ -186,6 +182,12 @@ class EmbeddingBag(Module):
 
     However, :class:`~torch.nn.EmbeddingBag` is much more time and memory efficient than using a chain of these
     operations.
+
+    EmbeddingBag also supports per-sample weights as an argument to the forward
+    pass. This scales the output of the Embedding before performing a weighted
+    reduction as specified by ``mode``. If :attr:`per_sample_weights`` is passed, the
+    only supported ``mode`` is ``"sum"``, which computes a weighted sum according to
+    :attr:`per_sample_weights`.
 
     Args:
         num_embeddings (int): size of the dictionary of embeddings
@@ -197,6 +199,9 @@ class EmbeddingBag(Module):
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
         mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+                                 ``"sum"`` computes the weighted sum, taking :attr:`per_sample_weights`
+                                 into consideration. ``"mean"`` computes the average of the values
+                                 in the bag, ``"max"`` computes the max value over each bag.
                                  Default: ``"mean"``
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
                                  Notes for more details regarding sparse gradients. Note: this option is not
@@ -206,7 +211,8 @@ class EmbeddingBag(Module):
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
                          initialized from :math:`\mathcal{N}(0, 1)`.
 
-    Inputs: :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
+    Inputs: :attr:`input` (LongTensor), :attr:`offsets` (LongTensor, optional), and
+        :attr:`per_index_weights` (Tensor, optional)
 
         - If :attr:`input` is 2D of shape `(B, N)`,
 
@@ -223,6 +229,12 @@ class EmbeddingBag(Module):
           having ``B`` bags. Empty bags (i.e., having 0-length) will have
           returned vectors filled by zeros.
 
+        per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
+            to indicate all weights should be taken to be ``1``. If specified, :attr:`per_sample_weights`
+            must have exactly the same shape as input and is treated as having the same
+            :attr:`offsets`, if those are not ``None``. Only supported for ``mode='sum'``.
+
+
     Output shape: `(B, embedding_dim)`
 
     Examples::
@@ -236,8 +248,8 @@ class EmbeddingBag(Module):
         tensor([[-0.8861, -5.4350, -0.0523],
                 [ 1.1306, -2.5798, -1.0044]])
     """
-    __constants__ = ['num_embeddings, embedding_dim', 'max_norm', 'norm_type',
-                     'scale_grad_by_freq', 'mode', 'sparse', '_weight']
+    __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
+                     'scale_grad_by_freq', 'mode', 'sparse']
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
@@ -261,12 +273,12 @@ class EmbeddingBag(Module):
     def reset_parameters(self):
         init.normal_(self.weight)
 
-    @weak_script_method
-    def forward(self, input, offsets=None):
-        # type: (Tensor, Optional[Tensor]) -> Tensor
+    def forward(self, input, offsets=None, per_sample_weights=None):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
-                               self.scale_grad_by_freq, self.mode, self.sparse)
+                               self.scale_grad_by_freq, self.mode, self.sparse,
+                               per_sample_weights)
 
     def extra_repr(self):
         s = '{num_embeddings}, {embedding_dim}'

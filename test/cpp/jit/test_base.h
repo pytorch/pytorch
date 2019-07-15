@@ -10,9 +10,9 @@
 #include <test/cpp/common/support.h>
 #else
 #include "c10/util/Exception.h"
-#define ASSERT_EQ(x, y) AT_ASSERT((x) == (y))
-#define ASSERT_NE(x, y) AT_ASSERT((x) != (y))
-#define ASSERT_TRUE AT_ASSERT
+#define ASSERT_EQ(x, y) TORCH_INTERNAL_ASSERT((x) == (y))
+#define ASSERT_NE(x, y) TORCH_INTERNAL_ASSERT((x) != (y))
+#define ASSERT_TRUE TORCH_INTERNAL_ASSERT
 #define ASSERT_FALSE(x) ASSERT_TRUE(!(x))
 #define ASSERT_THROWS_WITH(statement, substring)                         \
   try {                                                                  \
@@ -21,14 +21,16 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
-#define ASSERT_ANY_THROW(statement)   \
-  bool threw = false;                 \
-  try {                               \
-    (void)statement;                  \
-  } catch (const std::exception& e) { \
-    threw = true;                     \
-  }                                   \
-  ASSERT_TRUE(threw);
+#define ASSERT_ANY_THROW(statement)     \
+  {                                     \
+    bool threw = false;                 \
+    try {                               \
+      (void)statement;                  \
+    } catch (const std::exception& e) { \
+      threw = true;                     \
+    }                                   \
+    ASSERT_TRUE(threw);                 \
+  }
 
 #endif // defined(USE_GTEST)
 

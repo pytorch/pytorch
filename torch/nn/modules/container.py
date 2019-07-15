@@ -41,11 +41,6 @@ class Sequential(Module):
                   ('conv2', nn.Conv2d(20,64,5)),
                   ('relu2', nn.ReLU())
                 ]))
-
-    Shape:
-        - Input: :math:`(*)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(*)`, same shape as the input
     """
 
     def __init__(self, *args):

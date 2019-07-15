@@ -56,7 +56,7 @@ MATH_UTILS_DECL T Cube(const T x) {
 // 0x800...
 // The casting allows to use one condition instead of two.
 MATH_UTILS_DECL bool IsAGeZeroAndALtB(const int a, const int b) {
-  return static_cast<unsigned int>(a) < static_cast<unsigned>(b);
+  return static_cast<unsigned int>(a) < static_cast<unsigned int>(b);
 }
 
 // Increase the index digits by one based on dims.
@@ -65,7 +65,9 @@ CAFFE2_API void
 IncreaseIndexInDims(int ndim, const TIndex* dims, TIndex* index);
 
 // Get index value from dims and index digits.
-CAFFE2_API int GetIndexFromDims(const int n, const int* dims, const int* index);
+template <typename TIndex>
+CAFFE2_API TIndex
+GetIndexFromDims(const int n, const TIndex* dims, const TIndex* index);
 
 // Checks if the input permutation is an identity permutation;
 CAFFE2_API bool IsIdentityPermutation(const int n, const int* perm);
@@ -96,14 +98,15 @@ CAFFE2_API bool IsBothEndsReduce(
     int* nxt);
 
 // Computest the broadcast binary operation dims.
+template <typename TIndex>
 CAFFE2_API void ComputeBroadcastBinaryOpDims(
     const int A_ndim,
-    const int* A_dims,
+    const TIndex* A_dims,
     const int B_ndim,
-    const int* B_dims,
-    int* A_broadcast_dims,
-    int* B_broadcast_dims,
-    int* C_broadcast_dims);
+    const TIndex* B_dims,
+    TIndex* A_broadcast_dims,
+    TIndex* B_broadcast_dims,
+    TIndex* C_broadcast_dims);
 
 CAFFE2_API bool IsRowwiseBroadcastBinaryOp(
     const int ndim,

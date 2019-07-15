@@ -2,11 +2,14 @@
 
 from collections import OrderedDict
 
+from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.visualization as visualization
-from cimodel.lib.conf_tree import ConfigNode
+
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
@@ -14,39 +17,36 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 DOCKER_IMAGE_VERSION = 300
 
 
-class Conf(object):
-    def __init__(self,
-                 distro,
-                 parms,
-                 pyver=None,
-                 cuda_version=None,
-                 is_xla=False,
-                 restrict_phases=None,
-                 gpu_resource=None,
-                 dependent_tests=None,
-                 parent_build=None):
-
-        self.distro = distro
-        self.pyver = pyver
-        self.parms = parms
-        self.cuda_version = cuda_version
-
-        # TODO expand this to cover all the USE_* that we want to test for
-        #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
-        # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
-        self.is_xla = is_xla
-
-        self.restrict_phases = restrict_phases
-        self.gpu_resource = gpu_resource
-        self.dependent_tests = dependent_tests or []
-        self.parent_build = parent_build
+@dataclass
+class Conf:
+    distro: str
+    parms: List[str]
+    pyver: Optional[str] = None
+    cuda_version: Optional[str] = None
+    # TODO expand this to cover all the USE_* that we want to test for
+    #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
+    # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
+    is_xla: bool = False
+    restrict_phases: Optional[List[str]] = None
+    gpu_resource: Optional[str] = None
+    dependent_tests: List = field(default_factory=list)
+    parent_build: Optional['Conf'] = None
+    is_namedtensor: bool = False
+    is_important: bool = False
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
     def get_parms(self, for_docker):
-        leading = ["pytorch"]
+        leading = []
+        # We just don't run non-important jobs on pull requests;
+        # previously we also named them in a way to make it obvious
+        # if self.is_important and not for_docker:
+        #    leading.append("AAA")
+        leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
+        if self.is_namedtensor and not for_docker:
+            leading.append("namedtensor")
 
         cuda_parms = []
         if self.cuda_version:
@@ -105,20 +105,25 @@ class Conf(object):
 
     def gen_workflow_yaml_item(self, phase):
 
+        # All jobs require the setup job
+        parameters = OrderedDict({"requires": ["setup"]})
+
         if phase == "test":
-            val = OrderedDict()
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
             #  build of pytorch in the caffe2 build job, and just run the caffe2 tests off of a completed
             #  pytorch build job (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259452641)
-            if phase == "test":
-                dependency_build = self.parent_build or self
-                val["requires"] = [dependency_build.gen_build_name("build")]
 
-            return {self.gen_build_name(phase): val}
-        else:
-            return self.gen_build_name(phase)
+            dependency_build = self.parent_build or self
+            parameters["requires"].append(dependency_build.gen_build_name("build"))
+
+        if not self.is_important:
+            # If you update this, update
+            # caffe2_build_definitions.py too
+            parameters["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+
+        return {self.gen_build_name(phase): parameters}
 
 
 # TODO This is a hack to special case some configs just for the workflow list
@@ -157,67 +162,15 @@ def gen_dependent_configs(xenial_parent_config):
             restrict_phases=["test"],
             gpu_resource=gpu,
             parent_build=xenial_parent_config,
+            is_important=xenial_parent_config.is_important,
         )
 
         configs.append(c)
 
-    for x in ["pytorch_short_perf_test_gpu", "pytorch_doc_push"]:
+    for x in ["pytorch_short_perf_test_gpu", "pytorch_python_doc_push", "pytorch_cpp_doc_push"]:
         configs.append(HiddenConf(x, parent_build=xenial_parent_config))
 
     return configs
-
-
-def X(val):
-    """
-    Compact way to write a leaf node
-    """
-    return val, []
-
-
-CONFIG_TREE_DATA = [
-    ("trusty", [
-        (None, [
-            X("2.7.9"),
-            X("2.7"),
-            X("3.5"),
-            X("nightly"),
-        ]),
-        ("gcc", [
-            ("4.8", [X("3.6")]),
-            ("5.4", [("3.6", [X(False), X(True)])]),
-            ("7", [X("3.6")]),
-        ]),
-    ]),
-    ("xenial", [
-        ("clang", [
-            ("5", [X("3.6")]),
-        ]),
-        ("cuda", [
-            ("8", [X("3.6")]),
-            ("9", [
-                # Note there are magic strings here
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L143
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
-                # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("2.7"),
-                X("3.6"),
-            ]),
-            ("9.2", [X("3.6")]),
-            ("10", [X("3.6")]),
-        ]),
-        ("android", [
-            ("r19c", [X("3.6")]),
-        ]),
-    ]),
-]
-
-
-def get_major_pyver(dotted_version):
-    parts = dotted_version.split(".")
-    return "py" + parts[0]
 
 
 def get_root():
@@ -228,94 +181,6 @@ def gen_tree():
     root = get_root()
     configs_list = conf_tree.dfs(root)
     return configs_list
-
-
-class TreeConfigNode(ConfigNode):
-    def __init__(self, parent, node_name, subtree):
-        super(TreeConfigNode, self).__init__(parent, self.modify_label(node_name))
-        self.subtree = subtree
-        self.init2(node_name)
-
-    def modify_label(self, label):
-        return label
-
-    def init2(self, node_name):
-        pass
-
-    def get_children(self):
-        return [self.child_constructor()(self, k, v) for (k, v) in self.subtree]
-
-
-class TopLevelNode(TreeConfigNode):
-    def __init__(self, node_name, subtree):
-        super(TopLevelNode, self).__init__(None, node_name, subtree)
-
-    def child_constructor(self):
-        return DistroConfigNode
-
-
-class DistroConfigNode(TreeConfigNode):
-    def init2(self, node_name):
-        self.props["distro_name"] = node_name
-
-    def child_constructor(self):
-        distro = self.find_prop("distro_name")
-        return TrustyCompilerConfigNode if distro == "trusty" else XenialCompilerConfigNode
-
-
-class TrustyCompilerConfigNode(TreeConfigNode):
-
-    def modify_label(self, label):
-        return label or "<unspecified>"
-
-    def init2(self, node_name):
-        self.props["compiler_name"] = node_name
-
-    def child_constructor(self):
-        return TrustyCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
-
-
-class TrustyCompilerVersionConfigNode(TreeConfigNode):
-
-    def init2(self, node_name):
-        self.props["compiler_version"] = node_name
-
-    def child_constructor(self):
-        return PyVerConfigNode
-
-
-class PyVerConfigNode(TreeConfigNode):
-    def init2(self, node_name):
-        self.props["pyver"] = node_name
-        self.props["abbreviated_pyver"] = get_major_pyver(node_name)
-
-    def child_constructor(self):
-        return XlaConfigNode
-
-
-class XlaConfigNode(TreeConfigNode):
-    def modify_label(self, label):
-        return "XLA=" + str(label)
-
-    def init2(self, node_name):
-        self.props["is_xla"] = node_name
-
-
-class XenialCompilerConfigNode(TreeConfigNode):
-
-    def init2(self, node_name):
-        self.props["compiler_name"] = node_name
-
-    def child_constructor(self):
-        return XenialCompilerVersionConfigNode
-
-
-class XenialCompilerVersionConfigNode(TreeConfigNode):
-    def init2(self, node_name):
-        self.props["compiler_version"] = node_name
-
-    def child_constructor(self):
-        return PyVerConfigNode
 
 
 def instantiate_configs():
@@ -353,6 +218,7 @@ def instantiate_configs():
             gcc_version = compiler_name + (fc.find_prop("compiler_version") or "")
             parms_list.append(gcc_version)
 
+            # TODO: This is a nasty special case
             if compiler_name == "clang":
                 parms_list.append("asan")
 
@@ -361,6 +227,8 @@ def instantiate_configs():
             parms_list.append("gcc7")
 
         is_xla = fc.find_prop("is_xla") or False
+        is_namedtensor = fc.find_prop("is_namedtensor") or False
+        is_important = fc.find_prop("is_important") or False
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -374,9 +242,11 @@ def instantiate_configs():
             is_xla,
             restrict_phases,
             gpu_resource,
+            is_namedtensor=is_namedtensor,
+            is_important=is_important,
         )
 
-        if cuda_version == "8":
+        if cuda_version == "9" and python_version == "3.6":
             c.dependent_tests = gen_dependent_configs(c)
 
         config_list.append(c)
@@ -420,7 +290,7 @@ def get_workflow_list():
 
     config_list = instantiate_configs()
 
-    x = []
+    x = ["setup"]
     for conf_options in config_list:
 
         phases = conf_options.restrict_phases or dimensions.PHASES

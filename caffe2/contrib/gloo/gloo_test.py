@@ -121,18 +121,24 @@ class TestCase(hu.HypothesisTestCase):
         else:
             common_world = str(existing_cw) + ".forked"
 
-        inputs = [store_handler]
         if existing_cw is not None:
-            inputs.append(existing_cw)
-        workspace.RunOperatorOnce(
-            core.CreateOperator(
-                "CreateCommonWorld",
-                inputs,
-                [common_world],
-                size=comm_size,
-                rank=comm_rank,
-                sync=True,
-                engine=op_engine))
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "CloneCommonWorld",
+                    [existing_cw],
+                    [common_world],
+                    sync=True,
+                    engine=op_engine))
+        else:
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "CreateCommonWorld",
+                    [store_handler],
+                    [common_world],
+                    size=comm_size,
+                    rank=comm_rank,
+                    sync=True,
+                    engine=op_engine))
         return (store_handler, common_world)
 
     def synchronize(self, store_handler, value, comm_rank=None):
@@ -298,7 +304,7 @@ class TestCase(hu.HypothesisTestCase):
             tmpdir=tmpdir,
             existing_cw=common_world)
 
-        blob_size = 1e4
+        blob_size = int(1e4)
         num_blobs = 4
 
         for cw in [common_world, common_world2]:

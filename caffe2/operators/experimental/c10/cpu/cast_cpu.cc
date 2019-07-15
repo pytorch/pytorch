@@ -1,5 +1,5 @@
 #include <ATen/core/op_registration/op_registration.h>
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
@@ -26,8 +26,8 @@ void cast_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_,
     int64_t to_) {
-  Tensor input{C10Tensor(input_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor input(input_);
+  Tensor output(output_);
   TensorProto_DataType to = static_cast<TensorProto_DataType>(to_);
 
   switch (to) {
@@ -87,21 +87,13 @@ void cast_op_cpu(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::Cast",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("input"),
-            c10::Argument("output"),
-            c10::Argument("to_dtype", IntType::get()),
-        }),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<decltype(cast_op_cpu), &cast_op_cpu>(),
-    c10::dispatchKey(CPUTensorId()));
+    "_c10_experimental::Cast",
+    c10::RegisterOperators::options()
+      .kernel<decltype(cast_op_cpu), &cast_op_cpu>(CPUTensorId()));
 
 } // namespace
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::Cast",
     C10Cast_DontUseThisOpYet)
 

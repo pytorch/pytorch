@@ -21,17 +21,20 @@ SKIP_PYTHON_BINDINGS = [
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
-    'index',
+    '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
+    'index', 'unique_dim_consecutive',
     '_indexCopy_', 'max_values', 'min_values',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
-    'arange.*', 'range.*', '_solve.*', '_getri.*', '_inverse.*',
-    '_cholesky.*', '_triangular_solve.*',
+    'arange.*', 'range.*', '_solve.*', '_inverse.*',
+    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*',
     'slice', 'randint(_out)?',
-    'item', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
-    'copy_sparse_to_sparse_',
+    'item', '_local_scalar_dense', 'to',
+    'copy_sparse_to_sparse_', 'copy_',
+    'numpy_T',  # this needs to be an attribute in Python, not a function
+    'nonzero(_(out|numpy))?',
+    'set_quantizer_',
+    'set_data',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -150,6 +153,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
+    'QScheme', 'double',
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
@@ -157,9 +161,9 @@ const auto options = TensorOptions()
     .dtype(${dtype})
     .device(${device})
     .layout(${layout}.layout)
-    .requires_grad(${requires_grad});
+    .requires_grad(${requires_grad})
+    .pinned_memory(${pin_memory});
 """)
-
 
 def should_generate_python_binding(declaration):
     name = declaration['name']
@@ -171,15 +175,6 @@ def should_generate_python_binding(declaration):
     signature = '{}({})'.format(name, ', '.join(simple_types))
     for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
         if pattern == signature:
-            return False
-
-    # TODO: fix handling of SparseTensor. We don't want to generate Python
-    # bindings to SparseTensor overloads, such as add(Tensor, SparseTensorRef),
-    # since the Tensor-based signature already dynamically dispatches correctly.
-    # However, sparse_mask only has a SparseTensor signature so we need to bind
-    # that function.
-    for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensorRef' and declaration['name'] != 'sparse_mask':
             return False
 
     return True
@@ -290,16 +285,18 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
     unpack_methods = {
         'const Tensor &': 'tensor',
-        'SparseTensorRef': 'tensor',
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
         'const Type &': 'scalartype',
         'const THPLayout &': 'layout',
         'const Device &': 'device',
+        'c10::optional<DimnameList>': 'toDimnameListOptional',
         'c10::optional<ScalarType>': 'scalartypeOptional',
+        'c10::optional<MemoryFormat>': 'memoryformatOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
+        'c10::optional<bool>': 'toBoolOptional',
         'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',
@@ -352,6 +349,19 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if type_args and len(outputs) > 1:
             raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
 
+        def unpack_variable(name, unpack_expr, typename):
+            # optional<ArrayRef<T>> are special. The PythonArgParser returns an
+            # optional<vector<T>>, which cannot be implictly converted to
+            # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
+            if typename == 'c10::optional<DimnameList>':
+                result = """\
+                    auto __{name} = {expr};
+                    c10::optional<{typ}> {name} = __{name} ? c10::make_optional({typ}(__{name}.value())) : c10::nullopt;
+                """.format(name=name, expr=unpack_expr, typ='DimnameList')
+                return [line.strip() for line in result.split('\n')]
+
+            return ['auto {} = {};'.format(name, unpack_expr)]
+
         def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
             typename = arg['type']
@@ -371,11 +381,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
-                body.append('auto {} = {};'.format(name, expr))
+                body.extend(unpack_variable(name, expr, typename))
                 expr = name
-
-            if typename == 'SparseTensorRef':
-                expr = 'SparseTensorRef({})'.format(expr)
 
             dispatch_type = typename
             if dispatch_type == 'Tensor':
@@ -429,9 +436,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 arg_idx += 1
 
         if 'layout' in (a['name'] for a in python_binding_arguments):
-            layout_idx, device_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2)
+            layout_idx, device_idx, pin_memory_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2, arg_idx + 3)
         else:
-            device_idx, requires_grad_idx = (arg_idx, arg_idx + 1)
+            device_idx, pin_memory_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2)
 
         device = None
         for arg in python_binding_arguments:
@@ -459,9 +466,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     has_device_bind = True
             elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
                 requires_grad = parse_arg(arg, requires_grad_idx)[0]
+            elif arg['name'] == 'pin_memory' and arg['simple_type'] == 'bool':
+                pin_memory = parse_arg(arg, pin_memory_idx)[0]
             else:
                 raise RuntimeError(("found {} in python_binding_arguments but only "
-                                    "\"bool requires_grad\", \"ScalarType dtype\", \"Layout layout\", "
+                                    "\"bool pin_memory\", \"bool requires_grad\", \"ScalarType dtype\", \"Layout layout\", "
                                     "\"Device device\" are supported".format(arg)))
 
         dtype = parsed_type_args[0] if parsed_type_args else None
@@ -470,7 +479,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'dtype': dtype,
                 'layout': layout,
                 'device': device,
-                'requires_grad': requires_grad
+                'requires_grad': requires_grad,
+                'pin_memory': pin_memory,
             }))
             formal_args.append('const TensorOptions & options')
             actuals.append('options')
@@ -620,6 +630,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'python_default_init': py_default_device
             }
             python_binding_arguments.append(device_arg)
+            pin_memory_arg = {
+                'default': False,
+                'dynamic_type': 'bool',
+                'kwarg_only': True,
+                'name': 'pin_memory',
+                'type': 'bool',
+                'simple_type': 'bool',
+            }
+            python_binding_arguments.append(pin_memory_arg)
         if is_factory_or_like_function:
             requires_grad_arg = {
                 'default': False,
@@ -630,6 +649,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'simple_type': 'bool',
             }
             python_binding_arguments.append(requires_grad_arg)
+
         return python_binding_arguments
 
     def emit_namedtuple_return_type_def(declaration, next_index):
@@ -692,7 +712,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if not has_self:
                 # Use 'input' instead of 'self' for NN functions
                 signature = signature.replace('Tensor self', 'Tensor input')
-            signature = signature.replace('SparseTensorRef', 'Tensor')
             if dictionary['base'].get('deprecated', False):
                 signature += '|deprecated'
             env['signatures'].append('"{}",'.format(signature))
@@ -750,9 +769,9 @@ def group_declarations(declarations):
                 v['signature'] = signature
 
     result = []
-    for _, dictionary in sorted(grouped.items()):
+    for x, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
-            raise RuntimeError("'base' not in dictionary", dictionary)
+            raise RuntimeError("'base' not in dictionary for " + str(x), dictionary)
         result.append(dictionary)
     return sort_declarations(result)
 
@@ -855,7 +874,7 @@ def get_python_signature(declaration, include_out):
         default = None
         if arg.get('default') is not None:
             default = arg['default']
-            if default == 'nullptr' or default == 'nullopt' or default == '{}':
+            if default == 'nullptr' or default == 'c10::nullopt' or default == '{}':
                 default = 'None'
         if default is not None:
             param += '=' + str(default)

@@ -239,3 +239,11 @@ TEST_F(RNNTest, PrettyPrintRNNs) {
       c10::str(RNN(RNNOptions(128, 64).layers(3).dropout(0.2).tanh())),
       "torch::nn::RNN(input_size=128, hidden_size=64, layers=3, dropout=0.2, activation=tanh)");
 }
+
+// This test assures that flatten_parameters does not crash,
+// when bidirectional is set to true
+// https://github.com/pytorch/pytorch/issues/19545
+TEST_F(RNNTest, BidirectionalFlattenParameters) {
+  GRU gru(GRUOptions(100, 256).layers(2).bidirectional(true));
+  gru->flatten_parameters();
+}

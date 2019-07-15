@@ -53,7 +53,11 @@ struct AllocAligned {
   static void release(T* p) {
     if (p) {
       p->~T();
+#if defined(_MSC_VER)
+      _aligned_free((void*)p);
+#else
       free((void*)p);
+#endif
     }
   }
 };

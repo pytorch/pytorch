@@ -51,14 +51,13 @@ inline bool compute_requires_grad(Args&&... args) {
 inline void set_history(
     at::Tensor& variable,
     const std::shared_ptr<Function>& grad_fn) {
-  if (grad_fn) {
-    if (variable.defined()) {
-      auto output_nr =
-          grad_fn->add_input_metadata(variable);
-      as_variable_ref(variable).set_gradient_edge({grad_fn, output_nr});
-    } else {
-      grad_fn->add_input_metadata(Function::undefined_input());
-    }
+  AT_ASSERT(grad_fn);
+  if (variable.defined()) {
+    auto output_nr =
+        grad_fn->add_input_metadata(variable);
+    as_variable_ref(variable).set_gradient_edge({grad_fn, output_nr});
+  } else {
+    grad_fn->add_input_metadata(Function::undefined_input());
   }
 }
 

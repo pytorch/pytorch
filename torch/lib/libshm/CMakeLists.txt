@@ -25,6 +25,7 @@ ENDIF ()
 ADD_LIBRARY(shm SHARED core.cpp)
 
 target_include_directories(shm PUBLIC
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
   )
@@ -36,7 +37,7 @@ set_target_properties(torch_shm_manager PROPERTIES INSTALL_RPATH "${_rpath_porta
 SET_TARGET_PROPERTIES(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib")
-TARGET_LINK_LIBRARIES(shm caffe2 c10)
+TARGET_LINK_LIBRARIES(shm torch c10)
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)

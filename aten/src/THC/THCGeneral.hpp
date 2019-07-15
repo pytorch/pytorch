@@ -4,7 +4,6 @@
 
 /* Global state of THC. */
 struct THCState {
-  struct THCRNGState* rngState;
   /* Set of all allocated resources. blasHandles and sparseHandles do not have
      a default and must be explicitly initialized. We always initialize 1
      blasHandle and 1 sparseHandle but we can use more.

@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPLRNOp final : public IDEEPOperator {
  public:
@@ -86,4 +88,4 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(LRN, IDEEPLRNOp);
 REGISTER_IDEEP_OPERATOR(LRNGradient, IDEEPLRNGradientOp);
 
-} // namespace caffe2
+} // namespace

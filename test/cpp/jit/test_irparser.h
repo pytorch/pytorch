@@ -43,6 +43,7 @@ static void checkRoundtrip(const std::string& s) {
 void testIRParser() {
   {
     auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
     script::parseIR(
         R"IR(
 graph(%0 : Tensor, %1 : Tensor):
@@ -50,7 +51,8 @@ graph(%0 : Tensor, %1 : Tensor):
   %res, %3 = foo::mul(%0, %2)
   %x, %y = foo::combine(%res, %2, %3)
   return (%x, %y, %res))IR",
-        &*graph);
+        &*graph,
+        vmap);
 
     AT_ASSERT(graph->inputs().size() == 2);
     AT_ASSERT(graph->outputs().size() == 3);
@@ -59,10 +61,17 @@ graph(%0 : Tensor, %1 : Tensor):
     Value* res = graph->outputs()[2];
     Value* t0 = graph->inputs()[0];
     Value* t1 = graph->inputs()[1];
+    AT_ASSERT(vmap["x"] == x);
+    AT_ASSERT(vmap["y"] == y);
+    AT_ASSERT(vmap["res"] == res);
+    AT_ASSERT(vmap["0"] == t0);
+    AT_ASSERT(vmap["1"] == t1);
     AT_ASSERT(x->node() == y->node());
     Node* comb = x->node();
     Value* t2 = comb->inputs()[1];
     Value* t3 = comb->inputs()[2];
+    AT_ASSERT(vmap["2"] == t2);
+    AT_ASSERT(vmap["3"] == t3);
     AT_ASSERT(comb->kind().toQualString() == std::string("foo::combine"));
     AT_ASSERT(comb->outputs() == std::vector<Value*>({x, y}));
     AT_ASSERT(comb->inputs() == std::vector<Value*>({res, t2, t3}));

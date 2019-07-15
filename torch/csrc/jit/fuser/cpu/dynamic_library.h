@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
@@ -11,13 +11,11 @@ namespace cpu {
 struct DynamicLibrary {
   TH_DISALLOW_COPY_AND_ASSIGN(DynamicLibrary);
 
-  DynamicLibrary(const char* name);
+  TORCH_API DynamicLibrary(const char* name);
 
-  void* sym(const char* name);
+  TORCH_API void* sym(const char* name);
 
-  ~DynamicLibrary();
-
-  static std::string directoryOf(void* addr);
+  TORCH_API ~DynamicLibrary();
 
  private:
   void* handle = nullptr;

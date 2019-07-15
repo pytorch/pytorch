@@ -8,6 +8,7 @@ graph {
     op_type: "ReduceSum"
     attribute {
       name: "axes"
+      ints: 1
       ints: 2
       type: INTS
     }
@@ -48,9 +49,6 @@ graph {
         shape {
           dim {
             dim_value: 1
-          }
-          dim {
-            dim_value: 2
           }
           dim {
             dim_value: 4

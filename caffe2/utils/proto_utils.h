@@ -55,6 +55,7 @@ namespace TextFormat {
 inline bool ParseFromString(const string& spec, MessageLite* proto) {
   LOG(FATAL) << "If you are running lite version, you should not be "
              << "calling any text-format protobuffers.";
+  return false;
 }
 } // namespace TextFormat
 

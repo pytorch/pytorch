@@ -29,7 +29,10 @@ namespace c10 {
   _(std::complex<float>, ComplexFloat, z) /* 9 */    \
   _(std::complex<double>, ComplexDouble, z) /* 10 */ \
   _(bool, Bool, i) /* 11 */                          \
-  _(c10::qint8, QInt8, i) /* 12 */
+  _(c10::qint8, QInt8, i) /* 12 */                   \
+  _(c10::quint8, QUInt8, i) /* 13 */                 \
+  _(c10::qint32, QInt32, i) /* 14 */                 \
+  _(at::BFloat16, BFloat16, d) /* 15 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
@@ -46,7 +49,10 @@ namespace c10 {
   _(std::complex<float>, ComplexFloat, z)                          \
   _(std::complex<double>, ComplexDouble, z)                        \
   _(bool, Bool, i)                                                 \
-  _(c10::qint8, QInt8, i)
+  _(c10::qint8, QInt8, i)                                          \
+  _(c10::quint8, QUInt8, i)                                        \
+  _(c10::qint32, QInt32, i)                                        \
+  _(at::BFloat16, BFloat16, d)
 
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(_) \
   _(uint8_t, Byte, i)                                                       \
@@ -59,18 +65,8 @@ namespace c10 {
   _(double, Double, d)                                                      \
   _(std::complex<float>, ComplexFloat, z)                                   \
   _(std::complex<double>, ComplexDouble, z)                                 \
-  _(bool, Bool, i)
-
-#define AT_FORALL_SCALAR_TYPES(_) \
-  _(uint8_t, Byte, i)             \
-  _(int8_t, Char, i)              \
-  _(int16_t, Short, i)            \
-  _(int, Int, i)                  \
-  _(int64_t, Long, i)             \
-  _(at::Half, Half, d)            \
-  _(float, Float, d)              \
-  _(double, Double, d)            \
-  _(c10::qint8, QInt8, i)
+  _(bool, Bool, i)                                                          \
+  _(at::BFloat16, BFloat16, d)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(_) \
   _(uint8_t, Byte, i)                         \
@@ -80,7 +76,8 @@ namespace c10 {
   _(int64_t, Long, i)                         \
   _(at::Half, Half, d)                        \
   _(float, Float, d)                          \
-  _(double, Double, d)
+  _(double, Double, d)                        \
+  _(at::BFloat16, BFloat16, d)
 
 #define AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(_) \
   _(uint8_t, Byte, i)                                  \
@@ -101,7 +98,9 @@ namespace c10 {
   _(int64_t, Long, i)                         \
   _(float, Float, d)                          \
   _(double, Double, d)                        \
-  _(c10::qint8, QInt8, i)
+  _(c10::qint8, QInt8, i)                     \
+  _(c10::quint8, QUInt8, i)                   \
+  _(c10::qint32, QInt32, i)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(_) \
   _(uint8_t, Byte, i)                                  \
@@ -212,7 +211,7 @@ static inline bool isIntegralType(ScalarType t) {
 static inline bool isFloatingType(ScalarType t) {
   return (
       t == ScalarType::Double || t == ScalarType::Float ||
-      t == ScalarType::Half);
+      t == ScalarType::Half || t == ScalarType::BFloat16);
 }
 
 static inline bool isComplexType(ScalarType t) {
@@ -223,7 +222,37 @@ static inline bool isComplexType(ScalarType t) {
 
 static inline bool isQIntType(ScalarType t) {
   // Don't forget to extend this when adding new QInt types
-  return t == ScalarType::QInt8;
+  return t == ScalarType:: QInt8 || t == ScalarType::QUInt8 || t == ScalarType::QInt32;
+}
+
+static inline ScalarType toQIntType(ScalarType t) {
+  switch (t) {
+    case ScalarType::Byte:
+      return ScalarType::QUInt8;
+    case ScalarType::Char:
+      return ScalarType::QInt8;
+    case ScalarType::Int:
+      return ScalarType::QInt32;
+    default:
+      return t;
+  }
+}
+
+static inline ScalarType toUnderlying(ScalarType t) {
+  switch (t) {
+    case ScalarType::QUInt8:
+      return ScalarType::Byte;
+    case ScalarType::QInt8:
+      return ScalarType::Char;
+    case ScalarType::QInt32:
+      return ScalarType::Int;
+    default:
+      return t;
+  }
+}
+
+static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
+  return type == toUnderlying(qtype);
 }
 
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
@@ -244,6 +273,11 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   if (isComplexType(a) || isComplexType(b)) {
     AT_ERROR(
         "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
+  }
+
+  // For QInt types, we only allow exact match
+  if (isQIntType(a) && a == b) {
+    return a;
   }
 
   if (isQIntType(a) || isQIntType(b)) {

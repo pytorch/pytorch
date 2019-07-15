@@ -1,6 +1,8 @@
 #include <caffe2/ideep/operators/conv_pool_base_op.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class ChannelShuffleOp final : public IDEEPConvPoolOpBase {
  public:
@@ -50,4 +52,4 @@ class ChannelShuffleGradientOp final : public IDEEPConvPoolOpBase {
 REGISTER_IDEEP_OPERATOR(ChannelShuffle, ChannelShuffleOp);
 REGISTER_IDEEP_OPERATOR(ChannelShuffleGradient, ChannelShuffleGradientOp);
 
-} // namespace caffe2
+} // namespace

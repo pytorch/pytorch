@@ -22,7 +22,7 @@ template <size_t D, typename Derived>
 void ConvImpl<D, Derived>::reset() {
   if (!options.transposed_) {
     for (auto pad : *options.output_padding_) {
-      AT_CHECK(
+      TORCH_CHECK(
           pad == 0, "Only transposed convolutions support output padding!");
     }
   }

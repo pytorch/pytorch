@@ -7,6 +7,8 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <cstdlib>
+#include <c10/macros/Macros.h>
 
 /*
  * This header adds some polyfills with C++14 and C++17 functionality
@@ -26,6 +28,7 @@ template<class T> using result_of_t = std::result_of_t<T>;
 template<class T> using decay_t = std::decay_t<T>;
 template<class T> using remove_const_t = std::remove_const_t<T>;
 template<class T> using remove_pointer_t = std::remove_pointer_t<T>;
+template<class... T> using common_type_t = std::common_type_t<T...>;
 #else
 template<bool B, class T, class F> using conditional_t = typename std::conditional<B, T, F>::type;
 template<bool B, class T = void> using enable_if_t = typename std::enable_if<B, T>::type;
@@ -36,6 +39,7 @@ template<class T> using result_of_t = typename std::result_of<T>::type;
 template<class T> using decay_t = typename std::decay<T>::type;
 template<class T> using remove_const_t = typename std::remove_const<T>::type;
 template<class T> using remove_pointer_t = typename std::remove_pointer<T>::type;
+template<class... T> using common_type_t = typename std::common_type<T...>::type;
 #endif
 
 

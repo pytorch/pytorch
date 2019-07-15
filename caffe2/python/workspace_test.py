@@ -733,7 +733,7 @@ class TestScriptModule(test_util.TestCase):
         m = MyModule()
         workspace.FeedBlob('module', m)
         m2 = workspace.FetchBlob('module')
-        self.assertTrue(m is m2)
+        self.assertTrue(m2 is not None)
 
     def testForward(self):
         self._createFeedModule()

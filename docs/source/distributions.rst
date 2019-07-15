@@ -258,7 +258,7 @@ Probability distributions - torch.distributions
     :show-inheritance:
 
 :hidden:`LogitRelaxedBernoulli`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: torch.distributions.relaxed_bernoulli
 .. autoclass:: LogitRelaxedBernoulli
@@ -301,7 +301,7 @@ Probability distributions - torch.distributions
     :members:
     :undoc-members:
     :show-inheritance:
-    
+
 :hidden:`Weibull`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

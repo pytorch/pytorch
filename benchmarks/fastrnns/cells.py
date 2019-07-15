@@ -75,6 +75,24 @@ def premul_lstm_cell(igates, hidden, w_hh, b_ih, b_hh):
     return hy, cy
 
 
+def premul_lstm_cell_no_bias(igates, hidden, w_hh, b_hh):
+    # type: (Tensor, Tuple[Tensor, Tensor], Tensor, Tensor) -> Tuple[Tensor, Tensor]
+    hx, cx = hidden
+    gates = igates + torch.mm(hx, w_hh.t()) + b_hh
+
+    ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+
+    ingate = torch.sigmoid(ingate)
+    forgetgate = torch.sigmoid(forgetgate)
+    cellgate = torch.tanh(cellgate)
+    outgate = torch.sigmoid(outgate)
+
+    cy = (forgetgate * cx) + (ingate * cellgate)
+    hy = outgate * torch.tanh(cy)
+
+    return hy, cy
+
+
 def gru_cell(input, hidden, w_ih, w_hh, b_ih, b_hh):
     gi = torch.mm(input, w_ih.t()) + b_ih
     gh = torch.mm(hidden, w_hh.t()) + b_hh

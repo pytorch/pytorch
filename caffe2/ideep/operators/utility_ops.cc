@@ -2,7 +2,9 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/ideep/ideep_utils.h"
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class CopyCPUToIDEEPOp final : public IDEEPOperator {
  public:
@@ -121,4 +123,4 @@ OPERATOR_SCHEMA(CopyIDEEPToCPU)
     .Input(0, "ideep_blob", "The input IDEEP tensort to copy")
     .Output(0, "cpu_blob", "The output TensorCPU to copy to");
 
-} // namespace caffe2
+} // namespace

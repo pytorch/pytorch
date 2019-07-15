@@ -60,6 +60,17 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_top_k.*'  # opset 10 is not supported yet
                      '|test_resize.*'  # opset 10 is not supported yet
                      '|test_slice.*'  # opset 10 is not supported yet
+                     '|test_.*qlinear.*'  # Skip quantized op test
+                     '|test_.*quantize.*'  # Skip quantized op test
+                     '|test_.*matmulinteger.*'  # Skip quantized op test
+                     '|test_.*convinteger.*'  # Skip quantized op test
+                     '|test_isinf.*'  # Needs implementation
+                     '|test_mod.*'  # Needs implementation
+                     '|test_nonmaxsuppression.*'  # Needs implementation
+                     '|test_reversesequence.*'  # Needs implementation
+                     '|test_roialign.*'  # Needs implementation
+                     '|test_bitshift.*'  # Needs implementation
+                     '|test_round.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
@@ -80,11 +91,6 @@ backend_test.exclude('(test_pow_bcast'
 # Skip vgg to speed up CI
 if 'JENKINS_URL' in os.environ:
     backend_test.exclude(r'(test_vgg19|test_vgg)')
-
-if workspace.has_hip_support:
-    # TODO: Investigate flakiness in ROCM Softmax (it sometimes give NaN).
-    backend_test.exclude(r'test_softmax_.*_cuda')
-    backend_test.exclude(r'test_logsoftmax_.*_cuda')
 
 # import all test cases at global scope to make them visible to python.unittest
 globals().update(backend_test
