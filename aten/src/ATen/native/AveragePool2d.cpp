@@ -264,10 +264,7 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   TORCH_CHECK((ndim == 3 || ndim == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
-  if (divisor_override.has_value()) {
-    TORCH_CHECK(divisor_override.value() != 0, "divisor must be not zero");
-    TORCH_CHECK(input.scalar_type() != ScalarType::Long, "avg_pool2d backward function with divisor is not supported for LongTensor");
-  }
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
