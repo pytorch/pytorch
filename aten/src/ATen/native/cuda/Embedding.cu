@@ -10,7 +10,6 @@
 #include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/execution_policy.h>
-#include <thrust/iterator/constant_iterator.h>
 #include <thrust/unique.h>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>

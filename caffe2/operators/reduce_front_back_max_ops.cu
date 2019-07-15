@@ -2,10 +2,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/reduce_front_back_max_ops.h"
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <cfloat>
-#endif
-
 namespace caffe2 {
 
 /***

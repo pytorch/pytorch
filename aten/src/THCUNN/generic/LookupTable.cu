@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "THCUNN/generic/LookupTable.cu"
 #else
 
-#include <thrust/iterator/constant_iterator.h>
-
 void THNN_(LookupTable_accGradParameters)(
            THCState *state,
            THCIndexTensor *input,

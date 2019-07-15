@@ -21,7 +21,6 @@
 #include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/unique.h>
-#include <thrust/version.h>
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
