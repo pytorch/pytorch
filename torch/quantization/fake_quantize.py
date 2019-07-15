@@ -29,11 +29,12 @@ class FakeQuantize(Module):
         self.scale = None
         self.zero_point = None
 
-    def enable(self):
-        self.enabled = True
+    def enable(self, enabled=True):
+        self.enabled = enabled
+        return self
 
     def disable(self):
-        self.enable(False)
+        return self.enable(False)
 
     def calculate_qparams(self):
         return self.observer.calculate_qparams()
