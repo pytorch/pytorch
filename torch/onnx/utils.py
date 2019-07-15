@@ -231,7 +231,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
-        torch._C._jit_pass_onnx_peephole(graph)
+        from torch.onnx.symbolic_helper import _export_onnx_opset_version
+        torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version)
         torch._C._jit_pass_lint(graph)
 
     # graph is not a valid jit graph anymore because types have been replaced
@@ -353,6 +354,11 @@ def _model_to_graph(model, args, verbose=False, training=False,
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
+
+    # For ONNX opset < 9, constants only have three data types: float16, float, double.
+    # In this pass transform constants of other data types to float/double + cast operator.
+    if _export_onnx_opset_version < 9:
+        torch._C._jit_pass_onnx_cast_all_constant_to_floating(graph)
 
     if verbose:
         print(graph)
