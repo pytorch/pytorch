@@ -238,6 +238,7 @@ class CMake:
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'MKL_THREADING',
              'MKLDNN_THREADING',
+             'NCCL_ROOT_DIR',  # deprecated in favor of NCCL_ROOT
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'PARALLEL_BACKEND',
