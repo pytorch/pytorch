@@ -8,7 +8,8 @@ namespace c10 {
 // c10. Sigh...
 
 Function* ClassType::getMethod(const std::string& name) const {
-  return compilation_unit_->find_function(name);
+  const auto qualname = QualifiedName(*qualified_name_obj(), name);
+  return compilation_unit_->find_function(qualname);
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
@@ -63,7 +64,17 @@ size_t ClassType::addAttribute(
 }
 
 std::vector<Function*> ClassType::methods() const {
-  return compilation_unit()->get_functions();
+  // TODO: this needs to be made more efficient!
+  // This grabs all the functions in the CU and filters them by qualified name.
+  auto cuFunctions = compilation_unit()->get_functions();
+  const auto& classname = *qualified_name_obj();
+  cuFunctions.erase(
+      std::remove_if(
+          cuFunctions.begin(),
+          cuFunctions.end(),
+          [&](Function* fn) { return !classname.isPrefixOf(fn->qualname()); }),
+      cuFunctions.end());
+  return cuFunctions;
 }
 
 ClassType::ClassType(
