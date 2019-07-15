@@ -297,6 +297,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(ArangeModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test__dim_arange(self):
+        class DimArange(torch.nn.Module):
+            def forward(self, input):
+                return torch._dim_arange(input, 1)
+
+        x = torch.ones(5, 6)
+        self.run_test(DimArange(), x)
+
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input, other):

@@ -1677,7 +1677,7 @@ def arange(g, *args):
     def _get_arange_dtype(dtype):
         dtype = sym_help._maybe_get_const(dtype, 'i')
         if sym_help._is_value(dtype):
-            dtype = 6  # default to float
+            dtype = 4  # default to int64
         return dtype
 
     if len(args) == 5:
