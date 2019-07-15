@@ -360,6 +360,15 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("pass"))
         return Pass(r)
 
+    @staticmethod
+    def build_Break(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("break"))
+        return Break(r)
+
+    @staticmethod
+    def build_Continue(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("continue"))
+        return Continue(r)
 
 class ExprBuilder(Builder):
     binop_map = {

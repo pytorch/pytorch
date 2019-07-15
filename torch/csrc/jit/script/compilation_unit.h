@@ -85,7 +85,9 @@ struct TORCH_API CompilationUnit {
           resolvers, /* determines how we handle free
                      variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
-      const Self* self);
+      const Self* self,
+      // see [name mangling]
+      bool shouldMangle = false);
 
   // same as above but parse the definitions from source
   // Returns the list of Function's just defined.
@@ -98,7 +100,11 @@ struct TORCH_API CompilationUnit {
 
   Function* create_function(
       c10::QualifiedName name,
-      std::shared_ptr<Graph> graph) {
+      std::shared_ptr<Graph> graph,
+      bool shouldMangle = false) {
+    if (shouldMangle) {
+      name = c10::QualifiedName(name.prefix(), mangle(name.name()));
+    }
     auto fn = torch::make_unique<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
     auto ret = fn.get();
@@ -138,17 +144,27 @@ struct TORCH_API CompilationUnit {
   /**
    * Register a class as being owned by this compilation unit.
    */
-  void register_class(c10::NamedTypePtr classType) {
-    classes_.push_back(std::move(classType));
+  void register_class(c10::NamedTypePtr namedType) {
+    if (auto classType = namedType->cast<c10::ClassType>()) {
+      // TODO: class types cannot be redefined because we have no way right now
+      // of invalidating their methods. NamedTuples are fine though, since they
+      // don't have methods.
+      TORCH_CHECK(
+          0 == classDict_.count(*classType->qualified_name_obj()),
+          "class '",
+          classType->qualname(),
+          "' already defined.");
+    }
+    classes_.push_back(std::move(namedType));
+    classDict_[*classes_.back()->qualified_name_obj()] = classes_.size() - 1;
   };
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
-    for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
-        return cls->expect<ClassType>();
-      }
+    auto it = classDict_.find(name);
+    if (it == classDict_.end()) {
+      return nullptr;
     }
-    return nullptr;
+    return classes_[it->second]->cast<c10::ClassType>();
   }
 
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
@@ -161,33 +177,32 @@ struct TORCH_API CompilationUnit {
   }
 
   c10::NamedTypePtr get_type(const c10::QualifiedName& name) const {
-    for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
-        return cls;
-      }
+    auto it = classDict_.find(name);
+    if (it == classDict_.end()) {
+      return nullptr;
     }
-    return nullptr;
+    return classes_[it->second];
   }
 
-  /**
-   * Python compilation unit methods
-   *
-   * Right now there is a single compilation unit that owns all ScriptClasses
-   * defined in Python. Below are accessors methods for it.
-   */
-  static std::shared_ptr<CompilationUnit> _get_python_cu_const() {
-    return _get_python_cu();
-  }
-  static std::shared_ptr<CompilationUnit> _get_python_cu() {
-    static auto pyCu = std::make_shared<CompilationUnit>();
-    return pyCu;
-  }
   // For testing: clear all Python-defined classes to ensure that unit tests
   // have isolation.
-  static void _clear_python_cu() {
-    _get_python_cu()->classes_.clear();
-    _get_python_cu()->functions_.clear();
-    _get_python_cu()->dict_.clear();
+  void _clear_python_cu() {
+    // Delete all the associated class methods
+    for (auto type : classes_) {
+      if (auto cls = type->cast<ClassType>()) {
+        for (auto method : cls->methods()) {
+          // Tombstone the method in the compilation unit.
+          // Don't erase because the dict_
+          auto it = dict_.find(method->qualname());
+          TORCH_INTERNAL_ASSERT(it != dict_.end());
+          functions_[it->second] = nullptr;
+          // Erase in our big lookup table
+          dict_.erase(it);
+        }
+      }
+    }
+    classes_.clear();
+    classDict_.clear();
   }
 
  private:
@@ -196,11 +211,12 @@ struct TORCH_API CompilationUnit {
       const Def& def,
       const ResolverPtr& resolver,
       const Self* self,
-      const std::unordered_map<std::string, Function*>& function_table) const;
+      const std::unordered_map<std::string, Function*>& function_table,
+      bool shouldMangle = false) const;
 
   Function& register_function(std::unique_ptr<Function> fn) {
     TORCH_CHECK(
-        0 == dict_.count(fn->qualname()),
+        0 == dict_.count(fn->qualname().qualifiedName()),
         "method '",
         fn->qualname().qualifiedName(),
         "' already defined.");
@@ -211,14 +227,23 @@ struct TORCH_API CompilationUnit {
   std::vector<std::unique_ptr<Function>> functions_;
   // for fast lookup
   std::unordered_map<c10::QualifiedName, size_t> dict_;
+  std::unordered_map<c10::QualifiedName, size_t> classDict_;
   bool optimized_ = true;
 
-  // [class owernship] Right now there aree two relationships between classes
+
+  // [class ownership] Right now there aree two relationships between classes
   // and compilation units:
   // 1. Classes have compilation units internally that hold their methods.
   // 2. On load, the TypePtrs of any imported classes are owned by the main
   // module's compilation unit.
   std::vector<c10::NamedTypePtr> classes_;
+
+  // [name mangling] All code objects must have a unique qualified name in a
+  // CompilationUnit. In Python, sometimes functions won't have unique qualified
+  // name (for example, nested functions). So we mangle Python functions to
+  // ensure that they are uniquely named.
+  mutable size_t mangleIndex_ = 0;
+  std::string mangle(const std::string& name) const;
 };
 
 } // namespace script
