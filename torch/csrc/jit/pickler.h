@@ -227,7 +227,7 @@ class Unpickler {
 
  public:
   Unpickler(
-      void* data,
+      const void* data,
       size_t size,
       const std::vector<at::Tensor>* tensor_table)
       : bytes_(static_cast<const uint8_t*>(data)),

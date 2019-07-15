@@ -7,9 +7,10 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/DimVector.h>
 #include <ATen/Dispatch.h>
+#include <ATen/DynamicLibrary.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
 #include <ATen/ScalarOps.h>

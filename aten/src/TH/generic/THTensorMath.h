@@ -7,7 +7,7 @@
 
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
-#ifndef TH_REAL_IS_HALF
+#if !defined(TH_REAL_IS_HALF) && !defined(TH_REAL_IS_BFLOAT16)
 
 TH_API void THTensor_(ltValue)(THByteTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(leValue)(THByteTensor *r_, THTensor* t, scalar_t value);
@@ -76,12 +76,12 @@ TH_API void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, T
 TH_API void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val);
 
-#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
-
 TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value);
 TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
 TH_API void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value);
 TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src);
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 TH_API void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 

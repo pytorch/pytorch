@@ -29,7 +29,7 @@ TEST(TorchScriptTest, CanCompileMultipleFunctions) {
   ASSERT_TRUE(
       0x200 == module->run_method("test_while", a, b).toTensor().item<int64_t>());
 
-  at::IValue list = std::vector<int64_t>({3, 4});
+  at::IValue list = c10::List<int64_t>({3, 4});
   ASSERT_EQ(2, module->run_method("test_len", list).toInt());
 
 }
@@ -43,18 +43,18 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
 
   auto b = 3;
 
-  std::vector<torch::Tensor> list = {torch::rand({4, 4})};
+  torch::List<torch::Tensor> list({torch::rand({4, 4})});
 
-  std::vector<torch::jit::IValue> list_of_lists;
+  torch::List<torch::List<torch::Tensor>> list_of_lists;
   list_of_lists.push_back(list);
   module->run_method("nested_loop", list_of_lists, b);
 
-  std::vector<torch::jit::IValue> generic_list;
-  std::vector<torch::jit::IValue> empty_generic_list;
+  auto generic_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto empty_generic_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   empty_generic_list.push_back(generic_list);
   module->run_method("nested_loop", empty_generic_list, b);
 
-  std::vector<torch::jit::IValue> too_many_lists;
+  auto too_many_lists = c10::impl::GenericList(c10::impl::deprecatedUntypedList());;
   too_many_lists.push_back(empty_generic_list);
   try {
     module->run_method("nested_loop", too_many_lists, b);
@@ -67,8 +67,8 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
                   "'List[List[List[t]]]'") == 0);
   };
 
-  std::vector<torch::jit::IValue> gen_list;
-  std::vector<int64_t> int_list = {1, 2, 3};
+  auto gen_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  c10::List<int64_t> int_list({1, 2, 3});
 
   gen_list.emplace_back(list);
   gen_list.emplace_back(int_list);
@@ -93,7 +93,7 @@ TEST(TorchScriptTest, TestDictArgMatching) {
       def dict_op(a: Dict[str, Tensor], b: str):
         return a[b]
     )JIT");
-  c10::impl::GenericDict dict;
+  c10::Dict<std::string, at::Tensor> dict;
   dict.insert("hello", torch::ones({2}));
   auto output = module->run_method("dict_op", dict, std::string("hello"));
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());
@@ -105,7 +105,7 @@ TEST(TorchScriptTest, TestTupleArgMatching) {
         return a
     )JIT");
 
-  std::vector<int64_t> int_list = {1};
+  c10::List<int64_t> int_list({1});
   auto tuple_generic_list = c10::ivalue::Tuple::create({ int_list });
 
   // doesn't fail on arg matching
