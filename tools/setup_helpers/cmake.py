@@ -11,32 +11,15 @@ import distutils
 import distutils.sysconfig
 from distutils.version import LooseVersion
 
-from . import escape_path
+from . import escape_path, which
 from .env import (IS_64BIT, IS_DARWIN, IS_WINDOWS,
-                  DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
+                  DEBUG, REL_WITH_DEB_INFO,
                   check_env_flag, check_negative_env_flag)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
                    NCCL_SYSTEM_LIB, USE_NCCL)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
-from .rocm import USE_ROCM
-from .nnpack import USE_NNPACK
-from .qnnpack import USE_QNNPACK
-
-
-def _which(thefile):
-    path = os.environ.get("PATH", os.defpath).split(os.pathsep)
-    for d in path:
-        fname = os.path.join(d, thefile)
-        fnames = [fname]
-        if IS_WINDOWS:
-            exts = os.environ.get('PATHEXT', '').split(os.pathsep)
-            fnames += [fname + ext for ext in exts]
-        for name in fnames:
-            if os.access(name, os.F_OK | os.X_OK) and not os.path.isdir(name):
-                return name
-    return None
 
 
 def _mkdir_p(d):
@@ -50,7 +33,7 @@ def _mkdir_p(d):
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
 USE_NINJA = (not check_negative_env_flag('USE_NINJA') and
-             _which('ninja') is not None)
+             which('ninja') is not None)
 
 
 class CMake:
@@ -83,9 +66,9 @@ class CMake:
         cmake_command = 'cmake'
         if IS_WINDOWS:
             return cmake_command
-        cmake3 = _which('cmake3')
+        cmake3 = which('cmake3')
         if cmake3 is not None:
-            cmake = _which('cmake')
+            cmake = which('cmake')
             if cmake is not None:
                 bare_version = CMake._get_version(cmake)
                 if (bare_version < LooseVersion("3.5.0") and
@@ -237,22 +220,42 @@ class CMake:
             # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
             'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
         }
-        # Options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars
+        # Build options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars. This is a
+        # dict that maps environment variables to the corresponding variable name in CMake.
         additional_options = {
-            'BLAS',
-            'BUILDING_WITH_TORCH_LIBS',
-            'CMAKE_PREFIX_PATH',
-            'ONNX_ML',
-            'ONNX_NAMESPACE',
-            'WERROR'
+            # Key: environment variable name. Value: Corresponding variable name to be passed to CMake. If you are
+            # adding a new build option to this block: Consider making these two names identical and adding this option
+            # in the block below.
+            '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
+            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
         }
+        additional_options.update({
+            # Build options that have the same environment variable name and CMake variable name and that do not start
+            # with "BUILD_" or "USE_". If you are adding a new build option, also make sure you add it to
+            # CMakeLists.txt.
+            var: var for var in
+            ('BLAS',
+             'BUILDING_WITH_TORCH_LIBS',
+             'CMAKE_PREFIX_PATH',
+             'EXPERIMENTAL_SINGLE_THREAD_POOL',
+             'MKL_THREADING',
+             'MKLDNN_THREADING',
+             'ONNX_ML',
+             'ONNX_NAMESPACE',
+             'PARALLEL_BACKEND',
+             'WERROR')
+        })
+
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_" or "USE_". This is because we
             # currently have no reliable way to get the list of all build options we have specified in CMakeLists.txt.
             # (`cmake -L` won't print dependent options when the dependency condition is not met.) We will possibly
             # change this in the future by parsing CMakeLists.txt ourselves (then additional_options would also not be
             # needed to be specified here).
-            if var.startswith(('USE_', 'BUILD_')) or var in additional_options:
+            true_var = additional_options.get(var)
+            if true_var is not None:
+                build_options[true_var] = val
+            elif var.startswith(('USE_', 'BUILD_')):
                 build_options[var] = val
 
         # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
@@ -260,19 +263,18 @@ class CMake:
         # integration is completed. They appear here not in the CMake.defines call below because they start with either
         # "BUILD_" or "USE_" and must be overwritten here.
         build_options.update({
+            # Note: Do not add new build options to this dict if it is directly read from environment variable -- you
+            # only need to add one in `CMakeLists.txt`. All build options that start with "BUILD_" or "USE_" are
+            # automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
             'USE_CUDA': USE_CUDA,
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
                                check_negative_env_flag('USE_FBGEMM')),
-            'USE_MKLDNN': USE_MKLDNN,
-            'USE_NNPACK': USE_NNPACK,
-            'USE_QNNPACK': USE_QNNPACK,
             'USE_NCCL': USE_NCCL,
             'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
             'USE_NUMPY': USE_NUMPY,
-            'USE_ROCM': USE_ROCM,
             'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
 
@@ -283,54 +285,20 @@ class CMake:
                       TORCH_BUILD_VERSION=version,
                       CMAKE_BUILD_TYPE=self._build_type,
                       INSTALL_TEST=build_test,
-                      NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or
-                                           check_negative_env_flag('NO_NAMEDTENSOR')),
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
                       NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
                       NCCL_ROOT_DIR=NCCL_ROOT_DIR,
                       NCCL_SYSTEM_LIB=NCCL_SYSTEM_LIB,
-                      CAFFE2_STATIC_LINK_CUDA=check_env_flag('USE_CUDA_STATIC_LINK'),
-                      NCCL_EXTERNAL=USE_NCCL,
                       CMAKE_INSTALL_PREFIX=install_dir,
                       CMAKE_C_FLAGS=cflags,
                       CMAKE_CXX_FLAGS=cflags,
                       CMAKE_EXE_LINKER_FLAGS=ldflags,
                       CMAKE_SHARED_LINKER_FLAGS=ldflags,
-                      THD_SO_VERSION="1",
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
                       **build_options)
 
-        if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
-            CMake.defines(args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
-
-        if os.getenv('USE_OPENMP'):
-            CMake.defines(args, USE_OPENMP=check_env_flag('USE_OPENMP'))
-
-        if os.getenv('USE_TBB'):
-            CMake.defines(args, USE_TBB=check_env_flag('USE_TBB'))
-
-        if os.getenv('MKL_SEQ'):
-            CMake.defines(args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
-
-        if os.getenv('MKL_TBB'):
-            CMake.defines(args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
-
-        mkldnn_threading = os.getenv('MKLDNN_THREADING')
-        if mkldnn_threading:
-            CMake.defines(args, MKLDNN_THREADING=mkldnn_threading)
-
-        parallel_backend = os.getenv('PARALLEL_BACKEND')
-        if parallel_backend:
-            CMake.defines(args, PARALLEL_BACKEND=parallel_backend)
-        single_thread_pool = os.getenv('EXPERIMENTAL_SINGLE_THREAD_POOL')
-        if single_thread_pool:
-            CMake.defines(args, EXPERIMENTAL_SINGLE_THREAD_POOL=single_thread_pool)
-
         if USE_GLOO_IBVERBS:
             CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
-
-        if USE_MKLDNN:
-            CMake.defines(args, MKLDNN_ENABLE_CONCURRENT_EXEC="ON")
 
         expected_wrapper = '/usr/local/opt/ccache/libexec'
         if IS_DARWIN and os.path.exists(expected_wrapper):

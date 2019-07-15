@@ -14,6 +14,9 @@
 namespace torch {
 namespace jit {
 struct Function;
+namespace script {
+struct CompilationUnit;
+}
 } // namespace jit
 } // namespace torch
 namespace c10 {
@@ -110,6 +113,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
+  C10_DEPRECATED_MESSAGE("Creating tuples without type information is deprecated. Please use Tuple::create(elements, type) instead.")
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), nullptr);
   }
@@ -172,10 +176,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   * Wait on the future until it completes.
   */
   void wait() {
-    if (completed_) {
-      return;
-    }
-
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
@@ -186,14 +186,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * Explicitly mark the future as completed with the output value.
    */
   void markCompleted(IValue value) {
-    {
-      // This is not to protect completed_ but to create a barrier
-      // from possible addCallback() calls
-      std::unique_lock<std::mutex> lock(mutex_);
-      AT_ASSERT(!completed());
-      completed_ = true;
-      value_ = std::move(value);
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(!completed());
+    completed_ = true;
+    value_ = std::move(value);
 
     fireCallbacks();
     finished_cv_.notify_all();
@@ -204,15 +200,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   void markCompleted(FutureError&& error_) {
-    {
-      // This is not to protect completed_ but to create a barrier
-      // from possible addCallback() calls
-      std::unique_lock<std::mutex> lock(mutex_);
-      AT_ASSERT(!completed());
-      completed_ = true;
-      has_error = true;
-      error = std::move(error_);
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(!completed());
+    completed_ = true;
+    has_error = true;
+    error = std::move(error_);
 
     fireCallbacks();
     finished_cv_.notify_all();
@@ -280,16 +272,20 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   // temporary way to break cyclic dependencies in modules by forcing the deletion
   // of functions when the module object is destructed
   typedef void (*OnDelete)(ivalue::Object*);
-  Object(std::shared_ptr<ClassType> type, size_t numSlots, OnDelete on_delete)
+  Object(
+      StrongTypePtr type,
+      size_t numSlots,
+      OnDelete on_delete)
       : type_(std::move(type)), on_delete_(on_delete) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
-      std::shared_ptr<ClassType> type,
+      StrongTypePtr type,
       size_t numSlots,
       OnDelete on_delete = nullptr) {
-    return c10::make_intrusive<Object>(std::move(type), numSlots, on_delete);
+    return c10::make_intrusive<Object>(
+        std::move(type), numSlots, on_delete);
   }
 
   /**
@@ -333,14 +329,19 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_;
   }
   std::shared_ptr<ClassType> type() const {
-    return type_;
+    return type_.type_;
   }
-  // temporarily defined in class_type.cpp to 
+
+  std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
+    return type_.cu_;
+  }
+  // temporarily defined in class_type.cpp to
   // ensure Modules do not leak memory
   ~Object();
+
  private:
   void resizeObject(size_t slot);
-  std::shared_ptr<ClassType> type_;
+  StrongTypePtr type_;
   std::vector<IValue> slots_;
   OnDelete on_delete_;
 };
@@ -573,7 +574,7 @@ inline IValue::IValue(c10::List<int64_t> v)
 inline IValue::IValue(std::vector<int64_t> v)
 : IValue(c10::impl::toList(v)) {}
 inline IValue::IValue(c10::ArrayRef<int64_t> v)
-: IValue(c10::make_list<int64_t>(v)) {}
+: IValue(c10::List<int64_t>(v)) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 : tag(Tag::String), is_intrusive_ptr(true) {
@@ -607,15 +608,13 @@ inline IValue::IValue(c10::impl::GenericList v)
 : tag(Tag::GenericList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.impl_.release();
 }
-inline IValue::IValue(std::vector<IValue> v)
-: IValue(c10::impl::toList(std::move(v))) {}
 
 template<class T> inline IValue::IValue(c10::List<T> v)
 : IValue(impl::toGenericList<T>(std::move(v))) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
 }
 template<class T> inline IValue::IValue(std::vector<T> v)
-: IValue(impl::make_generic_list()) {
+: IValue(impl::GenericList()) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
@@ -633,7 +632,7 @@ inline IValue::IValue(c10::Dict<Key, Value> v)
 : IValue(impl::toGenericDict(std::move(v))) {}
 
 template<class Key, class Value> inline IValue::IValue(std::unordered_map<Key, Value> v)
-: IValue(impl::make_generic_dict()) {
+: IValue(Dict<Key, Value>()) {
   auto dict = to<c10::Dict<Key, Value>>();
   dict.reserve(v.size());
   for (auto& e : v) {

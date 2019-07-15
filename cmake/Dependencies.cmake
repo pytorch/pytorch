@@ -171,6 +171,9 @@ if (NOT INTERN_BUILD_MOBILE)
 
   if (MKL_FOUND)
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    if ("${MKL_THREADING}" STREQUAL "SEQ")
+      ADD_DEFINITIONS(-DTH_BLAS_MKL_SEQ=1)
+    endif()
     if (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
       set(AT_MKL_MT 1)
@@ -964,10 +967,10 @@ if(USE_GLOO)
     set(BUILD_TEST ${__BUILD_TEST})
     set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
 
-    # Add explicit dependency if NCCL is built from third_party.
+    # Add explicit dependency since NCCL is built from third_party.
     # Without dependency, make -jN with N>1 can fail if the NCCL build
     # hasn't finished when CUDA targets are linked.
-    if(NCCL_EXTERNAL)
+    if(USE_NCCL)
       add_dependencies(gloo_cuda nccl_external)
     endif()
     # Pick the right dependency depending on USE_CUDA

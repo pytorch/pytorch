@@ -40,6 +40,7 @@ using at::ScalarType;
 using at::Tensor;
 using at::TensorOptions;
 using at::DeviceGuard;
+using at::MemoryFormat;
 
 using ::c10::fmap;
 using ::c10::filter;

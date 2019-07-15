@@ -118,7 +118,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
   }
-  AT_ERROR("Tag not found\n");
+  AT_ERROR("Tag not found: ", v.tagKind());
 }
 
 #undef TORCH_FORALL_TAGS
@@ -129,16 +129,16 @@ void IValue::dump() const {
 
 
 std::string ivalue::Object::name() const {
-  return this->type_->qualname();
+  return this->type_.type_->qualname();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 

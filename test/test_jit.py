@@ -2,8 +2,8 @@ from __future__ import division
 
 # Torch
 from torch import Tensor
-from torch._C import TensorType, parse_ir, _propagate_shapes, _jit_python_print
-from torch._six import inf, PY2, PY37, builtins, StringIO
+from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes, _jit_python_print
+from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.jit.frontend import NotSupportedError
@@ -25,7 +25,8 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, enable_profiling_mode, disable_inline_everything_mode
+    _trace, enable_cpu_fuser_if, enable_profiling_mode, disable_inline_everything_mode, \
+    execWrapper
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -37,7 +38,6 @@ from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
 from collections import namedtuple
-from contextlib import contextmanager
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -791,7 +791,7 @@ graph(%x : Tensor,
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%x, %y, %2)
   %4 : int = aten::add(%2, %20)
-  %5 : bool = prim::Bool(%4)
+  %5 : bool = aten::Bool(%4)
   %z : int = prim::If(%5)
     # CHECK: block
     block0():
@@ -1171,7 +1171,6 @@ graph(%Pa, %Pb):
   return (%Pq)""", """
 graph(%Ra, %Rb):
   return (%Ra)""", graph)
-        print(graph)
         FileCheck().run(input_str, graph)
 
     def test_expand_quantlint(self):
@@ -1687,7 +1686,9 @@ graph(%Ra, %Rb):
 
         ge = self.checkTrace(fn, [torch.randn(2, 2)] * 2)
         inputs = set(ge.graph.inputs())
-        self.assertTrue(len(inputs) == 2)
+        # three instead of 2 because the export/import in checkTrace adds a
+        # `self` module argument
+        self.assertTrue(len(inputs) == 3)
 
     def test_repeated_output(self):
         def fn(a, b):
@@ -2836,53 +2837,22 @@ graph(%Ra, %Rb):
         s = str(torch.ops)
         self.assertRegex(s, r'ops')
 
-def execWrapper(code, glob, loc):
-    if PY2:
-        exec(code) in glob, loc
-    else:
-        exec(code, glob, loc)
-
 
 class TestScript(JitTestCase):
-    @contextmanager
-    def capture_stdout(self):
-        # No idea how to capture stdout from C++ on Windows
-        if WINDOWS:
-            yield ['']
-            return
-        import os
-        import fcntl
-        import errno
-        sys.stdout.flush()
-        stdout_fd = os.dup(1)
-        r, w = os.pipe()
-        try:
-            # Override stdout with r - dup is guaranteed to return the lowest free fd
-            os.close(1)
-            os.dup(w)
+    class capture_stdout(list):
+        """
+        Replace sys.stdout with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stdout = sys.stdout
+            self.stringio = StringIO()
+            sys.stdout = self.stringio
+            return self
 
-            captured_stdout = ['']
-            yield captured_stdout
-            sys.stdout.flush()  # Make sure that Python hasn't buffered anything
-
-            # Do the ugly dance to read all the data that was written into the pipe
-            fcntl.fcntl(r, fcntl.F_SETFL, os.O_NONBLOCK)
-            total_stdout = ''
-            while True:
-                try:
-                    total_stdout += os.read(r, 1000).decode('ascii')
-                except OSError as e:
-                    if e.errno != errno.EAGAIN:
-                        raise
-                    break
-            captured_stdout[0] = total_stdout
-        finally:
-            # Revert the change, and clean up all fds
-            os.close(1)
-            os.dup(stdout_fd)
-            os.close(stdout_fd)
-            os.close(r)
-            os.close(w)
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stdout = self.sys_stdout
 
     def test_sequence_parsing(self):
         tests = [
@@ -3354,6 +3324,82 @@ def foo(xyz):
         fc = FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
+
+    def test_serialized_source_ranges(self):
+
+        class FooTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest()
+        loaded = self.getExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_jit.py:{}'.format(lineno + 3)):
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_serialized_source_ranges2(self):
+
+        class FooTest2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                raise RuntimeError('foo')
+
+        _, lineno = inspect.getsourcelines(FooTest2)
+
+        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+            ft = FooTest2()
+            loaded = self.getExportImportCopy(ft)
+            loaded()
+
+    def test_serialized_source_ranges_dont_jitter(self):
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, lim):
+                first = 1
+                second = 1
+                i = 1
+                somenum = 5
+                dontmutateme = 3
+                third = 0
+                while bool(i < lim):
+                    third = first + second
+                    first = second
+                    second = third
+                    j = 0
+                    while j < 10:
+                        somenum = somenum * 2
+                        j = j + 1
+                    i = i + j
+                    i = i + dontmutateme
+
+                st = second + third
+                fs = first + second
+                return third, st, fs
+
+        ft3 = FooTest3()
+
+        def debug_records_from_mod(mod):
+            buffer = io.BytesIO()
+            torch.jit.save(ft3, buffer)
+            buffer.seek(0)
+            archive = zipfile.ZipFile(buffer)
+            debug_file = archive.open('archive/debug/archive.pkl')
+            return pickle.load(debug_file), buffer
+
+        records1, buffer = debug_records_from_mod(ft3)
+
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        records2, buffer = debug_records_from_mod(loaded)
+
+        buffer.seek(0)
+        loaded2 = torch.jit.load(buffer)
+        records3, _ = debug_records_from_mod(loaded2)
+
+        self.assertEqual(records1, records2)
+        self.assertEqual(records2, records3)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -4031,10 +4077,6 @@ a")
         self.run_pass('constant_propagation', func2.graph)
         g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         g2 = _propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        self.assertTrue(g.findNode("aten::sum").output().type().kind()
-                        == "DimensionedTensorType")
-        self.assertTrue(g2.findNode("aten::sum").output().type().kind()
-                        == "DimensionedTensorType")
 
     def test_cat(self):
         @torch.jit.script
@@ -4149,7 +4191,6 @@ a")
         self.checkScript(func, [torch.ones(4, 5, 6)])
 
     def test_func_call(self):
-        script = '''
         def add(a, b):
             return a + b
 
@@ -4158,14 +4199,14 @@ a")
 
         def func(alpha, beta, x, y):
             return add(mul(alpha, x), mul(beta, y))
-        '''
+
         alpha = torch.rand(1, dtype=torch.float, requires_grad=True)
         beta = torch.rand(1, dtype=torch.float, requires_grad=True)
         x = torch.rand(3, dtype=torch.float, requires_grad=True)
         y = torch.rand(3, dtype=torch.float, requires_grad=True)
-        outputs = alpha * x + beta * y
+
         # NOTE: cannot optimize yet because broadcasts are not inserted before the fuser runs
-        self.checkScript(script, [alpha, beta, x, y], optimize=False, outputs=outputs)
+        self.checkScript(func, [alpha, beta, x, y], optimize=False)
 
     def test_profiling_graph_executor(self):
         @torch.jit.script
@@ -5031,7 +5072,7 @@ a")
         def divmod_test_iterator(func, num, den):
             for i in num:
                 for j in den:
-                    self.checkScript(func, (i, j))
+                    self.checkScript(func, (i, j), frames_up=2)
 
         num_int = [1024, -1024]
         den_int = [10, -10]
@@ -5164,7 +5205,7 @@ a")
             return c
 
         inputs = self._make_scalar_vars([4321, 1234], torch.int64)
-        self.checkScript(func, inputs, optimize=True)
+        self.checkScript(func, inputs)
 
     def test_script_optional_none(self):
         def none_stmt(x):
@@ -5229,13 +5270,10 @@ a")
         self.checkScript(test_script_clamp_min, input, optimize=True)
 
     def test_script_bool_constant(self):
-        script = '''
         def test_script_bool_constant():
             a = True
             return a
-        '''
-        outputs = [1]
-        self.checkScript(script, [], outputs[0], True, 'test_script_bool_constant')
+        self.checkScript(test_script_bool_constant, [])
 
     def test_ternary(self):
         def func(a, b):
@@ -5307,19 +5345,14 @@ a")
 
     def test_type_cast(self):
         template = dedent('''
-        def cast(v):
+        def func(v):
             # type: ({from_type}) -> {to_type}
             return {to_type}(v)
         ''')
 
         def check_cast(from_type, to_type, value, raises=False):
             code = template.format(from_type=from_type, to_type=to_type)
-            expected = getattr(builtins, to_type)(value)
-            if raises:
-                with self.assertRaisesRegex(RuntimeError, "Cannot cast"):
-                    cu = torch.jit.CompilationUnit(code)
-            else:
-                self.checkScript(code, (value,), name='cast', outputs=expected)
+            self.checkScript(code, (value,))
 
         check_cast('int', 'float', 1)
         check_cast('int', 'bool', 1)
@@ -5482,8 +5515,8 @@ a")
         self.checkScript(func3, (torch.tensor([-5, 10, -20]),))
 
     def test_number_div(self):
-        self.checkScript(div_int_future, (), optimize=True)
-        self.checkScript(div_float_future, (), optimize=True)
+        self.assertEqual(div_int_future(), torch.jit.script(div_int_future)())
+        self.checkScript(div_float_future, ())
 
         if PY2:
             with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
@@ -5491,8 +5524,8 @@ a")
             with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
                 torch.jit.script(div_float_nofuture)
         else:
-            self.checkScript(div_int_nofuture, (), optimize=True)
-            self.checkScript(div_float_nofuture, (), optimize=True)
+            self.checkScript(div_int_nofuture, ())
+            self.checkScript(div_float_nofuture, ())
 
     def test_floor_div(self):
         @torch.jit.script
@@ -5971,6 +6004,267 @@ a")
 
         self.assertEqual(script_output, eager_output)
 
+    def test_nested_breaks(self):
+        def no_bool_loop_outputs(g):
+            # testing that the "did exit" transform values are not loop block
+            # outputs (and thus not affecting one loop from another)
+            loops = g.findAllNodes("prim::Loop")
+            for loop in loops:
+                for out in loop.outputs():
+                    self.assertTrue(out.type() != BoolType.get())
+
+        def test(y):
+            # type: (int)
+            ret = 0
+            tensor = torch.tensor(0)
+            while int(tensor.add_(1)) < 4:
+                if y == 1:
+                    continue
+                for i in range(y):
+                    continue
+                    ret += 1
+                ret += 1
+            return ret, int(tensor)
+
+        self.checkScript(test, (1,))
+        self.checkScript(test, (2,))
+        no_bool_loop_outputs(torch.jit.script(test).graph)
+
+        def foo():
+            y = torch.tensor(0)
+            z = 0
+            while int(y.add_(1)) < 20:
+                if int(y) < 10:
+                    for i in range(6):
+                        if i == 3:
+                            continue
+                        else:
+                            if i > 3:
+                                break
+                        z += 2
+                if int(y) == 18:
+                    break
+                if int(y) == 15:
+                    continue
+                z += 1
+            return int(y), z
+
+        no_bool_loop_outputs(torch.jit.script(foo).graph)
+        self.checkScript(foo, ())
+
+        def test_nested_two():
+            i = 0
+            k = 0
+            while i < 5:
+                for j in range(5):
+                    k += 1
+                    if j == 3:
+                        continue
+                i += 1
+                k += 1
+                if i == 4:
+                    break
+            return i, k
+
+        self.checkScript(test_nested_two, ())
+        no_bool_loop_outputs(torch.jit.script(test_nested_two).graph)
+
+    def test_breaks_continues(self):
+        def foo_continue(cond):
+            # type: (int)
+            j = 1
+            for i in range(5):
+                if i == cond:
+                    continue
+                j += 1
+            return j
+
+        def foo_break(cond):
+            # type: (int)
+            j = 1
+            for i in range(5):
+                if i == cond:
+                    break
+                j += 1
+            return j
+
+        for i in range(1, 4):
+            self.checkScript(foo_continue, (i,))
+            self.checkScript(foo_break, (i,))
+
+        def test_refine_outside_loop():
+            if True:
+                x = None
+            else:
+                x = 1
+            i = 0
+            j = 0
+            while (x is None or torch.jit._unwrap_optional(x) > 3):
+                if i < 3:
+                    if i < 3:
+                        x = torch.jit.annotate(Optional[int], None)
+                        i += 1
+                        continue
+                    x = 1
+                else:
+                    x = 1 if x is None else x
+                x = x + 1
+                j = x + x
+
+            return x, j
+
+        self.checkScript(test_refine_outside_loop, ())
+
+        def assign_after_break(y):
+            # type: (int)
+            x = 0
+            for i in range(y):
+                x = y * 2 + i
+                break
+                x = 4
+            return x
+
+        self.checkScript(assign_after_break, (1,))
+        self.checkScript(assign_after_break, (2,))
+        self.checkScript(assign_after_break, (3,))
+
+        def assign_after_break_nested(y):
+            # type: (int)
+            x = 0
+            for i in range(y):
+                if y == 1:
+                    x = 5
+                    break
+                    assert 1 == 2
+                else:
+                    x = x + 1
+                    break
+                    assert 1 == 2
+                x = -30
+                assert 1 == 2
+            return x
+
+        self.checkScript(assign_after_break_nested, (1,))
+        self.checkScript(assign_after_break_nested, (2,))
+        self.checkScript(assign_after_break_nested, (3,))
+
+        def may_break(y):
+            # type: (int)
+            x = 0
+            for i in range(y):
+                if y == 1:
+                    x = 5
+                else:
+                    x = x + 1
+                    break
+                x = -30
+            return x
+
+        self.checkScript(may_break, (1,))
+        self.checkScript(may_break, (2,))
+        self.checkScript(may_break, (3,))
+
+        def test(x, y):
+            # type: (int, int)
+            a = 1
+            while (x > 0):
+                if y == 3:
+                    for i in range(y):
+                        a += (1 % (i + 1))
+                        x -= 1
+                if x == 3:
+                    a = x * 3
+                    break
+                if x < 3:
+                    if x == 1:
+                        a -= 2
+                        x -= 1
+                        break
+                a -= 1
+                x -= 3
+            return a, x
+
+        self.checkScript(test, (10, 3))
+        self.checkScript(test, (10, 2))
+        self.checkScript(test, (3, 2))
+        self.checkScript(test, (5, 3))
+        self.checkScript(test, (2, 3))
+
+        def test_delete_after_break(x):
+            # type: (int)
+            a = 1
+            b = 1
+            for i in range(x):
+                a = i * 3
+                break
+                b = i * 5
+            return a, b
+
+        self.checkScript(test_delete_after_break, (0,))
+        self.checkScript(test_delete_after_break, (1,))
+
+        def test_will_break_after_guard(x):
+            # type: (int)
+            a = 1
+            for i in range(x):
+                if i == 4:
+                    a = 3
+                    break
+                a -= 1
+                break
+                assert 1 == 2
+                a -= -100
+            return a
+
+        self.checkScript(test_will_break_after_guard, (0,))
+        self.checkScript(test_will_break_after_guard, (2,))
+        self.checkScript(test_will_break_after_guard, (4,))
+
+        def test_varexit(cond):
+            # type: (int)
+            m = 0
+            for i in range(3):
+                if cond == 2:
+                    if cond == 2:
+                        m = 2
+                        break
+                    k = 1
+                else:
+                    k = 2
+                m += k
+            return m
+
+        # use of k tests the pathway where we have to insert unitialized
+        self.checkScript(test_varexit, (3,))
+        self.checkScript(test_varexit, (2,))
+
+        def test_break_true():
+            i = 0
+            while True:
+                i += 1
+                if i == 3:
+                    break
+            while False:
+                i += 1
+            return i
+
+        self.checkScript(test_break_true, ())
+
+    def test_break_continue_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Syntax"):
+            cu = torch.jit.CompilationUnit('''
+            def other_func(a):
+                break
+                ''')
+
+        with self.assertRaisesRegex(RuntimeError, "Syntax"):
+            cu = torch.jit.CompilationUnit('''
+            def other_func(a):
+                for i in range(5):
+                    def foo():
+                        break
+                ''')
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
@@ -6183,82 +6477,105 @@ a")
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
-        cell = torch.nn.LSTM(d_in, d_hid).float()
+        for cell in [
+            torch.nn.LSTM(d_in, d_hid).float(),
+            torch.nn.GRU(d_in, d_hid).float(),
+        ]:
 
-        # Replace parameter values s.t. the range of values is exactly
-        # 255, thus we will have 0 quantization error in the quantized
-        # GEMM call. This i s for testing purposes.
-        #
-        # Note that the current implementation does not support
-        # accumulation values outside of the range representable by a
-        # 16 bit integer, instead resulting in a saturated value. We
-        # must take care that in our test we do not end up with a dot
-        # product that overflows the int16 range, e.g.
-        # (255*127+255*127) = 64770. So, we hardcode the test values
-        # here and ensure a mix of signedness.
-        vals = [[100, -155],
-                [100, -155],
-                [-155, 100],
-                [-155, 100],
-                [100, -155],
-                [-155, 100],
-                [-155, 100],
-                [100, -155]]
-        num_chunks = 4  # TODO:change when we support more than just LSTM
-        vals = vals[:d_hid * num_chunks]
-        cell.weight_ih_l0 = torch.nn.Parameter(
-            torch.tensor(vals, dtype=torch.float),
-            requires_grad=False)
-        cell.weight_hh_l0 = torch.nn.Parameter(
-            torch.tensor(vals, dtype=torch.float),
-            requires_grad=False)
+            # Replace parameter values s.t. the range of values is exactly
+            # 255, thus we will have 0 quantization error in the quantized
+            # GEMM call. This i s for testing purposes.
+            #
+            # Note that the current implementation does not support
+            # accumulation values outside of the range representable by a
+            # 16 bit integer, instead resulting in a saturated value. We
+            # must take care that in our test we do not end up with a dot
+            # product that overflows the int16 range, e.g.
+            # (255*127+255*127) = 64770. So, we hardcode the test values
+            # here and ensure a mix of signedness.
+            vals = [[100, -155],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155]]
+            if isinstance(cell, torch.nn.LSTM):
+                num_chunks = 4
+            elif isinstance(cell, torch.nn.GRU):
+                num_chunks = 3
+            print(num_chunks)
+            vals = vals[:d_hid * num_chunks]
+            cell.weight_ih_l0 = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
+            cell.weight_hh_l0 = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
 
-        ref = copy.deepcopy(cell)
-        cell = torch.jit.quantized.quantize_rnn_modules(cell)
+            ref = copy.deepcopy(cell)
+            cell = torch.jit.quantized.quantize_rnn_modules(cell)
 
-        niter = 10
-        x = torch.tensor([[100, -155],
-                          [-155, 100],
-                          [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
-        h0_vals = [[-155, 100],
-                   [-155, 155],
-                   [100, -155]]
-        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
-        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
-        hiddens = (hx, cx)
+            niter = 10
+            x = torch.tensor([[100, -155],
+                              [-155, 100],
+                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+            h0_vals = [[-155, 100],
+                       [-155, 155],
+                       [100, -155]]
+            hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+            cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
 
-        # Compare quantized to unquantized
-        output, final_hiddens = cell(x, hiddens)
-        ref_out, ref_hid = ref(x, hiddens)
+            if isinstance(ref, torch.nn.LSTM):
+                hiddens = (hx, cx)
+            elif isinstance(ref, torch.nn.GRU):
+                hiddens = hx
 
-        torch.testing.assert_allclose(output, ref_out)
-        for out, ref in zip(final_hiddens, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+            # Compare quantized to unquantized
+            output, final_hiddens = cell(x, hiddens)
+            ref_out, ref_hid = ref(x, hiddens)
 
-        class ScriptWrapper(torch.jit.ScriptModule):
-            def __init__(self, cell):
-                super(ScriptWrapper, self).__init__()
-                self.cell = cell
+            torch.testing.assert_allclose(output, ref_out)
+            for out, ref in zip(final_hiddens, ref_hid):
+                torch.testing.assert_allclose(out, ref)
 
-            @torch.jit.script_method
-            def forward(self, x, hiddens):
-                # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-                return self.cell(x, hiddens)
+            if isinstance(cell, torch.jit.quantized.QuantizedLSTM):
+                class ScriptWrapper(torch.jit.ScriptModule):
+                    def __init__(self, cell):
+                        super(ScriptWrapper, self).__init__()
+                        self.cell = cell
 
-        wrapper = ScriptWrapper(cell)
+                    @torch.jit.script_method
+                    def forward(self, x, hiddens):
+                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                        #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                        return self.cell(x, hiddens)
+            elif isinstance(cell, torch.jit.quantized.QuantizedGRU):
+                class ScriptWrapper(torch.jit.ScriptModule):
+                    def __init__(self, cell):
+                        super(ScriptWrapper, self).__init__()
+                        self.cell = cell
 
-        # Compare quantize scripted module to unquantized
-        script_out, script_hid = wrapper(x, hiddens)
-        torch.testing.assert_allclose(script_out, ref_out)
-        for out, ref in zip(script_hid, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+                    @torch.jit.script_method
+                    def forward(self, x, hiddens):
+                        # type: (torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+                        return self.cell(x, hiddens)
 
-        # Compare export/import to unquantized
-        export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
-        ei_out, ei_hid = export_import_wrapper(x, hiddens)
-        torch.testing.assert_allclose(ei_out, ref_out)
-        for out, ref in zip(ei_hid, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+            wrapper = ScriptWrapper(cell)
+
+            # Compare quantize scripted module to unquantized
+            script_out, script_hid = wrapper(x, hiddens)
+            torch.testing.assert_allclose(script_out, ref_out)
+            for out, ref in zip(script_hid, ref_hid):
+                torch.testing.assert_allclose(out, ref)
+
+            # Compare export/import to unquantized
+            export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
+            ei_out, ei_hid = export_import_wrapper(x, hiddens)
+            torch.testing.assert_allclose(ei_out, ref_out)
+            for out, ref in zip(ei_hid, ref_hid):
+                torch.testing.assert_allclose(out, ref)
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
@@ -6518,6 +6835,68 @@ a")
             fb = FileCheck().check_count("2", 2).check_not("1").check_count("2", 2)
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
+
+    def _dtype_to_expect(self, dtype, dim=0):
+        param = ', '.join(['*'] * dim)
+        param = '(' + param + ')'
+        if(dtype == torch.float32):
+            return "Float" + param
+        if(dtype == torch.float64):
+            return "Double" + param
+        if(dtype == torch.int64):
+            return "Long" + param
+        if(dtype == torch.int32):
+            return "Int" + param
+
+    def _test_dtype_op_shape(self, ops, args, input_dims=1):
+        if input_dims < 1:
+            raise 'input dims must be at least 1'
+        dtypes = [torch.float32, torch.float64, torch.int64, torch.int32]
+        str_args = ', '.join([str(arg) for arg in args]) + (', ' if len(args) else '')
+        tensor_data = ('[' * input_dims) + '1, 2, 3' + (input_dims * ']')
+        template = dedent('''
+        def func():
+            return {return_line}
+        ''')
+
+        for op in ops:
+            for dtype in (dtypes + [None]):
+                for tensor_type in dtypes:
+                    # a couple of ops aren't implemented for non-floating types
+                    if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
+                        if op in ['mean', 'softmax', 'log_softmax']:
+                            continue
+                    return_line = "torch.tensor({}, dtype={}).{}({}dtype={})".format(tensor_data, tensor_type, op, str_args, dtype)
+                    # uncomment for debugging a failed test:
+                    # print("testing {}".format(return_line))
+                    code = template.format(return_line=return_line)
+                    scope = {}
+                    exec(code, globals(), scope)
+                    cu = torch.jit.CompilationUnit(code)
+                    graph = cu.func.graph
+                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
+                    input_array = [1, 2, 3]
+                    for _ in range(1, input_dims):
+                        input_array = [input_array]
+                    t = torch.tensor(input_array, dtype=tensor_type)
+                    attr = getattr(t, op)
+                    kwargs = {'dtype': dtype}
+                    result = attr(*args, **kwargs)
+                    expect = self._dtype_to_expect(result.dtype, result.dim())
+                    FileCheck().check("aten::tensor").check(expect).run(graph)
+
+    def test_dtype_op_shape(self):
+        ops = ['prod']
+        self._test_dtype_op_shape(ops, args=[])
+        self._test_dtype_op_shape(ops, args=[0, False])
+        self._test_dtype_op_shape(ops, args=[0, False])
+        self._test_dtype_op_shape(ops, args=[0, True])
+
+    def test_dtype_op_shape2(self):
+        ops = ['cumprod', 'cumsum', 'softmax', 'log_softmax']
+        self._test_dtype_op_shape(ops, args=[0])
+
+        self._test_dtype_op_shape(ops, args=[1], input_dims=4)
 
     def test_filecheck_parse(self):
         def test_check():
@@ -6944,7 +7323,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
 
-    def test_script_module_list_sequential_error(self):
+    def test_script_module_list_sequential(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, mod_list):
                 super(M, self).__init__(False)
@@ -6956,25 +7335,21 @@ a")
                     v = m(v)
                 return v
 
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.ModuleList([nn.ReLU()]))
+        m = M(nn.Sequential(nn.ReLU()))
+        self.assertExportImportModule(m, (torch.randn(2, 2),))
 
-    def test_attr_module_constants_error(self):
+    def test_attr_module_constants(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self, mod_list):
                 super(M2, self).__init__(False)
                 self.mods = mod_list
 
             @torch.jit.script_method
-            def forward(self, v):
+            def forward(self, x):
                 return self.mods.forward(x)
 
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            M2(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            M2(nn.ModuleList([nn.ReLU()]))
+        m = M2(nn.Sequential(nn.ReLU()))
+        self.assertExportImportModule(m, (torch.randn(2, 2),))
 
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
@@ -8225,6 +8600,32 @@ a")
         # constants not baked in
         self.assertEqual(g(x), f(x))
 
+    def test_trace_optional(self):
+        @torch.jit.script
+        def test(x):
+            # type: (Optional[Tensor])
+            if x is None:
+                return torch.zeros(1)
+            else:
+                return x
+
+        def test_none():
+            return test(None)
+
+        def test_tensor():
+            return test(torch.zeros(2))
+
+        f_none = torch.jit.trace(test_none, ())
+        self.assertEqual(f_none(), torch.zeros(1))
+
+        f_tensor = torch.jit.trace(test_tensor, ())
+        self.assertEqual(f_tensor(), torch.zeros(2))
+
+        graph = f_tensor.graph
+        f = str(graph)
+        # tensor type correctly set as graph input
+        FileCheck().check("Double(2) = prim:").run(f)
+
     def test_trace_nested_datatypes(self):
         @torch.jit.script
         def foo(x):
@@ -9057,7 +9458,7 @@ a")
             for i in range(100):
                 c += i
             return c
-        self.checkScript(fn, (), outputs=4950, optimize=True)
+        self.checkScript(fn, ())
 
     def test_for_in_range_dynamic(self):
         def fn():
@@ -9071,7 +9472,6 @@ a")
         self.checkScript(fn, (), optimize=False)
 
     def test_for_in_range_ast(self):
-        @torch.jit.script
         def test_script_for_in_range_ast():
             c = 0
             for i in range(100):
@@ -9081,7 +9481,7 @@ a")
                 c += acc
             return c
 
-        self.assertEqual(test_script_for_in_range_ast(), 161700)
+        self.checkScript(test_script_for_in_range_ast, ())
 
     def test_for_in_range_if_ast(self):
         @torch.jit.script
@@ -9103,7 +9503,7 @@ a")
             for i in range(7, 100):
                 x += i
             return x
-        self.checkScript(fn, (), outputs=4929, optimize=True)
+        self.checkScript(fn, ())
 
     def test_for_in_range_start_end_step(self):
         def fn(start, end, step):
@@ -9113,14 +9513,12 @@ a")
                 x += i
             return x
 
-        def check(inp):
-            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
-        check((7, 100, 7))
-        check((7, 100, -7))
-        check((2, -11, -3))
-        check((2, -11, 3))
-        check((2, 10, 3))
-        check((-2, -10, -10))
+        self.checkScript(fn, (7, 100, 7))
+        self.checkScript(fn, (7, 100, -7))
+        self.checkScript(fn, (2, -11, -3))
+        self.checkScript(fn, (2, -11, 3))
+        self.checkScript(fn, (2, 10, 3))
+        self.checkScript(fn, (-2, -10, -10))
 
     def test_for_in_range_zero_step(self):
         @torch.jit.script
@@ -9129,6 +9527,7 @@ a")
             for i in range(2, -11, 0):
                 x += i
             return x
+
         with self.assertRaisesRegex(RuntimeError, "must not be zero"):
             fn()
 
@@ -9216,7 +9615,7 @@ a")
             # type: (List[int], List[int], List[int]) -> int
             sum = 0
             for (i, (j, k)) in zip(x, zip(y, z)):
-                sum += i * j * k 
+                sum += i * j * k
 
             return sum
 
@@ -9238,7 +9637,7 @@ a")
                 # type: (List[int], List[int], List[int]) -> int
                 sum = 0
                 for (i, (j, k)) in zip(x, y, z):
-                    sum += i * j * k 
+                    sum += i * j * k
 
                 return sum
 
@@ -9484,14 +9883,15 @@ a")
         self.checkScript(subscript_tuple_assign, ([12, 7, 9, 11], torch.tensor((3, 13, 17)), 0))
 
         # python 2 does not support star assignments so we use compilation unit to test instead
-        star_code = '''
-        def star_tuple_assign():
-            # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
-            a, (b, *c), *d = 1, (2, 3, 4), 5, 6
-            return a, b, c, d
-        '''
+        if not PY2:
+            star_code = dedent('''
+            def star_tuple_assign():
+                # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
+                a, (b, *c), *d = 1, (2, 3, 4), 5, 6
+                return a, b, c, d
+            ''')
 
-        self.checkScript(star_code, (), name='star_tuple_assign', outputs=(1, 2, (3, 4), (5, 6)))
+            self.checkScript(star_code, (), name='star_tuple_assign')
 
 
     def test_multi_reduction(self):
@@ -10355,7 +10755,7 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "only supported on List, Dict, Tensor, Tuple, and str"):
+        with self.assertRaisesRegex(RuntimeError, "'int' object is not subscriptable"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8
@@ -10743,7 +11143,7 @@ a")
     # These tests don't work because UBSAN has a false positive about accessing
     # out of bounds on a dynamically sized struct internal to asmjit
     if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
-        def test_int8_quantization_module(self):
+        def test_quantization_modules(self):
             K1, N1 = 2, 2
 
             class FooBar(torch.nn.Module):
@@ -10759,19 +11159,24 @@ a")
             fb.linear1.weight = torch.nn.Parameter(
                 torch.tensor([[-150, 100], [100, -150]], dtype=torch.float), requires_grad=False)
             fb.linear1.bias = torch.nn.Parameter(torch.zeros_like(fb.linear1.bias), requires_grad=False)
-            fb_ref = FooBar()
-            fb_ref.linear1.weight = torch.nn.Parameter(fb.linear1.weight.clone(), requires_grad=False)
-            fb_ref.linear1.bias = torch.nn.Parameter(fb.linear1.bias.clone(), requires_grad=False)
-            fb = torch.jit.quantized.quantize_linear_modules(fb)
 
             x = (torch.rand(1, K1).float() - 0.5) / 10.0
-            traced = torch.jit.trace(fb, (x,))
-            fb = self.getExportImportCopyWithPacking(traced)
+            value = torch.tensor([[100, -150]], dtype=torch.float)
 
-            x = torch.tensor([[100, -150]], dtype=torch.float)
-            y = fb(x)
-            y_ref = fb_ref(x)
-            torch.testing.assert_allclose(y, y_ref, rtol=0.0001, atol=1e-3)
+            y_ref = fb(value)
+
+            fb_int8 = torch.jit.quantized.quantize_linear_modules(fb)
+            traced_int8 = torch.jit.trace(fb_int8, (x,))
+            fb_int8 = self.getExportImportCopyWithPacking(traced_int8)
+            y_int8 = fb_int8(value)
+
+            fb_fp16 = torch.jit.quantized.quantize_linear_modules(fb, torch.float16)
+            traced_fp16 = torch.jit.trace(fb_fp16, (x,))
+            fb_fp16 = self.getExportImportCopyWithPacking(traced_fp16)
+            y_fp16 = fb_fp16(value)
+
+            torch.testing.assert_allclose(y_int8, y_ref, rtol=0.0001, atol=1e-3)
+            torch.testing.assert_allclose(y_fp16, y_ref, rtol=0.0001, atol=1e-3)
 
     def checkTracerWarning(self, *args, **kwargs):
         with warnings.catch_warnings(record=True) as warns:
@@ -10858,7 +11263,8 @@ a")
 
     def test_string_frontend_elif(self):
         code = '''
-            def elif_test(niter : int):
+            def func(niter):
+                # type: (int)
                 rv = 0
                 for i in range(niter):
                     if i % 3 == 0 and i % 5 == 0:
@@ -10872,7 +11278,7 @@ a")
                 return rv
         '''
 
-        self.checkScript(code, (101,), name='elif_test', outputs=3028)
+        self.checkScript(dedent(code), (101,))
 
     def test_pyop_exception_message(self):
         class Foo(torch.jit.ScriptModule):
@@ -10972,6 +11378,7 @@ a")
         with self.assertRaisesRegex(torch.jit.Error, "Exception"):
             foo(torch.tensor(0))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_script_function(self):
         outer_var = 10
         outer_var2 = 11
@@ -11051,6 +11458,7 @@ a")
         eg = torch.zeros(3, dtype=torch.uint8)
         self.assertEqual(foo_traced(eg), foo(eg))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module(self):
 
         @torch._jit_internal.weak_module
@@ -11126,6 +11534,7 @@ a")
         self.assertEqual(script_result, expected_result)
         self.assertEqual(script_result, script_result2)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_parameters_and_buffers(self):
         weights = torch.randn(10, 10)
         bias = torch.randn(10)
@@ -11184,6 +11593,7 @@ a")
         self.assertEqual(strong_mod(inp), expected_result)
         self.assertExportImportModule(strong_mod, (inp,))
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_nested(self):
         @torch._jit_internal.weak_module
         class OtherWeak(torch.nn.Module):
@@ -11245,6 +11655,7 @@ a")
             + F.linear(inp, 2 * torch.ones(10, 10), 2 * torch.ones(10))
         self.assertEqual(result, expected_result)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_submodule(self):
         @torch._jit_internal.weak_module
         class Weak(torch.nn.Module):
@@ -11284,6 +11695,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
             strong_mod = Strong()
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_copying(self):
         class Submodule(torch.nn.Module):
             def __init__(self):
@@ -11350,6 +11762,7 @@ a")
 
         m = M()
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_weak_module_attributes(self):
         tester = self
 
@@ -11653,7 +12066,7 @@ a")
                 i += 1
             return b
 
-        FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::select") \
+        FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::__getitem__") \
             .check_count("aten::rand", 1, exactly=True).run(str(foo.graph))
 
     def test_mutable_dce_wildcards(self):
@@ -11913,6 +12326,7 @@ a")
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
+    @unittest.skipIf(True, "Removing weak script")
     def test_overloading(self):
         @torch._jit_internal.weak_module
         class W(torch.nn.Module):
@@ -12106,8 +12520,6 @@ a")
                                                                   None, None, None, 0.0,
                                                                   model.mod.out_proj.weight,
                                                                   model.mod.out_proj.bias)[0]
-        # print(jit_out/py_out-1)
-        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
@@ -12666,6 +13078,13 @@ a")
             def fn():
                 return random.randint()
 
+    def test_dir(self):
+        class M(torch.jit.ScriptModule):
+            def forward(self, t):
+                return t
+
+        self.assertTrue('forward' in dir(M()))
+
     def test_inferred_error_msg(self):
         """
         Test that when we get a type mismatch on a function where we inferred
@@ -12738,6 +13157,71 @@ class TestRecursiveScript(JitTestCase):
                 return z + 20 + y
 
         self.checkModule(M(), (torch.randn(2, 2),))
+
+    def test_error_stack(self):
+        def d(x):
+            # type: (int) -> int
+            return x + 10
+
+        def c(x):
+            return d("hello") + d(x)
+
+        def b(x):
+            return c(x)
+
+        def a(x):
+            return b(x)
+
+        try:
+            scripted = torch.jit.script(a)
+        except RuntimeError as e:
+            checker = FileCheck()
+            checker.check("Expected a value of type 'int'")
+            checker.check("def c(x)")
+            checker.check("def b(x)")
+            checker.check("def a(x)")
+            checker.run(str(e))
+
+    def test_error_stack_module(self):
+        def d(x):
+            # type: (int) -> int
+            return x + 10
+
+        def c(x):
+            return d("hello") + d(x)
+
+        def b(x):
+            return c(x)
+
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super(Submodule, self).__init__()
+
+            def forward(self, x):
+                return b(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.submodule = Submodule()
+
+            def some_method(self, y):
+                return y + self.submodule(y)
+
+            def forward(self, x):
+                return self.some_method(x)
+
+        try:
+            scripted = torch.jit.script(M())
+        except RuntimeError as e:
+            checker = FileCheck()
+            checker.check("Expected a value of type 'int'")
+            checker.check("return d(\"hello\")")
+            checker.check("return c(x)")
+            checker.check("return b(x)")
+            checker.check("return y + self.submodule(y)")
+            checker.check("return self.some_method(x)")
+            checker.run(str(e))
 
     def test_script_basic(self):
         def a_python_fn(a, b, c):
@@ -13583,6 +14067,9 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
     'test_nn_AdaptiveMaxPool3d_tuple_none',
+
+    # Uses Module._backend, so this is not supported
+    'test_nn_CrossMapLRN2d',
 }
 
 
@@ -14511,10 +14998,6 @@ def add_nn_module_test(*args, **kwargs):
     no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
 
     module_name = name.split("_")[0]
-
-    module = getattr(torch.nn, module_name, None)
-    if module is None or torch._jit_internal.weak_types.get(module) is None:
-        return
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests
@@ -15835,7 +16318,10 @@ class TestList(JitTestCase):
 
 class TestDict(JitTestCase):
     def dict(self):
-        return {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}
+
+    def dict2(self):
+        return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
 
     def test_keys(self):
         @torch.jit.script
@@ -15860,6 +16346,118 @@ class TestDict(JitTestCase):
             return len(x)
 
         self.checkScript(length, (self.dict(),))
+
+    def test_copy(self):
+        def func(x):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            return x.copy()
+
+        self.checkScript(func, (self.dict(),))
+
+    def test_items(self):
+        def func(x):
+            # type: (Dict[str, Tensor]) -> List[Tuple[str, Tensor]]
+            return x.items()
+
+        # The value returned by Python is in arbitrary order, so we can't use
+        # checkScript
+        scripted_func = torch.jit.script(func)
+
+        eager_out = (func(self.dict()))
+        script_out = (scripted_func(self.dict()))
+
+        self.assertEqual(len(eager_out), len(script_out))
+        for item in eager_out:
+            self.assertTrue(item in script_out)
+
+    def test_pop(self):
+        def pop(x, key):
+            # type: (Dict[str, Tensor], str) -> Tuple[Tensor, Dict[str, Tensor]]
+            return x.pop(key), x
+
+        # checkScript doesn't copy the inputs, so we can't use it since this mutates
+        # the dict
+        def tester(fn, *args):
+            eager_out = fn(self.dict(), *args)
+            script_out = torch.jit.script(fn)(self.dict(), *args)
+            self.assertEqual(eager_out, script_out)
+
+        tester(pop, 'a')
+
+        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+            torch.jit.script(pop)(self.dict(), 'x')
+
+
+        def default_pop(x, key, default):
+            # type: (Dict[str, Tensor], str, Tensor) -> Tuple[Tensor, Dict[str, Tensor]]
+            return x.pop(key, default), x
+
+        tester(default_pop, 'a', torch.randn(2, 2))
+        tester(default_pop, 'x', torch.randn(2, 2))
+
+    def test_setdefault(self):
+        def setdefault(x, key, default):
+            # type: (Dict[str, Tensor], str, Tensor) -> Dict[str, Tensor]
+            x.setdefault(key, default)
+            return x
+
+        self.checkScript(setdefault, (self.dict(), 'a', torch.randn(2, 2)))
+        self.checkScript(setdefault, (self.dict(), 'nonexistant', torch.randn(2, 2)))
+
+    def test_update(self):
+        def update(a, b):
+            # type: (Dict[str, Tensor], Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]
+            a.update(b)
+            return a, b
+
+        self.checkScript(update, (self.dict(), self.dict()))
+        self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_popitem(self):
+        @torch.jit.script
+        def popitem(x):
+            # type: (Dict[str, Tensor]) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]
+            item = x.popitem()
+            return item, x
+
+        # The value returned by Python is arbitrary, so we can't use checkScript
+        eager_in = self.dict()
+        eager_out = (eager_in.popitem(), eager_in)
+
+        script_out = popitem(self.dict())
+
+        # Check that an item was removed
+        self.assertEqual(len(eager_out[1]), len(script_out[1]))
+
+        # Check that the item is the correct types
+        if PY2:
+            self.assertTrue(isinstance(script_out[0][0], unicode))
+        else:
+            self.assertTrue(isinstance(script_out[0][0], str))
+        self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
+
+    def test_clear(self):
+        def clear(x):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            x.clear()
+            return x
+
+        self.checkScript(clear, (self.dict(),))
+
+    def test_get(self):
+        def get(x, key):
+            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+            return x.get(key)
+
+        self.checkScript(get, (self.dict(), 'a'))
+        self.checkScript(get, (self.dict(), "doesn't exist"))
+
+        def get_default(x, key):
+            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
+            return x.get(key, torch.randn(2, 2))
+
+        self.checkScript(get, (self.dict(), 'a'))
+        self.checkScript(get, (self.dict(), "doesn't exist"))
 
     def test_basic(self):
         def simple(x):
@@ -15919,6 +16517,13 @@ class TestDict(JitTestCase):
             return a
 
         self.assertEqual(fn(), {'ok': 10})
+
+    def test_key_type(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected key type 'None' to subtype"):
+            @torch.jit.script
+            def fn(a):
+                # type: (Dict[str, int]) -> int
+                return a[None]
 
     def test_loop(self):
         @torch.jit.script
@@ -16510,8 +17115,10 @@ class TestClassType(JitTestCase):
         def _xor():  # noqa: E306
             return BinOps(4) ^ 3
 
-        for func in [add, sub, mul, pow, truediv, ne, eq, lt, gt, le, ge, _and,
-                     _or, _xor]:
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor]
+        if not PY2:
+            ops.append(truediv)
+        for func in ops:
             self.checkScript(func, ())
 
         with self.assertRaisesRegex(RuntimeError, "__add__ method"):
