@@ -64,23 +64,6 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   }
 }
 
-inline TypedIValue trySpecializeTensorList(
-    std::vector<IValue>& elems,
-    TypePtr type) {
-  // Since we only call this function for trace inputs, the only options are
-  // generic list, and list of tensors. We do not need to check for primitive
-  // types.
-  if (!type->isSubtypeOf(TensorType::get())) {
-    return TypedIValue(elems, ListType::create(type));
-  }
-  std::vector<at::Tensor> tensors;
-  tensors.reserve(elems.size());
-  for (auto elem : elems) {
-    tensors.push_back(elem.toTensor());
-  }
-  return TypedIValue(tensors, ListType::ofTensors());
-}
-
 inline c10::optional<TypePtr> unifyOrInitializeType(
     TypePtr accum,
     TypePtr unify) {
@@ -305,7 +288,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  c10::impl::GenericList elems;
+  auto elems = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }

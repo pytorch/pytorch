@@ -138,7 +138,7 @@
 #   MIOPEN_LIBRARY
 #     specify where MIOpen is installed
 #
-#   NCCL_ROOT_DIR
+#   NCCL_ROOT
 #   NCCL_LIB_DIR
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
