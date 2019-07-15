@@ -196,7 +196,7 @@ def _tensor_str(self, indent):
         return '[]'
 
     summarize = self.numel() > PRINT_OPTS.threshold
-    if self.dtype is torch.float16:
+    if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
     formatter = _Formatter(get_summarized_data(self) if summarize else self)
     return _tensor_str_with_formatter(self, indent, formatter, summarize)
@@ -252,8 +252,7 @@ def _str(self):
             or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
-    has_default_dtype = self.dtype == torch.get_default_dtype() or self.dtype == torch.int64
-
+    has_default_dtype = self.dtype in (torch.get_default_dtype(), torch.int64, torch.bool)
     if self.is_sparse:
         suffixes.append('size=' + str(tuple(self.shape)))
         suffixes.append('nnz=' + str(self._nnz()))
@@ -294,6 +293,7 @@ def _str(self):
         else:
             if not has_default_dtype:
                 suffixes.append('dtype=' + str(self.dtype))
+
             if self.layout != torch.strided:
                 tensor_str = _tensor_str(self.to_dense(), indent)
             else:

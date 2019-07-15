@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/Type.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/core/Tensor.h>
 
 namespace at {
 

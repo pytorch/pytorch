@@ -704,6 +704,22 @@ Example::
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
 """)
 
+add_docstr(torch.bitwise_not,
+           r"""
+           bitwise_not(input, out=None) -> Tensor
+
+Computes the bitwise NOT of the given :attr:`input` tensor. The input must be of integer or Boolean types.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.bitwise_not(torch.tensor([-1, -2, 3], dtype=torch.int8))
+    tensor([ 0,  1, -4], dtype=torch.int8)
+""")
+
 add_docstr(torch.bmm,
            r"""
 bmm(batch1, batch2, out=None) -> Tensor
@@ -3593,6 +3609,22 @@ Example::
 
     >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
+
+.. function:: normal(mean, std, size, *, out=None) -> Tensor
+
+Similar to the function above, but the means and standard deviations are shared
+among all drawn elements. The resulting tensor has size given by :attr:`size`.
+
+Args:
+    mean (float): the mean for all distributions
+    std (float): the standard deviation for all distributions
+    size (int...): a sequence of integers defining the shape of the output tensor.
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.normal(2, 3, size=(1, 4))
+    tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
 """)
 
 add_docstr(torch.numel,
@@ -5848,7 +5880,7 @@ Example::
 
 add_docstr(torch.where,
            r"""
-where(condition, x, y) -> Tensor
+.. function:: where(condition, x, y) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -5883,6 +5915,14 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
+
+.. function:: where(condition) -> tuple of LongTensor
+
+``torch.where(condition)`` is identical to
+``torch.nonzero(condition, as_tuple=True)``.
+
+.. note::
+    See also :func:`torch.nonzero`.
 """)
 
 add_docstr(torch.logdet,

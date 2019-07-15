@@ -1180,8 +1180,8 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
-        def log_softmax(self, dim: int, *, dtype: Optional[int]):
-            result = torch.log_softmax(self, dim, dtype=dtype)
+        def log_softmax(self, dim: int, dtype: Optional[int]):
+            result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
                 grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
                 return grad_self, None, None
@@ -1398,7 +1398,7 @@ void loadModule(const script::CompilationUnit& module) {
 void loadFunctions() {
   for (const std::string& str : functions) {
     script::CompilationUnit cu;
-    cu.define(str, script::nativeResolver(), nullptr);
+    cu.define(c10::nullopt, str, script::nativeResolver(), nullptr);
     loadModule(cu);
   }
 }

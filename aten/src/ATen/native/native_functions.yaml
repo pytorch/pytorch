@@ -29,6 +29,12 @@
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
   variants: function
 
+- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void
+  variants: method
+
+- func: set_data(Tensor(a!) self, Tensor new_data) -> void
+  variants: method
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -351,6 +357,17 @@
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
 
+- func: bitwise_not(Tensor self) -> Tensor
+  variants: function, method
+
+- func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: bitwise_not(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: bitwise_not_out
+    CUDA: bitwise_not_out
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -631,6 +648,9 @@
 
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
+
+- func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
+  variants: method
 
 - func: div(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1018,22 +1038,27 @@
 - func: is_floating_point(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_complex(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_nonzero(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: is_signed(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
 
@@ -1075,6 +1100,10 @@
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
+
+- func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
+
+- func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
 
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
 
@@ -1169,7 +1198,8 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
-- func: log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+# log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
+- func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -1314,6 +1344,14 @@
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_weight
 
+- func: miopen_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: miopen_rnn
+
+- func: miopen_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+  dispatch:
+    CUDA: miopen_rnn_backward
+
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
   dispatch:
@@ -1413,9 +1451,14 @@
   dispatch:
     CUDA: batch_norm_elemt_cuda
 
+# for backward compatibility
 - func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_gather_stats_cuda
+
+- func: batch_norm_gather_stats_with_counts(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int[] counts) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_gather_stats_with_counts_cuda
 
 - func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -1658,6 +1701,7 @@
     MkldnnCPU: mkldnn_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: relu_
@@ -1736,6 +1780,7 @@
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
 
 - func: sigmoid(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: sigmoid
@@ -1743,6 +1788,7 @@
     MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _sigmoid__cpu
@@ -1750,6 +1796,7 @@
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _sigmoid_out_cpu
     CUDA: _sigmoid_out_cuda
@@ -1809,6 +1856,7 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
+# softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
@@ -1984,15 +2032,18 @@
     CUDA: _tan_out_cuda
 
 - func: tanh(Tensor self) -> Tensor
+  named_guard: False
   variants: function, method
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: function, method
   dispatch:
     CPU: _tanh__cpu
     CUDA: _tanh__cuda
 
 - func: tanh(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
@@ -2151,6 +2202,9 @@
 - func: where(Tensor condition, Tensor self, Tensor other) -> Tensor
   variants: function, method
 
+- func: where(Tensor condition) -> Tensor[]
+  variants: function
+
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   variants: function
   dispatch:
@@ -2281,6 +2335,7 @@
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
+    QuantizedCPU: quantized_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   variants: function, method
@@ -2306,6 +2361,7 @@
     SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_zero_
@@ -2589,6 +2645,7 @@
     SparseCUDA: is_coalesced_sparse
   requires_tensor: True
   device_guard: False
+  named_guard: False
 
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
@@ -2657,6 +2714,7 @@
 - func: numel(Tensor self) -> int
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -2759,6 +2817,7 @@
 
 - func: item(Tensor self) -> Scalar
   variants: method
+  named_guard: False
 
 # NB: Does NOT check precondition that numel == 1
 - func: _local_scalar_dense(Tensor self) -> Scalar
@@ -2766,6 +2825,7 @@
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
   variants: function
+  named_guard: False
 
 # Fused RNN kernels
 - func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor, Tensor)
@@ -2811,6 +2871,12 @@
 
 # Quantized RNN layers
 - func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
+
+# Quantized GRU layers
+
+- func: quantized_gru(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+
+- func: quantized_gru(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
 
 # Quantized RNN cells
 - func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
@@ -3159,6 +3225,7 @@
     CUDA: legacy::cuda::_th_irshift_
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_lgamma_
@@ -3183,18 +3250,21 @@
     CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_digamma_
     CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_polygamma_
     CUDA: legacy::cuda::_th_polygamma_
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_erfinv_
@@ -3796,44 +3866,52 @@
     CUDA: legacy::cuda::_th_multinomial_alias_draw
 
 - func: lgamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_lgamma_out
     CUDA: legacy::cuda::_th_lgamma_out
 
 - func: lgamma(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_lgamma
     CUDA: legacy::cuda::_th_lgamma
 
 - func: digamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_digamma_out
     CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_digamma
     CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_polygamma_out
     CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_polygamma
     CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: legacy::cpu::_th_erfinv_out
     CUDA: legacy::cuda::_th_erfinv_out
 
 - func: erfinv(Tensor self) -> Tensor
+  named_guard: False
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_erfinv
@@ -4091,6 +4169,10 @@
   dispatch:
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
+
+- func: normal(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
+- func: normal(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
