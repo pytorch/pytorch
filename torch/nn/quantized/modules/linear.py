@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
-from torch.nn.parameter import Parameter
 from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
 
@@ -189,8 +188,8 @@ class DynamicLinear(NNLinear):
                 module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
         bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
-        out_scale: `scale` parameter of output Quantized Tensor, type: double
-        out_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
+        scale: `scale` parameter of weight Quantized Tensor, type: double
+        zero_point: `zero_point` parameter for weight Quantized Tensor, type: long
 
     Examples::
 

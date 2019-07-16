@@ -231,7 +231,6 @@ class TestQuantizedLinear(unittest.TestCase):
         # Assert close: FP32 computation vs. INT8 computation with dynamic quantization
         torch.testing.assert_allclose(Y_dq, Y_ref, rtol=0.1, atol=1e-3)
 
-
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(
         batch_size=st.integers(1, 4),
