@@ -121,6 +121,7 @@ class Linear(NNLinear):
     def weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
+    # TODO: These will be duplicated multiple times, should we use multi-inheritance?
     @property
     def scale(self):
         return self._scale.item()

@@ -12,7 +12,6 @@ def default_eval_fn(model, calib_data):
     """
     total, correct = 0, 0
     for data, target in calib_data:
-        print(data.shape, target.shape)
         output = model(data)
         _, predicted = torch.max(output, 1)
         total += target.size(0)
