@@ -9,15 +9,19 @@
 /// OffsetCalculator calculates the offset in bytes of a linear index for NARGS
 /// operands that share the same shape, but may have different strides.
 
+#ifdef __HIP_PLATFORM_HCC__
+constexpr int MAX_DIMS = 16;
+#else
+constexpr int MAX_DIMS = 25;
+#endif
+
 template <int NARGS, typename index_t = uint32_t>
 struct OffsetCalculator {
-  static constexpr int MAX_DIMS = 25;
-
   // The offset for each argument (in bytes). Wrapper around fixed-size array.
   using offset_type = at::detail::Array<index_t, NARGS>;
 
   OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides) : dims(dims) {
-    TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>25) dims");
+    TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>", MAX_DIMS, ") dims");
     for (int i = 0; i < MAX_DIMS; ++i) {
       if (i < dims) {
         sizes_[i] = IntDivider<index_t>(sizes[i]);

@@ -345,6 +345,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
     ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
@@ -352,7 +353,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
@@ -374,6 +374,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/jit_log.cpp
     ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
@@ -421,24 +422,28 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/inline_loop_condition.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/canonicalize_modified_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
@@ -452,33 +457,27 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
-  if (WIN32)
+  if (NOT WIN32)
     list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_win.cpp
-    )
-  else ()
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
     )
-    if (USE_CUDA AND NOT USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-      )
-      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
-      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
-      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
-      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-
-    endif()
   endif ()
 
   if (USE_CUDA)
+    if (NOT USE_ROCM)
+      list(APPEND Caffe2_GPU_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      )
+    endif()
     list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
+    add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if (USE_ROCM)
@@ -486,6 +485,13 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
+    # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
+    # See NOTE [ ATen NVRTC Stub and HIP ]
+    add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
+    install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if (NOT NO_API)
@@ -759,7 +765,6 @@ ENDIF()
     DESTINATION share/cmake/Torch)
 
   if (USE_DISTRIBUTED)
-    add_subdirectory(${TORCH_SRC_DIR}/lib/THD lib_THD)
     if (NOT MSVC AND NOT APPLE)
       add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
     endif()
@@ -874,6 +879,11 @@ elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE_TBB")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
 else()
   message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
+endif()
+set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
+  "Experimental option to use a single thread pool for inter- and intra-op parallelism")
+if ("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
+  target_compile_definitions(torch PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
 endif()
 
 if (MSVC AND NOT BUILD_SHARED_LIBS)
@@ -1040,10 +1050,10 @@ if (BUILD_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if (INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
-        # Install PDB files for MSVC builds
-        if (MSVC AND BUILD_SHARED_LIBS)
-          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
-        endif()
+      # Install PDB files for MSVC builds
+      if (MSVC AND BUILD_SHARED_LIBS)
+        install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+      endif()
     endif()
   endforeach()
 

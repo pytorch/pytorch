@@ -16,8 +16,10 @@
 #include <test/cpp/jit/test_class_parser.h>
 #include <test/cpp/jit/test_code_template.h>
 #include <test/cpp/jit/test_constant_pooling.h>
+#include <test/cpp/jit/test_constant_propagation.h>
 #include <test/cpp/jit/test_create_autodiff_subgraphs.h>
 #include <test/cpp/jit/test_custom_operators.h>
+#include <test/cpp/jit/test_dce.h>
 #include <test/cpp/jit/test_dynamic_dag.h>
 #include <test/cpp/jit/test_fuser.h>
 #include <test/cpp/jit/test_graph_executor.h>
@@ -39,54 +41,56 @@ using namespace torch::jit::test;
 
 namespace torch {
 namespace jit {
-#define TH_FORALL_TESTS(_)         \
-  _(ADFormulas)                    \
-  _(Attributes)                    \
-  _(Blocks)                        \
-  _(CodeTemplate)                  \
-  _(ControlFlow)                   \
-  _(CreateAutodiffSubgraphs)       \
-  _(CustomOperators)               \
-  _(CustomOperatorAliasing)        \
-  _(IValueKWargs)                  \
-  _(CustomFusion)                  \
-  _(Differentiate)                 \
-  _(DifferentiateWithRequiresGrad) \
-  _(DynamicDAG)                    \
-  _(FromQualString)                \
-  _(InternedStrings)               \
-  _(IValue)                        \
-  _(PassManagement)                \
-  _(Proto)                         \
-  _(RegisterFusionCachesKernel)    \
-  _(SchemaParser)                  \
-  _(TopologicalIndex)              \
-  _(TopologicalMove)               \
-  _(SubgraphUtils)                 \
-  _(AliasAnalysis)                 \
-  _(ContainerAliasing)             \
-  _(AliasRegistration)             \
-  _(WriteTracking)                 \
-  _(Wildcards)                     \
-  _(MemoryDAG)                     \
-  _(IRParser)                      \
-  _(ConstantPooling)               \
-  _(NetDefConverter)               \
-  _(THNNConv)                      \
-  _(ATenNativeBatchNorm)           \
-  _(NoneSchemaMatch)               \
-  _(ClassParser)                   \
-  _(Profiler)                      \
-  _(InsertAndEliminateGuards)      \
-  _(InsertBailOuts)                \
-  _(PeepholeOptimize)              \
-  _(RecordFunction)                \
-  _(SubgraphMatching)              \
-  _(ModuleDefine)                  \
-  _(QualifiedName)                 \
-  _(ClassImport)                   \
-  _(ScriptObject)                  \
-  _(SaveExtraFilesHook)
+#define TH_FORALL_TESTS(_)             \
+  _(ADFormulas)                        \
+  _(Attributes)                        \
+  _(Blocks)                            \
+  _(CodeTemplate)                      \
+  _(ControlFlow)                       \
+  _(CreateAutodiffSubgraphs)           \
+  _(CustomOperators)                   \
+  _(CustomOperatorAliasing)            \
+  _(IValueKWargs)                      \
+  _(CustomFusion)                      \
+  _(Differentiate)                     \
+  _(DifferentiateWithRequiresGrad)     \
+  _(DynamicDAG)                        \
+  _(FromQualString)                    \
+  _(InternedStrings)                   \
+  _(IValue)                            \
+  _(PassManagement)                    \
+  _(Proto)                             \
+  _(RegisterFusionCachesKernel)        \
+  _(SchemaParser)                      \
+  _(TopologicalIndex)                  \
+  _(TopologicalMove)                   \
+  _(SubgraphUtils)                     \
+  _(AliasAnalysis)                     \
+  _(ContainerAliasing)                 \
+  _(AliasRegistration)                 \
+  _(WriteTracking)                     \
+  _(Wildcards)                         \
+  _(MemoryDAG)                         \
+  _(IRParser)                          \
+  _(ConstantPooling)                   \
+  _(ConstantPropagation)               \
+  _(NetDefConverter)                   \
+  _(THNNConv)                          \
+  _(ATenNativeBatchNorm)               \
+  _(NoneSchemaMatch)                   \
+  _(ClassParser)                       \
+  _(Profiler)                          \
+  _(InsertAndEliminateRedundantGuards) \
+  _(InsertBailOuts)                    \
+  _(PeepholeOptimize)                  \
+  _(RecordFunction)                    \
+  _(SubgraphMatching)                  \
+  _(ModuleDefine)                      \
+  _(QualifiedName)                     \
+  _(ClassImport)                       \
+  _(ScriptObject)                      \
+  _(SaveExtraFilesHook)                \
+  _(DCE)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

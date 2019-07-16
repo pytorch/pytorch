@@ -260,13 +260,20 @@ struct SymbolicVariable {
   SymbolicVariable sinh() const {
     return create(t("sinh"), {*this})[0];
   }
-  SymbolicVariable sum() const {
-    return create(t("sum"), {*this})[0];
+  SymbolicVariable sum(c10::optional<c10::ScalarType> dtype=c10::nullopt) const {
+    return create(t("sum"), {*this, insertNullable(dtype)})[0];
   }
-  SymbolicVariable sum(int dim, bool keepdim) const {
+  SymbolicVariable sum(
+    int dim,
+    bool keepdim,
+    c10::optional<c10::ScalarType> dtype = c10::nullopt) const
+  {
     return create(
         t("sum"),
-        {*this, insertConstant(at::IntArrayRef{dim}), insertConstant(keepdim)})[0];
+        {*this,
+          insertConstant(at::IntArrayRef{dim}),
+          insertConstant(keepdim),
+          insertNullable(dtype)})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
     return create(t("squeeze"), {*this, dim})[0];
@@ -284,13 +291,13 @@ struct SymbolicVariable {
     return create(aten::view, {*this, sizes})[0];
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
-    return view(insertConstant(std::move(sizes)));
+    return view(insertConstant(c10::impl::toList(std::move(sizes))));
   }
   SymbolicVariable reshape(Value* sizes) const {
     return create(aten::reshape, {*this, sizes})[0];
   }
   SymbolicVariable reshape(std::vector<std::int64_t> sizes) const {
-    return reshape(insertConstant(std::move(sizes)));
+    return reshape(insertConstant(c10::impl::toList(std::move(sizes))));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
     return create(
@@ -310,10 +317,22 @@ struct SymbolicVariable {
       v->setType(other_type->contiguous());
     return *this;
   }
+
+  Value * insertNullable(c10::optional<c10::ScalarType> value) const {
+    if (value != c10::nullopt) {
+      return insertConstant(static_cast<int64_t>(*value));
+    } else {
+      return v->owningGraph()
+          ->insertNode(v->owningGraph()->createNone(IntType::get()))
+          ->output();
+    }
+  }
+
   SymbolicVariable toType(TypePtr type) const {
     v->setType(type);
     return *this;
   }
+
   SymbolicVariable typeLikeWithScalarType(
       SymbolicVariable other,
       at::ScalarType type) const {

@@ -5,7 +5,7 @@ import shutil
 
 from .setup_helpers import escape_path
 from .setup_helpers.env import IS_64BIT, IS_WINDOWS, check_negative_env_flag
-from .setup_helpers.cmake import CMake, USE_NINJA
+from .setup_helpers.cmake import USE_NINJA
 from .setup_helpers.cuda import USE_CUDA, CUDA_HOME
 from .setup_helpers.cudnn import CUDNN_INCLUDE_DIR, CUDNN_LIBRARY, USE_CUDNN
 
@@ -50,15 +50,9 @@ def _create_build_env():
     return my_env
 
 
-def build_caffe2(version,
-                 cmake_python_library,
-                 build_python,
-                 rerun_cmake,
-                 cmake_only,
-                 build_dir):
+def build_caffe2(version, cmake_python_library, build_python, rerun_cmake, cmake_only, cmake):
     my_env = _create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
-    cmake = CMake(build_dir)
     cmake.generate(version,
                    cmake_python_library,
                    build_python,
@@ -69,7 +63,7 @@ def build_caffe2(version,
         return
     cmake.build(my_env)
     if build_python:
-        caffe2_proto_dir = os.path.join(build_dir, 'caffe2', 'proto')
+        caffe2_proto_dir = os.path.join(cmake.build_dir, 'caffe2', 'proto')
         for proto_file in glob(os.path.join(caffe2_proto_dir, '*.py')):
             if proto_file != os.path.join(caffe2_proto_dir, '__init__.py'):
                 shutil.copy(proto_file, os.path.join('caffe2', 'proto'))

@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/utils.h"
 #else
 
-#if defined(THD_GENERIC_FILE) || defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_HALF)
 #define GENERATE_SPARSE 0
 #else
 #define GENERATE_SPARSE 1
@@ -16,7 +16,6 @@ typedef class THPPointer<THWTensor>       THWTensorPtr;
 typedef class THPPointer<THPStorage>     THPStoragePtr;
 
 #if (!defined(THC_GENERIC_FILE)) && \
-    (!defined(THD_GENERIC_FILE)) && \
     (!defined(THQUANTIZED))
 template<>
 struct THPUtils_typeTraits<scalar_t> {

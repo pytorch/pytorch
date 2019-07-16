@@ -1,3 +1,4 @@
+mkdir -p ./t/build
 cd ./t/build
 pwd
 cmake -DCMAKE_PREFIX_PATH=/Users/$USER/pytorch ..

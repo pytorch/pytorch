@@ -286,7 +286,7 @@ Tensor hardshrink_backward_cuda(const Tensor & grad, const Tensor & self, Scalar
 
 template <typename scalar_t>
 void threshold_kernel_impl(TensorIterator& iter, scalar_t threshold, scalar_t value) {
-  gpu_binary_kernel(iter, [=]GPU_LAMBDA(scalar_t x, scalar_t other) -> scalar_t {
+  gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t x, scalar_t other) -> scalar_t {
     return x <= threshold ? value : other;
   });
 }

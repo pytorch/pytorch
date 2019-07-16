@@ -371,7 +371,7 @@ void initPythonIRBindings(PyObject* module_) {
           "__repr__",
           [](Value& n) {
             std::stringstream ss;
-            ss << n.uniqueName() << " defined in (" << *n.node() << ")";
+            ss << n.debugName() << " defined in (" << *n.node() << ")";
             return ss.str();
           })
       .VS(type)
@@ -380,8 +380,8 @@ void initPythonIRBindings(PyObject* module_) {
       // skip owningGraph because it returns a raw pointer to a otherwise
       // std::shared_ptr stored graph object, and would cause a double free
       .VS(unique)
-      .VS(uniqueName)
-      .VS(setUniqueName)
+      .VS(debugName)
+      .VS(setDebugName)
       .VS(offset)
       .VS(uses)
       .VS(replaceAllUsesWith)

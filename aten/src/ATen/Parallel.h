@@ -1,10 +1,11 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <ATen/core/ivalue.h>
 
 namespace at {
 namespace internal {
 // This parameter is heuristically chosen to determine the minimum number of
-// work that warrants paralellism. For example, when summing an array, it is
+// work that warrants parallelism. For example, when summing an array, it is
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,
 // no parallel algorithm (such as parallel_reduce) should split work into
 // smaller than GRAIN_SIZE chunks.
@@ -106,6 +107,10 @@ CAFFE2_API void launch(std::function<void()> func);
 
 // Launches intra-op parallel task
 CAFFE2_API void intraop_launch(std::function<void()> func);
+
+// Launches intra-op parallel task, returns a future
+CAFFE2_API std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+    std::function<void()> func);
 
 // Returns number of intra-op threads used by default
 CAFFE2_API int intraop_default_num_threads();

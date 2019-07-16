@@ -30,8 +30,11 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"ScalarType", ParameterType::SCALARTYPE},
   {"Layout", ParameterType::LAYOUT},
   {"MemoryFormat", ParameterType::MEMORY_FORMAT},
+  {"QScheme", ParameterType::QSCHEME},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
+  {"Dimname", ParameterType::DIMNAME},
+  {"DimnameList", ParameterType::DIMNAME_LIST},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -157,6 +160,10 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
+#ifdef BUILD_NAMEDTENSOR
+    case ParameterType::DIMNAME: return obj == Py_None || THPUtils_checkString(obj);
+    case ParameterType::DIMNAME_LIST:
+#endif
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -172,6 +179,7 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::SCALARTYPE: return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
     case ParameterType::MEMORY_FORMAT: return THPMemoryFormat_Check(obj);
+    case ParameterType::QSCHEME: return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
@@ -194,8 +202,13 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::SCALARTYPE: return "torch.dtype";
     case ParameterType::LAYOUT: return "torch.layout";
     case ParameterType::MEMORY_FORMAT: return "torch.memory_format";
+    case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
+#ifdef BUILD_NAMEDTENSOR
+    case ParameterType::DIMNAME: return "name";
+    case ParameterType::DIMNAME_LIST: return "tuple of names";
+#endif
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -614,5 +627,54 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
   throw TypeError("%s", msg.c_str());
 }
 
+at::Tensor PythonArgs::tensor_slow(int i) {
+  PyObject* obj = args[i];
+  if (!obj) {
+    return at::Tensor();
+  }
+  if (THPVariable_Check(obj)) {
+    return reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+
+  at::Scalar scalar;
+  if (THPUtils_checkLong(obj)) {
+    scalar = at::Scalar(THPUtils_unpackLong(obj));
+  } else if (THPUtils_checkDouble(obj)) {
+    scalar = at::Scalar(THPUtils_unpackDouble(obj));
+  } else {
+    // NB: Are you here because you passed None to a Variable method,
+    // and you expected an undefined tensor to be returned?   Don't add
+    // a test for Py_None here; instead, you need to mark the argument
+    // as *allowing none*; you can do this by writing 'Tensor?' instead
+    // of 'Tensor' in the ATen metadata.
+    throw TypeError("expected Tensor as argument %d, but got %s", i,
+        Py_TYPE(obj)->tp_name);
+  }
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return autograd::make_variable(tensor);
+}
+
+at::Scalar PythonArgs::scalar_slow(int i) {
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::NumberType::get());
+  }
+
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(args[i])) {
+    return ((THPVariable*)args[i])->cdata.item();
+  }
+  if (THPUtils_checkLong(args[i])) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+
+  if (PyComplex_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
+  }
+  return at::Scalar(THPUtils_unpackDouble(args[i]));
+}
 
 } // namespace torch

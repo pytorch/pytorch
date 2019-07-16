@@ -12,8 +12,7 @@ using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
 using c10::intrusive_ptr;
-using c10::DictPtr;
-using c10::make_dict;
+using c10::Dict;
 using at::Tensor;
 using std::unique_ptr;
 using std::string;
@@ -46,7 +45,7 @@ struct DecrementKernel final : OperatorKernel {
 
 void expectCallsIncrement(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema("_test::my_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
   auto result = callOp(*op, dummyTensor(type_id), 5);
   EXPECT_EQ(1, result.size());
@@ -55,7 +54,7 @@ void expectCallsIncrement(TensorTypeId type_id) {
 
 void expectCallsDecrement(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema("_test::my_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
   auto result = callOp(*op, dummyTensor(type_id), 5);
   EXPECT_EQ(1, result.size());
@@ -115,7 +114,7 @@ struct KernelWithoutOutput final : OperatorKernel {
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::no_return(Tensor dummy) -> ()", RegisterOperators::options().kernel<KernelWithoutOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_return", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_return", ""});
   ASSERT_TRUE(op.has_value());
   was_called = false;
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -133,7 +132,7 @@ struct KernelWithZeroOutputs final : OperatorKernel {
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::zero_outputs(Tensor dummy) -> ()", RegisterOperators::options().kernel<KernelWithZeroOutputs>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::zero_outputs", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::zero_outputs", ""});
   ASSERT_TRUE(op.has_value());
   was_called = false;
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -151,7 +150,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntOutput_whenR
   auto registrar = RegisterOperators()
       .op("_test::int_output(Tensor dummy, int a, int b) -> int", RegisterOperators::options().kernel<KernelWithIntOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_output", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()), 3, 6);
@@ -170,7 +169,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorOutput_wh
       .op("_test::returning_tensor(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorOutput>(TensorType1()))
       .op("_test::returning_tensor(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorOutput>(TensorType2()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::returning_tensor", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::returning_tensor", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -183,8 +182,8 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorOutput_wh
 }
 
 struct KernelWithTensorListOutput final : OperatorKernel {
-  c10::ListPtr<Tensor> operator()(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
-    return c10::make_list<Tensor>({input1, input2, input3});
+  c10::List<Tensor> operator()(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
+    return c10::List<Tensor>({input1, input2, input3});
   }
 };
 
@@ -192,7 +191,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutpu
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", RegisterOperators::options().kernel<KernelWithTensorListOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), dummyTensor(TensorType1()));
@@ -204,8 +203,8 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutpu
 }
 
 struct KernelWithIntListOutput final : OperatorKernel {
-  c10::ListPtr<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
-    return c10::make_list<int64_t>({input1, input2, input3});
+  c10::List<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
+    return c10::List<int64_t>({input1, input2, input3});
   }
 };
 
@@ -213,7 +212,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListOutput_w
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor dummy, int input1, int input2, int input3) -> int[]", RegisterOperators::options().kernel<KernelWithIntListOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()), 2, 4, 6);
@@ -225,14 +224,14 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListOutput_w
 }
 
 struct KernelWithMultipleOutputs final : OperatorKernel {
-  std::tuple<Tensor, int64_t, c10::ListPtr<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> operator()(Tensor) {
-    DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
+  std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> operator()(Tensor) {
+    Dict<string, Tensor> dict;
     dict.insert("first", dummyTensor(TensorType1()));
     dict.insert("second", dummyTensor(TensorType2()));
-    return std::tuple<Tensor, int64_t, c10::ListPtr<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
+    return std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
       dummyTensor(TensorType2()),
       5,
-      c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}),
+      c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}),
       c10::optional<int64_t>(c10::in_place, 0),
       dict
     );
@@ -243,7 +242,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithMultipleOutputs
   auto registrar = RegisterOperators()
      .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", RegisterOperators::options().kernel<KernelWithMultipleOutputs>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::multiple_outputs", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::multiple_outputs", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -277,7 +276,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByRe
       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorInputByReferenceWithOutput>(TensorType1()))
       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorInputByReferenceWithOutput>(TensorType2()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -294,7 +293,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByVa
       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorInputByValueWithOutput>(TensorType1()))
       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<KernelWithTensorInputByValueWithOutput>(TensorType2()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -325,7 +324,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByRe
       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<KernelWithTensorInputByReferenceWithoutOutput>(TensorType1()))
       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<KernelWithTensorInputByReferenceWithoutOutput>(TensorType2()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()));
@@ -342,7 +341,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByVa
       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<KernelWithTensorInputByValueWithoutOutput>(TensorType1()))
       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<KernelWithTensorInputByValueWithoutOutput>(TensorType2()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()));
@@ -366,7 +365,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withou
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> ()", RegisterOperators::options().kernel<KernelWithIntInputWithoutOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_int_input = 0;
@@ -385,7 +384,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withOu
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<KernelWithIntInputWithOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()), 3);
@@ -396,7 +395,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withOu
 int64_t captured_input_list_size = 0;
 
 struct KernelWithIntListInputWithoutOutput final : OperatorKernel {
-  void operator()(Tensor, const c10::ListPtr<int64_t>& input1) {
+  void operator()(Tensor, const c10::List<int64_t>& input1) {
     captured_input_list_size = input1.size();
   }
 };
@@ -405,17 +404,17 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> ()", RegisterOperators::options().kernel<KernelWithIntListInputWithoutOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
 }
 
 struct KernelWithIntListInputWithOutput final : OperatorKernel {
-  int64_t operator()(Tensor, const c10::ListPtr<int64_t>& input1) {
+  int64_t operator()(Tensor, const c10::List<int64_t>& input1) {
     return input1.size();
   }
 };
@@ -424,16 +423,16 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> int", RegisterOperators::options().kernel<KernelWithIntListInputWithOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
 }
 
 struct KernelWithTensorListInputWithoutOutput final : OperatorKernel {
-  void operator()(const c10::ListPtr<Tensor>& input1) {
+  void operator()(const c10::List<Tensor>& input1) {
     captured_input_list_size = input1.size();
   }
 };
@@ -442,17 +441,17 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", RegisterOperators::options().kernel<KernelWithTensorListInputWithoutOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
 
 struct KernelWithTensorListInputWithOutput final : OperatorKernel {
-  int64_t operator()(const c10::ListPtr<Tensor>& input1) {
+  int64_t operator()(const c10::List<Tensor>& input1) {
     return input1.size();
   }
 };
@@ -461,10 +460,10 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", RegisterOperators::options().kernel<KernelWithTensorListInputWithOutput>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -472,7 +471,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
 int captured_dict_size = 0;
 
 struct KernelWithDictInputWithoutOutput final : OperatorKernel {
-  void operator()(DictPtr<string, Tensor> input1) {
+  void operator()(Dict<string, Tensor> input1) {
     captured_dict_size = input1.size();
   }
 };
@@ -481,11 +480,11 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_witho
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().catchAllKernel<KernelWithDictInputWithoutOutput>());
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
+  Dict<string, Tensor> dict;
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -494,7 +493,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_witho
 }
 
 struct KernelWithDictInputWithOutput final : OperatorKernel {
-  string operator()(DictPtr<string, string> input1) {
+  string operator()(Dict<string, string> input1) {
     return input1.at("key2");
   }
 };
@@ -503,10 +502,10 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withO
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().catchAllKernel<KernelWithDictInputWithOutput>());
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  DictPtr<string, string> dict = make_dict<string, string>();
+  Dict<string, string> dict;
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -515,7 +514,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withO
 }
 
 struct KernelWithDictOutput final : OperatorKernel {
-  DictPtr<string, string> operator()(DictPtr<string, string> input) {
+  Dict<string, string> operator()(Dict<string, string> input) {
     return input;
   }
 };
@@ -524,10 +523,10 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictOutput_when
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().catchAllKernel<KernelWithDictOutput>());
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  DictPtr<string, string> dict = make_dict<string, string>();
+  Dict<string, string> dict;
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -554,7 +553,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithCache_thenCache
   auto registrar = RegisterOperators()
       .op("_test::cache_op(Tensor input) -> int", RegisterOperators::options().kernel<KernelWithCache>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::cache_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::cache_op", ""});
   ASSERT_TRUE(op.has_value());
 
   // expect first time calling returns a 4 (4 is the initial value in the cache)
@@ -595,7 +594,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithConstructorArg_
       .op("_test::offset_op(Tensor tensor, int input) -> int", RegisterOperators::options().kernel<KernelWithConstructorArg>(TensorType1(), 2))
       .op("_test::offset_op(Tensor tensor, int input) -> int", RegisterOperators::options().kernel<KernelWithConstructorArg>(TensorType2(), 4));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::offset_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::offset_op", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()), 4);
@@ -625,7 +624,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithMultipleConstru
       .op("_test::offset_op(Tensor tensor, int input) -> int", RegisterOperators::options().kernel<KernelWithMultipleConstructorArgs>(TensorType1(), 2, 3))
       .op("_test::offset_op(Tensor tensor, int input) -> int", RegisterOperators::options().kernel<KernelWithMultipleConstructorArgs>(TensorType2(), 4, 5));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::offset_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::offset_op", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()), 4);
@@ -652,7 +651,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutAnyA
   auto registrar = RegisterOperators()
       .op("_test::no_tensor_args() -> ()", RegisterOperators::options().catchAllKernel<KernelWithoutInputs>());
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
 
   called = false;
@@ -673,7 +672,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutTens
   auto registrar = RegisterOperators()
       .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().catchAllKernel<KernelWithoutTensorInputs>());
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, 3);
@@ -696,7 +695,7 @@ struct KernelWithOptInputWithoutOutput final : OperatorKernel {
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()", RegisterOperators::options().kernel<KernelWithOptInputWithoutOutput>(TensorType1()));
-  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
   called = false;
@@ -733,7 +732,7 @@ struct KernelWithOptInputWithOutput final : OperatorKernel {
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?", RegisterOperators::options().kernel<KernelWithOptInputWithOutput>(TensorType1()));
-  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
   called = false;
@@ -769,7 +768,7 @@ struct KernelWithOptInputWithMultipleOutputs final : OperatorKernel {
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)", RegisterOperators::options().kernel<KernelWithOptInputWithMultipleOutputs>(TensorType1()));
-  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), c10::IValue(), std::string("text"));
@@ -786,7 +785,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
 }
 
 struct KernelForSchemaInference final : OperatorKernel {
-  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, const c10::ListPtr<Tensor>& arg3) {
+  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, const c10::List<Tensor>& arg3) {
     return {};
   }
 };
@@ -795,7 +794,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegisteredWith
   auto registrar = RegisterOperators()
       .op("_test::no_schema_specified", RegisterOperators::options().kernel<KernelForSchemaInference>(TensorType1()));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
@@ -806,7 +805,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegisteredCatc
   auto registrar = RegisterOperators()
       .op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel<KernelForSchemaInference>());
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());

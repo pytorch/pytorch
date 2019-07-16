@@ -5,7 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/type_conversion.h>
+#include <ATen/core/type_map.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
@@ -49,7 +49,7 @@ class class_ {
   std::shared_ptr<script::CompilationUnit> classCu = nullptr;
   ClassTypePtr classTypePtr;
 
-  const std::string parentModule = "_C";
+  const std::string parentModule = "classes";
 
  public:
   class_(string className_) : className(std::move(className_)) {
@@ -69,10 +69,10 @@ class class_ {
     // capsule attribute.
     classCu = std::make_shared<script::CompilationUnit>();
     auto runtimeClassName = typeid(c10::intrusive_ptr<CurClass>).name();
-    tmap[runtimeClassName] =  ClassType::create(
+    classTypePtr = ClassType::create(
         c10::QualifiedName("__torch__.torch." + parentModule + "." + className),
         classCu);
-    classTypePtr = tmap.find(runtimeClassName)->second;
+    tmap.insert({runtimeClassName, StrongTypePtr(classCu, classTypePtr)});
     classTypePtr->addAttribute("capsule", CapsuleType::get());
     script::CompilationUnit::_get_python_cu().register_class(classTypePtr);
   }

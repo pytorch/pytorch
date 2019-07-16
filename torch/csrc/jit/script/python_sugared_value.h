@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/jit/pybind_utils.h>
@@ -28,7 +27,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     SourceRange loc,
     bool is_constant = false);
 
-std::shared_ptr<Function> as_function(const py::object& obj);
+c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self) : self(std::move(self)) {}
@@ -130,7 +129,7 @@ struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
 // holding the actual nn.Module class.
 
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
-  ModuleValue(Value* self, std::shared_ptr<Module> module, py::object py_module)
+  ModuleValue(Value* self, Module module, py::object py_module)
       : self_(self),
         module_(std::move(module)),
         py_module_(std::move(py_module)) {}
@@ -169,7 +168,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
  private:
   Value* self_;
-  std::shared_ptr<Module> module_;
+  Module module_;
   py::object py_module_;
 };
 

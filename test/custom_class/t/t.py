@@ -20,10 +20,9 @@ class Bar:
     def display(self, z):
         print(self.x, self.y, z)
 
-# print(torch.classes.Foo(5, 3))
 @torch.jit.script
 def f(x):
-    val = torch._C.Foo(5, 3)
+    val = torch.classes.Foo(5, 3)
     # val.display()
     # val2 = Bar(100, 0)
     # val2 = torch._C.Foo(100, 0)

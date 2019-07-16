@@ -13,6 +13,11 @@
 // Forward-declares THCState
 struct THCState;
 
+// Forward-declares at::cuda::NVRTC
+namespace at { namespace cuda {
+struct NVRTC;
+}} // at::cuda
+
 namespace at {
 class Context;
 }
@@ -58,8 +63,12 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual std::unique_ptr<Generator> initCUDAGenerator(Context*) const {
-    AT_ERROR("Cannot initialize CUDA generator without ATen_cuda library. ", CUDA_HELP);
+  virtual Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
+    AT_ERROR("Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual Device getDeviceFromPtr(void* data) const {
+    AT_ERROR("Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool hasCUDA() const {
@@ -74,16 +83,16 @@ struct CAFFE2_API CUDAHooksInterface {
     return false;
   }
 
+  virtual const at::cuda::NVRTC& nvrtc() const {
+    AT_ERROR("NVRTC requires CUDA. ", CUDA_HELP);
+  }
+
   virtual int64_t current_device() const {
     return -1;
   }
 
   virtual Allocator* getPinnedMemoryAllocator() const {
     AT_ERROR("Pinned memory requires CUDA. ", CUDA_HELP);
-  }
-
-  virtual void registerCUDATypes(Context*) const {
-    AT_ERROR("Cannot registerCUDATypes() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool compiledWithCuDNN() const {
@@ -95,6 +104,10 @@ struct CAFFE2_API CUDAHooksInterface {
   }
 
   virtual bool supportsDilatedConvolutionWithCuDNN() const {
+    return false;
+  }
+
+  virtual bool supportsDepthwiseConvolutionWithCuDNN() const {
     return false;
   }
 

@@ -23,7 +23,8 @@ Decl mergeTypesFromTypeComment(
         << "Number of type annotations ("
         << type_annotation_decl.params().size()
         << ") did not match the number of "
-        << "function parameters (" << expected_num_annotations << ")";
+        << (is_method ? "method" : "function")
+        << " parameters (" << expected_num_annotations << ")";
   }
   auto old = decl.params();
   auto _new = type_annotation_decl.params();
@@ -256,7 +257,10 @@ struct ParserImpl {
       }
 
       if (kind == TK_FOR) {
-        auto target = parseExp();
+        // TK_FOR targets should only parse exprs prec greater than 4, which only
+        // includes subset of Exprs that suppose to be on the LHS according to the
+        // python grammer https://docs.python.org/3/reference/grammar.html
+        auto target = parseLHSExp();
         L.expect(TK_IN);
         auto iter = parseExp();
         prefix = ListComp::create(pos, Expr(prefix), target, iter);
@@ -329,6 +333,12 @@ struct ParserImpl {
     });
   }
 
+  // parse LHS acceptable exprs, which only includes subset of Exprs that prec is
+  // greater than 4 according to the python grammer
+  Expr parseLHSExp() {
+    return parseExp(4);
+  }
+
   // Parse expr's of the form [a:], [:b], [a:b], [:] and all variations with "::"
   Expr parseSubscriptExp() {
     TreeRef first, second, third;
@@ -368,7 +378,11 @@ struct ParserImpl {
 
   Maybe<Expr> maybeParseTypeAnnotation() {
     if (L.nextIf(':')) {
-      return Maybe<Expr>::create(L.cur().range, parseExp());
+      // NB: parseExp must not be called inline, since argument evaluation order
+      // changes when L.cur().range is mutated with respect to the parseExp()
+      // call.
+      auto expr = parseExp();
+      return Maybe<Expr>::create(expr.range(), expr);
     } else {
       return Maybe<Expr>::create(L.cur().range);
     }
@@ -379,7 +393,11 @@ struct ParserImpl {
     TreeRef type = maybeParseTypeAnnotation();
     TreeRef def;
     if (L.nextIf('=')) {
-      def = Maybe<Expr>::create(L.cur().range, parseExp());
+      // NB: parseExp must not be called inline, since argument evaluation order
+      // changes when L.cur().range is mutated with respect to the parseExp()
+      // call.
+      auto expr = parseExp();
+      def = Maybe<Expr>::create(expr.range(), expr);
     } else {
       def = Maybe<Expr>::create(L.cur().range);
     }
@@ -471,6 +489,22 @@ struct ParserImpl {
         L.expect(TK_NEWLINE);
         return Assert::create(range, cond, maybe_first);
       }
+      case TK_BREAK: {
+        auto range = L.next().range;
+        if (cur_loop_count == 0) {
+          throw ErrorReport(range) << "SyntaxError: 'break' outside loop";
+        }
+        L.expect(TK_NEWLINE);
+        return Break::create(range);
+      }
+      case TK_CONTINUE: {
+        auto range = L.next().range;
+        if (cur_loop_count == 0) {
+          throw ErrorReport(range) << "SyntaxError: 'continue' outside loop";
+        }
+        L.expect(TK_NEWLINE);
+        return Continue::create(range);
+      }
       case TK_PASS: {
         auto range = L.next().range;
         L.expect(TK_NEWLINE);
@@ -516,15 +550,20 @@ struct ParserImpl {
     L.expect(TK_WHILE);
     auto cond = parseExp();
     L.expect(':');
+    cur_loop_count++;
     auto body = parseStatements();
+    cur_loop_count--;
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
+
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
-    auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseExp);
+    auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseLHSExp);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
+    cur_loop_count++;
     auto body = parseStatements();
+    cur_loop_count--;
     return For::create(r, targets, itrs, body);
   }
 
@@ -573,14 +612,37 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
-  TreeRef parseClass() {
+  TreeRef parseNamedTuple(const Ident& name) {
+    const auto& range = name.range();
+    L.expect(')');
+    L.expect(':');
+    L.expect(TK_INDENT);
+    std::vector<Ident> fields;
+    std::vector<Maybe<Expr>> type_exprs;
+    while (L.cur().kind != TK_DEDENT) {
+      fields.push_back(parseIdent());
+      type_exprs.push_back(maybeParseTypeAnnotation());
+      L.expect(TK_NEWLINE);
+    }
+    L.expect(TK_DEDENT);
+    return NamedTupleDef::create(
+        range,
+        name,
+        List<Ident>::create(range, fields),
+        List<Maybe<Expr>>::create(range, type_exprs));
+  }
+
+  TreeRef parseClassLike() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
     if (L.nextIf('(')) {
-      // The parser only supports py3 syntax, so classes are new-style when
-      // they don't inherit from anything.
-      L.reportError(
-          "Inheritance is not yet supported for TorchScript classes yet.");
+      // Only support inheriting from NamedTuple right now.
+      if (L.cur().kind == TK_IDENT && L.cur().text() == "NamedTuple") {
+        L.next();
+        return parseNamedTuple(name);
+      } else {
+        L.reportError("Inheritance is not supported for TorchScript classes");
+      }
     }
     L.expect(':');
 
@@ -596,6 +658,8 @@ struct ParserImpl {
   }
 
   TreeRef parseFunction(bool is_method) {
+    size_t old_loop_count = cur_loop_count;
+    cur_loop_count = 0;
     L.expect(TK_DEF);
     auto name = parseIdent();
     auto decl = parseDecl();
@@ -610,6 +674,7 @@ struct ParserImpl {
     }
 
     auto stmts_list = parseStatements(false);
+    cur_loop_count = old_loop_count;
     return Def::create(
         name.range(), Ident(name), Decl(decl), List<Stmt>(stmts_list));
   }
@@ -628,6 +693,7 @@ struct ParserImpl {
   TreeRef makeList(const SourceRange& range, TreeList&& trees) {
     return create_compound(TK_LIST, range, std::move(trees));
   }
+  size_t cur_loop_count = 0;
   Lexer L;
   SharedParserData& shared;
 };
@@ -640,8 +706,8 @@ Parser::~Parser() = default;
 TreeRef Parser::parseFunction(bool is_method) {
   return pImpl->parseFunction(is_method);
 }
-TreeRef Parser::parseClass() {
-  return pImpl->parseClass();
+TreeRef Parser::parseClassLike() {
+  return pImpl->parseClassLike();
 }
 Lexer& Parser::lexer() {
   return pImpl->lexer();
