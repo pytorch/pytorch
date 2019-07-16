@@ -168,16 +168,13 @@ class TestAutograd(TestCase):
         self.assertEqual(v.grad.data, torch.zeros(shape))
 
     def test_legacy_function_deprecation_warning(self):
-        class MyFunction(Function):
-            def forward(self, x):
-                return x
-
-            def backward(self, grad_output):
-                return grad_output
-
-        x = torch.randn(3, 5).requires_grad_()
         with warnings.catch_warnings(record=True) as warns:
-            MyFunction()(x)
+            class MyFunction(Function):
+                def forward(self, x):
+                    return x
+
+                def backward(self, grad_output):
+                    return grad_output
         self.assertIn(
             'Legacy autograd function with non-static forward method is deprecated',
             warns[0])
