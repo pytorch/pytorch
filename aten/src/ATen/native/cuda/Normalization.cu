@@ -105,8 +105,6 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(const Tensor
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const Tensor& self, const Tensor& input, const Tensor& mean,
                                                                            const Tensor& invstd, bool input_g, bool weight_g, bool bias_g) {
-  //FIXME
-  std::cout << "batch_norm_backward_reduce_cuda called" << std::endl;
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward_reduce", [&] {
       auto mean_st = mean.dtype();
       auto invstd_st = invstd.dtype();
@@ -130,8 +128,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const
 
 Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, const Tensor& mean, const Tensor& invstd,
                                       const Tensor& weight, const Tensor& mean_dy, const Tensor& mean_dy_xmu) {
-  //FIXME
-  std::cout << "batch_norm_backward_elemt_cuda called" << std::endl;
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward_elemt", [&] {
       auto mean_st = mean.dtype();
       auto invstd_st = invstd.dtype();

@@ -765,7 +765,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
     mean_dy_ = at::empty_like(mean_);
     mean_dy_xmu_ = at::empty_like(mean_);
   }
-  auto grad_options = grad_out_.options();
+  auto grad_options = mean_.options();
   if (weight_g) {
     grad_weight_ = at::empty({n_input}, grad_options);
   }
@@ -773,8 +773,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
     grad_bias_ = at::empty({n_input}, grad_options);
   }
 
-  //FIXME
-  std::cout << "backward_reduce_cuda_template before accessor" << std::endl;
   auto input = input_reshaped.packed_accessor<input_scalar_t, 3, DefaultPtrTraits, index_t>();
   auto grad_output = grad_output_reshaped.packed_accessor<input_scalar_t, 3, DefaultPtrTraits, index_t>();
   auto grad_weight = packed_accessor_or_dummy<stat_scalar_t, 1, DefaultPtrTraits, index_t>(grad_weight_);
@@ -783,7 +781,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
   auto invstd = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(invstd_);
   auto mean_dy = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(mean_dy_);
   auto mean_dy_xmu = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(mean_dy_xmu_);
-  std::cout << "backward_reduce_cuda_template after accessor" << std::endl;
 
   auto batch_size = input_reshaped.size(0);
   auto feature_size = input_reshaped.size(2);
@@ -815,8 +812,6 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
 
-  //FIXME
-  std::cout << "backward_elemt_cuda_template before accessor" << std::endl;
   auto input = input_reshaped.packed_accessor<input_scalar_t, 3, DefaultPtrTraits, index_t>();
   auto grad_input = grad_input_reshaped.packed_accessor<input_scalar_t, 3, DefaultPtrTraits, index_t>();
   auto grad_output = grad_output_reshaped.packed_accessor<input_scalar_t, 3, DefaultPtrTraits, index_t>();
@@ -825,7 +820,6 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   auto weight = packed_accessor_or_dummy<stat_scalar_t, 1, DefaultPtrTraits, index_t>(weight_);
   auto mean_dy = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(mean_dy_);
   auto mean_dy_xmu = packed_accessor_or_dummy<stat_accscalar_t, 1, DefaultPtrTraits, index_t>(mean_dy_xmu_);
-  std::cout << "backward_elemt_cuda_template after accessor" << std::endl;
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
