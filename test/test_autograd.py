@@ -175,9 +175,9 @@ class TestAutograd(TestCase):
             def backward(self, grad_output):
                 return grad_output
 
-        x = torch.randn(3, 5)
+        x = torch.randn(3, 5).requires_grad_()
         with warnings.catch_warnings(record=True) as warns:
-            MyFunction()(x).sum().backward()
+            MyFunction()(x)
         self.assertIn(
             'Legacy autograd function with non-static forward method is deprecated',
             warns[0])
