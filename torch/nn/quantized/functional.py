@@ -76,7 +76,6 @@ def conv2d(input, weight, bias,
 
     if not prepacked:
         weight = ops.quantized.fbgemm_conv_prepack(weight, groups)
-
     return ops.quantized.fbgemm_conv2d(input, weight, bias,
                                        stride, padding, dilation,
                                        groups, scale, zero_point)

@@ -894,6 +894,7 @@ bool Node::hasSideEffects() const {
     case prim::TimePoint:
     case prim::CallFunction:
     case prim::CallMethod:
+    case prim::BailoutTemplate:
       return true;
   }
   // All other builtin ops are known to be safe.
@@ -1391,15 +1392,6 @@ Node* Graph::createDict(
   return n;
 }
 
-Node* Graph::createDictIndex(Value* dict, Value* index) {
-  auto dict_type = dict->type()->expect<DictType>();
-  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
-
-  auto n = create(prim::DictIndex, {dict, index});
-  n->output()->setType(dict_type->getValueType());
-  return n;
-}
-
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
@@ -1453,7 +1445,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 }
 
 Value* Graph::insertFunctionCall(
-    std::shared_ptr<Function> callee,
+    Function* callee,
     script::MatchedSchema& matched) {
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->output()

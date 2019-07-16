@@ -59,7 +59,6 @@ class QCat final : public torch::OperatorKernel {
 };
 
 
-
 template <bool ReLUFused = false>
 class QCatOut final : public torch::OperatorKernel {
  public:

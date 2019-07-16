@@ -25,7 +25,7 @@ IValue deepCopy(const IValue& self) {
 
   // Lists of ivalues should recursively deep copy their contents
   if (self.isGenericList()) {
-    c10::List<IValue> newList;
+    auto newList = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
     newList.reserve(self.toGenericListRef().size());
     for (const IValue& value : self.toGenericListRef()) {
       newList.push_back(deepCopy(value));
@@ -176,7 +176,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
     }
   }
 
-  if (v->node()->kind() == prim::Float) {
+  if (v->node()->kind() == aten::Float) {
     auto op = getOperation(v->node());
     if (auto input = toIValue(v->node()->input())) {
       auto op = getOperation(v->node());
