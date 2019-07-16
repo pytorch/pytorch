@@ -17,6 +17,40 @@ JitLoggingLevels jit_log_level() {
   return log_level;
 }
 
+template <typename T>
+void logArguments(std::ostream& ss, T t) {
+  ss << t;
+}
+
+template <>
+void logArguments<Value*>(std::ostream& ss, Value* v) {
+  ss << v->debugName();
+}
+
+template <typename T, typename... Rest>
+void logArguments(std::ostream& ss, T t, Rest... rest) {
+  logArguments(ss, t);
+  ss << ", ";
+  logArguments(ss, rest...);
+}
+
+template <typename... Args>
+std::string logNode(Node* node, Args... args) {
+  std::stringstream ss;
+  ss << "(";
+  for (size_t i = 0; i < node->outputs().size(); i++) {
+    if (i != 0) {
+      ss << ", ";
+    }
+    node->outputs()[i]->debugName();
+  }
+  ss << ") = ";
+  ss << node->kind().toQualString() << "(";
+  logArguments(ss, args...);
+  ss << ")";
+  return ss.str();
+}
+
 std::string debugValueOrDefault(const Node* n) {
   return n->outputs().size() > 0 ? n->outputs().at(0)->debugName() : "n/a";
 }
