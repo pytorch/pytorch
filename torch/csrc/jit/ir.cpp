@@ -885,8 +885,6 @@ bool Node::hasSideEffects() const {
     case prim::Print:
     case prim::RaiseException:
     case prim::SetAttr:
-    case aten::clear:
-    case aten::setdefault:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:

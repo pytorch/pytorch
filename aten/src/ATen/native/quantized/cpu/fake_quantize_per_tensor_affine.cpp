@@ -1,9 +1,12 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/NativeFunctions.h>
 
 /* FakeQuantize Op for PerTensorAffine quantization scheme */
-namespace at { namespace native {
-namespace {
+namespace at {
+namespace native {
+
 /* Fake-quantizes the 'inputs' tensor.
 Args:
   X: Forward input tensor.
@@ -21,49 +24,33 @@ Returns:
 Notes:
   - quant_delay might be set to non-zero to help weights stabilize in the
     beginning of the training.
-  - quantization range [0, 2^bits - 1]
+  - quantization range [quant_min, quant_max]
 */
-
-class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
- public:
-  at::Tensor operator()(
-      at::Tensor X,
+Tensor fake_quantize_per_tensor_affine_cpu(
+      const Tensor& self,
       double scale,
       int64_t zero_point,
-      int64_t quant_min = 0,
-      int64_t quant_max = 255,
-      int64_t quant_delay = 0,
-      int64_t iter = 0
+      int64_t quant_min,
+      int64_t quant_max
     ) {
-    // Sanity checks.
-    if (quant_min > quant_max) {
-      throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
-    }
-    if (zero_point < 0) {
-      throw std::invalid_argument("`zero_point` must be a positive integer.");
-    }
-    if (quant_delay < 0) {
-      throw std::invalid_argument("`quant_delay` must be a positive integer.");
-    }
+    TORCH_CHECK(self.scalar_type() == ScalarType::Float);
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or \
+        equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= quant_min && zero_point <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
 
-    if (quant_delay != 0 && iter < 0) {
-      throw std::invalid_argument(
-        "`iter` must be >=0 for non-zero `quant_delay`");
-    }
+    auto Y = at::empty_like(self);
+    float inv_scale = 1.0f / scale;
+    auto iter = TensorIterator::unary_op(Y, self);
+    cpu_kernel(*iter, [&](float self) -> float {
+      return (std::fmin(std::fmax(
+          static_cast<int64_t>(
+            std::nearbyint(self * inv_scale + zero_point)),
+              quant_min), quant_max) - zero_point) * scale;
+    });
 
-    auto Y = at::empty_like(X);
-
-    if (quant_delay > 0 && iter <= quant_delay) {
-      Y.copy_(X);  // We might want to just return the input here.
-      return Y;
-    }
-
-    double inv_scale = 1.0f / scale;
-    Y = (((X * inv_scale + 0.5f).floor() + zero_point)
-      .clamp_min(quant_min).clamp_max(quant_max) - zero_point) * scale;
     return Y;
-  }
-};
+}
 
 /* Backward path to fake-quantize the 'inputs' tensor.
 
@@ -85,62 +72,32 @@ Notes:
     beginning of the training.
   - quantization range [0, 2^bits - 1]
 */
-class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
- public:
-  at::Tensor operator()(
-      at::Tensor X,
-      at::Tensor dY,
+Tensor fake_quantize_per_tensor_affine_backward_cpu(
+      const Tensor& dY,
+      const Tensor& X,
       double scale,
       int64_t zero_point,
-      int64_t quant_min = 0,
-      int64_t quant_max = 255,
-      int64_t quant_delay = 0,
-      int64_t iter = 0) {
-    // Sanity checks.
-    if (quant_min > quant_max) {
-      throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
-    }
-    if (zero_point < 0) {
-      throw std::invalid_argument("`zero_point` must be a positive integer.");
-    }
-    if (quant_delay < 0) {
-      throw std::invalid_argument("`quant_delay` must be a positive integer.");
-    }
+      int64_t quant_min,
+      int64_t quant_max) {
+    TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
+    TORCH_CHECK(X.scalar_type() == ScalarType::Float);
+    TORCH_CHECK(X.numel() == dY.numel(), "`X` and `dY` are not the same size");
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or \
+        equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= quant_min && zero_point <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
     if (X.numel() <= 0) {
-      throw std::length_error("`X` is empty");
-    }
-    if (X.numel() != dY.numel()) {
-      throw std::invalid_argument("`X` and `dY` are not the same size");
+      return X;
     }
 
-    if (quant_delay != 0 && iter < 0) {
-      throw std::invalid_argument(
-        "`iter` must be >=0 for non-zero `quant_delay`");
-    }
-
-    auto dX = at::zeros_like(dY);
-    if (quant_delay > 0 && iter <= quant_delay) {
-      dX.copy_(dY);
-      return dX;
-    }
-
-    double inv_scale = 1.0f / scale;
-    at::Tensor Xq = (X * inv_scale + 0.5).floor() + zero_point;
-    at::Tensor mask_min = (Xq >= quant_min);
-    at::Tensor mask_max = (Xq <= quant_max);
-    at::Tensor mask = mask_min * mask_max;
-    dX = mask.type_as(dY) * dY;
+    Tensor dX = at::zeros_like(X);
+    auto iter = TensorIterator::binary_op(dX, X, dY);
+    float inv_scale = 1.0f / scale;
+    cpu_kernel(*iter, [&](float x, float dy) -> float {
+      int64_t xq =
+        static_cast<int64_t>(std::nearbyint(x * inv_scale + zero_point));
+      return dy * (xq >= quant_min && xq <= quant_max);
+    });
     return dX;
-  }
-};
-
-static auto registry = c10::RegisterOperators()
-.op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int quant_min = 0, int quant_max = 255, int quant_delay = 0, int iter = 0) -> Tensor",
-    c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_forward>(CPUTensorId()))
-.op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int quant_min = 0, int quant_max = 255, int quant_delay=0, int iter = 0) -> Tensor",
-    c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_backward>(CPUTensorId()));
-
-}  // namespace
+}
 }}  // namespace at::native
