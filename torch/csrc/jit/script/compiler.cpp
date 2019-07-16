@@ -2710,7 +2710,7 @@ struct to_ir {
             emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
       } else if (expr->type()->isSubtypeOf(OptionalType::ofTensor())) {
         tensor_indices.resize(dims[i] + 1);
-        tensor_indices[dim] = expr;
+        tensor_indices[dims[i]] = expr;
       } else {
         TORCH_INTERNAL_ASSERT(
             "Trying to process index type that we don't support.");
