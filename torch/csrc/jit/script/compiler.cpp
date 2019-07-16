@@ -2662,7 +2662,8 @@ struct to_ir {
         }
       } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
         if (is_reverse) {
-          return dim - 1;
+          throw ErrorReport(loc)
+            << "Ellipses followed by tensor indexing is currently not supported";
         } else {
           return dim + 1;
         }
