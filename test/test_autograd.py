@@ -167,6 +167,21 @@ class TestAutograd(TestCase):
         MyFunction()(y).sum().backward()
         self.assertEqual(v.grad.data, torch.zeros(shape))
 
+    def test_legacy_function_deprecation_warning(self):
+        class MyFunction(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_output):
+                return grad_output
+
+        x = torch.randn(3, 5)
+        with warnings.catch_warnings(record=True) as warns:
+            MyFunction()(x)
+        self.assertIn(
+            'Legacy autograd function with non-static forward method is deprecated',
+            warns[0])
+
     def test_invalid_gradients(self):
         class MyFunction(Function):
             @staticmethod
