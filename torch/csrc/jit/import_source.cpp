@@ -107,10 +107,10 @@ struct ConstantTableValue : public SugaredValue {
 // constants.
 struct SourceResolver : public Resolver {
   explicit SourceResolver(
-      std::shared_ptr<CompilationUnit> cu,
+      const CompilationUnit& lib_cu,
       size_t version,
       const std::vector<at::Tensor>& constant_table)
-      : cu_(cu) {
+      : lib_cu_(lib_cu) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
@@ -140,34 +140,34 @@ struct SourceResolver : public Resolver {
 
     if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(
-          c10::QualifiedName(name), *cu_);
+          c10::QualifiedName(name), lib_cu_);
     }
     return nullptr;
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
-    return cu_->get_type(c10::QualifiedName(name));
+    return lib_cu_.get_type(c10::QualifiedName(name));
   }
 
  private:
   // Compilation unit to look classes up in
-  std::shared_ptr<CompilationUnit> cu_;
+  const CompilationUnit& lib_cu_;
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
 };
 
 struct SourceImporter {
   SourceImporter(
-      const std::shared_ptr<CompilationUnit> cu,
+      const CompilationUnit& lib_cu,
       const std::shared_ptr<Source>& src,
       const std::vector<at::Tensor>& constant_table,
       const std::function<void(const std::string&)>& import_callback)
       : p_(src),
-        cu_(cu),
+        lib_cu_(lib_cu),
         import_callback_(import_callback),
         constant_table_(constant_table) {
     version_ = parseVersionNumber();
     resolver_ =
-        std::make_shared<SourceResolver>(cu_, version_, constant_table_);
+        std::make_shared<SourceResolver>(lib_cu_, version_, constant_table_);
   }
 
   void checkVersionNumber() {
@@ -180,7 +180,7 @@ struct SourceImporter {
     }
   }
 
-  void importLibs(std::shared_ptr<CompilationUnit> owner, const std::string& class_qualifier) {
+  void importLibs(CompilationUnit& owner, const std::string& class_qualifier) {
     checkVersionNumber();
     auto& L = p_.lexer();
 
@@ -190,6 +190,7 @@ struct SourceImporter {
       auto parsed_treeref = p_.parseClassLike();
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
+        auto cu = std::make_shared<CompilationUnit>();
         const auto qualified_classname = QualifiedName(
             QualifiedName(class_qualifier), class_def.name().name());
 
@@ -201,10 +202,10 @@ struct SourceImporter {
         }
 
         auto class_type =
-            ClassType::create(c10::QualifiedName(qualified_classname), owner);
-        owner->register_class(class_type);
+            ClassType::create(c10::QualifiedName(qualified_classname), cu);
+        owner.register_class(class_type);
         const auto self = SimpleSelf(class_type);
-        owner->define(qualified_classname, definitions, resolvers, &self);
+        cu->define(qualified_classname, definitions, resolvers, &self);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
         auto named_tuple_def = NamedTupleDef(parsed_treeref);
 
@@ -232,7 +233,7 @@ struct SourceImporter {
             field_types,
             qualified_name,
             TupleType::namedTupleSchemaFromNamesAndTypes(qualified_name, field_names, field_types));
-        owner->register_class(tt);
+        owner.register_class(tt);
       } else {
         TORCH_INTERNAL_ASSERT(
             false,
@@ -244,6 +245,7 @@ struct SourceImporter {
 
   void importFunctions(
       const c10::optional<c10::QualifiedName>& prefix,
+      CompilationUnit& cu,
       const Self* self) {
     checkVersionNumber();
     parseImportsAndDoCallback();
@@ -255,7 +257,7 @@ struct SourceImporter {
       definitions.emplace_back(def);
       resolvers.emplace_back(resolver_);
     }
-    cu_->define(prefix, definitions, resolvers, self);
+    cu.define(prefix, definitions, resolvers, self);
   }
 
   size_t parseVersionNumber() {
@@ -301,7 +303,7 @@ struct SourceImporter {
  private:
   Parser p_;
   size_t version_;
-  std::shared_ptr<CompilationUnit> cu_;
+  const CompilationUnit& lib_cu_;
   const std::function<void(const std::string&)>& import_callback_;
   const std::vector<at::Tensor>& constant_table_;
   std::shared_ptr<SourceResolver> resolver_;
@@ -309,16 +311,18 @@ struct SourceImporter {
 
 void import_functions(
     const c10::optional<c10::QualifiedName>& prefix,
-    std::shared_ptr<CompilationUnit> cu,
+    const CompilationUnit& lib_cu,
+    CompilationUnit& cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const Self* self,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(cu, src, constant_table, import_callback);
-  importer.importFunctions(prefix, self);
+  SourceImporter importer(lib_cu, src, constant_table, import_callback);
+  importer.importFunctions(prefix, cu, self);
 }
 
 void import_methods(
+    const CompilationUnit& lib_cu,
     const Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
@@ -326,7 +330,8 @@ void import_methods(
   auto self = SimpleSelf(mod.type());
   import_functions(
       mod.name(),
-      mod.class_compilation_unit(),
+      lib_cu,
+      *mod.module_object()->type()->compilation_unit(),
       src,
       constant_table,
       &self,
@@ -334,13 +339,13 @@ void import_methods(
 }
 
 void import_libs(
-    std::shared_ptr<CompilationUnit> cu,
+    CompilationUnit& lib_cu,
     const std::string& class_qualifier,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(cu, src, constant_table, import_callback);
-  importer.importLibs(cu, class_qualifier);
+  SourceImporter importer(lib_cu, src, constant_table, import_callback);
+  importer.importLibs(lib_cu, class_qualifier);
 }
 
 } // namespace script

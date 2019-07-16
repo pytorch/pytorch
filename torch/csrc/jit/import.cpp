@@ -269,7 +269,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      main_module_.class_compilation_unit(),
+      *main_module_.class_compilation_unit(),
       qualifier,
       src,
       tensor_table_,
@@ -358,6 +358,7 @@ void ScriptModuleDeserializer::convertModule(
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
+        *main_module_.class_compilation_unit(),
         module,
         src,
         tensor_table_,
