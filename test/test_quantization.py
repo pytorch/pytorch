@@ -7,11 +7,11 @@ from torch.quantization import default_eval_fn, QConfig, \
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
-    ManualQATModel, default_train_fn
+    ManualLinearQATModel, ManualConvLinearQATModel, default_train_fn
 
 calib_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
 train_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
-
+img_data = [(torch.rand(20, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
 class PostTrainingQuantTest(QuantizationTestCase):
 
     def test_single_layer(self):
@@ -265,7 +265,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
-        model = ManualQATModel()
+        model = ManualLinearQATModel()
         model.qconfig = default_qat_qconfig
 
         model = prepare(model)
@@ -279,13 +279,13 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
             self.assertEqual(type(model.fc2), nnq.Linear)
             default_eval_fn(model, calib_data)
 
-        model = ManualQATModel()
+        model = ManualLinearQATModel()
         model.qconfig = default_qat_qconfig
         model = quantize(model, default_train_fn, train_data)
         checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
-        model = ManualQATModel()
+        model = ManualLinearQATModel()
         model.qconfig = default_qat_qconfig
 
         model = prepare(model)
@@ -293,6 +293,29 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
         model.eval()
         default_eval_fn(model, calib_data)
+
+    def test_conv_linear(self):
+        model = ManualConvLinearQATModel()
+        model.qconfig = default_qat_qconfig
+
+        model = prepare(model)
+        self.checkObservers(model)
+
+        default_train_fn(model, img_data)
+        convert(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.conv), nnq.Conv2d)
+            self.assertEqual(type(model.fc1), nnq.Linear)
+            self.assertEqual(type(model.fc2), nnq.Linear)
+            default_eval_fn(model, img_data)
+
+        checkQuantized(model)
+
+        model = ManualConvLinearQATModel()
+        model.qconfig = default_qat_qconfig
+        model = quantize(model, default_train_fn, img_data)
+        checkQuantized(model)
 
 if __name__ == '__main__':
     run_tests()

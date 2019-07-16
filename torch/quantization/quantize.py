@@ -215,11 +215,13 @@ DEFAULT_MODULE_MAPPING = {
     DeQuantStub: nnq.DeQuantize,
     # QAT modules:
     qat.Linear: nnq.Linear,
+    qat.Conv2d: nnq.Conv2d,
 }
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
     torch.nn.Linear: qat.Linear,
+    torch.nn.Conv2d: qat.Conv2d,
 }
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):

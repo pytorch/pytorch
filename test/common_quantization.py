@@ -159,11 +159,11 @@ class ManualQuantModel(torch.nn.Module):
         x = self.fc(x)
         return self.dequant(x)
 
-class ManualQATModel(torch.nn.Module):
+class ManualLinearQATModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
     """
     def __init__(self):
-        super(ManualQATModel, self).__init__()
+        super(ManualLinearQATModel, self).__init__()
         self.qconfig = default_qconfig
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -174,4 +174,34 @@ class ManualQATModel(torch.nn.Module):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.fc2(x)
+        return self.dequant(x)
+
+class ManualConvLinearQATModel(torch.nn.Module):
+    r"""A module with manually inserted `QuantStub` and `DeQuantStub`
+    and contains both linear and conv modules
+    """
+    def __init__(self):
+        super(ManualConvLinearQATModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.conv = torch.nn.Conv2d(3, 5, kernel_size=3).to(dtype=torch.float)
+        self.fc1 = torch.nn.Linear(320, 10).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(10, 10).to(dtype=torch.float)
+
+    def forward(self, x):
+        print('input:', x.shape)
+        print('conv features', self.conv.in_channels, self.conv.out_channels, self.conv.kernel_size)
+        print('conv weight:', self.conv.weight.shape)
+        x = self.quant(x)
+        print('after quant:', x.shape)
+        x = self.conv(x)
+        print('after conv:', x.shape)
+        x = self.dequant(x)
+        print('before view:', x.shape)
+        x = x.view(-1, 320).contiguous()
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.fc2(x)
+        # print('after net:', x.shape)
         return self.dequant(x)

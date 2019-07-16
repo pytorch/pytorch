@@ -60,6 +60,7 @@ class Conv2d(_ConvNd):
 
     @property
     def weight(self):
+        # TODO: upack
         return self._packed_weight
 
     @weight.setter
@@ -75,7 +76,7 @@ class Conv2d(_ConvNd):
         if isinstance(s, torch.Tensor):
             self._scale = s
         else:
-            self._scale = torch.Tensor([s])
+            self._scale = torch.tensor([s], dtype=torch.double)
 
     @property
     def zero_point(self):
@@ -86,17 +87,10 @@ class Conv2d(_ConvNd):
         if isinstance(zp, torch.Tensor):
             self._zero_point = zp
         else:
-            self._zero_point = torch.Tensor([zp]).to(torch.int)
-
-    @staticmethod
-    def from_float(mod):
-        assert hasattr(mod, 'observer'), "No observer in module."
-        qparams = mod.observer.calculate_qparams()
-        return Quantize(qparams[0].item(), qparams[1].item(),
-                        mod.observer.dtype)
+            self._zero_point = torch.tensor([zp], dtype=torch.long)
 
     def forward(self, input):
-        return qF.conv2d(input=input,
+        return qF.conv2d(input=input.permute([0, 2, 3, 1]).contiguous(),
                          weight=self._packed_weight,
                          bias=self.bias,
                          stride=self.stride,
@@ -108,3 +102,38 @@ class Conv2d(_ConvNd):
                          zero_point=self.zero_point,
                          dtype=torch.quint8,
                          prepacked=True)
+
+
+    @staticmethod
+    def from_float(mod):
+        r"""Create a quantized module from a float module or qparams_dict
+
+            Args: `mod` a float module, either produced by torch.quantization utilities
+            or directly from user
+        """
+        if hasattr(mod, 'weight_fake_quant'):
+            # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
+            activation_observer = mod.observer
+            weight_observer = mod.weight_fake_quant
+        else:
+            assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
+            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+            activation_observer = mod.observer
+            weight_observer = mod.qconfig.weight()
+            weight_observer(mod.weight)
+        act_scale, act_zp = activation_observer.calculate_qparams()
+        wt_scale, wt_zp = weight_observer.calculate_qparams()
+        bias_scale = (wt_scale * act_scale).float()
+        qweight = torch.quantize_linear(mod.weight.float().permute([0, 2, 3, 1]).contiguous(), wt_scale, wt_zp.long().item(), torch.qint8)
+        qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
+        qconv = Conv2d(mod.in_channels, mod.out_channels, mod.kernel_size,
+                       mod.stride, mod.padding, mod.dilation, mod.groups,
+                       mod.bias is not None, mod.padding_mode)
+        print('qweight:', qweight.shape)
+        qconv._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(qweight, qconv.groups)
+        print('packed:', qconv._packed_weight.shape)
+        qconv.bias = qbias
+        qconv.scale = torch.tensor([act_scale], dtype=torch.double)
+        qconv.zero_point = torch.tensor([act_zp], dtype=torch.long)
+        return qconv
