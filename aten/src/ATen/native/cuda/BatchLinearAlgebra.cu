@@ -1295,11 +1295,11 @@ AT_ERROR("svd: MAGMA library not found in "
   magma_int_t lwork = -1;
   scalar_t wkopt;
   magma_int_t* iwork;
-  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * k, self);
+  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * k);
   magmaSvd<scalar_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, iwork, &info);
   lwork = magma_int_cast(wkopt, "work_size");
   scalar_t* work;
-  ALLOCATE_ARRAY(work, scalar_t, lwork, self);
+  ALLOCATE_ARRAY(work, scalar_t, lwork);
 
   for (int64_t i = 0; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_stride];
