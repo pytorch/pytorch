@@ -198,8 +198,8 @@ class TestMkldnn(TestCase):
                         bn(x),
                         mkldnn_bn(x.to_mkldnn()).to_dense())
                     if (not train and track_running_stats):
-                      self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
-                      self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+                        self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+                        self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
 
     def test_batch_norm2d_backward(self):
         N = torch.randint(3, 10, (1,)).item()
