@@ -10,6 +10,7 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/data/init.h>
 
 #include <iterator>
 #include <string>

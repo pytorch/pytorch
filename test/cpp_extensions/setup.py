@@ -1,3 +1,4 @@
+import os
 import sys
 import torch.cuda
 from setuptools import setup
@@ -6,10 +7,15 @@ from torch.utils.cpp_extension import CUDA_HOME
 
 CXX_FLAGS = [] if sys.platform == 'win32' else ['-g', '-Werror']
 
+# `cpp_extension` extension pybinds a C++ type defined in the `test` folder
+test_dir=os.path.abspath(os.path.join(os.getcwd(), os.pardir))
+torch_dir=os.path.abspath(os.path.join(test_dir, os.pardir))
+
 ext_modules = [
     CppExtension(
         'torch_test_cpp_extension.cpp', ['extension.cpp'],
-        extra_compile_args=CXX_FLAGS),
+        extra_compile_args=CXX_FLAGS,
+        include_dirs = [os.path.join('..', '..')]),
     CppExtension(
         'torch_test_cpp_extension.msnpu', ['msnpu_extension.cpp'],
         extra_compile_args=CXX_FLAGS),

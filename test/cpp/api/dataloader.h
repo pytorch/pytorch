@@ -2,11 +2,12 @@
 
 #include <torch/data.h>
 
-// dummy chunk data reader with 3 chunks and 35 examples in total. Each chunk
-// contains 10, 5, 20 examples respectively.
-
 using namespace torch::data; // NOLINT
 
+/* DummyChunkDataReader implementation with 3 chunks and 35 examples in total
+ * Each chunk contains 10, 5, 20 examples respectively
+ * For this class, BatchType is std::vector<int>, but custom types are supported
+ */
 struct DummyChunkDataReader : public datasets::ChunkDataReader<int> {
  public:
   using BatchType = datasets::ChunkDataReader<int>::ChunkType;

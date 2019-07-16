@@ -8,6 +8,8 @@ import common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
+from torch.utils.data import DataLoader
+import torch.utils.data.chunk as chunk
 from torch.utils.cpp_extension import CUDA_HOME
 
 
@@ -634,6 +636,37 @@ class TestCppExtension(common.TestCase):
         pattern = r'.*(\\n|\\r).*'
         self.assertNotRegex(str(e), pattern)
 
+    def test_chunkdataset_bindings(self):
+        """
+        This class serves as an example on how to use ChunkDataset API python bindings
+
+        The API is almost identical to the C++ version. The difference is the need for the
+        SampleWrapper on Python implementation that is not required by C++ counterpart.
+        This is due to the fact that Python DataLoader uses multiprocessing module for
+        parallelism as opposed to multi-threading
+        """
+        chunk_count=3
+        batch_size=5
+        cache_size=100
+        preloaders=1
+        chunk_sampler = chunk.SequentialSampler(size=chunk_count)
+        example_sampler = chunk.SequentialSampler(size=batch_size)
+        chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
+        example_sampler_wrapper = chunk.SamplerWrapper(sampler=example_sampler)
+        reader = cpp_extension.DummyChunkDataReader()
+        opt = chunk.ChunkDatasetOptions(preloader_count=preloaders, batch_size=batch_size, cache_size=cache_size)
+
+        dummy_chunkdataset = cpp_extension.DummyChunkDataset(chunk_reader=reader,
+                                             chunk_sampler=chunk_sampler_wrapper,
+                                             example_sampler=example_sampler_wrapper,
+                                             options=opt)
+
+        trainset = chunk.ChunkDataset(dummy_chunkdataset)
+        trainset.reset()
+        trainloader = DataLoader(dataset=trainset)
+        for i, actual in enumerate(trainloader, 0):
+            expected=[torch.tensor([j], dtype=torch.long) for j in list(range(batch_size*i, batch_size*i+batch_size))]
+            self.assertEqual(expected, actual)
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod

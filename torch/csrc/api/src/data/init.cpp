@@ -28,17 +28,13 @@ using namespace torch::data::samplers;
 using namespace torch::serialize;
 
 void init_dataset_bindings(PyObject* module) {
-  init_dataset_bindings_impl(module);
-  init_dataset_bindings_example(module);
-}
-
-void init_dataset_bindings_impl(PyObject* module) {
   // Getting reference to python submodule
   auto m = py::handle(module).cast<py::module>();
   auto data = m.def_submodule("data");
+  auto chunk = data.def_submodule("chunk");
 
   /// ChunkDatasetOptions
-  py::class_<ChunkDatasetOptions>(data, "ChunkDatasetOptions")
+  py::class_<ChunkDatasetOptions>(chunk, "ChunkDatasetOptions")
       .def(
           py::init<size_t, size_t, size_t>(),
           "Create and return a new ChunkDatasetOptions instance",
@@ -58,7 +54,7 @@ void init_dataset_bindings_impl(PyObject* module) {
 
   /// Sampler
   py::class_<Sampler<>, std::shared_ptr<Sampler<>>, PySampler<>> sampler(
-      data, "Sampler");
+      chunk, "Sampler");
   sampler.def(py::init<>(), "Create and return a new `Sampler` instance");
   sampler.def(
       "reset",
@@ -83,7 +79,7 @@ void init_dataset_bindings_impl(PyObject* module) {
 
   /// SamplerWrapper
   py::class_<SamplerWrapper, std::shared_ptr<SamplerWrapper>> sampler_wrapper(
-      data, "SamplerWrapper", sampler);
+      chunk, "SamplerWrapper", sampler);
   sampler_wrapper.def(
       py::init<std::shared_ptr<Sampler<>>, size_t>(),
       "Create and return a new `SamplerWrapper` instance",
@@ -130,7 +126,7 @@ void init_dataset_bindings_impl(PyObject* module) {
 
   /// DistributedSampler
   py::class_<DistributedSampler<>, PyDistributedSampler<>> distributed_sampler(
-      data, "DistributedSampler", sampler);
+      chunk, "DistributedSampler", sampler);
   distributed_sampler.def(
       py::init<size_t, size_t, size_t, bool>(),
       "Create and return a new `DistributedSampler` instance",
@@ -148,7 +144,7 @@ void init_dataset_bindings_impl(PyObject* module) {
 
   /// DistributedRandomSampler
   py::class_<DistributedRandomSampler>(
-      data, "DistributedRandomSampler", distributed_sampler)
+      chunk, "DistributedRandomSampler", distributed_sampler)
       .def(
           py::init<size_t, size_t, size_t, bool>(),
           "Create and return a new `DistributedRandomSampler` instance",
@@ -183,7 +179,7 @@ void init_dataset_bindings_impl(PyObject* module) {
 
   /// DistributedSequentialSampler
   py::class_<DistributedSequentialSampler>(
-      data, "DistributedSequentialSampler", distributed_sampler)
+      chunk, "DistributedSequentialSampler", distributed_sampler)
       .def(
           py::init<size_t, size_t, size_t, bool>(),
           "Create and return a new `DistributedSequentialSampler` instance",
@@ -217,7 +213,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           "Returns the current index of the `DistributedSequentialSampler`");
 
   /// RandomSampler
-  py::class_<RandomSampler>(data, "RandomSampler", distributed_sampler)
+  py::class_<RandomSampler>(chunk, "RandomSampler", distributed_sampler)
       .def(
           py::init<int64_t>(),
           "Create and return a new `RandomSampler` instance",
@@ -248,7 +244,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           "Returns the current index of the `RandomSampler`");
 
   /// SequentialSampler
-  py::class_<SequentialSampler>(data, "SequentialSampler", distributed_sampler)
+  py::class_<SequentialSampler>(chunk, "SequentialSampler", distributed_sampler)
       .def(
           py::init<size_t>(),
           "Create and return a new `SequentialSampler` instance",
@@ -278,9 +274,10 @@ void init_dataset_bindings_impl(PyObject* module) {
           &SequentialSampler::index,
           "Returns the current index of the `SequentialSampler`");
 
-  /// ChunkDataReader
+  /// ChunkDataReader for all standard types
+  /// (uint8_t, int8_t, int16_t, int32_t, int64_t, float, double)
   py::class_<ChunkDataReader<uint8_t>, PyChunkDataReader<uint8_t>>(
-      data,
+      chunk,
       "ChunkDataReaderUint8T",
       "Chunk reader performs data chunking and reading of entire chunks with uint8_t data")
       .def(
@@ -298,7 +295,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           &ChunkDataReader<uint8_t>::reset,
           "Resets any internal state associate with this reader");
   py::class_<ChunkDataReader<int8_t>, PyChunkDataReader<int8_t>>(
-      data,
+      chunk,
       "ChunkDataReaderInt8T",
       "Chunk reader performs data chunking and reading of entire chunks with int8_t data")
       .def(
@@ -316,7 +313,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           &ChunkDataReader<int8_t>::reset,
           "Resets any internal state associate with this reader");
   py::class_<ChunkDataReader<int16_t>, PyChunkDataReader<int16_t>>(
-      data,
+      chunk,
       "ChunkDataReaderInt16T",
       "Chunk reader performs data chunking and reading of entire chunks with int16_t data")
       .def(
@@ -334,7 +331,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           &ChunkDataReader<int16_t>::reset,
           "Resets any internal state associate with this reader");
   py::class_<ChunkDataReader<int32_t>, PyChunkDataReader<int32_t>>(
-      data,
+      chunk,
       "ChunkDataReaderInt32T",
       "Chunk reader performs data chunking and reading of entire chunks with int32_t data")
       .def(
@@ -352,7 +349,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           &ChunkDataReader<int32_t>::reset,
           "Resets any internal state associate with this reader");
   py::class_<ChunkDataReader<int64_t>, PyChunkDataReader<int64_t>>(
-      data,
+      chunk,
       "ChunkDataReaderInt64T",
       "Chunk reader performs data chunking and reading of entire chunks with int64_t data")
       .def(
@@ -370,7 +367,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           &ChunkDataReader<int64_t>::reset,
           "Resets any internal state associate with this reader");
   py::class_<ChunkDataReader<float>, PyChunkDataReader<float>>(
-      data,
+      chunk,
       "ChunkDataReaderFloat",
       "Chunk reader performs data chunking and reading of entire chunks with float data")
       .def(
@@ -388,7 +385,7 @@ void init_dataset_bindings_impl(PyObject* module) {
           &ChunkDataReader<float>::reset,
           "Resets any internal state associate with this reader");
   py::class_<ChunkDataReader<double>, PyChunkDataReader<double>>(
-      data,
+      chunk,
       "ChunkDataReaderDouble",
       "Chunk reader performs data chunking and reading of entire chunks with double data")
       .def(
@@ -405,74 +402,6 @@ void init_dataset_bindings_impl(PyObject* module) {
           "reset",
           &ChunkDataReader<double>::reset,
           "Resets any internal state associate with this reader");
-}
-
-void init_dataset_bindings_example(PyObject* module) {
-  // Getting reference to python submodule
-  auto m = py::handle(module).cast<py::module>();
-  auto data = m.def_submodule("data");
-
-  /// DummyChunkDataReader
-  py::class_<DummyChunkDataReader>(
-      m, "DummyChunkDataReader", "Dummy chunk data reader for testing the API")
-      .def(
-          py::init<>(),
-          "Create and return a new `DummyChunkDataReader` instance")
-      .def(
-          "read_chunk",
-          &DummyChunkDataReader::read_chunk,
-          "Returns dummy data",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &DummyChunkDataReader::chunk_count,
-          "Returns the number of chunks")
-      .def("reset", &DummyChunkDataReader::reset, "Not used");
-
-  using DummyChunkDataset =
-      ChunkDataset<DummyChunkDataReader, SamplerWrapper, SamplerWrapper>;
-  py::class_<DummyChunkDataset>(
-      m,
-      "DummyChunkDataset",
-      "A stateful dataset that support hierarchical sampling and prefetching of entire chunks."
-      "Unlike regular dataset, chunk dataset require two samplers to operate and keeps internal state."
-      "`ChunkSampler` selects, which chunk to load next"
-      "`ExampleSampler` determines the order of Examples that are returned in each `get_batch` call")
-      .def(
-          py::init<
-              DummyChunkDataReader,
-              SamplerWrapper,
-              SamplerWrapper,
-              ChunkDatasetOptions>(),
-          "Create and return a new `DummyChunkDataset` instance",
-          py::arg("chunk_reader"),
-          py::arg("chunk_sampler"),
-          py::arg("example_sampler"),
-          py::arg("options"))
-      .def(
-          "get_batch",
-          (DummyChunkDataset::BatchType (DummyChunkDataset::*)(size_t)) &
-              DummyChunkDataset::get_batch,
-          "Returns a batch created from preloaded chunks",
-          py::arg("batch_size"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "get_batch",
-          (DummyChunkDataset::BatchType (DummyChunkDataset::*)()) & DummyChunkDataset::get_batch,
-          "Returns a batch created from preloaded chunks",
-          py::return_value_policy::take_ownership)
-      .def(
-          "reset",
-          &DummyChunkDataset::reset,
-          "Resets any internal state and starts the internal prefetching mechanism for the chunk dataset")
-      .def("size", &DummyChunkDataset::size, "Not used")
-      .def(
-          "chunk_sampler",
-          &DummyChunkDataset::chunk_sampler,
-          "Returns the reference to chunk sampler."
-          "Used mainly in distributed data loading to set the epoch number for the sampler.",
-          py::return_value_policy::reference_internal);
 }
 
 } // namespace data
