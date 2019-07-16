@@ -173,8 +173,10 @@ module_tests = [
         module_name='Softplus',
         constructor_args=(2, -100),
         input_size=(10, 20),
-        reference_fn=(lambda i, *_: ((i * 2) > -100).type_as(i) * i +
-                                    ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))),
+        reference_fn=(
+            lambda i, *_: ((i * 2) > -100).type_as(i) * i
+            + ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))
+        ),
         desc='beta_threshold',
     ),
     dict(
@@ -1709,6 +1711,12 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
+        constructor=wrap_functional(F.interpolate, size=2, scale_factor=None, mode='nearest'),
+        input_size=(1, 128, 1, 1),
+        fullname='interpolate_nearest_2d_launch_configs',
+        pickle=False,
+    ),
+    dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         input_size=(1, 2, 4, 4),
         fullname='interpolate_nearest_2d',
@@ -2220,8 +2228,10 @@ new_module_tests = [
         module_name='Softplus',
         constructor_args=(2, -100),
         input_size=(),
-        reference_fn=(lambda i, *_: ((i * 2) > -100).type_as(i) * i +
-                                    ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))),
+        reference_fn=(
+            lambda i, *_: ((i * 2) > -100).type_as(i) * i
+            + ((i * 2) <= -100).type_as(i) * 1.0 / 2.0 * torch.log(1 + torch.exp(2 * i))
+        ),
         desc='beta_threshold_scalar',
     ),
     dict(

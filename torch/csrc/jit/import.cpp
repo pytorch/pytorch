@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
@@ -267,7 +269,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      *main_module_.class_compilation_unit(),
+      main_module_.class_compilation_unit(),
       qualifier,
       src,
       tensor_table_,
@@ -277,11 +279,10 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
 void ScriptModuleDeserializer::moduleSetState(
     const script::Module& module,
     IValue state) {
-  auto setstate =
-      module.class_compilation_unit()->find_function("__setstate__");
+  auto setstate = module.find_method("__setstate__");
 
   TORCH_CHECK(
-      setstate != nullptr,
+      setstate,
       "Cannot call '__setstate__' method because"
       " it does not exist");
 
@@ -328,6 +329,20 @@ void ScriptModuleDeserializer::convertModule(
     module.register_attribute(
         attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
   }
+
+  // If present, load in the table of source ranges from the original
+  // generating code.
+  std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr;
+  if (module_def.has_torchscript_debug_arena()) {
+    at::DataPtr data;
+    size_t size;
+    std::tie(data, size) =
+        reader_.getRecord(module_def.torchscript_debug_arena().key());
+
+    gen_ranges =
+        std::make_shared<ConcreteSourceRangeUnpickler>(std::move(data), size);
+  }
+
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
     size_t size;
@@ -337,12 +352,12 @@ void ScriptModuleDeserializer::convertModule(
     auto src = std::make_shared<Source>(
         std::string(static_cast<const char*>(data.get()), size),
         module_def.torchscript_arena().key(),
-        1);
+        1,
+        std::move(gen_ranges));
 
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
-        *main_module_.class_compilation_unit(),
         module,
         src,
         tensor_table_,
