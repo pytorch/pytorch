@@ -1222,9 +1222,9 @@ struct PythonPrintPass {
     }
   }
 
-  void printCompilationUnit(const script::CompilationUnit& cu) {
-    for (auto& func : cu.get_functions()) {
-      printFunction(*func);
+  void printModuleMethods(const script::Module& module) {
+    for (const auto method : module.type()->methods()) {
+      printFunction(*method);
     }
   }
 
@@ -1282,13 +1282,13 @@ void PythonPrint(
 void PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
-    const script::CompilationUnit& cu,
-    bool is_method,
+    const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  pp.printCompilationUnit(cu);
+  PythonPrintPass pp(
+      tensor_table, class_table, enforce_importable, /*isMethod=*/true);
+  pp.printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }
 
