@@ -33,7 +33,6 @@
   } while(0)
 #endif
 
-struct THCRNGState;  /* Random number generator state. */
 typedef struct THCState THCState;
 struct THCState;
 
@@ -56,7 +55,6 @@ THC_API void THCudaShutdown(THCState* state);
 /* 1; otherwise, 0. */
 THC_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
 
-THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API c10::Allocator* THCState_getCudaHostAllocator(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);

@@ -160,6 +160,9 @@ private:
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
 public:
+  const OperatorName& operator_name() const {
+    return name_;
+  }
   const std::string& name() const {
     return name_.name;
   }

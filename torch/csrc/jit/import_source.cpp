@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 
 namespace torch {
 namespace jit {
@@ -52,8 +53,12 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       Function& m,
       const std::string& name) override {
     auto fullName = c10::QualifiedName(basename_, name);
-    if (auto classType = cu_.get_class(fullName)) {
-      return std::make_shared<ClassValue>(classType);
+    if (auto serializable_type = cu_.get_type(fullName)) {
+      if (auto classType = serializable_type->cast<ClassType>()) {
+        return std::make_shared<ClassValue>(classType);
+      } else if (auto tupleType = serializable_type->cast<TupleType>()) {
+        return std::make_shared<NamedTupleConstructor>(tupleType);
+      }
     }
 
     return std::make_shared<ClassNamespaceValue>(std::move(fullName), cu_);
@@ -102,10 +107,10 @@ struct ConstantTableValue : public SugaredValue {
 // constants.
 struct SourceResolver : public Resolver {
   explicit SourceResolver(
-      const CompilationUnit& lib_cu,
+      std::shared_ptr<CompilationUnit> cu,
       size_t version,
       const std::vector<at::Tensor>& constant_table)
-      : lib_cu_(lib_cu) {
+      : cu_(cu) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
@@ -135,34 +140,34 @@ struct SourceResolver : public Resolver {
 
     if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(
-          c10::QualifiedName(name), lib_cu_);
+          c10::QualifiedName(name), *cu_);
     }
     return nullptr;
   }
 
-  TypePtr resolveType(const std::string& name) const override {
-    return lib_cu_.get_class(c10::QualifiedName(name));
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
+    return cu_->get_type(c10::QualifiedName(name));
   }
 
  private:
   // Compilation unit to look classes up in
-  const CompilationUnit& lib_cu_;
+  std::shared_ptr<CompilationUnit> cu_;
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
 };
 
 struct SourceImporter {
   SourceImporter(
-      const CompilationUnit& lib_cu,
+      const std::shared_ptr<CompilationUnit> cu,
       const std::shared_ptr<Source>& src,
       const std::vector<at::Tensor>& constant_table,
       const std::function<void(const std::string&)>& import_callback)
       : p_(src),
-        lib_cu_(lib_cu),
+        cu_(cu),
         import_callback_(import_callback),
         constant_table_(constant_table) {
     version_ = parseVersionNumber();
     resolver_ =
-        std::make_shared<SourceResolver>(lib_cu_, version_, constant_table_);
+        std::make_shared<SourceResolver>(cu_, version_, constant_table_);
   }
 
   void checkVersionNumber() {
@@ -175,36 +180,71 @@ struct SourceImporter {
     }
   }
 
-  void importLibs(CompilationUnit& owner, const std::string& class_qualifier) {
+  void importLibs(std::shared_ptr<CompilationUnit> owner, const std::string& class_qualifier) {
     checkVersionNumber();
     auto& L = p_.lexer();
 
     while (L.cur().kind != TK_EOF) {
       parseImportsAndDoCallback();
 
-      std::vector<Def> definitions;
-      std::vector<ResolverPtr> resolvers;
-      auto class_def = ClassDef(p_.parseClass());
-      for (const auto& method_def : class_def.defs()) {
-        definitions.emplace_back(method_def);
-        resolvers.emplace_back(resolver_);
-      }
+      auto parsed_treeref = p_.parseClassLike();
+      if (parsed_treeref->kind() == TK_CLASS_DEF) {
+        auto class_def = ClassDef(parsed_treeref);
+        const auto qualified_classname = QualifiedName(
+            QualifiedName(class_qualifier), class_def.name().name());
 
-      auto cu = std::make_shared<CompilationUnit>();
-      const auto qualified_classname =
-          class_qualifier + "." + class_def.name().name();
-      auto class_type =
-          ClassType::create(c10::QualifiedName(qualified_classname), cu);
-      owner.register_class(class_type);
-      auto self = [&](Value* v) {
-        v->setType(class_type);
-        return std::make_shared<SimpleValue>(v);
-      };
-      cu->define(definitions, resolvers, self);
+        std::vector<Def> definitions;
+        std::vector<ResolverPtr> resolvers;
+        for (const auto& method_def : class_def.defs()) {
+          definitions.emplace_back(method_def);
+          resolvers.emplace_back(resolver_);
+        }
+
+        auto class_type =
+            ClassType::create(c10::QualifiedName(qualified_classname), owner);
+        owner->register_class(class_type);
+        const auto self = SimpleSelf(class_type);
+        owner->define(qualified_classname, definitions, resolvers, &self);
+      } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
+        auto named_tuple_def = NamedTupleDef(parsed_treeref);
+
+        auto qualified_name = c10::QualifiedName(
+            class_qualifier + "." + named_tuple_def.name().name());
+
+        std::vector<std::string> field_names;
+        std::vector<TypePtr> field_types;
+
+        for (const auto& name_ident : named_tuple_def.fields()) {
+          field_names.push_back(name_ident.name());
+        }
+
+        ScriptTypeParser type_parser(resolver_);
+        for (const auto& maybe_type_expr : named_tuple_def.type_exprs()) {
+          if (maybe_type_expr.present()) {
+            field_types.push_back(
+                type_parser.parseTypeFromExpr(maybe_type_expr.get()));
+          } else {
+            field_types.push_back(TensorType::get());
+          }
+        }
+
+        auto tt = TupleType::create(
+            field_types,
+            qualified_name,
+            TupleType::namedTupleSchemaFromNamesAndTypes(qualified_name, field_names, field_types));
+        owner->register_class(tt);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Got an unrecognized type from "
+            "parseClassLike");
+      }
     }
   }
 
-  void importFunctions(CompilationUnit& cu, const Self& self) {
+  void importFunctions(
+      const c10::optional<c10::QualifiedName>& prefix,
+      const Self* self) {
     checkVersionNumber();
     parseImportsAndDoCallback();
 
@@ -215,7 +255,7 @@ struct SourceImporter {
       definitions.emplace_back(def);
       resolvers.emplace_back(resolver_);
     }
-    cu.define(definitions, resolvers, self);
+    cu_->define(prefix, definitions, resolvers, self);
   }
 
   size_t parseVersionNumber() {
@@ -261,50 +301,46 @@ struct SourceImporter {
  private:
   Parser p_;
   size_t version_;
-  const CompilationUnit& lib_cu_;
+  std::shared_ptr<CompilationUnit> cu_;
   const std::function<void(const std::string&)>& import_callback_;
   const std::vector<at::Tensor>& constant_table_;
   std::shared_ptr<SourceResolver> resolver_;
 };
 
 void import_functions(
-    const CompilationUnit& lib_cu,
-    CompilationUnit& cu,
+    const c10::optional<c10::QualifiedName>& prefix,
+    std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
-    const Self& self,
+    const Self* self,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(lib_cu, src, constant_table, import_callback);
-  importer.importFunctions(cu, self);
+  SourceImporter importer(cu, src, constant_table, import_callback);
+  importer.importFunctions(prefix, self);
 }
 
 void import_methods(
-    const CompilationUnit& lib_cu,
-    const std::shared_ptr<Module>& mod,
+    const Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
-  auto self = [&](Value* v) {
-    v->setType(mod->module_object()->type());
-    return std::make_shared<SimpleValue>(v);
-  };
+  auto self = SimpleSelf(mod.type());
   import_functions(
-      lib_cu,
-      mod->module_object()->type()->compilation_unit(),
+      mod.name(),
+      mod.class_compilation_unit(),
       src,
       constant_table,
-      self,
+      &self,
       import_callback);
 }
 
 void import_libs(
-    CompilationUnit& lib_cu,
+    std::shared_ptr<CompilationUnit> cu,
     const std::string& class_qualifier,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(lib_cu, src, constant_table, import_callback);
-  importer.importLibs(lib_cu, class_qualifier);
+  SourceImporter importer(cu, src, constant_table, import_callback);
+  importer.importLibs(cu, class_qualifier);
 }
 
 } // namespace script

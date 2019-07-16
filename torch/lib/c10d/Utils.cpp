@@ -26,7 +26,8 @@ constexpr int LISTEN_QUEUE_SIZE = 64;
 void setSocketNoDelay(int socket) {
   int flag = 1;
   socklen_t optlen = sizeof(flag);
-  SYSCHECK_ERR_RETURN_NEG1(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
+  SYSCHECK_ERR_RETURN_NEG1(
+      setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
 }
 
 PortType getSocketPort(int fd) {
@@ -58,11 +59,15 @@ std::string sockaddrToString(struct ::sockaddr* addr) {
   char address[INET6_ADDRSTRLEN + 1];
   if (addr->sa_family == AF_INET) {
     struct ::sockaddr_in* s = reinterpret_cast<struct ::sockaddr_in*>(addr);
-    SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN), __output != nullptr)
+    SYSCHECK(
+        ::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN),
+        __output != nullptr)
     address[INET_ADDRSTRLEN] = '\0';
   } else if (addr->sa_family == AF_INET6) {
     struct ::sockaddr_in6* s = reinterpret_cast<struct ::sockaddr_in6*>(addr);
-    SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN), __output != nullptr)
+    SYSCHECK(
+        ::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN),
+        __output != nullptr)
     address[INET6_ADDRSTRLEN] = '\0';
   } else {
     throw std::runtime_error("unsupported protocol");
@@ -104,7 +109,8 @@ std::pair<int, PortType> listen(PortType port) {
       SYSCHECK_ERR_RETURN_NEG1(
           ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
 
-      SYSCHECK_ERR_RETURN_NEG1(::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
+      SYSCHECK_ERR_RETURN_NEG1(
+          ::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
       SYSCHECK_ERR_RETURN_NEG1(::listen(socket, LISTEN_QUEUE_SIZE))
       break;
 

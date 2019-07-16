@@ -11,8 +11,6 @@ try:
 except ImportError:
     from yaml import Loader
 
-from env import NAMEDTENSOR_ENABLED
-
 # [temp translations]
 # We're currently incrementally moving from the custom func schema to the
 # JIT signature schema incrementally. This will reduce overall complexity
@@ -398,6 +396,7 @@ def run(paths):
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
+                declaration['cpu_bfloat16'] = func.get('cpu_bfloat16', False)
                 declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
@@ -406,8 +405,6 @@ def run(paths):
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
-                if not NAMEDTENSOR_ENABLED and is_named_tensor_only(declaration):
-                    continue
                 declarations.append(declaration)
             except Exception as e:
                 msg = '''Exception raised in processing function:

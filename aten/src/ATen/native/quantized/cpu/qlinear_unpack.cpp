@@ -1,9 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/quantized/Quantizer.h>
 
 namespace at {
 namespace native {
@@ -21,13 +19,12 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
     int64_t N = static_cast<int64_t>(packB->numCols());
     int64_t K = static_cast<int64_t>(packB->numRows());
 
-    float weight_scale_float = pack_ptr.w_scale;
     int32_t weight_zero_point_int32 = pack_ptr.w_zp;
 
     auto weight_origin = _empty_affine_quantized(
         {N, K},
         at::device(kCPU).dtype(kQInt8),
-        weight_scale_float,
+        pack_ptr.w_scale,
         weight_zero_point_int32);
     int8_t* weight_ptr_int8 =
         reinterpret_cast<int8_t*>(weight_origin.data<c10::qint8>());

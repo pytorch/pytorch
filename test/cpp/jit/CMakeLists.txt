@@ -17,3 +17,11 @@ if (USE_CUDA)
 
   target_compile_definitions(test_jit PRIVATE USE_CUDA)
 endif()
+
+if (INSTALL_TEST)
+  install(TARGETS test_jit DESTINATION bin)
+  # Install PDB files for MSVC builds
+  if (MSVC AND BUILD_SHARED_LIBS)
+    install(FILES $<TARGET_PDB_FILE:test_jit> DESTINATION bin OPTIONAL)
+  endif()
+endif()

@@ -2,9 +2,11 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
-#include <ATen/RegisterCUDA.h>
+#include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
@@ -53,9 +55,12 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
       });
 }
 
-std::unique_ptr<Generator> CUDAHooks::initCUDAGenerator(
-    Context* context) const {
-  return std::unique_ptr<Generator>(new CUDAGenerator(context));
+Generator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+  return at::cuda::detail::getDefaultCUDAGenerator(device_index);
+}
+
+Device CUDAHooks::getDeviceFromPtr(void* data) const {
+  return at::cuda::getDeviceFromPtr(data);
 }
 
 bool CUDAHooks::hasCUDA() const {
@@ -74,6 +79,32 @@ bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
+#ifdef USE_DIRECT_NVRTC
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+  return std::make_pair(nullptr, at::cuda::load_nvrtc());
+}
+#else
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+#if defined(_WIN32)
+  std::string libcaffe2_nvrtc = "caffe2_nvrtc.dll";
+#elif defined(__APPLE__)
+  std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dylib";
+#else
+  std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.so";
+#endif
+  std::unique_ptr<at::DynamicLibrary> libnvrtc_stub(
+      new at::DynamicLibrary(libcaffe2_nvrtc.c_str()));
+  auto fn = (at::cuda::NVRTC * (*)()) libnvrtc_stub->sym("load_nvrtc");
+  return std::make_pair(std::move(libnvrtc_stub), fn());
+}
+#endif
+
+const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
+  // must hold onto DynamicLibrary otherwise it will unload
+  static auto handle = load_nvrtc();
+  return *handle.second;
+}
+
 int64_t CUDAHooks::current_device() const {
   int device;
   cudaError_t err = cudaGetDevice(&device);
@@ -85,10 +116,6 @@ int64_t CUDAHooks::current_device() const {
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
   return at::cuda::getPinnedMemoryAllocator();
-}
-
-void CUDAHooks::registerCUDATypes(Context* context) const {
-  register_cuda_types(context);
 }
 
 bool CUDAHooks::compiledWithCuDNN() const {
@@ -105,6 +132,20 @@ bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return true;
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
+#if AT_CUDNN_ENABLED()
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 7) {
+    return true;
+  } else {
+    return false;
+  }
 #else
   return false;
 #endif

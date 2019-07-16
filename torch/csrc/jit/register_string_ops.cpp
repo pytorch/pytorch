@@ -85,12 +85,12 @@ RegisterOperators reg_str_ops({
     return 0;                                                      \
   })
 
-    DEFINE_STRING_IS_OP(aten::isdigit, std::isdigit),
-    DEFINE_STRING_IS_OP(aten::isspace, std::isspace),
-    DEFINE_STRING_IS_OP(aten::isalnum, std::isalnum),
-    DEFINE_STRING_IS_OP(aten::isalpha, std::isalpha),
-    DEFINE_STRING_IS_OP(aten::isdecimal, std::isdigit),
-    DEFINE_STRING_IS_OP(aten::isnumeric, std::isdigit),
+    DEFINE_STRING_IS_OP(aten::isdigit, ::isdigit),
+    DEFINE_STRING_IS_OP(aten::isspace, ::isspace),
+    DEFINE_STRING_IS_OP(aten::isalnum, ::isalnum),
+    DEFINE_STRING_IS_OP(aten::isalpha, ::isalpha),
+    DEFINE_STRING_IS_OP(aten::isdecimal, ::isdigit),
+    DEFINE_STRING_IS_OP(aten::isnumeric, ::isdigit),
 
 #define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op)         \
   Operator(#op_name "(str self) -> str", [](Stack& stack) { \
@@ -103,27 +103,27 @@ RegisterOperators reg_str_ops({
     return 0;                                               \
   })
 
-    DEFINE_STRING_CHAR_MAP_OP(aten::upper, std::toupper),
-    DEFINE_STRING_CHAR_MAP_OP(aten::lower, std::tolower),
+    DEFINE_STRING_CHAR_MAP_OP(aten::upper, ::toupper),
+    DEFINE_STRING_CHAR_MAP_OP(aten::lower, ::tolower),
     DEFINE_STRING_CHAR_MAP_OP(aten::swapcase, ([](char c) {
-                                if (c == static_cast<char>(std::toupper(c))) {
-                                  return static_cast<char>(std::tolower(c));
+                                if (c == static_cast<char>(::toupper(c))) {
+                                  return static_cast<char>(::tolower(c));
                                 } else {
-                                  return static_cast<char>(std::toupper(c));
+                                  return static_cast<char>(::toupper(c));
                                 }
                               }))
 
 });
 
-auto reg_str_ops_2 = torch::jit::RegisterOperators()
+auto reg_str_ops_2 = torch::RegisterOperators()
   .op("aten::splitlines(str self, bool keepends=False) -> str[]",
         [](std::string string, bool keepends) {
           std::string delimiters =
               "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
-          std::vector<std::string> splits;
+          c10::List<std::string> splits;
 
-          auto prev_pos = 0;
-          auto pos = 0;
+          std::string::size_type prev_pos = 0;
+          std::string::size_type pos = 0;
           while ((pos = string.find_first_of(delimiters, pos)) !=
                  std::string::npos) {
             splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
@@ -151,8 +151,8 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           bool is_upper = true;
           for (size_t i = 0; i < string.size() && is_upper; ++i) {
             char c = string[i];
-            found_alpha |= std::isalpha(c);
-            is_upper &= (!std::isalpha(c) || std::isupper(c));
+            found_alpha |= ::isalpha(c);
+            is_upper &= (!::isalpha(c) || ::isupper(c));
           }
           return found_alpha && is_upper;
         })
@@ -162,8 +162,8 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           bool is_lower = true;
           for (size_t i = 0; i < string.size() && is_lower; ++i) {
             char c = string[i];
-            found_alpha |= std::isalpha(c);
-            is_lower &= (!std::isalpha(c) || std::islower(c));
+            found_alpha |= ::isalpha(c);
+            is_lower &= (!::isalpha(c) || ::islower(c));
           }
           return found_alpha && is_lower;
         })
@@ -174,10 +174,10 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           auto first_char = true;
           for (char c : string) {
             if (first_char) {
-              ss << static_cast<char>(std::toupper(c));
+              ss << static_cast<char>(::toupper(c));
               first_char = false;
             } else {
-              ss << static_cast<char>(std::tolower(c));
+              ss << static_cast<char>(::tolower(c));
             }
           }
           return ss.str();
@@ -189,11 +189,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           bool prev_is_nonalpha = true;
           for (char c : string) {
             if (prev_is_nonalpha) {
-              ss << static_cast<char>(std::toupper(c));
+              ss << static_cast<char>(::toupper(c));
             } else {
-              ss << static_cast<char>(std::tolower(c));
+              ss << static_cast<char>(::tolower(c));
             }
-            if (std::isalpha(c)) {
+            if (::isalpha(c)) {
               prev_is_nonalpha = false;
             } else {
               prev_is_nonalpha = true;
@@ -209,23 +209,23 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             throw std::runtime_error(
                 "TypeError: The fill character must be exactly one character long");
           }
-          if (string.size() > width) {
+          if (string.size() > static_cast<std::string::size_type>(width)) {
             return string;
           }
           std::stringstream ss;
-          auto full_padding = width - string.size();
-          auto l_pad = full_padding / 2;
-          auto r_pad = (full_padding + 1) / 2;
+          std::string::size_type full_padding = width - string.size();
+          std::string::size_type l_pad = full_padding / 2;
+          std::string::size_type r_pad = (full_padding + 1) / 2;
           if (width % 2) {
             auto tmp = r_pad;
             r_pad = l_pad;
             l_pad = tmp;
           }
-          for (auto i = 0; i < l_pad; ++i) {
+          for (std::string::size_type i = 0; i < l_pad; ++i) {
             ss << fillchar;
           }
           ss << string;
-          for (auto i = 0; i < r_pad; ++i) {
+          for (std::string::size_type i = 0; i < r_pad; ++i) {
             ss << fillchar;
           }
           return ss.str();
@@ -249,7 +249,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           int64_t occurrences = 0;
           std::string::size_type pos = start;
           while ((pos = string.find(substr, pos)) != std::string::npos) {
-            if (pos < end) {
+            if (pos < static_cast<std::string::size_type>(end)) {
               ++occurrences;
             } else {
               break;
@@ -356,11 +356,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           if (string.size() < 1) {
             return false;
           }
-          if (std::isdigit(string[0])) {
+          if (::isdigit(string[0])) {
             return false;
           }
           auto result = std::all_of(string.begin(), string.end(), [](char c) {
-            return std::isalnum(c);
+            return ::isalnum(c);
           });
           return result;
         })
@@ -372,21 +372,21 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           bool prev_is_alpha = false;
           for (char c : string) {
             if (prev_is_alpha) {
-              if (c != static_cast<char>(std::tolower(c))) {
+              if (c != static_cast<char>(::tolower(c))) {
                 result = false;
                 break;
               }
             } else {
-              if (c != static_cast<char>(std::toupper(c))) {
+              if (c != static_cast<char>(::toupper(c))) {
                 result = false;
                 break;
               }
               // Only true if there exists at least one alpha
-              if (std::isalpha(c)) {
+              if (::isalpha(c)) {
                 result = true;
               }
             }
-            if (std::isalpha(c)) {
+            if (::isalpha(c)) {
               prev_is_alpha = true;
             } else {
               prev_is_alpha = false;
@@ -399,7 +399,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
     .op("aten::isprintable(str self) -> bool",
         [](std::string string) {
           auto result = std::all_of(string.begin(), string.end(), [](char c) {
-            return std::isalnum(c) || std::ispunct(c) || c == ' ';
+            return ::isalnum(c) || ::ispunct(c) || c == ' ';
           });
           return result;
         })
@@ -551,7 +551,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
         [](std::string string, std::string separator, int64_t max) {
           std::string::size_type prev_pos = 0;
           std::string::size_type pos = 0;
-          std::vector<std::string> splits;
+          c10::List<std::string> splits;
           auto count = 0;
           while ((pos = string.find(separator, pos)) != std::string::npos) {
             count++;
@@ -575,7 +575,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
 
           std::string::size_type prev_pos = 0;
           std::string::size_type pos = 0;
-          std::vector<std::string> splits;
+          c10::List<std::string> splits;
           auto count = 0;
           while ((pos = string.find(separator, pos)) != std::string::npos) {
             count++;

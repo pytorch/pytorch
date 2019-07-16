@@ -407,8 +407,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
             flattened input is returned. default: ``None``
 
     Returns:
-        (Tensor, Tensor (optional) Tensor (optional))::
-        A tensor or a tuple of tensors containing
+        (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
 
             - **output** (*Tensor*): the output list of unique scalar elements.
             - **inverse_indices** (*Tensor*): (optional) if

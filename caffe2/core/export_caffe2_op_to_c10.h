@@ -2,6 +2,7 @@
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #include <vector>
@@ -12,16 +13,16 @@ namespace detail {
 constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
     "_caffe2_preallocated_outputs";
 
-using _CallCaffe2OpFunc = c10::ListPtr<at::Tensor>(
+using _CallCaffe2OpFunc = c10::List<at::Tensor>(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    c10::ListPtr<at::Tensor>&& outputs);
+    c10::List<at::Tensor>&& outputs);
 
 template <class Caffe2Operator>
-inline c10::ListPtr<at::Tensor> _call_caffe2_op(
+inline c10::List<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    c10::ListPtr<at::Tensor>&& outputs) {
+    c10::List<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
   op.Run();
   return std::move(op).move_newstyle_outputs();
@@ -44,6 +45,10 @@ inline void _call_caffe2_op_from_c10(
   // (if not ivalue::None) contains a preallocated output tensor for each
   // operator output.
 
+  // As an invariant, we don't want any autograd gradients to be tracked in
+  // Caffe2 operators.
+  at::NoGradGuard guard;
+
   AT_ASSERT(
       schema.arguments().size() != 0 &&
       schema.arguments().back().type()->isSubtypeOf(
@@ -54,7 +59,7 @@ inline void _call_caffe2_op_from_c10(
   const size_t num_inputs = schema.arguments().size() -
       1; // -1 because the last argument is the list of preallocated tensors
 
-  c10::ListPtr<at::Tensor> outputs = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> outputs;
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
     // they haven't been passed in. Pass a list of uninitialized tensors to
