@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/source_range_serialization.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -105,7 +106,9 @@ void validateGraph(
     const std::shared_ptr<Graph>& graph,
     onnx_torch::OperatorExportTypes operator_export_type) {
   validateBlock(graph->block(), operator_export_type);
-  EliminateDeadCode(graph->block());
+  // this is run on an onnx graph which doesn't have side effects.
+  // ignore side effects in dead code elimination.
+  EliminateDeadCode(graph->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 class EncoderBase {
@@ -547,7 +550,7 @@ class ScriptModuleSerializer final {
   IValue moduleGetState(const script::Module& module);
   bool moduleHasValidGetSetState(const script::Module& module);
 
-  void convertClass(const c10::NamedTypePtr& type, torch::ModelDef* model_def);
+  void convertClass(const c10::NamedTypePtr& type);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -606,7 +609,7 @@ void ScriptModuleSerializer::serialize(
 void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   // Convert all the classes that this model depends on
   for (const auto& class_type : class_table_) {
-    convertClass(class_type, model_def);
+    convertClass(class_type);
   }
 
   // Mapping of filename => src. We need this because multiple clases may go in
@@ -651,16 +654,18 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 // python print the class and add to the converted_classes_. Recursively
 // python print all classes that this class depends on.
 void ScriptModuleSerializer::convertClass(
-    const c10::NamedTypePtr& class_type,
-    torch::ModelDef* model_def) {
+    const c10::NamedTypePtr& class_type) {
   if (converted_classes_.contains(class_type)) {
     return;
   }
 
   std::vector<c10::NamedTypePtr> class_deps;
   std::ostringstream class_stream;
+  // TODO: serialize for classes
+  SourceRangeRecords source_ranges;
   PythonPrint(
       class_stream,
+      source_ranges,
       class_type,
       tensor_table_,
       class_deps,
@@ -675,7 +680,7 @@ void ScriptModuleSerializer::convertClass(
       // class isn't in there yet.
       continue;
     }
-    convertClass(c, model_def);
+    convertClass(c);
   }
   // Insert *after* we've traversed the dependencies. This ensures that any
   // given class will appear after its dependencies in the order.
@@ -740,11 +745,11 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
   // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.class_compilation_unit()->find_function("__setstate__");
-  if (setstate == nullptr) {
+  auto setstate = module.find_method("__setstate__");
+  if (!setstate) {
     return false;
   }
-  auto set_schema = setstate->getSchema();
+  auto set_schema = setstate->function().getSchema();
 
   TORCH_CHECK(
       set_schema.arguments().size() == 2,
@@ -903,13 +908,14 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.class_compilation_unit()->get_functions().size() > 0) {
+  if (module.type()->methods().size() > 0) {
     std::ostringstream methods;
+    SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
-        *module.class_compilation_unit(),
-        /*is_method=*/true,
+        source_ranges,
+        module,
         tensor_table_,
         class_table_,
         /*enforce_importable=*/true);
@@ -921,6 +927,19 @@ void ScriptModuleSerializer::convertModule(
     writer_.writeRecord(
         filename.str(), methods_str.c_str(), methods_str.size());
     record->set_key(filename.str());
+
+    // Write out debug records
+    torch::RecordRef* debug_record =
+        module_def->mutable_torchscript_debug_arena();
+
+    SourceRangePickler source_range_pickler;
+    source_range_pickler.pickle(source_ranges);
+    const auto& range_data = source_range_pickler.get_data();
+    std::stringstream debug_filename;
+    debug_filename << "debug/" << module_name.str() << ".pkl";
+    writer_.writeRecord(
+        debug_filename.str(), range_data.data(), range_data.size());
+    debug_record->set_key(debug_filename.str());
   }
 
   for (script::Slot s : module.get_module_slots()) {

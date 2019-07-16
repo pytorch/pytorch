@@ -94,10 +94,7 @@ class FrontendError(Exception):
         self.msg = msg
 
     def __str__(self):
-        result = self.msg
-        if self.source_range is not None:
-            result += '\n' + self.source_range.highlight()
-        return result
+        return self.msg + torch._C.ErrorReport(self.source_range).what()
 
 
 class NotSupportedError(FrontendError):
@@ -363,6 +360,15 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("pass"))
         return Pass(r)
 
+    @staticmethod
+    def build_Break(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("break"))
+        return Break(r)
+
+    @staticmethod
+    def build_Continue(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("continue"))
+        return Continue(r)
 
 class ExprBuilder(Builder):
     binop_map = {

@@ -40,6 +40,15 @@ C10_DEFINE_bool(
     false,
     "If set, throws if floating point exception FE_OVERFLOW is detected when "
     "running any operator.");
+#ifdef __GNU_LIBRARY__
+C10_DEFINE_bool(
+    caffe2_operator_throw_on_first_occurrence_if_fp_exceptions,
+    false,
+    "If set with caffe2_operator_throw_if_fp_exceptions or "
+    "caffe2_operator_throw_if_fp_overflow_exceptions, throw on the first "
+    "occurrence of corresponding floating point exceptions that is detected when "
+    "running any operator.");
+#endif
 
 namespace caffe2 {
 
@@ -50,7 +59,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-      newstyle_outputs_(c10::make_list<at::Tensor>()),
+      newstyle_outputs_(),
 #endif
       input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {

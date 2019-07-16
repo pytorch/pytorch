@@ -11,9 +11,12 @@ from .gen_variable_type import format_trace
 FUNCTION_TEMPLATE = CodeTemplate("""\
 inline at::Tensor ${name}(${formals}) {
   ${pre_record_trace}
-  at::Tensor tensor = at::${name}(${actuals});
+  at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::${name}(${actuals});
+  })();
   at::Tensor result =
-    autograd::make_variable_consuming(std::move(tensor), /*requires_grad=*/${requires_grad});
+    autograd::make_variable(std::move(tensor), /*requires_grad=*/${requires_grad});
   ${post_record_trace}
   return result;
 }
