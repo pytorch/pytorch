@@ -79,11 +79,10 @@ class TestQuantizedOps(TestCase):
         return output_size
 
     """Tests the correctness of the quantized::relu op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5)),
-           qparams=hu.qparams())
-    def test_qrelu(self, X, qparams):
-        hu.assume_not_overflowing(X, qparams)
-        (scale, zero_point), (qmin, qmax), torch_type = qparams
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu(self, X):
+        X, (scale, zero_point, torch_type) = X
         relu = torch.ops.quantized.relu
 
         Y = X.copy()
@@ -164,14 +163,14 @@ class TestQuantizedOps(TestCase):
 
     """Tests max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=10)),
-           qparams=hu.qparams(),
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.integers(1, 2),
            dilation=st.integers(1, 2),
            padding=st.integers(0, 2))
-    def test_max_pool2d(self, X, qparams, kernel, stride, dilation, padding):
-        (scale, zero_point), (qmin, qmax), torch_type = qparams
+    def test_max_pool2d(self, X, kernel, stride, dilation, padding):
+        X, (scale, zero_point, torch_type) = X
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
@@ -185,27 +184,26 @@ class TestQuantizedOps(TestCase):
         d = (dilation, dilation)
         p = (padding, padding)
 
-        max_pool_params = {"kernel_size": k,
-                           "stride": s,
-                           "padding": p,
-                           "dilation": d}
-
         a = torch.from_numpy(X)
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=k, stride=s,
+                                                padding=p, dilation=d)
+        a_ref = torch.quantize_linear(a_pool, scale=scale,
+                                      zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
+        # a_ref = a_ref.dequantize()
         qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
 
-        Y_ref = F.max_pool2d(a, **max_pool_params)
-        qY_ref = torch.quantize_linear(Y_ref, scale=scale,
-                                       zero_point=zero_point,
-                                       dtype=torch_type)
-        ops_under_test = [
-            F.max_pool2d,
-            torch.ops.quantized.max_pool2d
-        ]
+        ops_under_test = {
+            "ops.quantized": torch.ops.quantized.max_pool2d,
+            "torch": torch.max_pool2d,
+            "nn.functional": torch.nn.functional.max_pool2d,
+            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d
+        }
 
-        for op in ops_under_test:
-            qY_hat = op(qa, **max_pool_params)
-            self.assertEqual(qY_ref, qY_hat)
+        for name, op in ops_under_test.items():
+            a_hat = op(qa, kernel_size=k, stride=s, padding=p, dilation=d)
+            self.assertEqual(a_ref, a_hat.dequantize())
 
 
 @unittest.skipIf(
@@ -307,16 +305,16 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
-    @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,)),
-           qparams=hu.qparams(dtypes=torch.qint8))
-    def test_qlinear_unpack(self, W, qparams):
-        hu.assume_not_overflowing(W, qparams)
-        (W_scale, W_zp), (qmin, qmax), torch_type = qparams
+    @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
+                       qparams=hu.qparams(dtypes=torch.qint8)))
+    def test_qlinear_unpack(self, W):
+        W, (W_scale, W_zp, torch_type) = W
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
 
         W = torch.from_numpy(W)
-        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp,
+                                    dtype=torch_type)
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
@@ -471,12 +469,12 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
-    @given(W=hu.tensor(shapes=hu.array_shapes(4, 4,)),
-           qparams=hu.qparams(dtypes=torch.qint8, zero_point_min=0,
-                              zero_point_max=0))
-    def test_qconv_unpack(self, W, qparams):
-        hu.assume_not_overflowing(W, qparams)
-        (W_scale, W_zp), (qmin, qmax), torch_type = qparams
+    @given(W=hu.tensor(shapes=hu.array_shapes(4, 4,),
+                       qparams=hu.qparams(dtypes=torch.qint8,
+                                          zero_point_min=0,
+                                          zero_point_max=0)))
+    def test_qconv_unpack(self, W):
+        W, (W_scale, W_zp, torch_type) = W
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
         qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
 
@@ -502,19 +500,18 @@ class TestQuantizedConv(unittest.TestCase):
                  " so we skip the test if we are in a UBSAN environment.")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5)),
-           qparams=hu.qparams(dtypes=torch.quint8))
-    def test_qnnpack_relu(self, X, qparams):
-        hu.assume_not_overflowing(X, qparams)
-        (scale, zero_point), (qmin, qmax), torch_type = qparams
-        assume(0 == zero_point)
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams(dtypes=torch.quint8,
+                                          zero_point_min=0,
+                                          zero_point_max=0)))
+    def test_qnnpack_relu(self, X):
+        X, (scale, zero_point, torch_type) = X
         relu = torch.ops.quantized.qnnpack_relu
 
         X = torch.from_numpy(X)
         Y = X.clone()
 
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch_type)
-        print(qX)
         qY_hat = relu(qX)
 
         Y[Y < 0] = 0
@@ -523,10 +520,12 @@ class TestQNNPackOps(TestCase):
 
     """Tests the correctness of the quantized::qnnpack_linear op."""
     @given(output_channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           X=hu.tensor(shapes=hu.array_shapes(2, 3, 8, 15)),
-           qparams=hu.qparams(dtypes=torch.quint8))
-    def test_qnnpack_linear(self, output_channels, X, qparams):
-        (X_scale, X_zp), (qmin, qmax), torch_type = qparams
+           X=hu.tensor(shapes=hu.array_shapes(2, 3, 8, 15),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_qnnpack_linear(self, output_channels, X):
+        X, (X_scale, X_zp, torch_type) = X
+        qmin = torch.iinfo(torch_type).min
+        qmax = torch.iinfo(torch_type).max
 
         input_channels = X.shape[X.ndim - 1]
 
@@ -537,10 +536,7 @@ class TestQNNPackOps(TestCase):
 
         qnnpack_linear = torch.ops.quantized.qnnpack_linear
 
-        X_q0 = np.round(
-            X * (qmin - qmax)
-            + qmin
-        ).astype(np.uint8)
+        X_q0 = np.round(X * (qmin - qmax) + qmin).astype(np.uint8)
 
         W_scale = 0.4
         W_zp = 0
