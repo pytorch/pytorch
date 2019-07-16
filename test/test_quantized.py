@@ -79,11 +79,11 @@ class TestQuantizedOps(TestCase):
         return output_size
 
     """Tests the correctness of the quantized::relu op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5)),
-           qparams=hu.qparams())
-    def test_qrelu(self, X, qparams):
-        hu.assume_not_overflowing(X, qparams)
-        (scale, zero_point), (qmin, qmax), torch_type = qparams
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu(self, X):
+        # hu.assume_not_overflowing(X, qparams)
+        X, (scale, zero_point, torch_type) = X
         relu = torch.ops.quantized.relu
 
         Y = X.copy()
@@ -164,14 +164,14 @@ class TestQuantizedOps(TestCase):
 
     """Tests max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=10)),
-           qparams=hu.qparams(),
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.integers(1, 2),
            dilation=st.integers(1, 2),
            padding=st.integers(0, 2))
-    def test_max_pool2d(self, X, qparams, kernel, stride, dilation, padding):
-        (scale, zero_point), (qmin, qmax), torch_type = qparams
+    def test_max_pool2d(self, X, kernel, stride, dilation, padding):
+        X, (scale, zero_point, torch_type) = X
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
@@ -200,12 +200,12 @@ class TestQuantizedOps(TestCase):
         a_pool_hat = qa_pool_hat.dequantize()
 
 
-@unittest.skipIf(
-    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized Linear requires FBGEMM. FBGEMM does not play"
-    " well with UBSAN at the moment, so we skip the test if"
-    " we are in a UBSAN environment.",
-)
+# @unittest.skipIf(
+#     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+#     " Quantized Linear requires FBGEMM. FBGEMM does not play"
+#     " well with UBSAN at the moment, so we skip the test if"
+#     " we are in a UBSAN environment.",
+# )
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
@@ -299,16 +299,17 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
-    @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,)),
-           qparams=hu.qparams(dtypes=torch.qint8))
-    def test_qlinear_unpack(self, W, qparams):
-        hu.assume_not_overflowing(W, qparams)
-        (W_scale, W_zp), (qmin, qmax), torch_type = qparams
+    @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
+                       qparams=hu.qparams(dtypes=torch.qint8)))
+    def test_qlinear_unpack(self, W):
+        # hu.assume_not_overflowing(W, qparams)
+        W, (W_scale, W_zp, torch_type) = W
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
 
         W = torch.from_numpy(W)
-        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp,
+                                    dtype=torch_type)
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
@@ -321,12 +322,12 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 
-@unittest.skipIf(
-    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized convolution requires FBGEMM. FBGEMM does not play"
-    " well with UBSAN at the moment, so we skip the test if"
-    " we are in a UBSAN environment.",
-)
+# @unittest.skipIf(
+#     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+#     " Quantized convolution requires FBGEMM. FBGEMM does not play"
+#     " well with UBSAN at the moment, so we skip the test if"
+#     " we are in a UBSAN environment.",
+# )
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
@@ -463,12 +464,12 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
-    @given(W=hu.tensor(shapes=hu.array_shapes(4, 4,)),
-           qparams=hu.qparams(dtypes=torch.qint8, zero_point_min=0,
-                              zero_point_max=0))
-    def test_qconv_unpack(self, W, qparams):
-        hu.assume_not_overflowing(W, qparams)
-        (W_scale, W_zp), (qmin, qmax), torch_type = qparams
+    @given(W=hu.tensor(shapes=hu.array_shapes(4, 4,),
+                       qparams=hu.qparams(dtypes=torch.qint8,
+                                          zero_point_min=0,
+                                          zero_point_max=0)))
+    def test_qconv_unpack(self, W):
+        W, (W_scale, W_zp, torch_type) = W
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
         qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
 
@@ -488,18 +489,19 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
         np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
-@unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
-@unittest.skipIf(TEST_WITH_UBSAN,
-                 "QNNPACK does not play well with UBSAN at the moment,"
-                 " so we skip the test if we are in a UBSAN environment.")
+# @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
+# @unittest.skipIf(TEST_WITH_UBSAN,
+#                  "QNNPACK does not play well with UBSAN at the moment,"
+#                  " so we skip the test if we are in a UBSAN environment.")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5)),
-           qparams=hu.qparams(dtypes=torch.quint8))
-    def test_qnnpack_relu(self, X, qparams):
-        hu.assume_not_overflowing(X, qparams)
-        (scale, zero_point), (qmin, qmax), torch_type = qparams
-        assume(0 == zero_point)
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams(dtypes=torch.quint8,
+                                          zero_point_min=0,
+                                          zero_point_max=0)))
+    def test_qnnpack_relu(self, X):
+        # hu.assume_not_overflowing(X, qparams)
+        X, (scale, zero_point, torch_type) = X
         relu = torch.ops.quantized.qnnpack_relu
 
         X = torch.from_numpy(X)
@@ -514,10 +516,12 @@ class TestQNNPackOps(TestCase):
 
     """Tests the correctness of the quantized::qnnpack_linear op."""
     @given(output_channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           X=hu.tensor(shapes=hu.array_shapes(2, 3, 8, 15)),
-           qparams=hu.qparams(dtypes=torch.quint8))
-    def test_qnnpack_linear(self, output_channels, X, qparams):
-        (X_scale, X_zp), (qmin, qmax), torch_type = qparams
+           X=hu.tensor(shapes=hu.array_shapes(2, 3, 8, 15),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_qnnpack_linear(self, output_channels, X):
+        X, (X_scale, X_zp, torch_type) = X
+        qmin = torch.iinfo(torch_type).min
+        qmax = torch.iinfo(torch_type).max
 
         input_channels = X.shape[X.ndim - 1]
 
@@ -528,10 +532,7 @@ class TestQNNPackOps(TestCase):
 
         qnnpack_linear = torch.ops.quantized.qnnpack_linear
 
-        X_q0 = np.round(
-            X * (qmin - qmax)
-            + qmin
-        ).astype(np.uint8)
+        X_q0 = np.round(X * (qmin - qmax) + qmin).astype(np.uint8)
 
         W_scale = 0.4
         W_zp = 0
