@@ -1807,9 +1807,15 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
-  return at::where(det != 0,
-                   grad * det * self.inverse().transpose(-2, -1), // invertible case
-                   singular_case_backward(grad, self, det)); // non-invertible case, uses SVD
+  if ((det != 0).all().item<uint8_t>()) {  // all matrices are invertible
+    return grad * det * self.inverse().transpose(-2, -1);
+  } else if ((det == 0).all().item<uint8_t>()) {  // all matrices are singular
+    return singular_case_backward(grad, self, det);
+  } else {  // some matrices are invertible, some matrices are singular
+    return at::where(det != 0,
+                     grad * det * self.inverse().transpose(-2, -1), // invertible case
+                     singular_case_backward(grad, self, det)); // non-invertible case, uses SVD
+  }
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
@@ -1821,9 +1827,15 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
-  return at::where(logdet != -INFINITY,
-                   grad * self.inverse().transpose(-2, -1), // invertible case
-                   singular_case_backward(grad, self));  // non-invertible case using SVD
+  if ((logdet != -INFINITY).all().item<uint8_t>()) {  // all matrices are invertible
+    return grad * self.inverse().transpose(-2, -1);
+  } else if ((logdet == -INFINITY).all().item<uint8_t>()) {  // all matrices are singular
+    return singular_case_backward(grad, self);
+  } else {  // some matrices are invertible, some matrices are singular
+    return at::where(logdet != -INFINITY,
+                     grad * self.inverse().transpose(-2, -1), // invertible case
+                     singular_case_backward(grad, self)); // non-invertible case, uses SVD
+  }
 }
 
 Tensor slogdet_backward(const Tensor& grad_logabsdet,
@@ -1839,9 +1851,15 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
-  return at::where(signdet != 0,
-                   grad_logabsdet * self.inverse().transpose(-2, -1),
-                   singular_case_backward(grad_logabsdet, self));
+  if ((signdet != 0).all().item<uint8_t>()) {  // all matrices are invertible
+    return grad_logabsdet * self.inverse().transpose(-2, -1);
+  } else if ((signdet == 0).all().item<uint8_t>()) {  // all matrices are singular
+    return singular_case_backward(grad_logabsdet, self);
+  } else {  // some matrices are invertible, some matrices are singular
+    return at::where(signdet != 0,
+                     grad_logabsdet * self.inverse().transpose(-2, -1),
+                     singular_case_backward(grad_logabsdet, self));
+  }
 }
 
 // Reference:
