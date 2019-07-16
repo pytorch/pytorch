@@ -34,7 +34,7 @@ def sort(g, self, dim, decending, out=None):
     slice_ = sym_help._slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
     return g.op("TopK", self, slice_, axis_i=dim, outputs=2)
 
-@parse_args('v', 'i', 'i', 'i', 'i')
+
 @parse_args('v', 'v', 'i', 'i', 'i')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
