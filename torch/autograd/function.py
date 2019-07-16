@@ -98,6 +98,10 @@ class FunctionMeta(type):
 
         # old-style functions
         if not has_static_forward:
+            warnings.warn('Legacy autograd function with non-static forward method is deprecated. '
+                          'Please use new-style autograd function with static forward method. '
+                          '(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)',
+                          DeprecationWarning)
             return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
