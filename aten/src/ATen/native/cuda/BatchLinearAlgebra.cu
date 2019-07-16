@@ -154,6 +154,15 @@ void magmaSymeig(
   AT_ERROR("symeig only takes float or double Tensors");
 }
 
+template<class scalar_t>
+void magmaSvd(
+    magma_vec_t jobz, magma_int_t m, magma_int_t n, scalar_t* A,
+    magma_int_t lda, scalar_t* s, scalar_t* U, magma_int_t ldu,
+    scalar_t* VT, magma_int_t ldvt, scalar_t* work, magma_int_t lwork,
+    magma_int_t* iwork, magma_int_t* info) {
+  AT_ERROR("svd only takes float or double Tensors")
+}
+
 template<>
 void magmaSolve<double>(
     magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
@@ -428,6 +437,24 @@ void magmaSymeig<float>(
     float* w, float* wA, magma_int_t ldwa, float* work, magma_int_t lwork,
     magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
   magma_ssyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
+}
+
+template<>
+void magmaSvd<double>(
+    magma_vec_t jobz, magma_int_t m, magma_int_t n, double* A,
+    magma_int_t lda, double* s, double* U, magma_int_t ldu,
+    double* VT, magma_int_t ldvt, double* work, magma_int_t lwork,
+    magma_int_t* iwork, magma_int_t* info) {
+  magma_dgesdd(jobz, m, n, A, lda, s, U, ldu, VT, ldvt, work, lwork, iwork, info);
+}
+
+template<>
+void magmaSvd<float>(
+    magma_vec_t jobz, magma_int_t m, magma_int_t n, float* A,
+    magma_int_t lda, float* s, float* U, magma_int_t ldu,
+    float* VT, magma_int_t ldvt, float* work, magma_int_t lwork,
+    magma_int_t* iwork, magma_int_t* info) {
+  magma_sgesdd(jobz, m, n, A, lda, s, U, ldu, VT, ldvt, work, lwork, iwork, info);
 }
 #endif
 
@@ -1232,6 +1259,116 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
     singleCheckErrors(infos[0], "symeig_cuda");
   }
   return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
+                      char jobchar, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("svd: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  auto self_data = self.data<scalar_t>();
+  auto U_data = U.data<scalar_t>();
+  auto S_data = S.data<scalar_t>();
+  auto VT_data = VT.data<scalar_t>();
+  auto self_stride = matrixStride(self);
+  auto U_stride = matrixStride(U);
+  auto S_stride = S.size(-1);
+  auto VT_stride = matrixStride(VT);
+  auto batchsize = batchCount(self);
+
+  magma_vec_t jobz = jobchar == 'A' ? MagmaAllVec : (jobchar == 'S' ? MagmaSomeVec : MagmaNoVec);
+
+  magma_int_t m = magma_int_cast(self.size(-2), "m");
+  magma_int_t n = magma_int_cast(self.size(-1), "n");
+  auto k = std::min(m, n);
+
+  magma_int_t info = 0;
+  // Run once, first to get the optimum work size.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
+  magma_int_t lwork = -1;
+  scalar_t wkopt;
+  magma_int_t* iwork;
+  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * k, self);
+  magmaSvd<scalar_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, iwork, &info);
+  lwork = magma_int_cast(wkopt, "work_size");
+  scalar_t* work;
+  ALLOCATE_ARRAY(work, scalar_t, lwork, self);
+
+  for (int64_t i = 0; i < batchsize; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_stride];
+    scalar_t* S_working_ptr = &S_data[i * S_stride];
+    scalar_t* U_working_ptr = &U_data[i * U_stride];
+    scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
+
+    // Compute S, U (optionally), VT (optionally)
+    magmaSvd<scalar_t>(jobz, m, n, self_working_ptr, m,
+                       S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work, lwork, iwork, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool some, bool compute_uv) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  int64_t m = self.size(-2), n = self.size(-1);
+  int64_t k = std::min(m, n);
+
+  char jobchar = compute_uv ? (some ? 'S' : 'A') : 'N';
+
+  Tensor U_working_copy, S_working_copy, VT_working_copy;
+  std::tie(U_working_copy, S_working_copy, VT_working_copy) = _create_U_S_VT(self, some, compute_uv);
+
+  if (self.numel() > 0) {
+    // The input matrix, U, S and VT have to reside in pinned memory.
+    // Additionally, the input and U have to be in column major format.
+    // _create_U_S_VT takes care of a part of these requirements (for U, S and VT)
+    // For the input matrix, this requirements are being taken care of below.
+    // Specify strides
+    auto self_col_major_strides = at::detail::defaultStrides(self.sizes());
+    self_col_major_strides[self.dim() - 2] = 1;
+    self_col_major_strides[self.dim() - 1] = m;
+    // Create strided tensor in pinned memory
+    auto self_working_copy = at::empty_strided(self.sizes(), self_col_major_strides,
+                                               at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
+    self_working_copy.copy_(self);
+
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cuda", [&]{
+      apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobchar, infos);
+    });
+
+    if (self.dim() > 2) {
+      batchCheckErrors(infos, "svd_cuda");
+    } else {
+      singleCheckErrors(infos[0], "svd_cuda");
+    }
+
+    U_working_copy = same_stride_to(U_working_copy, self.options());
+    S_working_copy = same_stride_to(S_working_copy, self.options());
+    VT_working_copy = same_stride_to(VT_working_copy, self.options());
+
+    if (compute_uv) {
+      if (some) {
+        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+      }
+    } else {
+      VT_working_copy.zero_();
+      U_working_copy.zero_();
+    }
+  } else {
+    U_working_copy = same_stride_to(U_working_copy, self.options()).zero_();
+    S_working_copy = same_stride_to(S_working_copy, self.options());
+    VT_working_copy = same_stride_to(VT_working_copy, self.options()).zero_();
+  }
+  return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
 }}  // namespace at::native
