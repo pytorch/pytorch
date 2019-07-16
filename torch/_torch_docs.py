@@ -896,7 +896,7 @@ tensor will be composed of lower-triangular Cholesky factors of each of the indi
 matrices.
 
 Args:
-    a (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    a (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
     upper (bool, optional): flag that indicates whether to return a
                             upper or lower triangular matrix. Default: ``False``
@@ -2281,7 +2281,7 @@ individual inverses.
     transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).stride()`
 
 Args:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                     batch dimensions
     out (Tensor, optional): the optional output tensor
 
