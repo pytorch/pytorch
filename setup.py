@@ -79,7 +79,7 @@
 #   USE_LMDB
 #     enables use of LMDB for storage
 #
-#   USE_PROTOTYPES
+#   BUILD_NESTEDTENSOR
 #     toggles the exposure of prototype features
 #
 #   BUILD_BINARY

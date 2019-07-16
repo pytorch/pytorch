@@ -1,6 +1,6 @@
 import torch
 from . import nested
-import torch.prototypes.nestedtensor.codegen as codegen
+import torch.tensortypes.nestedtensor.codegen as codegen
 
 def is_available():
     return hasattr(torch._C, "_nestedtensor_init")
@@ -8,7 +8,7 @@ def is_available():
 if is_available() and not torch._C._nestedtensor_init():
     raise RuntimeError("Failed to initialize PyTorch nestedtensor support")
 
-import torch.prototypes.nestedtensor as nestedtensor
+import torch.tensortypes.nestedtensor as nestedtensor
 
 NestedTensor = nested.NestedTensor
 

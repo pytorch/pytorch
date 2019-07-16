@@ -3,7 +3,7 @@ import unittest
 from common_utils import TEST_WITH_PROTOTYPES
 
 if TEST_WITH_PROTOTYPES:
-    import torch.prototypes.nestedtensor as nestedtensor
+    import torch.tensortypes.nestedtensor as nestedtensor
     from common_utils import TestCase
     NestedTensor = nestedtensor.NestedTensor
 else:
