@@ -49,6 +49,8 @@ namespace c10 {
   _(prim, IgnoredPythonOp)           \
   _(prim, Reverse)                   \
   _(prim, Return)                    \
+  _(prim, BreakStmt)                 \
+  _(prim, ContinueStmt)              \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -109,6 +111,7 @@ namespace c10 {
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
   _(prim, CallMethod)                \
+  _(prim, LoopContinuation)          \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

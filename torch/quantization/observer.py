@@ -52,9 +52,11 @@ class Observer(nn.Module):
             if self.qscheme == torch.per_tensor_symmetric:
                 max_val = max(-min_val, max_val)
                 scale = max_val / 127.0
+                scale = max(scale, torch.finfo(torch.float32).eps)
                 zero_point = 0 if self.dtype == torch.qint8 else 128
             else:
                 scale = (max_val - min_val) / n_levels
+                scale = max(scale, torch.finfo(torch.float32).eps)
                 zero_point = qmin - round(min_val / scale)
                 zero_point = max(qmin, zero_point)
                 zero_point = min(qmax, zero_point)
