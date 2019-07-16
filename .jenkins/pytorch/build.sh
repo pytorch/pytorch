@@ -109,11 +109,12 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
 
-  if [ -e /opt/rocm/hcc/bin/clang-7.0_original ]; then
+  ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
+  if [ -e $ORIG_COMP ]; then
     # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
     # note that the wrapping always names the compiler "clang-7.0_original"
     WRAPPED=/opt/rocm/hcc/bin/clang-[0-99]
-    mv /opt/rocm/hcc/bin/clang-7.0_original $WRAPPED
+    mv $ORIG_COMP $WRAPPED
 
   fi
   exit 0
