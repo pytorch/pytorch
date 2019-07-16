@@ -45,6 +45,7 @@ def get_signature(fn):
             return sig
 
     type_line, source = None, None
+    print("48", fn)
     try:
         source = dedent(inspect.getsource(fn))
         type_line = get_type_line(source)

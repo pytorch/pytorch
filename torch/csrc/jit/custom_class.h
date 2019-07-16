@@ -49,7 +49,7 @@ class class_ {
   std::shared_ptr<script::CompilationUnit> classCu = nullptr;
   ClassTypePtr classTypePtr;
 
-  const std::string parentModule = "torch._C";
+  const std::string parentModule = "_C";
 
  public:
   class_(string className_) : className(std::move(className_)) {
@@ -57,20 +57,20 @@ class class_ {
     // We'll want to remove this at some point to get rid of the python
     // dependency. It would require significant changes to class registration,
     // (I think)?
-    auto obj = py::module::import(parentModule.c_str());
+    auto obj = py::module::import("torch").attr(parentModule.c_str());
     pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
     auto newClass =
         py::module::import("torch.jit")
             .attr("_add_script_class")(
                 *pyClass,
-                ("__torch__." + parentModule + "." + className_).c_str());
+                ("__torch__.torch." + parentModule + "." + className).c_str());
 
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute.
     classCu = std::make_shared<script::CompilationUnit>();
     auto runtimeClassName = typeid(c10::intrusive_ptr<CurClass>).name();
     tmap[runtimeClassName] =  ClassType::create(
-        c10::QualifiedName("__torch__." + parentModule + "." + className),
+        c10::QualifiedName("__torch__.torch." + parentModule + "." + className),
         classCu);
     classTypePtr = tmap.find(runtimeClassName)->second;
     classTypePtr->addAttribute("capsule", CapsuleType::get());
@@ -96,10 +96,9 @@ class class_ {
     std::vector<Value*> inputs = addInputs(func, graph);
     static auto classRegistry =
         torch::RegisterOperators().op(qualFuncName, std::move(func));
-    // auto capsuleNode = graph->insertConstant(IValue(c10::intrusive_ptr<c10::intrusive_ptr_target>()))->setType(CapsuleType::get());
-    auto capsuleNode = graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))->output()->setType(CapsuleType::get());
+    auto capsuleValue = graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))->output()->setType(CapsuleType::get());
     auto n = graph->insertNode(
-        graph->create(prim::SetAttr, {inputs[0], capsuleNode}, 0));
+        graph->create(prim::SetAttr, {inputs[0], capsuleValue}, 0));
     n->s_(attr::name, "capsule");
     auto res = graph->insertNode(
         graph->create(Symbol::fromQualString(qualFuncName), inputs, 0));

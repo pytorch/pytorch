@@ -448,8 +448,7 @@ T generic_to(
     }
     auto initializedCapsule = IValue(c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(static_cast<intrusive_ptr_target*>(capsulePtr)));
     obj->setAttr("capsule", initializedCapsule);
-    std::cout<<"449: "<<initializedCapsule.toCapsule().get()<<std::endl;
-    return c10::intrusive_ptr<ElemType>::reclaim(static_cast<ElemType*>(initializedCapsule.toCapsule().get()));
+    return c10::intrusive_ptr<ElemType>::reclaim(static_cast<ElemType*>(initializedCapsule.toCapsule().release()));
     // return std::static_pointer_cast<T>(capsule.toCapsule());
     // return reinterpret_cast<T>(capsule.toCapsule());
 }

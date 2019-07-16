@@ -102,6 +102,5 @@ class _Ops(types.ModuleType):
             ctypes.CDLL(path)
         self.loaded_libraries.add(path)
 
-
 # The ops "namespace"
 ops = _Ops()
