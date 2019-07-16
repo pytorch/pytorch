@@ -3711,7 +3711,7 @@ a")
         vals = [":", 1, None]
         for _ in range(100):
             indices = list(random.choices(vals, k=4))
-            indices[random.randint(0, len(indices)-1)] = "..."
+            indices[random.randint(0, len(indices) - 1)] = "..."
             test_str = dedent(f"""
             def f():
                 x = torch.ones(10, 9, 8, 7, 6)
