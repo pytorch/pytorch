@@ -202,6 +202,19 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
   Py_RETURN_NONE;
 }
 
+PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to has_primary_context");
+  int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
+  if (at::detail::getCUDAHooks().hasPrimaryContext(device_index)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_emptyCache(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
@@ -383,6 +396,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, nullptr},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, nullptr},
   {"_cuda_getCompiledVersion", (PyCFunction)THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
+  {"_cuda_hasPrimaryContext", (PyCFunction) THCPModule_hasPrimaryContext,  METH_O,  nullptr},
   {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache,       METH_NOARGS,  nullptr},
   {"_cuda_memoryAllocated", (PyCFunction) THCPModule_memoryAllocated, METH_O,  nullptr},
   {"_cuda_maxMemoryAllocated", (PyCFunction) THCPModule_maxMemoryAllocated, METH_O,  nullptr},
