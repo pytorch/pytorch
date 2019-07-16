@@ -1,4 +1,5 @@
 import torch
+from functools import wraps
 
 # These functions only take two inputs. An input and a output.
 # No scalars etc.
@@ -84,6 +85,7 @@ def get_comparison_functions():
         'gt',
         'le',
         'ne',
+        'lt'
     ]
 
 
@@ -91,6 +93,7 @@ def set_function(module, cls, tfunc, func):
     def _gen_func(tfunc):
         orig_tfunc = getattr(torch, tfunc)
 
+        @wraps(orig_tfunc)
         def _func(*args, **kwargs):
             if isinstance(args[0], cls):
                 return func(*((tfunc, orig_tfunc,) + args), **kwargs)
@@ -100,17 +103,17 @@ def set_function(module, cls, tfunc, func):
     setattr(module, tfunc, _gen_func(tfunc))
 
 
-def _check_meaningful_overwrite(cls, pbf):
+def _check_meaningful_overwrite(cls, method_name):
     class DefaultClass:
         pass
 
-    if getattr(cls, pbf, False) and not getattr(DefaultClass, pbf, False):
-        raise Exception("WARNING: " + pbf + " already exists "
+    if getattr(cls, method_name, False) and not getattr(DefaultClass, method_name, False):
+        raise Exception("WARNING: " + method_name + " already exists "
                         "and not part of default class")
 
 
-def set_unary_method(cls, tfunc, pbf, inplace):
-    def _gen_func(pbf):
+def set_unary_method(cls, tfunc, method_name, inplace):
+    def _gen_func(method_name):
         def _func(self: cls):
             assert isinstance(self, cls)
             if inplace:
@@ -118,11 +121,11 @@ def set_unary_method(cls, tfunc, pbf, inplace):
             else:
                 return getattr(torch, tfunc)(self)
         return _func
-    _check_meaningful_overwrite(cls, pbf)
-    setattr(cls, pbf, _gen_func(pbf))
+    _check_meaningful_overwrite(cls, method_name)
+    setattr(cls, method_name, _gen_func(method_name))
 
 
-def set_binary_method(cls, tfunc, pbf, inplace):
+def set_binary_method(cls, tfunc, method_name, inplace):
     def _gen_func(tfunc):
         def _func(self: cls, other: cls):
             if inplace:
@@ -130,25 +133,25 @@ def set_binary_method(cls, tfunc, pbf, inplace):
             else:
                 return getattr(torch, tfunc)(self, other)
         return _func
-    _check_meaningful_overwrite(cls, pbf)
-    setattr(cls, pbf, _gen_func(tfunc))
+    _check_meaningful_overwrite(cls, method_name)
+    setattr(cls, method_name, _gen_func(tfunc))
 
 
 def get_unary_method_signatures():
     signatures = []
-    for pbf in get_unary_functions():
-        signatures.append({'torch': pbf, 'Tensor': pbf, 'inplace': False})
-        signatures.append({'torch': pbf, 'Tensor': pbf + "_", 'inplace': True})
+    for method_name in get_unary_functions():
+        signatures.append({'torch': method_name, 'Tensor': method_name, 'inplace': False})
+        signatures.append({'torch': method_name, 'Tensor': method_name + "_", 'inplace': True})
     return signatures
 
 
 def get_binary_method_signatures():
     signatures = []
-    for pbf in ['add', 'mul', 'sub']:
-        signatures.append({'torch': pbf, 'Tensor': pbf, 'inplace': False})
-        signatures.append({'torch': pbf, 'Tensor': pbf + "_", 'inplace': True})
-        signatures.append({'torch': pbf, 'Tensor': "__" + pbf + "__", 'inplace': False})
-        signatures.append({'torch': pbf, 'Tensor': "__i" + pbf + "__", 'inplace': True})
+    for method_name in ['add', 'mul', 'sub']:
+        signatures.append({'torch': method_name, 'Tensor': method_name, 'inplace': False})
+        signatures.append({'torch': method_name, 'Tensor': method_name + "_", 'inplace': True})
+        signatures.append({'torch': method_name, 'Tensor': "__" + method_name + "__", 'inplace': False})
+        signatures.append({'torch': method_name, 'Tensor': "__i" + method_name + "__", 'inplace': True})
     signatures.append({'torch': 'div', 'Tensor': 'div', 'inplace': False})
     signatures.append({'torch': 'div', 'Tensor': 'div' + "_", 'inplace': True})
     signatures.append({'torch': 'div', 'Tensor': "__" + 'div' + "__", 'inplace': False})
@@ -158,10 +161,10 @@ def get_binary_method_signatures():
 
 def get_comparison_method_signatures():
     signatures = []
-    for pbf in get_comparison_functions():
-        signatures.append({'torch': pbf, 'Tensor': pbf, 'inplace': False})
-        signatures.append({'torch': pbf, 'Tensor': pbf + "_", 'inplace': True})
-        signatures.append({'torch': pbf, 'Tensor': "__" + pbf + "__", 'inplace': False})
+    for method_name in get_comparison_functions():
+        signatures.append({'torch': method_name, 'Tensor': method_name, 'inplace': False})
+        signatures.append({'torch': method_name, 'Tensor': method_name + "_", 'inplace': True})
+        signatures.append({'torch': method_name, 'Tensor': "__" + method_name + "__", 'inplace': False})
     return signatures
 
 

@@ -293,6 +293,13 @@ void nestedtensor_ne(const std::vector<at::Tensor>& input1,
     at::ne_out(out[i], input1[i], input2[i]);
   }
 }
+void nestedtensor_lt(const std::vector<at::Tensor>& input1,
+                       const std::vector<at::Tensor>& input2,
+                       std::vector<at::Tensor>& out) {
+  for (int64_t i = 0; i < input1.size(); i++) {
+    at::lt_out(out[i], input1[i], input2[i]);
+  }
+}
 
 PyObject* nestedtensor_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("tensor_list.python.import");
@@ -347,6 +354,7 @@ PyObject* nestedtensor_init(PyObject* _unused) {
   m.def("gt", &nestedtensor_gt, "gt");
   m.def("le", &nestedtensor_le, "le");
   m.def("ne", &nestedtensor_ne, "ne");
+  m.def("lt", &nestedtensor_lt, "lt");
 
   Py_RETURN_TRUE;
 }
