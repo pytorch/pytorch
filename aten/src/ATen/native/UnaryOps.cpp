@@ -119,6 +119,26 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
+Tensor sign(const Tensor& self) {
+    Tensor result = at::empty({0}, self.options());
+    return at::sign_out(result, self);
+}
+
+Tensor& sign_(Tensor& self) {
+    return at::sign_out(self, self);
+}
+
+Tensor& sign_out(Tensor& result, const Tensor& self) {
+    checkBackend("sign", result, self.type().backend());
+    assert_no_internal_overlap(result, "sign");
+    auto iter = TensorIterator::unary_op(result, self);
+    sign_stub(iter->device_type(), *iter);
+#ifdef BUILD_NAMEDTENSOR
+    at::namedinference::propagate_names(result, self);
+#endif
+    return result;
+}
+
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
@@ -190,7 +210,6 @@ IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)
 IMPLEMENT_UNARY_OP_VEC(sigmoid)
-IMPLEMENT_UNARY_OP_VEC(sign)
 IMPLEMENT_UNARY_OP_VEC(sin)
 IMPLEMENT_UNARY_OP_VEC(sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt)
