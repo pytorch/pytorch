@@ -332,10 +332,6 @@ std::shared_ptr<FusedKernel> compileKernel(
     }
   }
 
-  // Have checked the limit at graph_fuser. Assert nothing else changing that.
-  AT_ASSERT((flat_inputs.size() + flat_outputs.size()) <=
-            fusion_kernel_args_limit);
-
   const bool use_cuda = device.is_cuda();
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   std::string code =

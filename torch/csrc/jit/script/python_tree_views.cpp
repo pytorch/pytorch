@@ -190,6 +190,12 @@ void initTreeViewBindings(PyObject* module) {
       }));
   py::class_<Pass, Stmt>(m, "Pass").def(
       py::init([](const SourceRange& range) { return Pass::create(range); }));
+  py::class_<Break, Stmt>(m, "Break")
+      .def(py::init(
+          [](const SourceRange& range) { return Break::create(range); }));
+  py::class_<Continue, Stmt>(m, "Continue")
+      .def(py::init(
+          [](const SourceRange& range) { return Continue::create(range); }));
   py::class_<Dots, Expr>(m, "Dots").def(
       py::init([](const SourceRange& range) { return Dots::create(range); }));
   py::class_<If, Stmt>(m, "If").def(

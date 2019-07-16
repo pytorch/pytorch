@@ -4,10 +4,12 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import operator_benchmark as op_bench
-from ops.pt import ( # noqa
-    add_test, batchnorm_test, conv_test, linear_test, matmul_test # noqa
+from pt import ( # noqa
+    add_test, batchnorm_test, cat_test, chunk_test, conv_test, # noqa
+    gather_test, linear_test, matmul_test, pool_test, # noqa
+    softmax_test, split_test, unary_test # noqa
 )
-from ops.c2 import ( # noqa
+from c2 import ( # noqa
     add_test, matmul_test # noqa
 )
 
