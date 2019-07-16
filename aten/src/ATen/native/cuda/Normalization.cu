@@ -7,7 +7,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Ten
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_cuda", [&] {
       auto mean_st = running_mean.dtype();
       auto var_st = running_var.dtype();
-      AT_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
+      TORCH_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
       bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
         if (is_half_float) {
@@ -30,7 +30,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward_cuda", [&] {
       auto mean_st = running_mean.dtype();
       auto var_st = running_var.dtype();
-      AT_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
+      TORCH_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
       bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
         if (is_half_float) {
@@ -63,7 +63,7 @@ Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Ten
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_elemt", [&] {
       auto mean_st = mean.dtype();
       auto invstd_st = invstd.dtype();
-      AT_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
+      TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
       bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
         if (is_half_float) {
@@ -105,22 +105,50 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(const Tensor
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const Tensor& self, const Tensor& input, const Tensor& mean,
                                                                            const Tensor& invstd, bool input_g, bool weight_g, bool bias_g) {
+  //FIXME
+  std::cout << "batch_norm_backward_reduce_cuda called" << std::endl;
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward_reduce", [&] {
+      auto mean_st = mean.dtype();
+      auto invstd_st = invstd.dtype();
+      TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
+      bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        return batch_norm_backward_reduce_cuda_template<scalar_t, int32_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+        if (is_half_float) {
+          return batch_norm_backward_reduce_cuda_template<at::Half, float, int32_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+        } else {
+          return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+        }
       } else {
-        return batch_norm_backward_reduce_cuda_template<scalar_t, int64_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+        if (is_half_float) {
+          return batch_norm_backward_reduce_cuda_template<at::Half, float, int64_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+        } else {
+          return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+        }
       }
     });
 }
 
 Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, const Tensor& mean, const Tensor& invstd,
                                       const Tensor& weight, const Tensor& mean_dy, const Tensor& mean_dy_xmu) {
+  //FIXME
+  std::cout << "batch_norm_backward_elemt_cuda called" << std::endl;
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward_elemt", [&] {
+      auto mean_st = mean.dtype();
+      auto invstd_st = invstd.dtype();
+      TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
+      bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        return batch_norm_backward_elemt_cuda_template<scalar_t, int32_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        if (is_half_float) {
+          return batch_norm_backward_elemt_cuda_template<at::Half, float, int32_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        } else {
+          return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        }
       } else {
-        return batch_norm_backward_elemt_cuda_template<scalar_t, int64_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        if (is_half_float) {
+          return batch_norm_backward_elemt_cuda_template<at::Half, float, int64_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        } else {
+          return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        }
       }
     });
 }
