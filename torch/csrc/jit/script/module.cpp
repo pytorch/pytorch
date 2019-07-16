@@ -12,31 +12,28 @@ namespace torch {
 namespace jit {
 namespace script {
 
-static ModulePtr create_module_object(c10::QualifiedName class_name) {
-  auto cu = std::make_shared<CompilationUnit>();
+static ModulePtr create_module_object(
+    c10::QualifiedName class_name,
+    std::shared_ptr<CompilationUnit> cu) {
   auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
   return c10::ivalue::Object::create(
       c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
 }
 
 Module::Module(c10::QualifiedName class_name)
-    : module_value_(create_module_object(std::move(class_name))) {}
+    : module_value_(create_module_object( std::move(class_name), std::make_shared<CompilationUnit>())) {}
 
 Module::Module(
     c10::QualifiedName class_name,
-    std::shared_ptr<CompilationUnit> cu) {
-  auto cls = ClassType::create(
-      QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
-  // TODO: register class? Does it actaully matter?
-  module_value_ = c10::ivalue::Object::create(
-      c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
-}
+    std::shared_ptr<CompilationUnit> cu)
+    : module_value_(
+          create_module_object(std::move(class_name), std::move(cu))) {}
 
 ModulePtr Module::module_object() const {
   if (!module_value_) {
     // User has created a Model without assigning it to something already
     // loaded. This is done in tests, and when using the .define method.
-    module_value_ = create_module_object("__main__");
+    module_value_ = create_module_object("__main__", std::make_shared<CompilationUnit>());
   }
   return module_value_;
 }
