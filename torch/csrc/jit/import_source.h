@@ -15,6 +15,8 @@ namespace script {
 
 // Add the methods defined in `src` to the module `mod`.
 TORCH_API void import_methods(
+    // CompilationUnit in which to look up any classes used
+    const CompilationUnit& lib_cu,
     const script::Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
@@ -24,7 +26,7 @@ TORCH_API void import_methods(
 // Define the list of classes in `src`.
 TORCH_API void import_libs(
     // The compilation unit that will own the imported libs
-    std::shared_ptr<CompilationUnit> cu,
+    CompilationUnit& lib_cu,
     // Qualifier for any classes that `src` defines. Looks like a module path,
     // like "foo.bar.baz"
     const std::string& class_qualifier,
@@ -40,8 +42,10 @@ TORCH_API void import_libs(
 TORCH_API void import_functions(
     // Prefix to use when importing these functions in to the CU
     const c10::optional<c10::QualifiedName>& prefix,
+    // CompilationUnit in which to look up any classes used
+    const CompilationUnit& lib_cu,
     // CompilationoUnit to define the functions in.
-    std::shared_ptr<CompilationUnit> cu,
+    CompilationUnit& cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const Self* self = nullptr,
