@@ -195,6 +195,9 @@ struct C10_API VariableVersion {
   c10::intrusive_ptr<VersionCounter> version_counter_;
 
  public:
+  bool unique() const {
+    return 1 == version_counter_.use_count();
+  }
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
   // https://cplusplus.github.io/LWG/issue2334.
@@ -390,6 +393,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
     return numel_;
+  }
+
+  bool unique_version() const {
+    return version_counter_.unique();
   }
 
   /**
@@ -906,6 +913,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // In `shallow_copy_from()`, we don't check the destination TensorImpl's `allow_tensor_metadata_change_`,
   // because `shallow_copy_from()` is used for implementing functions such as `var.set_data(tensor)`, which
   // changes `var`'s tensor metadata and expects its `allow_tensor_metadata_change_` to be ignored.
+
+  /**
+   * One TensorImpl can be copied to another TensorImpl if they have the same
+   * type_id. The only two special cases (for legacy reason) are:
+   * CPUTensorId is compatible with CUDATensorId and SparseCPUTensorId is
+   * compatible with SparseCUDATensorId.
+   */
+  inline bool has_compatible_shallow_copy_type(TensorTypeId from) {
+    TensorTypeId self = type_id();
+    return (self == from) ||
+        ((self == CPUTensorId() || self == CUDATensorId() || self == HIPTensorId()) &&
+        (from == CPUTensorId() || from == CUDATensorId() || from == HIPTensorId())) ||
+        ((self == SparseCPUTensorId() || self == SparseCUDATensorId() || self == SparseHIPTensorId()) &&
+        (from == SparseCPUTensorId() || from == SparseCUDATensorId() || from == SparseHIPTensorId()));
+  }
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.

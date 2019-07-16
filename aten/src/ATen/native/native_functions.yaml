@@ -83,29 +83,29 @@
 - func: dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  variant: method
+  variant: function, method
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  variant: method
+  variant: function, method
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  variant: method
+  variant: function, method
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  variant: method
+  variant: function, method
 
 - func: abs(Tensor self) -> Tensor
   variants: function, method
   named_guard: False
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
+  variants: function, method
   named_guard: False
   dispatch:
     CPU: _abs__cpu
@@ -123,7 +123,7 @@
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _acos__cpu
     CUDA: _acos__cuda
@@ -181,7 +181,7 @@
     CUDA: legacy::cuda::_th_addmv
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  variants: method
+  variants: function, method
   dispatch:
     CPU: legacy::cpu::_th_addmv_
     CUDA: legacy::cuda::_th_addmv_
@@ -254,7 +254,7 @@
   named_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
-  variants: method
+  variants: function, method
   device_guard: False
 
 - func: asin(Tensor self) -> Tensor
@@ -263,7 +263,7 @@
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _asin__cpu
     CUDA: _asin__cuda
@@ -280,7 +280,7 @@
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _atan__cpu
     CUDA: _atan__cuda
@@ -401,7 +401,7 @@
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _ceil__cpu
     CUDA: _ceil__cuda
@@ -425,7 +425,7 @@
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _clamp__cpu
     CUDA: _clamp__cuda
@@ -442,7 +442,7 @@
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _clamp_max__cpu
     CUDA: _clamp_max__cuda
@@ -459,7 +459,7 @@
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _clamp_min__cpu
     CUDA: _clamp_min__cuda
@@ -517,7 +517,7 @@
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _cos__cpu
     CUDA: _cos__cuda
@@ -534,7 +534,7 @@
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _cosh__cpu
     CUDA: _cosh__cuda
@@ -653,6 +653,9 @@
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
 
+- func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
+  variants: method
+
 - func: div(Tensor self, Tensor other) -> Tensor
   variants: function, method
 
@@ -765,7 +768,7 @@
 
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _erf__cpu
     CUDA: _erf__cuda
@@ -782,7 +785,7 @@
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _erfc__cpu
     CUDA: _erfc__cuda
@@ -799,7 +802,7 @@
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _exp__cpu
     CUDA: _exp__cuda
@@ -854,11 +857,11 @@
 
 - func: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
 
 - func: fill_(Tensor(a!) self, Tensor value) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
 
 - func: floor(Tensor self) -> Tensor
   named_guard: False
@@ -866,7 +869,7 @@
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _floor__cpu
     CUDA: _floor__cuda
@@ -883,7 +886,7 @@
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _frac__cpu
     CUDA: _frac__cuda
@@ -1003,7 +1006,7 @@
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
-  variants: method
+  variants: function, method
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   variants: function, method
@@ -1102,6 +1105,10 @@
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
 
+- func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
+
+- func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
 
 - func: fbgemm_is_cpu_supported() -> bool
@@ -1119,7 +1126,7 @@
 
 - func: log_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _log__cpu
     CUDA: _log__cuda
@@ -1153,7 +1160,7 @@
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _log1p__cpu
     CUDA: _log1p__cuda
@@ -1340,6 +1347,14 @@
 - func: miopen_depthwise_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_weight
+
+- func: miopen_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: miopen_rnn
+
+- func: miopen_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+  dispatch:
+    CUDA: miopen_rnn_backward
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
@@ -1604,7 +1619,7 @@
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _reciprocal__cpu
     CUDA: _reciprocal__cuda
@@ -1621,7 +1636,7 @@
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _neg__cpu
     CUDA: _neg__cuda
@@ -1667,7 +1682,7 @@
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _round__cpu
     CUDA: _round__cuda
@@ -1739,7 +1754,7 @@
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _rsqrt__cpu
     CUDA: _rsqrt__cuda
@@ -1778,7 +1793,7 @@
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _sigmoid__cpu
     CUDA: _sigmoid__cuda
@@ -1796,7 +1811,7 @@
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _sin__cpu
     CUDA: _sin__cuda
@@ -1813,7 +1828,7 @@
 
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _sinh__cpu
     CUDA: _sinh__cuda
@@ -1828,7 +1843,7 @@
   variants: function, method
 
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
+  variants: function, method
 
 - func: size(Tensor self, int dim) -> int
   variants: function, method
@@ -1962,7 +1977,7 @@
 
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _sqrt__cpu
     CUDA: _sqrt__cuda
@@ -2009,7 +2024,7 @@
 
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _tan__cpu
     CUDA: _tan__cuda
@@ -2026,7 +2041,7 @@
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _tanh__cpu
     CUDA: _tanh__cuda
@@ -2106,7 +2121,7 @@
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: function, method
   dispatch:
     CPU: _trunc__cpu
     CUDA: _trunc__cuda
@@ -2120,7 +2135,7 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
-- func: _has_same_tensorimpl_type(Tensor self, Tensor other) -> bool
+- func: _has_compatible_shallow_copy_type(Tensor self, Tensor from) -> bool
   variants: function
 
 - func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
@@ -2327,7 +2342,7 @@
     QuantizedCPU: quantized_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  variants: method
+  variants: function, method
   dispatch:
     CPU: legacy::cpu::_th_resize_as_
     CUDA: legacy::cuda::_th_resize_as_
@@ -2351,7 +2366,7 @@
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
-  variants: method
+  variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_zero_
     CUDA: legacy::cuda::_th_zero_
@@ -2392,7 +2407,7 @@
     CUDA: s_addmm_sparse_dense_cuda
 
 - func: s_native_addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  variant: method
+  variants: function, method
   dispatch:
     CPU: s_addmm_sparse_dense_cpu_
     CUDA: s_addmm_sparse_dense_cuda_
@@ -2695,7 +2710,7 @@
   requires_tensor: True
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  variants: method
+  variants: function, method
   dispatch:
     SparseCPU: copy_sparse_
     SparseCUDA: copy_sparse_
@@ -2777,6 +2792,18 @@
   variants: method
   dispatch:
     QuantizedCPU: qscheme_quant
+
+- func: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
+  variants: function
+  dispatch:
+    CPU: fake_quantize_per_tensor_affine_cpu
+    CUDA: fake_quantize_per_tensor_affine_cuda
+
+- func: fake_quantize_per_tensor_affine_backward(Tensor grad, Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
+  variants: function
+  dispatch:
+    CPU: fake_quantize_per_tensor_affine_backward_cpu
+    CUDA: fake_quantize_per_tensor_affine_backward_cuda
 
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
@@ -2861,6 +2888,12 @@
 
 # Quantized RNN layers
 - func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
+
+# Quantized GRU layers
+
+- func: quantized_gru(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+
+- func: quantized_gru(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
 
 # Quantized RNN cells
 - func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
@@ -3706,15 +3739,15 @@
     CUDA: legacy::cuda::_th_eig
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
-  dispatch:
-    CPU: legacy::cpu::_th_svd_out
-    CUDA: legacy::cuda::_th_svd_out
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
+
+- func: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor, Tensor, Tensor)
+  variants: function
   dispatch:
-    CPU: legacy::cpu::_th_svd
-    CUDA: legacy::cuda::_th_svd
+    CPU: _svd_helper_cpu
+    CUDA: _svd_helper_cuda
 
 - func: cholesky(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 

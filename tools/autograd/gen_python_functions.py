@@ -27,7 +27,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
-    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*',
+    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
@@ -49,6 +49,7 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
+  ${deprecation_message}
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     ${signatures}
@@ -66,6 +67,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 {
+  ${deprecation_message}
   HANDLE_TH_ERRORS
   ${declare_namedtuple_return_types}
   ${unpack_self}
@@ -691,6 +693,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             'unpack_self': [],
             'dispatch': [],
             'declare_namedtuple_return_types': '',
+            'deprecation_message': '',
         }
 
         if has_self:
@@ -720,6 +723,12 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['dispatch'].append('}')
 
         env['traceable'] = 'true' if all(should_trace(d) for d in declarations) else 'false'
+
+        # In-place operator, should be method only. Deprecate it.
+        if is_module and name.endswith('_') and not name.startswith('_'):
+            env['deprecation_message'] = ('PyErr_WarnEx(PyExc_DeprecationWarning, '
+                                          '"In-place functions such as torch.${name} are deprecated. '
+                                          'Use their in-place method counterparts such as Tensor.${name} instead.", 1)')
 
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
             tmpl = PY_VARIABLE_METHOD_NOARGS

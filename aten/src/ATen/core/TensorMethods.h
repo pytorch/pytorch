@@ -281,6 +281,10 @@ inline Tensor Tensor::diagonal(int64_t offset, int64_t dim1, int64_t dim2) const
     static auto table = globalATenDispatch().getOpTable("aten::diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, offset, dim1, dim2);
 }
+inline Tensor & Tensor::fill_diagonal_(Scalar fill_value, bool wrap) {
+    static auto table = globalATenDispatch().getOpTable("aten::fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Scalar, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, fill_value, wrap);
+}
 inline Tensor Tensor::div(const Tensor & other) const {
     static auto table = globalATenDispatch().getOpTable("aten::div(Tensor self, Tensor other) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, other);
@@ -926,6 +930,10 @@ inline Tensor Tensor::sub(Scalar other, Scalar alpha) const {
 inline Tensor & Tensor::sub_(Scalar other, Scalar alpha) {
     static auto table = globalATenDispatch().getOpTable("aten::sub_(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, Scalar, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, other, alpha);
+}
+inline Tensor & Tensor::s_native_addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) {
+    static auto table = globalATenDispatch().getOpTable("aten::s_native_addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, mat1, mat2, beta, alpha);
 }
 inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
     static auto table = globalATenDispatch().getOpTable("aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor");

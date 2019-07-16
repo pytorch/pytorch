@@ -406,6 +406,7 @@ class CAFFE2_API Tensor {
   Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;
   Tensor diagonal(int64_t offset=0, int64_t dim1=0, int64_t dim2=1) const;
+  Tensor & fill_diagonal_(Scalar fill_value, bool wrap=false);
   Tensor div(const Tensor & other) const;
   Tensor & div_(const Tensor & other);
   Tensor div(Scalar other) const;
@@ -569,6 +570,7 @@ class CAFFE2_API Tensor {
   Tensor & sub_(const Tensor & other, Scalar alpha=1);
   Tensor sub(Scalar other, Scalar alpha=1) const;
   Tensor & sub_(Scalar other, Scalar alpha=1);
+  Tensor & s_native_addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
   Tensor addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
   Tensor & sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
