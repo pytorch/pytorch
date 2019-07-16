@@ -238,7 +238,17 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else {
-    Tensor tensor = tensor_.to(kCPU, kDouble).contiguous();
+    Tensor tensor;
+    if (tensor_.is_quantized()) {
+      tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
+      stream << "[ " << tensor_.toString() << "{}\n";
+      stream << "size: " << tensor_.sizes() << "\n";
+      stream << "scale: " << tensor_.q_scale() << "\n";
+      stream << "zero_point: " << tensor_.q_zero_point() << " ]\n";
+    }
+    else {
+      tensor = tensor_.to(kCPU, kDouble).contiguous();
+    }
     if(tensor.ndimension() == 0) {
       stream << defaultfloat << tensor.data<double>()[0] << std::endl;
       stream << "[ " << tensor_.toString() << "{} ]";
