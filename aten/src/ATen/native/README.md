@@ -190,8 +190,8 @@ are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
 more complicated neural network layers (e.g., `conv2d`) and internal functions
 designed specifically for binding (e.g., `cudnn_convolution`).
 
-In addition, if the operator is in-place, you should only use a method variant, not a function
-variant.
+In addition, if the operator is in-place, you should only use a method variant,
+not a function variant.
 
 As we progress along our schema unification of the `func` schema with the JIT
 signature schema, we must introduce features that allow us to increase compliance.
