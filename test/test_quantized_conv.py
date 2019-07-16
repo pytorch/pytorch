@@ -6,40 +6,37 @@ from __future__ import unicode_literals
 import numpy as np
 import torch
 import torch.nn.quantized.functional as qF
+from torch.nn.quantized.modules.conv import _conv_output_shape
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import qtensors_conv
+import hypothesis_utils as hu
 
 from common_utils import TestCase, run_tests
 
 
 class FunctionalAPITest(TestCase):
-    """Computes the output shape given convolution parameters."""
-    def _conv_output_shape(self, input_size, kernel_size, padding, stride,
-                           dilation):
-        return np.floor((input_size + 2 * padding - kernel_size
-                         - (kernel_size - 1) * (dilation - 1)) / stride) + 1
-
-    @given(Q=qtensors_conv(min_batch=1, max_batch=3,
-                           min_in_channels=1, max_in_channels=7,
-                           min_out_channels=1, max_out_channels=7,
-                           H_range=(6, 12), W_range=(6, 12),
-                           kH_range=(3, 5), kW_range=(3, 5),
-                           dtypes=((torch.quint8, np.uint8, 0),),
-                           max_groups=4),
+    @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
+                              min_in_channels=1, max_in_channels=7,
+                              min_out_channels=1, max_out_channels=7,
+                              H_range=(6, 12), W_range=(6, 12),
+                              kH_range=(3, 5), kW_range=(3, 5),
+                              max_groups=4),
+           qparams=hu.qparams(dtypes=torch.quint8,
+                              zero_point_min=0,
+                              zero_point_max=0),
            padH=st.integers(1, 3), padW=st.integers(1, 3),
            sH=st.integers(1, 3), sW=st.integers(1, 3),
            dH=st.integers(1, 2), dW=st.integers(1, 2),
            prepacked=st.booleans())
-    def test_conv_api(self, Q, padH, padW, sH, sW, dH, dW, prepacked):
+    def test_conv_api(self, X, qparams, padH, padW, sH, sW, dH, dW, prepacked):
         """Tests the correctness of the conv functional.
 
         The correctness is defined by the behavior being similar to the
         `quantized._ops` implementation.
         """
-        # Random iunputs
-        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
+        # Random inputs
+        (scale, zero_point), (qmin, qmax), torch_type = qparams
         (inputs, filters, bias, groups) = X
 
         iC, oC = inputs.shape[1], filters.shape[0]
@@ -48,9 +45,9 @@ class FunctionalAPITest(TestCase):
         kH, kW = filters.shape[2:]
         assume(kH // 2 >= padH)
         assume(kW // 2 >= padW)
-        oH = self._conv_output_shape(iH, kH, padH, sH, dH)
+        oH = _conv_output_shape(iH, kH, padH, sH, dH)
         assume(oH > 0)
-        oW = self._conv_output_shape(iW, kW, padW, sW, dW)
+        oW = _conv_output_shape(iW, kW, padW, sW, dW)
         assume(oW > 0)
 
         inputs = torch.from_numpy(inputs).to(torch.float)
