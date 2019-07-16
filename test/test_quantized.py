@@ -67,8 +67,6 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     return Y_q_ref
 
 
-@skipIfNotRegistered("Relu_ENGINE_FBGEMM",
-                     "fbgemm-based Caffe2 ops are not linked")
 class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
     def _pool_output_shape(self, input_size, kernel_size, padding, stride,
@@ -85,18 +83,26 @@ class TestQuantizedOps(TestCase):
     @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5)))
     def test_qrelu(self, Q):
         X, (scale, zero_point), (qmin, qmax), torch_type = Q
-        relu = torch.ops.quantized.relu
+        ops_relu = torch.ops.quantized.relu
+        native_relu = torch.relu
 
         Y = X.copy()
+        Y[Y < 0] = 0
+        qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale,
+                                   zero_point=zero_point, dtype=torch_type)
         X = torch.from_numpy(X)
-
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
-        qY_hat = relu(qX)
 
-        Y[Y < 0] = 0
-        qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale, zero_point=zero_point, dtype=torch_type)
-        self.assertEqual(qY, qY_hat)
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.relu,
+            'native': torch.relu,
+            'nn.functional': torch.nn.functional.relu
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX)
+            self.assertEqual(qY, qY_hat, "{} relu failed".format(name))
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
