@@ -728,7 +728,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if is_module and name.endswith('_') and not name.startswith('_'):
             env['deprecation_message'] = ('PyErr_WarnEx(PyExc_DeprecationWarning, '
                                           '"In-place functions such as torch.${name} are deprecated. '
-                                          'Use their in-place method counterparts such as Tensor.${name} instead.", 1)')
+                                          'Use their in-place method counterparts such as Tensor.${name} instead.", 1);')
 
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
             tmpl = PY_VARIABLE_METHOD_NOARGS
