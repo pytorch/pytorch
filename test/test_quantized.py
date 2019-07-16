@@ -82,7 +82,6 @@ class TestQuantizedOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
     def test_qrelu(self, X):
-        # hu.assume_not_overflowing(X, qparams)
         X, (scale, zero_point, torch_type) = X
         relu = torch.ops.quantized.relu
 
@@ -200,12 +199,12 @@ class TestQuantizedOps(TestCase):
         a_pool_hat = qa_pool_hat.dequantize()
 
 
-# @unittest.skipIf(
-#     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-#     " Quantized Linear requires FBGEMM. FBGEMM does not play"
-#     " well with UBSAN at the moment, so we skip the test if"
-#     " we are in a UBSAN environment.",
-# )
+@unittest.skipIf(
+    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+    " Quantized Linear requires FBGEMM. FBGEMM does not play"
+    " well with UBSAN at the moment, so we skip the test if"
+    " we are in a UBSAN environment.",
+)
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
@@ -302,7 +301,6 @@ class TestQuantizedLinear(unittest.TestCase):
     @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
                        qparams=hu.qparams(dtypes=torch.qint8)))
     def test_qlinear_unpack(self, W):
-        # hu.assume_not_overflowing(W, qparams)
         W, (W_scale, W_zp, torch_type) = W
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
@@ -322,12 +320,12 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 
-# @unittest.skipIf(
-#     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-#     " Quantized convolution requires FBGEMM. FBGEMM does not play"
-#     " well with UBSAN at the moment, so we skip the test if"
-#     " we are in a UBSAN environment.",
-# )
+@unittest.skipIf(
+    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+    " Quantized convolution requires FBGEMM. FBGEMM does not play"
+    " well with UBSAN at the moment, so we skip the test if"
+    " we are in a UBSAN environment.",
+)
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
@@ -489,10 +487,10 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
         np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
-# @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
-# @unittest.skipIf(TEST_WITH_UBSAN,
-#                  "QNNPACK does not play well with UBSAN at the moment,"
-#                  " so we skip the test if we are in a UBSAN environment.")
+@unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
+@unittest.skipIf(TEST_WITH_UBSAN,
+                 "QNNPACK does not play well with UBSAN at the moment,"
+                 " so we skip the test if we are in a UBSAN environment.")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -500,7 +498,6 @@ class TestQNNPackOps(TestCase):
                                           zero_point_min=0,
                                           zero_point_max=0)))
     def test_qnnpack_relu(self, X):
-        # hu.assume_not_overflowing(X, qparams)
         X, (scale, zero_point, torch_type) = X
         relu = torch.ops.quantized.qnnpack_relu
 
