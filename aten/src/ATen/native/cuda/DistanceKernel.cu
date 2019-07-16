@@ -226,7 +226,6 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   const int64_t r1 = x1.size(-2);
   const int64_t r2 = x2.size(-2);
   const int64_t m = x1.size(-1);
-  const int64_t d = x1.size(0);
   const int64_t r_size = r1 * r2;
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
@@ -325,7 +324,10 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t r1 = x1.size(-2);
   const int64_t r2 = x2.size(-2);
   const int64_t m = x1.size(-1);
-  const int64_t d = x1.size(0);
+  int64_t d = 1;
+  if (x1.dim() > 2) {
+    d = x1.size(0);
+  }
   const int block_x = 64;
   const int block_y = 16;
   const int grid_x = (m + block_x * 8 - 1) / (block_x * 8);
