@@ -251,7 +251,7 @@ class TestONNXRuntime(unittest.TestCase):
         # This is the reason we don't validate the ORT prediction in run_test for
         # all the lstm tests below. Instead we do it here.
         output, (h, c) = model(input, (h0, c0))
-        validate_ORT_prediction(ort_session, (input, h0, c0), (output, h, c))
+        validate_ORT_prediction(ort_session, (input, h0, c0), (output, h, c), atol=1e-07)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_default_init_state(self):
@@ -261,7 +261,7 @@ class TestONNXRuntime(unittest.TestCase):
         ort_session = self.run_test(model, input, validate_prediction=False)
 
         output, (h, c) = model(input)
-        validate_ORT_prediction(ort_session, input, (output, h, c))
+        validate_ORT_prediction(ort_session, input, (output, h, c), atol=1e-07)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_fixed_batch_size(self):
@@ -285,12 +285,12 @@ class TestONNXRuntime(unittest.TestCase):
         ort_session = self.run_test(model, input, fixed_batch_size=True, validate_prediction=False)
 
         output, (h, c) = model(input)
-        validate_ORT_prediction(ort_session, input, (output, h, c))
+        validate_ORT_prediction(ort_session, input, (output, h, c), atol=1e-07)
 
         # verify with different input of same batch size
         input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         output, (h, c) = model(input2)
-        validate_ORT_prediction(ort_session, input2, (output, h, c))
+        validate_ORT_prediction(ort_session, input2, (output, h, c), atol=1e-07)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_post_fix_init_state(self):
@@ -316,12 +316,12 @@ class TestONNXRuntime(unittest.TestCase):
                                     validate_prediction=False)
 
         output, (h, c) = model(input)
-        validate_ORT_prediction(ort_session, input, (output, h, c))
+        validate_ORT_prediction(ort_session, input, (output, h, c), atol=1e-07)
 
         # verify with different input of different batch size
         input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         output, (h, c) = model(input2)
-        validate_ORT_prediction(ort_session, input2, (output, h, c))
+        validate_ORT_prediction(ort_session, input2, (output, h, c), atol=1e-07)
 
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_adaptive_max_pool(self):
