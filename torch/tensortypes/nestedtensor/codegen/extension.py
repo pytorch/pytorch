@@ -1,5 +1,6 @@
 import torch
 from functools import wraps
+from collections import namedtuple
 
 # These functions only take two inputs. An input and a output.
 # No scalars etc.
@@ -75,6 +76,8 @@ def get_binary_functions():
         'mul',
         'sub',
         'div',
+        'pow',
+        'atan2',
     ]
 
 
@@ -147,13 +150,13 @@ def get_unary_method_signatures():
 
 def get_binary_method_signatures():
     signatures = []
-    for method_name in ['add', 'mul', 'sub']:
+    for method_name in get_binary_functions():
         signatures.append({'torch': method_name, 'Tensor': method_name, 'inplace': False})
         signatures.append({'torch': method_name, 'Tensor': method_name + "_", 'inplace': True})
+
+    for method_name in ['add', 'mul', 'sub']:
         signatures.append({'torch': method_name, 'Tensor': "__" + method_name + "__", 'inplace': False})
         signatures.append({'torch': method_name, 'Tensor': "__i" + method_name + "__", 'inplace': True})
-    signatures.append({'torch': 'div', 'Tensor': 'div', 'inplace': False})
-    signatures.append({'torch': 'div', 'Tensor': 'div' + "_", 'inplace': True})
     signatures.append({'torch': 'div', 'Tensor': "__" + 'div' + "__", 'inplace': False})
     signatures.append({'torch': 'div', 'Tensor': "__i" + 'div' + "__", 'inplace': True})
     return signatures
