@@ -15559,6 +15559,7 @@ class TestDataParallel(JitTestCase):
             self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
                                    nn.ReLU(), nn.Linear(2, 2))
 
+        @torch.jit.ignore
         def forward(self, input):
             return self.m(input)
 
@@ -15567,6 +15568,7 @@ class TestDataParallel(JitTestCase):
             super(TestDataParallel.Mpy1, self).__init__()
             self.m = block
 
+        @torch.jit.ignore
         def forward(self, input):
             return self.m.forward(input)
 
@@ -15576,6 +15578,7 @@ class TestDataParallel(JitTestCase):
             self.m1 = block1
             self.m2 = block2
 
+        @torch.jit.ignore
         def forward(self, input):
             x = self.m1.forward(input)
             return self.m2(x)
