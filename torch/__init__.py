@@ -312,7 +312,6 @@ import torch.hub
 import torch.random
 import torch.distributions
 import torch.testing
-import torch.tensortypes
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp

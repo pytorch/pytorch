@@ -7,7 +7,7 @@ if TEST_WITH_NESTEDTENSORS:
     from common_utils import TestCase
     NestedTensor = nestedtensor.NestedTensor
 else:
-    print('prototypes not available, skipping tests')
+    print('NestedTensors not available, skipping tests')
     TestCase = object
 
 
