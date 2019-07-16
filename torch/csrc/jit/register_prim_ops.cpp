@@ -49,6 +49,15 @@ namespace jit {
 
 namespace {
 
+template<class T>
+c10::List<T> make_result_list() {
+  return c10::List<T>();
+}
+template<>
+c10::impl::GenericList make_result_list<IValue>() {
+  return c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+}
+
 Operation noop(const Node* n) {
   return [](Stack& stack) { return 0; };
 }
@@ -828,6 +837,7 @@ RegisterOperators reg(
            return [=](Stack& stack) {
              auto tuple = pop(stack).toTuple();
              std::vector<IValue> output_elems;
+             output_elems.reserve(end_ind - beg_ind);
              for (int64_t i = beg_ind; i < end_ind; ++i) {
                output_elems.emplace_back(tuple->elements()[i]);
              }
@@ -989,7 +999,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::impl::GenericList vals;
+               auto vals = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -1073,9 +1083,10 @@ RegisterOperators reg(
          [](const Node* node) {
            const auto type = node->output()->type()->expect<ClassType>();
            const size_t numAttrs = type->numAttributes();
-           return [type, numAttrs](Stack& stack) {
+           auto cu = type->compilation_unit();
+           return [cu, type, numAttrs](Stack& stack) {
              auto userObj = c10::ivalue::Object::create(
-                 c10::StrongTypePtr(type->compilation_unit(), type), numAttrs);
+                 c10::StrongTypePtr(cu, type), numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };
@@ -1260,9 +1271,8 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
 
 template <typename T>
 int listAppend(Stack& stack) {
-  c10::List<T> list;
-  T el;
-  pop(stack, list, el);
+  T el = pop(stack).to<T>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   list.push_back(std::move(el));
   push(stack, std::move(list));
@@ -1272,8 +1282,7 @@ int listAppend(Stack& stack) {
 
 template <typename T>
 int listReverse(Stack& stack) {
-  c10::List<T> list;
-  pop(stack, list);
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   std::reverse(list.begin(), list.end());
 
@@ -1282,9 +1291,8 @@ int listReverse(Stack& stack) {
 
 template <typename T>
 int listPop(Stack& stack) {
-  c10::List<T> list;
-  int64_t idx;
-  pop(stack, list, idx);
+  int64_t idx = pop(stack).to<int64_t>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
@@ -1301,8 +1309,7 @@ int listPop(Stack& stack) {
 
 template <typename T>
 int listClear(Stack& stack) {
-  c10::List<T> list;
-  pop(stack, list);
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   list.clear();
   return 0;
@@ -1310,10 +1317,9 @@ int listClear(Stack& stack) {
 
 template <typename T>
 int listInsert(Stack& stack) {
-  c10::List<T> list;
-  int64_t idx;
-  T elem;
-  pop(stack, list, idx, elem);
+  T elem = pop(stack).to<T>();
+  int64_t idx = pop(stack).to<int64_t>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
@@ -1333,9 +1339,8 @@ int listInsert(Stack& stack) {
 
 template <typename T>
 int listRemove(Stack& stack) {
-  c10::List<T> list;
-  T elem;
-  pop(stack, list, elem);
+  T elem = pop(stack).to<T>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   auto pos = std::find(list.begin(), list.end(), elem);
 
@@ -1350,9 +1355,8 @@ int listRemove(Stack& stack) {
 
 template <>
 int listRemove<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list;
-  at::Tensor elem;
-  pop(stack, list, elem);
+  at::Tensor elem = pop(stack).to<at::Tensor>();
+  c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
   auto pos = std::find_if(
       list.begin(), list.end(), [&](const at::Tensor& b) {
@@ -1371,9 +1375,8 @@ int listRemove<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listIndex(Stack& stack) {
-  c10::List<T> list;
-  T elem;
-  pop(stack, list, elem);
+  T elem = pop(stack).to<T>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   auto pos = std::find(list.begin(), list.end(), elem);
 
@@ -1388,9 +1391,8 @@ int listIndex(Stack& stack) {
 
 template <>
 int listIndex<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list;
-  at::Tensor elem;
-  pop(stack, list, elem);
+  at::Tensor elem = pop(stack).to<at::Tensor>();
+  c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
   auto pos = std::find_if(
       list.begin(), list.end(), [elem](const at::Tensor& b) {
@@ -1409,9 +1411,8 @@ int listIndex<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listCount(Stack& stack) {
-  c10::List<T> list;
-  T elem;
-  pop(stack, list, elem);
+  T elem = pop(stack).to<T>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   const int64_t count = std::count(list.begin(), list.end(), elem);
   push(stack, count);
@@ -1421,9 +1422,8 @@ int listCount(Stack& stack) {
 
 template <>
 int listCount<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> list;
-  at::Tensor elem;
-  pop(stack, list, elem);
+  at::Tensor elem = pop(stack).to<at::Tensor>();
+  c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
   const int64_t count = std::count_if(
       list.begin(), list.end(), [&](const at::Tensor& b) {
@@ -1438,9 +1438,8 @@ int listCount<at::Tensor>(Stack& stack) {
 template <typename T>
 Operation listExtend(const Node* node) {
   return [](Stack& stack) {
-    c10::List<T> a;
-    c10::List<T> b;
-    pop(stack, a, b);
+    c10::List<T> b = pop(stack).to<c10::List<T>>();
+    c10::List<T> a = pop(stack).to<c10::List<T>>();
 
     a.reserve(a.size() + b.size());
     for (size_t i = 0; i < b.size(); ++i) {
@@ -1453,8 +1452,7 @@ Operation listExtend(const Node* node) {
 template <typename T>
 Operation listCopy(const Node* node) {
   return [](Stack& stack) {
-    c10::List<T> list;
-    pop(stack, list);
+    c10::List<T> list = pop(stack).to<c10::List<T>>();
     push(stack, list.copy());
     return 0;
   };
@@ -1462,9 +1460,8 @@ Operation listCopy(const Node* node) {
 
 template <typename T>
 int listSelect(Stack& stack) {
-  c10::List<T> list;
-  int64_t idx;
-  pop(stack, list, idx);
+  int64_t idx = pop(stack).to<int64_t>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   auto element = getItem(list, idx);
   push(stack, std::move(element));
@@ -1473,8 +1470,7 @@ int listSelect(Stack& stack) {
 
 template <typename T>
 int listLen(Stack& stack) {
-  c10::List<T> a;
-  pop(stack, a);
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
 
   const int64_t size = a.size();
   push(stack, size);
@@ -1483,18 +1479,16 @@ int listLen(Stack& stack) {
 
 template <typename T>
 int listEq(Stack& stack) {
-  c10::List<T> a;
-  c10::List<T> b;
-  pop(stack, a, b);
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
   push(stack, list_is_equal(a, b));
   return 0;
 }
 
 template <typename T>
 int listNe(Stack& stack) {
-  c10::List<T> a;
-  c10::List<T> b;
-  pop(stack, a, b);
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
   push(stack, !list_is_equal(a, b));
   return 0;
 }
@@ -1522,9 +1516,8 @@ inline bool tensor_list_equal(const c10::List<at::Tensor>& a, const c10::List<at
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 int listEq<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> a;
-  c10::List<at::Tensor> b;
-  pop(stack, a, b);
+  c10::List<at::Tensor> b = pop(stack).to<c10::List<at::Tensor>>();
+  c10::List<at::Tensor> a = pop(stack).to<c10::List<at::Tensor>>();
   push(stack, tensor_list_equal(a, b));
   return 0;
 }
@@ -1532,9 +1525,8 @@ int listEq<at::Tensor>(Stack& stack) {
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 int listNe<at::Tensor>(Stack& stack) {
-  c10::List<at::Tensor> a;
-  c10::List<at::Tensor> b;
-  pop(stack, a, b);
+  c10::List<at::Tensor> b = pop(stack).to<c10::List<at::Tensor>>();
+  c10::List<at::Tensor> a = pop(stack).to<c10::List<at::Tensor>>();
   push(stack, !tensor_list_equal(a, b));
   return 0;
 }
@@ -1548,11 +1540,10 @@ int listList(Stack& stack) {
 
 template <class T>
 int listAdd(Stack& stack) {
-  c10::List<T> a;
-  c10::List<T> b;
-  pop(stack, a, b);
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
 
-  c10::List<T> ret;
+  c10::List<T> ret = make_result_list<T>();
 
   if (a.use_count() == 1) {
     ret = std::move(a);
@@ -1577,11 +1568,10 @@ int listInplaceAdd(Stack& stack) {
 
 template <class T>
 int listMulIntLeft(Stack& stack) {
-  c10::List<T> list;
-  int64_t n;
-  pop(stack, list, n);
+  int64_t n = pop(stack).to<int64_t>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
-  c10::List<T> ret;
+  c10::List<T> ret = make_result_list<T>();
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1597,11 +1587,10 @@ int listMulIntLeft(Stack& stack) {
 
 template <class T>
 int listMulIntRight(Stack& stack) {
-  c10::List<T> list;
-  int64_t n;
-  pop(stack, n, list);
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  int64_t n = pop(stack).to<int64_t>();
 
-  c10::List<T> ret;
+  c10::List<T> ret = make_result_list<T>();
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1617,12 +1606,11 @@ int listMulIntRight(Stack& stack) {
 
 template <typename T>
 int listSlice(Stack& stack) {
-  c10::List<T> list;
-  int64_t start;
-  int64_t end;
-  int64_t step;
+  int64_t step = pop(stack).to<int64_t>();
+  int64_t end = pop(stack).to<int64_t>();
+  int64_t start = pop(stack).to<int64_t>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
-  pop(stack, list, start, end, step);
   const int64_t list_size = list.size();
 
   // clamp start and end to the bounds of the list
@@ -1631,7 +1619,7 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  c10::List<T> sliced_list;
+  c10::List<T> sliced_list = make_result_list<T>();
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
     push(stack, std::move(sliced_list));
@@ -1673,11 +1661,10 @@ int listSort<at::Tensor>(Stack& stack) {
 
 template <typename T>
 int listSetItem(Stack& stack) {
-  c10::List<T> list;
-  int64_t idx;
-  T value;
+  T value = pop(stack).to<T>();
+  int64_t idx = pop(stack).to<int64_t>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
-  pop(stack, list, idx, value);
   setItem(list, idx, std::move(value));
 
   push(stack, std::move(list));
@@ -1700,7 +1687,7 @@ int dictLen(Stack& stack) {
 
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  c10::impl::GenericList keys;
+  auto keys = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   keys.reserve(dict.size());
   for (auto& item : dict) {
     keys.push_back(item.key());
@@ -1714,8 +1701,19 @@ c10::List<Elem> makeListForDictValues(
     const std::vector<std::pair<IValue, IValue>>& order) {
   c10::List<Elem> values;
   values.reserve(order.size());
-  for (auto item : order) {
+  for (const auto& item : order) {
     values.push_back(item.second.to<Elem>());
+  }
+  return values;
+}
+
+template <>
+c10::impl::GenericList makeListForDictValues<IValue>(
+    const std::vector<std::pair<IValue, IValue>>& order) {
+  auto values = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  values.reserve(order.size());
+  for (const auto& item : order) {
+    values.push_back(item.second);
   }
   return values;
 }
@@ -1847,12 +1845,12 @@ int dictUpdate(Stack& stack) {
 
 int dictItems(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  std::vector<IValue> items;
+  auto items = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   items.reserve(dict.size());
   for (const auto& item : iterationOrder(dict)) {
     items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
   }
-  push(stack, items);
+  push(stack, std::move(items));
   return 0;
 }
 
@@ -2441,7 +2439,7 @@ RegisterOperators reg2({
           " key, t default_value) -> t(*)",                                   \
           dictGet<true>),                                                     \
       Operator(                                                               \
-          "aten::setdefault(Dict(" key_type ", t) self, " key_type            \
+          "aten::setdefault(Dict(" key_type ", t)(a!) self, " key_type        \
           " key, t default_value) -> t(*)",                                   \
           dictSetDefault),                                                    \
       Operator(                                                               \

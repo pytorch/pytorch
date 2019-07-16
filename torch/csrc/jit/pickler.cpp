@@ -580,7 +580,7 @@ OpCode Unpickler::readInstruction() {
           AT_ERROR("Unknown list specialization");
         }
       } else {
-        stack_.emplace_back(std::vector<IValue>());
+        stack_.emplace_back(c10::impl::GenericList(c10::impl::deprecatedUntypedList()));
       }
     } break;
     case OpCode::EMPTY_TUPLE: {

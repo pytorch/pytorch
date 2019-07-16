@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from .quantize import *  # noqa: F401
 from .observer import *  # noqa: F401
 from .QConfig import *  # noqa: F401
+from .fake_quantize import *  # noqa: F401
 
 def default_eval_fn(model, calib_data):
     r"""

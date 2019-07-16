@@ -1706,3 +1706,10 @@ def arange(g, *args):
         return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
+
+
+def masked_fill(g, self, mask, value):
+    mask = _cast_Bool(g, mask, False)
+    value = sym_help._maybe_get_scalar(value)
+    return g.op('Where', mask, sym_help._if_scalar_type_as(g, value, self), self)
+
