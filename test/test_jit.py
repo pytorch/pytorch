@@ -10782,7 +10782,7 @@ a")
 
     def test_unsupported_builtin_error(self):
         with self.assertRaisesRegex(RuntimeError,
-                                    "calling a python builtin_function_or_method which is currently not supported"):
+                                    "Python builtin <built-in function hypot> is currently"):
             @torch.jit.script
             def test_unsupported(a):
                 return math.hypot(a, 2.0)
