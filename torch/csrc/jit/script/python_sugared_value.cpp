@@ -277,7 +277,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         self_, py::cast<std::vector<std::string>>(overloads));
   }
   if (!py::hasattr(py_module_, field.c_str())) {
-    throw ErrorReport(loc) << "module has no attribute '" << field;
+    throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   py::object attr = py::getattr(py_module_, field.c_str());
 

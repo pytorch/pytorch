@@ -1690,7 +1690,7 @@ if _enabled:
                     # original module is dead, try looking up the value on the
                     # original type
                     fn = getattr(self.__dict__["_original_type"], attr, None)
-                    if fn is not None and inspect.isfunction(fn):
+                    if fn is not None and inspect.isroutine(fn):
                         # bind the function to this instance and return it
                         return fn.__get__(self, self.__dict__["_original_type"])
                 # If it's not on this module and it wasn't on the original
