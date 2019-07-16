@@ -3712,11 +3712,11 @@ a")
         for _ in range(100):
             indices = list(random.choices(vals, k=4))
             indices[random.randint(0, len(indices) - 1)] = "..."
-            test_str = dedent(f"""
+            test_str = dedent("""
             def f():
                 x = torch.ones(10, 9, 8, 7, 6)
                 return x{indices}.shape
-            """)
+            """.format(indices=indices))
             test_str = test_str.replace(r"'", r'')
             scope = {}
             execWrapper(test_str, globals(), scope)
