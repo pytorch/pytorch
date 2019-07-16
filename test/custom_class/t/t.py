@@ -1,3 +1,4 @@
+import pdb
 import torch
 torch.ops.load_library("build/t.cpython-37m-darwin.so")
 # print(torch.ops.my_ops.warp_perspective(torch.randn(32, 32)))
@@ -19,19 +20,18 @@ class Bar:
     def display(self, z):
         print(self.x, self.y, z)
 
-print(torch._C.Foo(1, 2))
+# print(torch._C.Foo(5, 3))
 @torch.jit.script
 def f(x):
     val = torch._C.Foo(5, 3)
-    # val = Bar(5, 3)
-    # val.display()
-    # val2 = Bar(100, 0)
-    val2 = torch._C.Foo(100, 0)
-    print("Initialization done")
     val.display()
-    val3 = val.combine(val2)
-    val3.display()
-    print(val, val2)
+    # val2 = Bar(100, 0)
+    # val2 = torch._C.Foo(100, 0)
+    print("Initialization done")
+    # val.display()
+    # val3 = val.combine(val2)
+    # val3.display()
+    # print(val, val2)
 
 print(f.graph)
 f(torch.randn(32, 32))

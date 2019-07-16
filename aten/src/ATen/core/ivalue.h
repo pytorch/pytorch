@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/blob.h>
-#include <ATen/core/Capsule.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Tensor.h>
 
@@ -147,12 +146,12 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
   // Capsule
-  IValue(intrusive_ptr<Capsule> blob);
+  IValue(intrusive_ptr<intrusive_ptr_target> blob);
   bool isCapsule() const {
     return Tag::Capsule == tag;
   }
-  c10::intrusive_ptr<Capsule> toCapsule() &&;
-  c10::intrusive_ptr<Capsule> toCapsule() const &;
+  c10::intrusive_ptr<intrusive_ptr_target> toCapsule() &&;
+  c10::intrusive_ptr<intrusive_ptr_target> toCapsule() const &;
 
   // Tuple
   IValue(ivalue::TuplePtr v);

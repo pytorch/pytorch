@@ -1047,9 +1047,7 @@ RegisterOperators reg(
      Operator(
          "prim::CreateCapsule() -> Capsule",
          [](Stack& stack) {
-            auto userObj = Capsule();
-            auto capsulePtr = c10::make_intrusive<Capsule>(std::move(userObj));
-            auto res = IValue(capsulePtr);
+            auto res = IValue(c10::intrusive_ptr<c10::intrusive_ptr_target>());
             push(stack, std::move(res));
             return 0;
          }),

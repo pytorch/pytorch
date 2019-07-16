@@ -1081,6 +1081,9 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         return obj
     else:
         ast = get_jit_def(obj)
+
+        # import pdb
+        # pdb.set_trace()
         fn = torch._C._jit_script_compile(ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__

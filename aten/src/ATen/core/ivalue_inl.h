@@ -75,13 +75,13 @@ inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() const & {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return toIntrusivePtr<caffe2::Blob>();;
 }
-inline c10::intrusive_ptr<Capsule> IValue::toCapsule() && {
+inline c10::intrusive_ptr<intrusive_ptr_target> IValue::toCapsule() && {
   TORCH_INTERNAL_ASSERT(isCapsule());
-  return moveToIntrusivePtr<Capsule>();
+  return moveToIntrusivePtr<intrusive_ptr_target>();
 }
-inline c10::intrusive_ptr<Capsule> IValue::toCapsule() const & {
+inline c10::intrusive_ptr<intrusive_ptr_target> IValue::toCapsule() const & {
   TORCH_INTERNAL_ASSERT(isCapsule());
-  return toIntrusivePtr<Capsule>();
+  return toIntrusivePtr<intrusive_ptr_target>();
 }
 
 namespace ivalue {
@@ -439,13 +439,19 @@ template <typename T>
 T generic_to(
     IValue ivalue,
     _fake_type<T>) {
+    using ElemType = typename T::element_type;
     auto obj = ivalue.toObject();
     auto capsule = obj->getAttr("capsule");
-    auto &capsulePtr = capsule.toCapsule()->ptr;
+    auto capsulePtr = capsule.toCapsule().release();
     if (capsulePtr == nullptr) {
-      capsulePtr = malloc(sizeof(typename std::remove_pointer<T>::type));
+      capsulePtr = (ElemType*)malloc(sizeof(ElemType));
     }
-    return reinterpret_cast<T>(capsule.toCapsule()->ptr);
+    auto initializedCapsule = IValue(c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(static_cast<intrusive_ptr_target*>(capsulePtr)));
+    obj->setAttr("capsule", initializedCapsule);
+    std::cout<<"449: "<<initializedCapsule.toCapsule().get()<<std::endl;
+    return c10::intrusive_ptr<ElemType>::reclaim(static_cast<ElemType*>(initializedCapsule.toCapsule().get()));
+    // return std::static_pointer_cast<T>(capsule.toCapsule());
+    // return reinterpret_cast<T>(capsule.toCapsule());
 }
 
 template <typename Elem>
@@ -663,7 +669,7 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(c10::intrusive_ptr<Capsule> v)
+inline IValue::IValue(c10::intrusive_ptr<intrusive_ptr_target> v)
 : tag(Tag::Capsule), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }

@@ -68,10 +68,11 @@ class class_ {
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute.
     classCu = std::make_shared<script::CompilationUnit>();
-    tmap[typeid(CurClass*).name()] =  ClassType::create(
+    auto runtimeClassName = typeid(c10::intrusive_ptr<CurClass>).name();
+    tmap[runtimeClassName] =  ClassType::create(
         c10::QualifiedName("__torch__." + parentModule + "." + className),
         classCu);
-    classTypePtr = tmap.find(typeid(CurClass*).name())->second;
+    classTypePtr = tmap.find(runtimeClassName)->second;
     classTypePtr->addAttribute("capsule", CapsuleType::get());
     script::CompilationUnit::_get_python_cu().register_class(classTypePtr);
   }
@@ -79,12 +80,14 @@ class class_ {
   template <typename... Types>
   class_& def(detail::types<void, Types...>) { // Used in combination with
                                                // torch::jit::init<...>()
+
     pyClass->def(py::init<Types...>());
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::__init__";
     // auto qualFuncName = className + "::__init__." + type_name<int64_t,
     // Types...>();
-    auto func = [](CurClass* cur, Types... args) { *cur = CurClass(args...); };
+    auto func = [](c10::intrusive_ptr<CurClass> cur, Types... args) {
+      *cur = CurClass(args...); };
     //  auto func = [](CurClass* cur, Types... args) {
     //     auto res = new Capsule();
     //     res->ptr = (void*)(new CurClass(args...));
@@ -93,10 +96,8 @@ class class_ {
     std::vector<Value*> inputs = addInputs(func, graph);
     static auto classRegistry =
         torch::RegisterOperators().op(qualFuncName, std::move(func));
-    auto capsuleNode =
-        graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))
-            ->output()
-            ->setType(CapsuleType::get());
+    // auto capsuleNode = graph->insertConstant(IValue(c10::intrusive_ptr<c10::intrusive_ptr_target>()))->setType(CapsuleType::get());
+    auto capsuleNode = graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))->output()->setType(CapsuleType::get());
     auto n = graph->insertNode(
         graph->create(prim::SetAttr, {inputs[0], capsuleNode}, 0));
     n->s_(attr::name, "capsule");
@@ -154,7 +155,7 @@ class class_ {
   class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {
     pyClass->def(name.c_str(), f);
     auto qualFuncName = className + "::" + name;
-    auto func = [f](CurClass* cur, Types... args) {
+    auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
       return guts::invoke(f, *cur, args...);
     };
     static auto classRegistry =

@@ -160,7 +160,7 @@ namespace ivalue {
   #define CONVERSION_TYPES(_) \
   _(at::Tensor)\
   _(intrusive_ptr<caffe2::Blob>)\
-  _(intrusive_ptr<Capsule>)\
+  _(intrusive_ptr<c10::intrusive_ptr_target>)\
   _(ivalue::TuplePtr)\
   _(double)\
   _(c10::intrusive_ptr<ivalue::Future>)\
@@ -198,6 +198,7 @@ namespace ivalue {
   IValue from(std::unordered_map<Key, Value> v) { return IValue(v); }
   template<class T>
   IValue from(c10::optional<T> v) { return IValue(v); }
+
   template <typename T>
   IValue from(T x) {
     auto res = tmap.find(typeid(T).name());
@@ -205,9 +206,7 @@ namespace ivalue {
       throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
     }
     auto retObject = ivalue::Object(res->second, 1);
-    auto capsule = Capsule();
-    capsule.ptr = (void*)x;
-    retObject.setAttr("capsule", IValue(c10::make_intrusive<Capsule>(std::move(capsule))));
+    retObject.setAttr("capsule", IValue(x));
     auto resIVal = IValue(c10::make_intrusive<ivalue::Object>(std::move(retObject)));
     return resIVal;
       // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
