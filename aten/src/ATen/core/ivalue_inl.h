@@ -270,14 +270,23 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  Object(StrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
+  // temporary way to break cyclic dependencies in modules by forcing the deletion
+  // of functions when the module object is destructed
+  typedef void (*OnDelete)(ivalue::Object*);
+  Object(
+      StrongTypePtr type,
+      size_t numSlots,
+      OnDelete on_delete)
+      : type_(std::move(type)), on_delete_(on_delete) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
       StrongTypePtr type,
-      size_t numSlots) {
-    return c10::make_intrusive<Object>(std::move(type), numSlots);
+      size_t numSlots,
+      OnDelete on_delete = nullptr) {
+    return c10::make_intrusive<Object>(
+        std::move(type), numSlots, on_delete);
   }
 
   /**
@@ -327,11 +336,15 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
     return type_.cu_;
   }
+  // temporarily defined in class_type.cpp to
+  // ensure Modules do not leak memory
+  ~Object();
 
  private:
   void resizeObject(size_t slot);
   StrongTypePtr type_;
   std::vector<IValue> slots_;
+  OnDelete on_delete_;
 };
 
 std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);

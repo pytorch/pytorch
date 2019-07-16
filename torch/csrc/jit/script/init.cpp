@@ -332,8 +332,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
   const auto name = QualifiedName(module.name(), "forward");
-  auto method = module.class_compilation_unit()->create_function(name, graph);
-  module.type()->addMethod(method);
+  module.module_object()->compilation_unit()->create_function(name, graph);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -549,7 +548,8 @@ void initJitScriptBindings(PyObject* module) {
             PythonPrint(
                 ss,
                 source_ranges,
-                self,
+                *self.class_compilation_unit(),
+                true,
                 tensors,
                 classes,
                 false);
@@ -795,11 +795,12 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_import_functions",
-      [](std::shared_ptr<CompilationUnit> cu,
+      [](CompilationUnit& cu,
          const std::string& src,
          const std::vector<at::Tensor>& constant_table) {
         import_functions(
             c10::nullopt,
+            *get_python_cu(),
             cu,
             std::make_shared<Source>(src),
             constant_table,
@@ -831,7 +832,8 @@ void initJitScriptBindings(PyObject* module) {
       PythonPrint(
           ss,
           source_ranges,
-          *self,
+          *self->class_compilation_unit(),
+          true,
           constants,
           classes,
           true);
