@@ -2370,35 +2370,6 @@
       default: N
 ]]
 [[
-  name: _th_svd
-  cname: gesdd
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1,2
-  arguments:
-    - arg: THTensor* res1
-      output: True
-    - arg: THTensor* res2
-      output: True
-    - arg: THTensor* res3
-      output: True
-    - THTensor* self
-    - arg: bool some
-      if_true: S
-      if_false: A
-      default: S
-    - arg: bool compute_uv
-      if_true: S
-      if_false: N
-      default: S
-]]
-[[
   name: _th_potri
   cname: potri
   types:
