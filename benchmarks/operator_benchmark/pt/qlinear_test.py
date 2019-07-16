@@ -10,18 +10,27 @@ import torch.nn.quantized as nnq
 
 
 """
-Microbenchmarks for qlinear operators.
+Microbenchmarks for Quantized Linear operators.
 """
 
 # Configs for qlinear
 qlinear_configs = op_bench.config_list(
-    # Resnext101 - 32x8d shapes
     attrs=[
-        [1, 32, 10],
-        [4, 256, 100],
-        [16, 1024, 256],
+        [1024, 1024, 1024],
+        [64, 800, 320],
+        [64, 768, 512],
+        [16, 256, 512],
+        [128, 128, 128],
+        [256, 512, 256],
+        [6400, 15, 141],
+        [6400, 8, 141],
+        [16, 211, 2504],
+        [16, 369, 1434],
+        [1, 1024, 3496],
+        [16, 256, 512],
+        [1, 1600, 3456],
     ],
-    attr_names=["N", "IN", "OUT"],
+    attr_names=["N", "OUT", "IN"], # M, N, K
     tags=["short"],
 )
 
