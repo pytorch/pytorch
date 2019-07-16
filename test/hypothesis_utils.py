@@ -24,13 +24,6 @@ _ALL_QINT_TYPES = (
     torch.qint32,
 )
 
-# Map from torch data type to its underlying non-quantized data type.
-_UNDERLYING_TYPE = {
-    torch.quint8: torch.uint8,
-    torch.qint8: torch.int8,
-    torch.qint32: torch.int32
-}
-
 # Enforced zero point for every quantized data type.
 # If None, any zero_point point within the range of the data type is OK.
 _ENFORCED_ZERO_POINT = defaultdict(lambda: None, {
@@ -63,11 +56,12 @@ def assume_not_overflowing(tensor, qparams):
     _long_type_info = torch.iinfo(torch.long)
     long_min, long_max = _long_type_info.min / adjustment, _long_type_info.max / adjustment
     # make sure intermediate results are within the range of long
-    min_value = max((long_min - zero_point) * scale, (long_min / scale + zero_point), float_min)
-    max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point), float_max)
+    min_value = max((long_min - zero_point) * scale, (long_min / scale + zero_point))
+    max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point))
 
-    assume((tensor >= min_value).all())
-    assume((tensor <= max_value).all())
+    assume(float_min >= min_value)
+    assume(float_max <= max_value)
+
     return True
 
 
