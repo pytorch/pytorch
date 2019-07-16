@@ -30,7 +30,7 @@ qlinear_configs = op_bench.config_list(
         [16, 256, 512],
         [1, 1600, 3456],
     ],
-    attr_names=["N", "OUT", "IN"], # M, N, K
+    attr_names=["N", "OUT", "IN"],  # M, N, K
     tags=["short"],
 )
 
