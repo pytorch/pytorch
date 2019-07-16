@@ -776,7 +776,7 @@ def trace(func,
         raise AttributeError("trace doesn't support compiling individual module's functions.\n"
                              "Please use trace_module")
 
-    name = _qualified_name(func)
+    name = getattr(func, '__name__', 'forward')
     if name == '<lambda>':
         name = '_lambda'  # make name a valid identifier
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
@@ -1040,10 +1040,6 @@ def whichmodule(obj):
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
-    # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.Function):
-        return obj.qualified_name
-
     name = obj.__name__
     module_name = obj.__module__
 
@@ -1487,8 +1483,10 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
+        def __init__(self, optimize=True, _name=None):
+            if _name is None:
+                _name = type(self).__name__
+            self.__dict__['_c'] = torch._C.ScriptModule(_name)
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
@@ -1622,7 +1620,7 @@ if _enabled:
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
-            super(WeakScriptModuleProxy, self).__init__()
+            super(WeakScriptModuleProxy, self).__init__(_name=type(original).__name__)
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
