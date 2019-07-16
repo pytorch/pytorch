@@ -6,18 +6,36 @@ def is_nested_tensor(obj):
 
 
 def _verify_tensors(tensors):
+    if not isinstance(tensors, list):
+        raise ValueError("Must pass a list.")
     for tensor in tensors:
-        assert torch.is_tensor(tensor)
+        if not torch.is_tensor(tensor):
+            raise ValueError("List must consist of Tensors")
     if len(tensors):
-        dim = tensors[0].dim()
-        layout = tensors[0].layout
-        device = tensors[0].device
-        dtype = tensors[0].dtype
+        self.dim = tensors[0].dim()
+        self.layout = tensors[0].layout
+        self.device = tensors[0].device
+        self.dtype = tensors[0].dtype
+        requires_grad = tensors[0].requires_grad
+        is_pinned = tensors[0].is_pinned()
         for tensor in tensors:
-            assert(dim == tensor.dim())
-            assert(layout == tensor.layout)
-            assert(device == tensor.device)
-            assert(dtype == tensor.dtype)
+            if not (self.dim == tensor.dim() and
+                    self.layout == tensor.layout and
+                    self.device == tensor.device and
+                    self.dtype == tensor.dtype and
+                    requires_grad == tensor.requires_grad and
+                    is_pinned == tensor.is_pinned()):
+                raise ValueError("Each passed Tensor "
+                        "must match in dim, layout, "
+                        "device, dtype and requires_grad")
+    else:
+        # Carrying around information as member variables vs.
+        # checking one entry of the owned Tensors is annoying
+        # and error-prone. Carrying around an is_empty attribute
+        # to hide the fact that we carry around a list with a
+        # single empty Tensor is also annoying and error-prone.
+        # Both are not worth it for a minor feature.
+        raise ValueError("We do not support empty lists for now.")
 
 
 def is_contiguous_tensors(tensors):
@@ -35,7 +53,6 @@ def is_contiguous_tensors(tensors):
 
 def make_contiguous_tensors(tensors):
     _verify_tensors(tensors)
-    assert len(tensors)
     dtype = tensors[0].dtype
     device = tensors[0].device
     all_numel = 0
@@ -64,9 +81,7 @@ def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_m
         # function, but we can't meaningfully provide one if passed a Tensor
         raise ValueError("Can't construct a NestedTensor from a Tensor")
     else:
-        assert isinstance(data, list)
-        for data_ in data:
-            assert(torch.is_tensor(data_))
+        _verify_tensors(data)
         tensors = []
         for data_ in data:
             # torch.tensor copies on construction
@@ -77,7 +92,6 @@ def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_m
             new_data = new_data.pin_memory()
             tensors.append(new_data)
 
-        _verify_tensors(obj)
         return NestedTensor(make_contiguous_tensors(tensors))
 
 
@@ -99,32 +113,6 @@ class NestedTensor():
     def __init__(self, tensors):
         _verify_tensors(tensors)
         self.tensors = tensors
-        reference_tensor = torch.Tensor([])
-        if len(tensors):
-            self.dim = tensors[0].dim()
-            self.layout = tensors[0].layout
-            self.device = tensors[0].device
-            self.dtype = tensors[0].dtype
-            requires_grad = tensors[0].requires_grad
-            is_pinned = tensors[0].is_pinned()
-            for tensor in tensors:
-                if not (self.dim == tensor.dim() and
-                        self.layout == tensor.layout and
-                        self.device == tensor.device and
-                        self.dtype == tensor.dtype and
-                        requires_grad == tensor.requires_grad and
-                        is_pinned == tensor.is_pinned()):
-                    raise ValueError("Each passed Tensor "
-                            "must match in dim, layout, "
-                            "device, dtype and requires_grad")
-        else:
-            # Carrying around information as member variables vs.
-            # checking one entry of the owned Tensors is annoying
-            # and error-prone. Carrying around an is_empty attribute
-            # to hide the fact that we carry around a list with a
-            # single empty Tensor is also annoying and error-prone.
-            # Both are not worth it for a minor feature.
-            raise ValueError("We do not support empty lists for now.")
 
     def __getattribute__(self, attr):
         if attr == 'shape':
