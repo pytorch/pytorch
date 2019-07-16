@@ -524,9 +524,8 @@ void initJitScriptBindings(PyObject* module) {
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, &self);
             const auto method_name = QualifiedName(self.name(), name);
-            auto fn = self.class_compilation_unit()->create_function(
+            self.module_object()->compilation_unit()->create_function(
                 method_name, graph);
-            self.type()->addMethod(fn);
             didFinishEmitModule(self);
           })
       .def(
@@ -655,13 +654,9 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             return self.function_->get_executor().getDebugState();
           })
-      .def_property_readonly(
-          "name",
-          [](const StrongFunctionPtr& self) { return self.function_->name(); })
-      .def_property_readonly(
-          "qualified_name", [](const StrongFunctionPtr& self) {
-            return self.function_->qualname().qualifiedName();
-          });
+      .def_property_readonly("name", [](const StrongFunctionPtr& self) {
+        return self.function_->name();
+      });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
@@ -727,10 +722,10 @@ void initJitScriptBindings(PyObject* module) {
         auto typed_inputs = toTypedStack(input_tuple);
         auto graph = tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, force_outplace);
-        auto cu = get_python_cu();
-        auto name = c10::QualifiedName(qualname);
-        auto result = cu->create_function(
-            std::move(name), std::move(graph), /*shouldMangle=*/true);
+        // TODO this should go in the global Python CU
+        auto cu = std::make_shared<CompilationUnit>();
+        const auto name = c10::QualifiedName(qualname);
+        auto result = cu->create_function(std::move(name), std::move(graph));
         StrongFunctionPtr ret(std::move(cu), result);
         didFinishEmitFunction(ret);
         return ret;
