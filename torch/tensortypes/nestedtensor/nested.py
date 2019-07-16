@@ -85,8 +85,6 @@ class NestedTensor():
             return self.tensors[0].requires_grad
         return super().__getattribute__(attr)
 
-
-
     def __len__(self):
         return len(self.tensors)
 

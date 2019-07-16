@@ -1,8 +1,8 @@
 import torch
 import unittest
-from common_utils import TEST_WITH_PROTOTYPES
+from common_utils import TEST_WITH_NESTEDTENSORS
 
-if TEST_WITH_PROTOTYPES:
+if TEST_WITH_NESTEDTENSORS:
     import torch.tensortypes.nestedtensor as nestedtensor
     from common_utils import TestCase
     NestedTensor = nestedtensor.NestedTensor

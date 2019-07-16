@@ -187,8 +187,8 @@ TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
-# Enables tests for prototypes
-TEST_WITH_PROTOTYPES = os.getenv('PYTORCH_TEST_WITH_PROTOTYPES', '0') == '1'
+# Enables tests for NestedTensors
+TEST_WITH_NESTEDTENSORS = os.getenv('PYTORCH_TEST_WITH_NESTEDTENSORS', '0') == '1'
 
 # Disables non-slow tests (these tests enabled by default)
 # This is usually used in conjunction with TEST_WITH_SLOW to

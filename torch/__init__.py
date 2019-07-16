@@ -312,6 +312,7 @@ import torch.hub
 import torch.random
 import torch.distributions
 import torch.testing
+import torch.tensortypes
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp
@@ -325,12 +326,6 @@ _C._init_names(list(torch._storage_classes))
 from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs
 
-def check_env_flag(name, default=''):
-    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
-
-# Prototypes overwrites torch builtins with functions!
-if check_env_flag('BUILD_NESTEDTENSOR'):
-    import torch.tensortypes
 
 def compiled_with_cxx11_abi():
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""

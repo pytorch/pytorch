@@ -80,7 +80,7 @@
 #     enables use of LMDB for storage
 #
 #   BUILD_NESTEDTENSOR
-#     toggles the exposure of prototype features
+#     enables building the NestedTensor features
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
