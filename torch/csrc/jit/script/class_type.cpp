@@ -8,7 +8,8 @@ namespace c10 {
 // c10. Sigh...
 
 Function* ClassType::getMethod(const std::string& name) const {
-  return compilation_unit_->find_function(name);
+  const auto qualname = QualifiedName(*qualified_name_obj(), name);
+  return compilation_unit_->find_function(qualname);
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
@@ -62,8 +63,8 @@ size_t ClassType::addAttribute(
   return slot;
 }
 
-std::vector<Function*> ClassType::methods() const {
-  return compilation_unit()->get_functions();
+const std::vector<Function*>& ClassType::methods() const {
+  return methods_;
 }
 
 ClassType::ClassType(

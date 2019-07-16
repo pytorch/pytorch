@@ -2668,6 +2668,10 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_symeig(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_svd(self):
+        _TestTorchMixin._test_svd(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_svd_no_singularvectors(self):
         _TestTorchMixin._test_svd_no_singularvectors(self, lambda t: t.cuda())
 
