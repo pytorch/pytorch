@@ -54,7 +54,8 @@ namespace at { namespace cuda {
 //
 // ATen's NVRTC stub library, caffe2_nvrtc, provides dynamic loading of both
 // NVRTC and driver APIs. While the former is not yet suppoted for HIP, the
-// later is supported and needed.
+// later is supported and needed (e.g., in CUDAHooks::getDeviceWithPrimaryContext()
+// used by tensor.pin_memory()).
 //
 // The macro below strips out certain unsupported operations on HIP from the full
 // list above.

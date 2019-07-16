@@ -908,15 +908,14 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.class_compilation_unit()->get_functions().size() > 0) {
+  if (module.type()->methods().size() > 0) {
     std::ostringstream methods;
     SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
         source_ranges,
-        *module.class_compilation_unit(),
-        /*is_method=*/true,
+        module,
         tensor_table_,
         class_table_,
         /*enforce_importable=*/true);
