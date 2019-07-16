@@ -39,6 +39,13 @@ namespace jit {
 // locations in libtorch code rather than user code.
 
 using tracer::TypedStack;
+
+inline std::shared_ptr<script::CompilationUnit> get_python_cu() {
+  return py::module::import("torch.jit")
+      .attr("_python_cu")
+      .cast<std::shared_ptr<script::CompilationUnit>>();
+}
+
 struct TypedIValue : public std::pair<IValue, TypePtr> {
   using pair::pair;
 
@@ -62,23 +69,6 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   } else {
     AT_ERROR("Dictionary inputs may only have string, int, or float keys");
   }
-}
-
-inline TypedIValue trySpecializeTensorList(
-    std::vector<IValue>& elems,
-    TypePtr type) {
-  // Since we only call this function for trace inputs, the only options are
-  // generic list, and list of tensors. We do not need to check for primitive
-  // types.
-  if (!type->isSubtypeOf(TensorType::get())) {
-    return TypedIValue(elems, ListType::create(type));
-  }
-  std::vector<at::Tensor> tensors;
-  tensors.reserve(elems.size());
-  for (auto elem : elems) {
-    tensors.push_back(elem.toTensor());
-  }
-  return TypedIValue(tensors, ListType::ofTensors());
 }
 
 inline c10::optional<TypePtr> unifyOrInitializeType(
@@ -305,7 +295,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  c10::impl::GenericList elems;
+  auto elems = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
@@ -431,9 +421,9 @@ inline IValue toIValue(
       auto classType = type->expect<ClassType>();
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
+      auto cu = classType->compilation_unit();
       auto userObj = c10::ivalue::Object::create(
-          c10::StrongTypePtr(classType->compilation_unit(), classType),
-          numAttrs);
+          c10::StrongTypePtr(cu, classType), numAttrs);
 
       // 2. copy all the contained types
       for (size_t slot = 0; slot < numAttrs; slot++) {
@@ -576,7 +566,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
-    auto pyCu = script::CompilationUnit::_get_python_cu();
+    auto pyCu = get_python_cu();
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
@@ -734,7 +724,7 @@ inline py::object invokeScriptFunctionFromPython(
     AutoNoGIL no_gil_guard;
     callee.run(stack);
   }
-  AT_CHECK(
+  TORCH_CHECK(
       stack.size() > 0,
       "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));

@@ -138,6 +138,14 @@ struct GraphFuser {
   FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
   Symbol kind_ = prim::FusionGroup;
 
+  // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
+  // The specific limit is a function of constant memory size, amount available
+  // to pass arguments, and some implementation dependence. Select a safe
+  // limit here.
+  // This limit is also applied to other devices in the fuser by default.
+  // Change with setInputArgLimit
+  size_t subgraph_arg_limit_ = 128;
+
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
       : block_(block), graph_(std::move(graph)) {}
 
@@ -151,6 +159,10 @@ struct GraphFuser {
         graph_(std::move(graph)),
         callback_(callback),
         kind_(kind) {}
+
+  void setInputArgLimit(size_t limit) {
+    subgraph_arg_limit_ = limit;
+  }
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
@@ -219,7 +231,7 @@ struct GraphFuser {
 
     auto tensors_node = node->namedInput(attr::tensors)->node();
     if ((tensors_node->inputs().size() + node->outputs().size()) >
-        fusion_kernel_args_limit) {
+        subgraph_arg_limit_) {
       return false;
     }
     if (tensors_node->kind() != prim::ListConstruct)
@@ -428,7 +440,7 @@ struct GraphFuser {
 
     if ((consumer->inputs().size() + consumer->outputs().size() +
          producer->node()->inputs().size() +
-         producer->node()->outputs().size()) > fusion_kernel_args_limit) {
+         producer->node()->outputs().size()) > subgraph_arg_limit_) {
       return at::nullopt;
     }
 
@@ -1022,7 +1034,7 @@ struct GraphFuser {
     // If the number of kernel args could exceed the limit, skip.
     if ((before_check->inputs().size() + before_check->outputs().size() +
          producer->node()->inputs().size() +
-         producer->node()->outputs().size()) > fusion_kernel_args_limit) {
+         producer->node()->outputs().size()) > subgraph_arg_limit_) {
       return false;
     }
 
@@ -1306,13 +1318,15 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
     std::function<bool(Node*)> fn,
-    Symbol kind) {
-  GraphFuser(
+    Symbol kind,
+    size_t arg_limit) {
+  auto g = GraphFuser(
       graph->block(),
       graph,
       [=](Node* n) { return fn(n) || n->kind() == kind; },
-      kind)
-      .run();
+      kind);
+  g.setInputArgLimit(arg_limit);
+  g.run();
 }
 
 } // namespace jit
