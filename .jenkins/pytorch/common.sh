@@ -148,9 +148,8 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
 fi
 
 function pip_install() {
-  local pkg=$1
   # retry 3 times
-  pip install -q ${pkg} --user || pip install -q ${pkg} --user || pip install -q ${pkg} --user
+  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@"
 }
 
 function get_exit_code() {
