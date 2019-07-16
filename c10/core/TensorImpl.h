@@ -915,6 +915,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // changes `var`'s tensor metadata and expects its `allow_tensor_metadata_change_` to be ignored.
 
   /**
+   * One TensorImpl can be copied to another TensorImpl if they have the same
+   * type_id. The only two special cases (for legacy reason) are:
+   * CPUTensorId is compatible with CUDATensorId and SparseCPUTensorId is
+   * compatible with SparseCUDATensorId.
+   */
+  inline bool has_compatible_shallow_copy_type(TensorTypeId from) {
+    TensorTypeId self = type_id();
+    return (self == from) ||
+        ((self == CPUTensorId() || self == CUDATensorId() || self == HIPTensorId()) &&
+        (from == CPUTensorId() || from == CUDATensorId() || from == HIPTensorId())) ||
+        ((self == SparseCPUTensorId() || self == SparseCUDATensorId() || self == SparseHIPTensorId()) &&
+        (from == SparseCPUTensorId() || from == SparseCUDATensorId() || from == SparseHIPTensorId()));
+  }
+
+  /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`,
