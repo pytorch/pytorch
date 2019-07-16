@@ -239,8 +239,8 @@ struct TORCH_API Variable : public at::Tensor {
       bool create_graph) const;
 
   /// Sets the tensor data held by this `Variable` to be the same as `new_data`.
-  /// It requires that `new_data` has the same derived type of TensorImpl as
-  /// this `Variable`, by checking `_has_same_tensorimpl_type(this, new_data)`.
+  /// It requires that `new_data` and `Variable` have compatible tensor type, by
+  /// checking `_has_compatible_shallow_copy_type(this, new_data)`.
   void set_data(const at::Tensor &new_data) const;
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
@@ -485,7 +485,7 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
 /// are a lot of call sites to these factory functions that need to change the
 /// variable's size or storage afterwards, and they don't expect the original
 /// tensor (where the variable is created from) to be updated. Setting
-/// `allow_tensor_metadata_change_` to false by default would unnecessarily
+/// `allow_tensor_metadata_change_` to false by default would unnecessarily
 /// prevent those changes from happening and is undesirable.
 
 // See NOTE [ Autograd View Variables ] for details.

@@ -687,12 +687,6 @@ void initJitScriptBindings(PyObject* module) {
         return ss.str();
       });
   m.def(
-      "_jit_recursive_script",
-      []() { return getRecursiveScriptMode(); });
-  m.def(
-      "_jit_recursive_script",
-      [](bool recurse) { getRecursiveScriptMode() = recurse; });
-  m.def(
       "_jit_script_compile",
       [](const std::string& qualname,
          const Def& def,
