@@ -49,12 +49,12 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   list_of_lists.push_back(list);
   module->run_method("nested_loop", list_of_lists, b);
 
-  c10::impl::GenericList generic_list;
-  c10::impl::GenericList empty_generic_list;
+  auto generic_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto empty_generic_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   empty_generic_list.push_back(generic_list);
   module->run_method("nested_loop", empty_generic_list, b);
 
-  c10::impl::GenericList too_many_lists;
+  auto too_many_lists = c10::impl::GenericList(c10::impl::deprecatedUntypedList());;
   too_many_lists.push_back(empty_generic_list);
   try {
     module->run_method("nested_loop", too_many_lists, b);
@@ -67,7 +67,7 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
                   "'List[List[List[t]]]'") == 0);
   };
 
-  c10::impl::GenericList gen_list;
+  auto gen_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   c10::List<int64_t> int_list({1, 2, 3});
 
   gen_list.emplace_back(list);

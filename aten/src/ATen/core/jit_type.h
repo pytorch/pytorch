@@ -184,6 +184,10 @@ public:
   }
 };
 
+inline std::string toString(TypePtr typePtr) {
+  return typePtr->str();
+}
+
 inline bool operator!=(const Type & lhs, const Type & rhs) {
   return !(lhs == rhs);
 }
@@ -1070,10 +1074,9 @@ private:
 
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
-// This type represents a Python Function
+using ::torch::jit::Function;
 struct CAFFE2_API FunctionType : public Type {
-  static FunctionTypePtr create(
-      std::shared_ptr<torch::jit::Function> function) {
+  static FunctionTypePtr create(Function* function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
@@ -1091,16 +1094,16 @@ struct CAFFE2_API FunctionType : public Type {
   std::string python_str() const override {
     throw "Function";
   }
-  std::shared_ptr<torch::jit::Function> function() const {
+  Function* function() const {
     return function_;
   }
   static const TypeKind Kind = TypeKind::FunctionType;
 
  private:
-  FunctionType(std::shared_ptr<torch::jit::Function> function)
+  FunctionType(Function* function)
       : Type(TypeKind::FunctionType), function_(function) {}
 
-  std::shared_ptr<torch::jit::Function> function_;
+  Function* function_;
 };
 
 struct NoneType;
@@ -1403,8 +1406,11 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeNames_[slot];
   }
 
-  std::shared_ptr<Function> getMethod(const std::string& name) const;
-  std::vector<Function*> methods() const;
+  Function* getMethod(const std::string& name) const;
+  const std::vector<Function*>& methods() const;
+  void addMethod(Function* method) {
+    methods_.push_back(method);
+  }
 
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
@@ -1488,5 +1494,8 @@ struct CAFFE2_API ClassType : public NamedType {
   // if present, this class inherits from torch.nn.Module
   // and these are the indices of the attributes which are parameters
   std::shared_ptr<std::vector<bool>> parameterSlots_;
+
+  // List of methods associated with this class.
+  std::vector<Function*> methods_;
 };
 } // namespace c10

@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -112,11 +113,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def("_jit_pass_onnx_cast_all_constant_to_floating", CastAllConstantToFloating)
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict) {
-            ConstantFoldONNX(graph->block(), paramsDict); // overload resolution
+             std::map<std::string, at::Tensor>& paramsDict,
+             int opset_version) {
+            ConstantFoldONNX(graph->block(), paramsDict, opset_version); // overload resolution
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -155,7 +158,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Function>& function_var,
+          [](const StrongFunctionPtr& function_var,
              py::function pyObserverFunction) {
             // Overloaded jit pass for pure functions instead of modules.
             // Create a new node that would be used in the insert observer pass:
@@ -163,7 +166,7 @@ void initJITBindings(PyObject* module) {
             Graph g;
             Node* new_node = g.createPythonOp(
                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(function_var, new_node);
+            InsertObserverNodes(function_var.function_, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })

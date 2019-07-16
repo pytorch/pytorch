@@ -739,7 +739,7 @@ def emit_body(declaration):
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable({})'.format(call), []
+            return 'as_variable(std::move({}))'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
