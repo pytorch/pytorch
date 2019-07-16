@@ -111,6 +111,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 
  public:
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
+    TORCH_INTERNAL_ASSERT(nullptr != type_.get(), "Type cannot be nullptr");
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
   C10_DEPRECATED_MESSAGE("Creating tuples without type information is deprecated. Please use Tuple::create(elements, type) instead.")
@@ -614,7 +615,7 @@ template<class T> inline IValue::IValue(c10::List<T> v)
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
 }
 template<class T> inline IValue::IValue(std::vector<T> v)
-: IValue(impl::GenericList()) {
+: IValue(c10::List<T>()) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
   auto list = to<c10::List<T>>();
   list.reserve(v.size());

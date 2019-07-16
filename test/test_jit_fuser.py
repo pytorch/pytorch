@@ -46,6 +46,18 @@ class TestFuser(JitTestCase):
     def test_abs_cuda(self):
         self._test_fused_abs(device="cuda")
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @skipIfRocm
+    def test_zero_element_tensors(self):
+        def decode(sin_t, cos_t):
+            theta = torch.atan2(sin_t.float(), cos_t.float())
+            return theta
+
+        sin = torch.zeros(0, device="cuda")
+        cos = torch.zeros(0, device="cuda")
+        inputs = [sin, cos]
+        ge = self.checkScript(decode, inputs)
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_arg_configurations_smoke_cuda(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
