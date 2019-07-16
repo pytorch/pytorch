@@ -180,9 +180,6 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'expected shape'):
             input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
             MyFunction.apply(input).sum().backward()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            input = torch.randn(10, dtype=torch.double, requires_grad=True)
-            MyFunction.apply(input).sum().backward()
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
