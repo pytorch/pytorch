@@ -13237,9 +13237,13 @@ class TestRecursiveScript(JitTestCase):
             checker = FileCheck()
             checker.check("Expected a value of type 'int'")
             checker.check("return d(\"hello\")")
+            checker.check("it was called from 'b'")
             checker.check("return c(x)")
+            checker.check("it was called from 'Submodule.forward'")
             checker.check("return b(x)")
+            checker.check("it was called from 'M.some_method'")
             checker.check("return y + self.submodule(y)")
+            checker.check("it was called from 'M.forward'")
             checker.check("return self.some_method(x)")
             checker.run(str(e))
 

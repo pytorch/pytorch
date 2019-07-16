@@ -2972,7 +2972,13 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    ErrorReport::CallStack::push_function(def.name().name());
+    std::stringstream name;
+
+    if (self) {
+      name << self->getClassType()->qualname() << ".";
+    }
+    name << def.name().name();
+    ErrorReport::CallStack::push_function(name.str());
     to_ir(def, _resolver, self, method);
     // Compilation was successful, so remove the function def info
     ErrorReport::CallStack::pop_function();
