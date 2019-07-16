@@ -488,7 +488,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::isinstance<py::function>(obj)) {
     if (typeString(obj) == "builtin_function_or_method") {
       throw ErrorReport(loc) << "Python builtin " << py::str(obj)
-                             << " is currently not supported in Torchscript.";
+                             << " is currently not supported in Torchscript";
     }
   }
 

@@ -650,7 +650,7 @@ struct PythonPrintPass {
       throw script::ErrorReport(stmt.node()->sourceRange())
           << "loop cannot be printed as python "
           << "because it has gone through an optimization "
-          << "that combined while and for loops. File a bug.";
+          << "that combined while and for loops. File a bug";
     }
 
     bool emit_as_for_loop = loop_type == LoopView::For;
@@ -786,7 +786,7 @@ struct PythonPrintPass {
         if (enforce_importable_ && node->inputs().size() != 1) {
           throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
-              << "Normal use of ScriptMethods should enforce this.";
+              << "Normal use of ScriptMethods should enforce this";
         }
         if (node->inputs().size() > 0) {
           indent();
