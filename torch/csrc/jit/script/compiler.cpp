@@ -2589,13 +2589,13 @@ struct to_ir {
         loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
   }
 
-  Value* emitUnsqueeze(const SourceRange& loc, Value* input, int64_t dim) {
+  Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
     return emitBuiltinCall(
         loc,
         *graph,
         aten::unsqueeze,
         c10::nullopt,
-        {input, graph->insertConstant(dim, nullptr, loc)},
+        {input, dim_val},
         {},
         true);
   }
@@ -2626,66 +2626,94 @@ struct to_ir {
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
     std::vector<Value*> tensor_indices;
-    size_t dim = 0;
 
-    auto handle_tensor = [&](Value* tensor) {
-      // NB: tensor_indices can have None holes because of how at::index works.
-      tensor_indices.resize(dim + 1);
-      tensor_indices[dim] = tensor;
-      dim++;
-    };
-
-    // before ellipsis, dimension index should be `dim`
-    // after ellipsis, dimension index should be `-offset`
-    int offset = 0;
-    size_t ellipsis_dim = 0;
     auto insert_value_for_dim = [&](int64_t dim) {
-      return (offset == 0)
-          ? graph->insertConstant(dim, nullptr, loc)
-          :
-          // NB: offset is incremented to move to the next dimension index
-          graph->insertConstant(offset++, nullptr, loc);
+      return graph->insertConstant(dim, nullptr, loc);
     };
+    std::vector<int64_t> dims(subscript_exprs.size());
+    std::vector<c10::optional<Value*>> exprs(
+        subscript_exprs.size(), c10::nullopt);
 
-    for (const auto& subscript_expr : subscript_exprs) {
-      // NB: ellipsis_dim is **always** incremented
-      // (comparing to dim) in order to compute
-      // the correct offsets for the remaining
-      // dimension indices following an ellipsis "..."
-      // token
-      ellipsis_dim++;
-      if (subscript_expr.kind() == TK_DOTS) {
-        offset = -(subscript_exprs.size() - ellipsis_dim);
-        ++dim;
-        continue;
-      }
+    auto handle_indexing = [&](const Expr& subscript_expr,
+                               int expr_idx,
+                               int64_t dim,
+                               bool is_reverse = false) {
+      dims[expr_idx] = dim;
       if (subscript_expr.kind() == TK_SLICE_EXPR) {
-        auto dim_val = insert_value_for_dim(dim);
-        sliceable =
-            emitSlice(loc, sliceable, dim_val, SliceExpr(subscript_expr));
-        ++dim;
-        continue;
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim + 1;
+        }
       }
       auto index = emitExpr(subscript_expr, OptionalType::ofTensor());
-      if (index->type() == IntType::get()) {
-        // NB: note, select squeezes out a dimension,
-        // so dim is **not** incremented
-        auto dim_val = insert_value_for_dim(dim);
-        sliceable = emitSelect(loc, sliceable, dim_val, index);
-        continue;
-      } else if (index->type()->isSubtypeOf(NoneType::get())) {
-        sliceable = emitUnsqueeze(loc, sliceable, dim);
-        dim++;
-        continue;
+      exprs[expr_idx] = index;
+      if (index->type()->isSubtypeOf(NoneType::get())) {
+        if (is_reverse) {
+          return dim;
+        } else {
+          return dim + 1;
+        }
+      } else if (index->type() == IntType::get()) {
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim;
+        }
       } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
-        // NB:index type can either be a Tensor or : (None of Optional Tensor)
-        handle_tensor(index);
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim + 1;
+        }
+      } else {
+        throw ErrorReport(loc)
+            << "Unsupported operation: indexing tensor with unsupported index type '"
+            << index->type()->python_str()
+            << "'. Only ints, slices, and tensors are supported";
+      }
+    };
+    size_t idx = 0;
+    int64_t dim = 0;
+    for (; idx < subscript_exprs.size(); idx++) {
+      auto subscript_expr = subscript_exprs[idx];
+      if (subscript_expr.kind() == TK_DOTS) {
+        break;
+      }
+      dim = handle_indexing(subscript_expr, idx, dim, /*is_reverse=*/false);
+    }
+    int64_t rdim = -1;
+    for (size_t rev_idx = subscript_exprs.size() - 1; rev_idx > idx;
+         rev_idx--) {
+      auto subscript_expr = subscript_exprs[rev_idx];
+      rdim =
+          handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
+    }
+    for (size_t i = 0; i < exprs.size(); i++) {
+      if (!exprs[i].has_value()) {
+        if (subscript_exprs[i].kind() == TK_SLICE_EXPR) {
+          sliceable = emitSlice(
+              loc,
+              sliceable,
+              insert_value_for_dim(dims[i]),
+              SliceExpr(subscript_exprs[i]));
+        }
         continue;
       }
-      throw ErrorReport(loc)
-          << "Unsupported operation: indexing tensor with unsupported index type '"
-          << index->type()->python_str()
-          << "'. Only ints, slices, and tensors are supported";
+      auto expr = exprs[i].value();
+      if (expr->type()->isSubtypeOf(NoneType::get())) {
+        sliceable =
+            emitUnsqueeze(loc, sliceable, insert_value_for_dim(dims[i]));
+      } else if (expr->type() == IntType::get()) {
+        sliceable =
+            emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
+      } else if (expr->type()->isSubtypeOf(OptionalType::ofTensor())) {
+        tensor_indices.resize(dims[i] + 1);
+        tensor_indices[dim] = expr;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            "Trying to process index type that we don't support.");
+      }
     }
     // at::index takes in a List[Optional[Tensor]] where some dims can be None.
     // create None node with optional tensor output type and pass to at::index.
