@@ -5,6 +5,7 @@
 #include <torch/optim/adam.h>
 #include <torch/types.h>
 #include <torch/utils.h>
+#include <ATen/core/grad_mode.h>
 
 #include <test/cpp/api/support.h>
 
@@ -267,10 +268,13 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward) {
 
   // Now make sure the weights of the reverse gru layer match
   // ones of the (reversed) bidirectional's:
-  reverse_gru->w_ih[0].set_requires_grad(false).copy_(bi_grus->w_ih[1]);
-  reverse_gru->w_hh[0].set_requires_grad(false).copy_(bi_grus->w_hh[1]);
-  reverse_gru->b_ih[0].set_requires_grad(false).copy_(bi_grus->b_ih[1]);
-  reverse_gru->b_hh[0].set_requires_grad(false).copy_(bi_grus->b_hh[1]);
+  {
+    at::NoGradGuard guard;
+    reverse_gru->w_ih[0].copy_(bi_grus->w_ih[1]);
+    reverse_gru->w_hh[0].copy_(bi_grus->w_hh[1]);
+    reverse_gru->b_ih[0].copy_(bi_grus->b_ih[1]);
+    reverse_gru->b_hh[0].copy_(bi_grus->b_hh[1]);
+  }
 
   auto bi_output = bi_grus->forward(input);
   auto reverse_output = reverse_gru->forward(input_reversed);
@@ -303,10 +307,13 @@ TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
 
   // Now make sure the weights of the reverse lstm layer match
   // ones of the (reversed) bidirectional's:
-  reverse_lstm->w_ih[0].set_requires_grad(false).copy_(bi_lstm->w_ih[1]);
-  reverse_lstm->w_hh[0].set_requires_grad(false).copy_(bi_lstm->w_hh[1]);
-  reverse_lstm->b_ih[0].set_requires_grad(false).copy_(bi_lstm->b_ih[1]);
-  reverse_lstm->b_hh[0].set_requires_grad(false).copy_(bi_lstm->b_hh[1]);
+  {
+    at::NoGradGuard guard;
+    reverse_lstm->w_ih[0].copy_(bi_lstm->w_ih[1]);
+    reverse_lstm->w_hh[0].copy_(bi_lstm->w_hh[1]);
+    reverse_lstm->b_ih[0].copy_(bi_lstm->b_ih[1]);
+    reverse_lstm->b_hh[0].copy_(bi_lstm->b_hh[1]);
+  }
 
   auto bi_output = bi_lstm->forward(input);
   auto reverse_output = reverse_lstm->forward(input_reversed);
