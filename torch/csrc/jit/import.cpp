@@ -446,7 +446,7 @@ script::Module load(
     script::Module curr = module;
     auto qualname = basename;
     for (const auto& name : qualified_name) {
-      qualname = c10::QualifiedName(basename, name);
+      qualname = c10::QualifiedName(qualname, name);
       if (!curr.find_module(name)) {
         curr.register_module(name, script::Module(qualname, cu));
       }

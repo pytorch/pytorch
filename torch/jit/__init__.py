@@ -1632,7 +1632,7 @@ if _enabled:
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
-            super(WeakScriptModuleProxy, self).__init__()
+            super(WeakScriptModuleProxy, self).__init__(_qualified_name=_qualified_name(type(original)))
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
