@@ -1,10 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/Storage.h>
-#include <ATen/TensorUtils.h>
 
 namespace at {
 namespace native {
