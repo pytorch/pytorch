@@ -2229,7 +2229,7 @@ class TestAutograd(TestCase):
 
     def test_cdist(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        sizes = [(S, S), (S, S, S)]
+        sizes = [[S, S], [S, S, S]]
         for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
             for device in devices:
                 for size in sizes:
