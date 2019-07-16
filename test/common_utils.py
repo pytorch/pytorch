@@ -18,6 +18,7 @@ import warnings
 import random
 import contextlib
 import socket
+import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -46,9 +47,12 @@ torch.backends.cudnn.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('--subprocess', action='store_true',
+                    help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
+TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
@@ -56,8 +60,61 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
+def shell(command, cwd=None):
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # The following cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    try:
+        return p.wait()
+    except KeyboardInterrupt:
+        # Give `p` a chance to handle KeyboardInterrupt. Without this,
+        # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except:  # noqa E722, copied from python core library
+        p.kill()
+        raise
+    finally:
+        # Always call p.wait() to ensure exit
+        p.wait()
+
+
 def run_tests(argv=UNITTEST_ARGS):
-    unittest.main(argv=argv)
+    if TEST_IN_SUBPROCESS:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = []
+
+        def add_to_test_cases(suite_or_case):
+            if isinstance(suite_or_case, unittest.TestCase):
+                test_cases.append(suite_or_case)
+            else:
+                for element in suite_or_case:
+                    add_to_test_cases(element)
+
+        add_to_test_cases(suite)
+        failed_tests = []
+        for case in test_cases:
+            test_case_full_name = case.id().split('.', 1)[1]
+            exitcode = shell([sys.executable] + argv + [test_case_full_name])
+            if exitcode != 0:
+                failed_tests.append(test_case_full_name)
+
+        assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
+            len(failed_tests), '\n\t'.join(failed_tests))
+    else:
+        unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
