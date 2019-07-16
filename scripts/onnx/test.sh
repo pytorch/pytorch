@@ -25,10 +25,8 @@ set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
 pip install pytest scipy hypothesis
 
-# JIT C++ extensions require ninja.
-NINJA_LOCATION=`which ninja`
-NINJA_BIN_DIR=`dirname $NINJA_LOCATION`
-export PATH="$NINJA_BIN_DIR:$PATH"
+# JIT C++ extensions require ninja, and put it into PATH.
+export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
@@ -62,7 +60,6 @@ pytest "${args[@]}" \
 # onnxruntime only support py3
 # "Python.h" not found in py2, needed by TorchScript custom op compilation.
 if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-  pip install onnxruntime --user
   pytest "${args[@]}" "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
   pytest "${args[@]}" "$top_dir/test/onnx/test_custom_ops.py"
   pytest "${args[@]}" "$top_dir/test/onnx/test_models_onnxruntime.py"
