@@ -5,6 +5,7 @@
 #include <ATen/cuda/CUDABlas.h>
 
 #include <algorithm>
+#include <mutex>
 
 float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float *y, int64_t incy)
 {
@@ -189,9 +190,30 @@ void adjustLdLevel3(char transa, char transb, int64_t m, int64_t n, int64_t k, i
 
 }
 
+// Check https://github.com/pytorch/pytorch/issues/22078
+// for information about the bug. We don't know the exact conditions that trigger it,
+// but using Sgemm or Hgemm on Maxwell or Pascal seems to be a
+// necessary condition.
+static void checkCuda90Bug(int i_m, int i_n, int i_k)
+{
+#if CUDA_VERSION < 9200 && CUDA_VERSION >= 9000
+  static std::once_flag alreadyWarned;
+  const int LIMIT = 1 << 21;
+  if (i_m > LIMIT || i_n > LIMIT || i_k > LIMIT) {
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major == 5 || prop->major == 6) {
+      std::call_once(alreadyWarned, []() {
+        TORCH_WARN("Matrix multiplication for dimensions larger than 2^21 has known bugs on your combination of CUDA version and device type. Please consider upgrading to CUDA 9.2 or later.");
+      });
+    }
+  }
+#endif
+}
+
 /* Level 3 */
 void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, float alpha, float *a, int64_t lda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
+  checkCuda90Bug((int)m, (int)n, (int)k);
   at::cuda::blas::gemm<float>(THCState_getCurrentStream(state), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -202,6 +224,7 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 
 void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::Half alpha, at::Half *a, int64_t lda, at::Half *b, int64_t ldb, at::Half beta, at::Half *c, int64_t ldc)
 {
+  checkCuda90Bug((int)m, (int)n, (int)k);
   at::cuda::blas::gemm<at::Half>(THCState_getCurrentStream(state), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 

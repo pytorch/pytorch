@@ -78,6 +78,17 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(scale, q.q_scale())
         self.assertEqual(zero_point, q.q_zero_point())
 
+        # create via empty_like
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        q_el = torch.empty_like(q)
+        self.assertEqual(q.q_scale(), q_el.q_scale())
+        self.assertEqual(q.q_zero_point(), q_el.q_zero_point())
+        self.assertEqual(q.dtype, q_el.dtype)
+
+        # create via empty_like but change the dtype (currently not supported)
+        with self.assertRaises(RuntimeError):
+            torch.empty_like(q, dtype=torch.qint8)
+
     def test_qtensor_dtypes(self):
         r = torch.rand(3, 2, dtype=torch.float) * 2 - 4
         scale = 2
@@ -182,6 +193,14 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(q.q_scale(), q2.q_scale())
         self.assertEqual(q.q_zero_point(), q2.q_zero_point())
 
+    def test_qtensor_clone(self):
+        numel = 10
+        scale = 0.5
+        zero_point = 10
+        q2 = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        q = q2.clone()
+        # Check to make sure the scale and zero_point has been copied.
+        self.assertEqual(q, q2)
 
 if __name__ == "__main__":
     run_tests()

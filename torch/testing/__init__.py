@@ -88,7 +88,7 @@ def make_non_contiguous(tensor):
 
 def get_all_dtypes():
     return [torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.float32, torch.float64]
+            torch.float16, torch.float32, torch.float64, torch.bfloat16]
 
 
 def get_all_math_dtypes(device):

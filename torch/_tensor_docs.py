@@ -481,6 +481,20 @@ bincount(weights=None, minlength=0) -> Tensor
 See :func:`torch.bincount`
 """)
 
+add_docstr_all('bitwise_not',
+               r"""
+bitwise_not() -> Tensor
+
+See :func:`torch.bitwise_not`
+""")
+
+add_docstr_all('bitwise_not_',
+               r"""
+bitwise_not_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_not`
+""")
+
 add_docstr_all('bmm',
                r"""
 bmm(batch2) -> Tensor
@@ -714,6 +728,46 @@ add_docstr_all('diagonal',
 diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 
 See :func:`torch.diagonal`
+""")
+
+add_docstr_all('fill_diagonal_',
+               r"""
+fill_diagonal_(fill_value, wrap=False) -> Tensor
+
+Fill the main diagonal of a tensor that has at least 2-dimensions.
+When dims>2, all dimensions of input must be of equal length.
+This function modifies the input tensor in-place, and returns the input tensor.
+
+Arguments:
+    fill_value (Scalar): the fill value
+    wrap (bool): the diagonal 'wrapped' after N columns for tall matrices.
+
+Example::
+
+    >>> a = torch.zeros(3, 3)
+    >>> a.fill_diagonal_(5)
+    tensor([[5., 0., 0.],
+            [0., 5., 0.],
+            [0., 0., 5.]])
+    >>> b = torch.zeros(7, 3)
+    >>> b.fill_diagonal_(5)
+    tensor([[5., 0., 0.],
+            [0., 5., 0.],
+            [0., 0., 5.],
+            [0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.]])
+    >>> c = torch.zeros(7, 3)
+    >>> c.fill_diagonal_(5, wrap=True)
+    tensor([[5., 0., 0.],
+            [0., 5., 0.],
+            [0., 0., 5.],
+            [0., 0., 0.],
+            [5., 0., 0.],
+            [0., 5., 0.],
+            [0., 0., 5.]])
+
 """)
 
 add_docstr_all('digamma',
@@ -2506,6 +2560,12 @@ add_docstr_all('char',
 char() -> Tensor
 
 ``self.char()`` is equivalent to ``self.to(torch.int8)``. See :func:`to`.
+""")
+
+add_docstr_all('bfloat16',
+               r"""
+bfloat16() -> Tensor
+``self.bfloat16()`` is equivalent to ``self.to(torch.bfloat16)``. See :func:`to`.
 """)
 
 add_docstr_all('double',

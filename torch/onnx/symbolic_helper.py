@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 from torch._C import ListType
 import warnings
@@ -175,9 +177,9 @@ def _unimplemented(op, msg):
 
 def _black_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
-        warnings.warn("ONNX export failed on {}, which is not yet implemented for opset 10. "
-                      "Try exporting with a previous opset version."
-                      .format(name))
+        raise RuntimeError("ONNX export failed on {}, which is not implemented for opset {}. "
+                           "Try exporting with other opset versions."
+                           .format(name, _export_onnx_opset_version))
     return symbolic_fn
 
 
@@ -190,10 +192,10 @@ def _try_get_scalar_type(*args):
     return None
 
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
-    if _export_onnx_opset_version == 9:
+    if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
         return _slice(g, input, axes, starts, ends)
-    if _export_onnx_opset_version == 10:
+    else:
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
@@ -226,7 +228,7 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [9, 10]
+_onnx_stable_opsets = [7, 8, 9, 10]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 
@@ -240,6 +242,10 @@ def _set_opset_version(opset_version):
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
 
+_operator_export_type = None
+def _set_operator_export_type(operator_export_type):
+    global _operator_export_type
+    _operator_export_type = operator_export_type
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
