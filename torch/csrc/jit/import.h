@@ -63,5 +63,7 @@ TORCH_API script::Module load(
     c10::optional<c10::Device> device = c10::nullopt,
     script::ExtraFilesMap& extra_files = default_extra_files);
 
+TORCH_API IValue loadIValue(const std::string& filename);
+
 } // namespace jit
 } // namespace torch

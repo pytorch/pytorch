@@ -1193,5 +1193,18 @@ void ExportModule(
   serializer.serialize(module, extra_files);
 }
 
+void saveIValue(const IValue& ivalue, const std::string& filename) {
+  // Pickle the tensor
+  Pickler pickler;
+  pickler.pushMetadata();
+  pickler.start();
+  pickler.addIValue(value);
+  pickler.finish();
+
+  // Write file
+  std::fstream output(filename, std::ios::out | std::ios::binary);
+  output.write(pickler.stack().data(), pickler.stack().size());
+}
+
 } // namespace jit
 } // namespace torch

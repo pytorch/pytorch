@@ -457,5 +457,15 @@ script::Module load(
   return module;
 }
 
+IValue loadIValue(const std::string& filename) {
+  caffe2::serialize::PyTorchStreamReader reader;
+  at::DataPtr data_ptr;
+  size_t size;
+  std::tie(data_ptr, size) = reader.getRecord(name);
+
+  Unpickler unpickler(data_ptr.get(), size, &tensor_table_);
+  return unpickler.parse_ivalue_list();
+}
+
 } // namespace jit
 } // namespace torch
