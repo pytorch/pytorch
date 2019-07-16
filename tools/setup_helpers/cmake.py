@@ -17,6 +17,8 @@ from .env import (IS_64BIT, IS_DARWIN, IS_WINDOWS,
                   check_env_flag, check_negative_env_flag)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
+from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
+                   NCCL_SYSTEM_LIB, USE_NCCL)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 
 
@@ -270,6 +272,8 @@ class CMake:
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
                                check_negative_env_flag('USE_FBGEMM')),
+            'USE_NCCL': USE_NCCL,
+            'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
             'USE_NUMPY': USE_NUMPY,
             'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
@@ -282,6 +286,9 @@ class CMake:
                       CMAKE_BUILD_TYPE=self._build_type,
                       INSTALL_TEST=build_test,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
+                      NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
+                      NCCL_ROOT_DIR=NCCL_ROOT_DIR,
+                      NCCL_SYSTEM_LIB=NCCL_SYSTEM_LIB,
                       CMAKE_INSTALL_PREFIX=install_dir,
                       CMAKE_C_FLAGS=cflags,
                       CMAKE_CXX_FLAGS=cflags,

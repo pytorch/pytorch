@@ -5963,7 +5963,6 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 x = self.conv(x)
-                return x
                 x = self.bn(x)
                 return F.relu(x, inplace=True)
 
@@ -5975,7 +5974,6 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 x = self.Conv2d_1a_3x3(x)
-                return x
                 return F.dropout(x, training=self.training)
 
         class EagerConv2d(torch.nn.Module):
@@ -5986,7 +5984,6 @@ a")
 
             def forward(self, x):
                 x = self.conv(x)
-                return x
                 x = self.bn(x)
                 return F.relu(x, inplace=True)
 
@@ -5997,7 +5994,6 @@ a")
 
             def forward(self, x):
                 x = self.Conv2d_1a_3x3(x)
-                return x
                 return F.dropout(x, training=self.training)
 
         script_input = torch.rand(4, 3, 299, 299)

@@ -109,15 +109,8 @@ option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
 option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
-cmake_dependent_option(
-    USE_NCCL "Use NCCL" ON
-    "USE_CUDA;UNIX;NOT APPLE" OFF)
-cmake_dependent_option(
-    USE_STATIC_NCCL "Use static NCCL" OFF
-    "USE_NCCL" OFF)
-cmake_dependent_option(
-    USE_SYSTEM_NCCL "Use system-wide NCCL" ON
-    "USE_NCCL" OFF)
+option(USE_NCCL "Use NCCL" ON)
+option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 option(USE_NUMA "Use NUMA (only available on Linux)" ON)
