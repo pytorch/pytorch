@@ -54,34 +54,83 @@ def make_contiguous_tensors(tensors):
     return new_tensors
 
 
-def make_nested_tensor(obj):
-    if is_nested_tensor(obj):
-        return obj.clone().detach()
-    elif torch.is_tensor(obj):
-        return obj.clone().detach()
+# Arguments match torch.tensor
+def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False):
+    if is_nested_tensor(data):
+        # This is consistent with torch.tensor(torch.Tensor)
+        return data.clone().detach()
+    elif torch.is_tensor(data):
+        # The user has the right to expect a NestedTensor from this
+        # function, but we can't meaningfully provide one if passed a Tensor
+        raise ValueError("Can't construct a NestedTensor from a Tensor")
     else:
-        assert isinstance(obj, list)
-        if len(obj) == 0:
-            return NestedTensor([])
+        assert isinstance(data, list)
+        for data_ in data:
+            assert(torch.is_tensor(data_))
+        tensors = []
+        for data_ in data:
+            # torch.tensor copies on construction
+            new_data = data_.clone().detach()
+            new_data = new_data.to(dtype)
+            new_data = new_data.to(device)
+            new_data = new_data.requires_grad_(requires_grad)
+            new_data = new_data.pin_memory()
+            tensors.append(new_data)
+
         _verify_tensors(obj)
-        return NestedTensor(make_contiguous_tensors(obj))
+        return NestedTensor(make_contiguous_tensors(tensors))
 
 
 class NestedTensor():
+    # The attributes must match across all constiuents
+    # and default to the empty Tensor's if the given list
+    # is empty.
+    #
+    # The NestedTensor's attributes then become that of its
+    # constiuents.
+    #
+    # Attributes:
+    #     dim
+    #     layout
+    #     device
+    #     dtype
+    #     requires_grad
+    #     is_pinned
     def __init__(self, tensors):
         _verify_tensors(tensors)
         self.tensors = tensors
         reference_tensor = torch.Tensor([])
         if len(tensors):
-            reference_tensor = tensors[0]
-        self.dim = reference_tensor.dim()
-        self.layout = reference_tensor.layout
-        self.device = reference_tensor.device
-        self.dtype = reference_tensor.dtype
+            self.dim = tensors[0].dim()
+            self.layout = tensors[0].layout
+            self.device = tensors[0].device
+            self.dtype = tensors[0].dtype
+            requires_grad = tensors[0].requires_grad
+            is_pinned = tensors[0].is_pinned()
+            for tensor in tensors:
+                if not (self.dim == tensor.dim() and
+                        self.layout == tensor.layout and
+                        self.device == tensor.device and
+                        self.dtype == tensor.dtype and
+                        requires_grad == tensor.requires_grad and
+                        is_pinned == tensor.is_pinned()):
+                    raise ValueError("Each passed Tensor "
+                            "must match in dim, layout, "
+                            "device, dtype and requires_grad")
+        else:
+            # Carrying around information as member variables vs.
+            # checking one entry of the owned Tensors is annoying
+            # and error-prone. Carrying around an is_empty attribute
+            # to hide the fact that we carry around a list with a
+            # single empty Tensor is also annoying and error-prone.
+            # Both are not worth it for a minor feature.
+            raise ValueError("We do not support empty lists for now.")
 
     def __getattribute__(self, attr):
         if attr == 'shape':
             raise NotImplementedError()
+        if attr == 'requires_grad':
+            return self.tensors[0].requires_grad
         return super().__getattribute__(attr)
 
     def __len__(self):
@@ -154,6 +203,9 @@ class NestedTensor():
 
     def to(self, device):
         return self.__loop__apply(lambda x: x.to(device))
+
+    def requires_grad_(self, requires_grad=True):
+        return self.__loop__apply(lambda x: x.requires_grad_(x, requires_grad_=requires_grad))
 
     def unbind(self):
         return tuple(self.tensors)

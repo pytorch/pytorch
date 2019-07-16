@@ -79,8 +79,8 @@
 #   USE_LMDB
 #     enables use of LMDB for storage
 #
-#   USE_PROTOTYPES
-#     toogles the exposure of prototype features
+#   BUILD_NESTEDTENSOR
+#     enables building the NestedTensor features
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build

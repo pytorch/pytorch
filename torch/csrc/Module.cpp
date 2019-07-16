@@ -57,8 +57,8 @@
 #endif
 #endif
 
-#ifdef USE_PROTOTYPES
-#include <torch/csrc/prototypes/nestedtensor/nestedtensor.h>
+#ifdef BUILD_NESTEDTENSOR
+#include <torch/csrc/tensortypes/nestedtensor/nestedtensor.h>
 #endif
 
 
@@ -633,8 +633,8 @@ PyObject* initModule() {
 #endif
 #endif
 
-#ifdef USE_PROTOTYPES
-  THPUtils_addPyMethodDefs(methods, torch::prototypes::nestedtensor::python_functions());
+#ifdef BUILD_NESTEDTENSOR
+  THPUtils_addPyMethodDefs(methods, torch::tensortypes::nestedtensor::python_functions());
 #endif
 
 #if PY_MAJOR_VERSION == 2

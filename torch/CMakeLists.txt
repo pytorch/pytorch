@@ -74,6 +74,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
@@ -242,10 +243,11 @@ if (USE_NCCL)
     endif()
 endif()
 
-if (USE_PROTOTYPES)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_PROTOTYPES)
+if (BUILD_NESTEDTENSOR)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS BUILD_NESTEDTENSOR)
     list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/prototypes/nestedtensor/init.cpp)
+      ${TORCH_SRC_DIR}/csrc/tensortypes/nestedtensor/nary.cpp
+      ${TORCH_SRC_DIR}/csrc/tensortypes/nestedtensor/init.cpp)
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists

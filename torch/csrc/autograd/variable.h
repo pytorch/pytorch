@@ -112,16 +112,6 @@ struct TORCH_API Variable : public at::Tensor {
       bool requires_grad,
       bool allow_tensor_metadata_change);
 
-  /// Creates a `Variable` from the given `Tensor`, consuming its underlying `TensorImpl`.
-  /// This is intended to be used from functions that immediately create a `Tensor`,
-  /// convert it to a `Variable`, and then free it; it has been found to
-  /// decrease the overhead of those operations, in some situations.
-  /// The comments about `requires_grad` and `data` on the above version also apply to this one.
-  friend Variable make_variable_consuming(
-      at::Tensor data,
-      bool requires_grad,
-      bool allow_tensor_metadata_change);
-
   /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
   /// `gradient_edge` should be a (function, input_nr) pair specifying the function
   /// in the autograd graph, and what particular input of that function, this
@@ -249,8 +239,8 @@ struct TORCH_API Variable : public at::Tensor {
       bool create_graph) const;
 
   /// Sets the tensor data held by this `Variable` to be the same as `new_data`.
-  /// It requires that `new_data` has the same derived type of TensorImpl as
-  /// this `Variable`, by checking `_has_same_tensorimpl_type(this, new_data)`.
+  /// It requires that `new_data` and `Variable` have compatible tensor type, by
+  /// checking `_has_compatible_shallow_copy_type(this, new_data)`.
   void set_data(const at::Tensor &new_data) const;
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
@@ -495,7 +485,7 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
 /// are a lot of call sites to these factory functions that need to change the
 /// variable's size or storage afterwards, and they don't expect the original
 /// tensor (where the variable is created from) to be updated. Setting
-/// `allow_tensor_metadata_change_` to false by default would unnecessarily
+/// `allow_tensor_metadata_change_` to false by default would unnecessarily
 /// prevent those changes from happening and is undesirable.
 
 // See NOTE [ Autograd View Variables ] for details.
@@ -535,29 +525,19 @@ inline Variable make_variable(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-      /*version_counter=*/0,
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
-      data_impl_copy.get(), requires_grad));
-    return Variable(data_impl_copy);
-  }
-  return Variable();
-}
-
-inline Variable make_variable_consuming(
-    at::Tensor data,
-    bool requires_grad = false,
-    bool allow_tensor_metadata_change = true) {
-  TORCH_CHECK(
-      !data.is_variable(),
-      "Must not create a new variable from a variable, use its .tensor_data()");
-  if (data.defined()) {
-    AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
-    auto data_impl = data.getIntrusivePtr();
-    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
-    return Variable(std::move(data_impl));
+    if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
+      auto data_impl = data.getIntrusivePtr();
+      data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
+      return Variable(std::move(data_impl));
+    } else {
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
+        data_impl_copy.get(), requires_grad));
+      return Variable(data_impl_copy);
+    }
   }
   return Variable();
 }

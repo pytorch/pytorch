@@ -1,13 +1,13 @@
 import torch
 import unittest
-from common_utils import TEST_WITH_PROTOTYPES
+from common_utils import TEST_WITH_NESTEDTENSORS
 
-if TEST_WITH_PROTOTYPES:
-    import torch.prototypes.nestedtensor as nestedtensor
+if TEST_WITH_NESTEDTENSORS:
+    import torch.tensortypes.nestedtensor as nestedtensor
     from common_utils import TestCase
     NestedTensor = nestedtensor.NestedTensor
 else:
-    print('prototypes not available, skipping tests')
+    print('NestedTensors not available, skipping tests')
     TestCase = object
 
 
@@ -63,6 +63,8 @@ class TestNestedTensor(TestCase):
             tensors[i].mul_(i + 2)
         for i in range(16):
             assert (tensors[i] != nested_tensor.tensors[i]).all()
+        self.assertRaises(ValueError, lambda: torch.nestedtensor([]))
+        self.assertRaises(ValueError, lambda: torch.nestedtensor(torch.tensor([3.0])))
 
     def test_nested_size(self):
         a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
@@ -82,8 +84,6 @@ class TestNestedTensor(TestCase):
         assert(len(a) == 2)
         a = torch.nestedtensor([torch.tensor([1, 2])])
         assert(len(a) == 1)
-        a = torch.nestedtensor([])
-        assert(len(a) == 0)
 
 
     def test_unbind(self):
