@@ -195,6 +195,9 @@ struct C10_API VariableVersion {
   c10::intrusive_ptr<VersionCounter> version_counter_;
 
  public:
+  bool unique() const {
+    return 1 == version_counter_.use_count();
+  }
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
   // https://cplusplus.github.io/LWG/issue2334.
@@ -390,6 +393,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
     return numel_;
+  }
+
+  bool unique_version() const {
+    return version_counter_.unique();
   }
 
   /**
