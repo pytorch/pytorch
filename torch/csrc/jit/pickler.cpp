@@ -665,7 +665,7 @@ OpCode Unpickler::readInstruction() {
       // TODO [unpickler refactor] __main__ isn't used by the pickler anymore
       if (module_name == "__main__") {
         auto pickler_class = getClass(class_name);
-        globals_.push_back([this, pickler_class] {
+        globals_.emplace_back([this, pickler_class] {
           // TODO: [unpickler refactor]
           auto setitem_data = stack_.back();
           stack_.pop_back();
@@ -682,7 +682,7 @@ OpCode Unpickler::readInstruction() {
         });
       } else if (module_name == "torch.jit._pickle") {
         auto pickler_class = getClass(class_name);
-        globals_.push_back([this, pickler_class] {
+        globals_.emplace_back([this, pickler_class] {
           // Pop reduce arg off the stack
           auto data = stack_.back().toTuple()->elements().at(0);
           stack_.pop_back();
@@ -710,7 +710,7 @@ OpCode Unpickler::readInstruction() {
         AT_ASSERT(class_resolver_);
         at::StrongTypePtr type =
             class_resolver_(c10::QualifiedName(module_name, class_name));
-        globals_.push_back([this, type] {
+        globals_.emplace_back([this, type] {
           auto dict = stack_.back().toGenericDict();
           stack_.pop_back();
           auto cls = type.type_->expect<at::ClassType>();
