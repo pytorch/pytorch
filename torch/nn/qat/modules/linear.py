@@ -34,7 +34,6 @@ class Linear(NNLinear):
                  weight_fake_quant=default_qat_qconfig.weight()):
         assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
-        # fake quant module for output activation
         self.observer = activation_fake_quant
         self.weight_fake_quant = weight_fake_quant
 
