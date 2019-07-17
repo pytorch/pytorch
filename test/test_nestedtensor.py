@@ -56,12 +56,13 @@ class TestNestedTensor(TestCase):
 
     def test_constructor(self):
         tensors = []
-        for i in range(16):
+        num_tensors = 16
+        for i in range(num_tensors):
             tensors.append(self.gen_float_tensor(i, (16, 128, 128)))
         nested_tensor = torch.nestedtensor(tensors)
-        for i in range(16):
+        for i in range(num_tensors):
             tensors[i].mul_(i + 2)
-        for i in range(16):
+        for i in range(num_tensors):
             assert (tensors[i] != nested_tensor.tensors[i]).all()
         self.assertRaises(ValueError, lambda: torch.nestedtensor([]))
         self.assertRaises(ValueError, lambda: torch.nestedtensor(torch.tensor([3.0])))

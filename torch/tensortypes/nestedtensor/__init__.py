@@ -31,8 +31,7 @@ def _unary(func_name, func, input1, out=None):
         assert out.tensors[i].size() == input1.tensors[i].size()
 
     if out.is_contiguous() and input1.is_contiguous():
-        func(input1.get_contiguous_buffer(),
-             out=out.get_contiguous_buffer())
+        func(input1.buffer(), out=out.buffer())
     else:
         list_func = getattr(nestedtensor, func_name)
         list_func(input1.tensors, out.tensors)
@@ -47,8 +46,11 @@ def _binary(func_name, func, input1, input2, out=None):
         # NOTE: We are disabling broadcasting for now
         assert out.tensors[i].size() == input1.tensors[i].size()
         assert input2.tensors[i].size() == input1.tensors[i].size()
-    list_func = getattr(nestedtensor, func_name)
-    list_func(input1.tensors, input2.tensors, out.tensors)
+    if out.is_contiguous() and input1.is_contiguous() and input2.is_contiguous():
+        func(input1.buffer(), input2.buffer(), out=out.buffer())
+    else:
+        list_func = getattr(nestedtensor, func_name)
+        list_func(input1.tensors, input2.tensors, out.tensors)
     return out
 
 
