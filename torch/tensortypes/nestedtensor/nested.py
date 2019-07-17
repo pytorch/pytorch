@@ -30,15 +30,24 @@ def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_m
         tensors = []
         for data_ in data:
             # torch.tensor copies on construction
-            new_data = data_.clone().detach()
+            new_data = torch.empty_like(data_)
+            new_data.copy_(data_)
             new_data = new_data.to(dtype)
             new_data = new_data.to(device)
             new_data = new_data.requires_grad_(requires_grad)
-            new_data = new_data.pin_memory()
+            if pin_memory:
+                new_data = new_data.pin_memory()
             tensors.append(new_data)
 
         return NestedTensor(tensors)
 
+def as_nestedtensor(data, dtype=None, device=None):
+    ret = NestedTensor(data)
+    if dtype is not None:
+        ret = ret.to(dtype)
+    if device is not None:
+        ret = ret.to(device)
+    return ret
 
 class NestedTensor():
     # The attributes must match across all constiuents
@@ -103,6 +112,19 @@ class NestedTensor():
                         tensor.grad_fn(*args, **kwargs)
                 return _func
             return create_grad_fn(self)
+        if attr == 'grad':
+            grads = []
+            for tensor in self.tensors:
+                grads.append(tensor.grad)
+            if all(grad is None for grad in grads):
+                return None
+            else:
+                return NestedTensor(grads)
+        if attr == 'data':
+            data = []
+            for tensor in self.tensors:
+                data.append(tensor.data)
+            return NestedTensor(data)
         return super().__getattribute__(attr)
 
     def __len__(self):
@@ -136,7 +158,7 @@ class NestedTensor():
         tensors = []
         for tensor in self.tensors:
             tensors.append(fn(tensor))
-        return NestedTensor(tensors)
+        return tensors
 
     def nested_size(self):
         tensors = self.unbind()
@@ -161,34 +183,33 @@ class NestedTensor():
 
     # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
     def sum(self):
+        sums = []
         # We currently assume len(self.tensors) is always non-zero
-        ret = self.tensors[0].sum()
-        for i in range(1, len(self.tensors)):
-            ret = ret + self.tensors[i].sum()
-        return ret
+        for tensor in self.tensors:
+            sums.append(tensor.sum())
+        return torch.stack(sums).sum()
 
     # Tensor ops
     def detach(self):
-        return self.__loop__apply(lambda x: x.detach())
+        return NestedTensor(self.__loop__apply(lambda x: x.detach()))
 
     def detach_(self):
-        return self.__loop__apply(lambda x: x.detach_())
+        return NestedTensor(self.__loop__apply(lambda x: x.detach_()))
 
-    def backward(self):
-        for tensor in self.tensors:
-            tensor.backward()
+    def backward(self, *args, **kwargs):
+        self.tensors = self.__loop__apply(lambda x: x.backward(*args, **kwargs))
 
     def clone(self):
-        return self.__loop__apply(lambda x: x.clone())
+        return NestedTensor(self.__loop__apply(lambda x: x.clone()))
 
     def type(self, dtype):
-        return self.__loop__apply(lambda x: x.type(dtype))
+        return NestedTensor(self.__loop__apply(lambda x: x.type(dtype)))
 
-    def to(self, device):
-        return self.__loop__apply(lambda x: x.to(device))
+    def to(self, *args, **kwargs):
+        return NestedTensor(self.__loop__apply(lambda x: x.to(*args, **kwargs)))
 
-    def requires_grad_(self, requires_grad=True):
-        return self.__loop__apply(lambda x: x.requires_grad_(x, requires_grad_=requires_grad))
+    def requires_grad_(self, *args, **kwargs):
+        return NestedTensor(self.__loop__apply(lambda x: x.requires_grad_(*args, **kwargs)))
 
     def unbind(self):
         return tuple(self.tensors)

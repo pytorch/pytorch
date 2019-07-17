@@ -2,54 +2,38 @@ import torch
 from . import nested
 import torch.tensortypes.nestedtensor.codegen as codegen
 
-import torch.tensortypes.nestedtensor as nestedtensor
-
 NestedTensor = nested.NestedTensor
 
-def _create_out(input1, out, dtype=None):
-    if out is None:
-        if dtype is None:
-            dtype = input1.dtype
-        out_tensors = []
-        for tensor in input1.tensors:
-            out_tensors.append(torch.empty_like(tensor, dtype=dtype))
-        out = NestedTensor(out_tensors)
-    assert len(out) == len(input1)
-    return out
+
+def _nary_gen(out_dtype=None):
+    # Follows signature of torch nary functions
+    def _nary(func_name, func, *inputs, out=None):
+        # NOTE: We are disabling broadcasting for now.
+        for i in range(1, len(inputs)):
+            for j in range(len(inputs[i])):
+                assert inputs[0].tensors[j].size() == inputs[i].tensors[j].size()
+        if out is None:
+            out_tensors = []
+            for i in range(len(inputs[0])):
+                out_tensor = func(*list(map(lambda x: x.tensors[i], inputs)))
+                if out_dtype is not None:
+                    out_tensor = out_tensor.to(out_dtype)
+                out_tensors.append(out_tensor)
+            return NestedTensor(out_tensors)
+        else:
+            # NOTE: We are disabling broadcasting for now.
+            for i in range(len(out)):
+                assert out.tensors[i].size() == inputs[0].tensors[i].size()
+            if out_dtype is not None:
+                out = out.to(out_dtype)
+            for i in range(len(inputs[0])):
+                func(*list(map(lambda x: x.tensors[i], inputs)), out=out.tensors[i])
+            return out
+    return _nary
 
 
-def _unary(func_name, func, input1, out=None):
-    out = _create_out(input1, out)
-    for i in range(len(out)):
-        # NOTE: We are disabling broadcasting and scalar arguments for now.
-        assert out.tensors[i].size() == input1.tensors[i].size()
-    list_func(input1.tensors, out.tensors)
-    return out
-
-
-# The contract is that func only works with torch.Tensor
-def _binary(func_name, func, input1, input2, out=None):
-    out = _create_out(input1, out)
-    assert len(input1) == len(input2)
-    for i in range(len(out)):
-        # NOTE: We are disabling broadcasting and scalar arguments for now.
-        assert out.tensors[i].size() == input1.tensors[i].size()
-        assert input2.tensors[i].size() == input1.tensors[i].size()
-    list_func(input1.tensors, input2.tensors, out.tensors)
-    return out
-
-
-def _comparison(func_name, func, input1, input2, out=None):
-    out = _create_out(input1, out, dtype=torch.uint8)
-    assert len(input1) == len(input2)
-    for i in range(len(out)):
-        # NOTE: We are disabling broadcasting and scalar arguments for now.
-        assert out.tensors[i].size() == input1.tensors[i].size()
-        assert input2.tensors[i].size() == input1.tensors[i].size()
-    list_func(input1.tensors, input2.tensors, out.tensors)
-    return out
-
-torch, NestedTensor = codegen.add_pointwise_unary_functions(torch, NestedTensor, _unary)
-torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor, _binary)
-torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _comparison)
+torch, NestedTensor = codegen.add_pointwise_unary_functions(torch, NestedTensor, _nary_gen())
+torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor, _nary_gen())
+torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _nary_gen(torch.uint8))
 torch.nestedtensor = nested.make_nested_tensor
+torch.as_nestedtensor = nested.as_nestedtensor

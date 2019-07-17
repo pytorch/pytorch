@@ -144,9 +144,9 @@ class TestNestedTensor(TestCase):
         assert (a3 == a1).all()
 
     def test_detach(self):
-        data = [self.gen_float_tensor(1, (10, 10), requires_grad=True),
-                self.gen_float_tensor(2, (10, 10), requires_grad=True),
-                self.gen_float_tensor(3, (10, 10), requires_grad=True)]
+        data = [self.gen_float_tensor(1, (10, 10)),
+                self.gen_float_tensor(2, (10, 10)),
+                self.gen_float_tensor(3, (10, 10))]
         ones_data = [torch.ones(10, 10),
                      torch.ones(10, 10),
                      torch.ones(10, 10)]
@@ -158,6 +158,7 @@ class TestNestedTensor(TestCase):
         fours_data = [torch.ones(10, 10) * 4,
                       torch.ones(10, 10) * 4,
                       torch.ones(10, 10) * 4]
+        ones = torch.nestedtensor(ones_data).to(torch.float)
         twos = torch.nestedtensor(twos_data).to(torch.float)
         fours = torch.nestedtensor(fours_data).to(torch.float)
         x = torch.nestedtensor(data, requires_grad=True)
@@ -167,44 +168,39 @@ class TestNestedTensor(TestCase):
         self.assertFalse(y.requires_grad)
         self.assertFalse(z.requires_grad)
 
-        x = torch.nestedtensor(data)
+        x = torch.nestedtensor(data, requires_grad=True)
         y = x * twos
         y = y.detach()
         self.assertFalse(y.requires_grad)
         self.assertIsNone(y.grad_fn)
         z = x + y
-        print(z.sum())
         z.sum().backward()
 
         # This is an incorrect gradient, but we assume that's what the user
         # wanted. detach() is an advanced option.
-        self.assertEqual(x.grad.data, torch.nestedtensor(ones_data))
+        self.assertTrue((x.grad.data == ones).all())
 
         # in-place detach
-        x = torch.nestedtensor(data)
-        y = torch.nestedtensor(data)
+        x = torch.nestedtensor(data, requires_grad=True)
+        y = torch.nestedtensor(data, requires_grad=True)
         a = x * twos
         (y + a).sum().backward(retain_graph=True)
         a.detach_()
         self.assertFalse(a.requires_grad)
         (y + a).sum().backward()  # this won't backprop to x
-        self.assertEqual(x.grad.data, torch.nestedtensor(ones_data) * 2)
-        self.assertEqual(y.grad.data, torch.nestedtensor(ones_data) * 2)
+        self.assertTrue((x.grad.data == ones * twos).all())
+        self.assertTrue((y.grad.data == ones * twos).all())
 
         # TODO: view semantics will be defined by NestedTensor 0.0.3 or 0.0.4
         # in-place deatch on a view raises an exception
         # view = x.narrow(0, 1, 4)
         # self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
-    # def test_detach_base(self):
-    #     "detaching base does not detach view"
-    #     x = torch.randn(10, 10, requires_grad=True)
-    #     view = x.narrow(0, 1, 4)
-    #     x.detach_()
-    #     self.assertFalse(x.requires_grad)
-    #     self.assertTrue(view.requires_grad)
-    #     self.assertIsNotNone(view.grad_fn)
-    #     self.assertIs(view._base, x)
+    def test_detach_base(self):
+        "detaching base does not detach view"
+        x = torch.nestedtensor([torch.randn(10, 10)], requires_grad=True)
+        x.detach_()
+        self.assertFalse(x.requires_grad)
 
 if __name__ == "__main__":
     unittest.main()
