@@ -1664,3 +1664,9 @@ def gather(g, self, dim, index, sparse_grad=False):
 @parse_args('v', 'is', 'i')
 def logsumexp(g, input, dim, keepdim):
     return g.op('ReduceLogSumExp', input, axes_i=dim, keepdims_i=keepdim)
+
+
+def masked_fill(g, self, mask, value):
+    mask = _cast_Bool(g, mask, False)
+    value = sym_help._maybe_get_scalar(value)
+    return g.op('Where', mask, sym_help._if_scalar_type_as(g, value, self), self)

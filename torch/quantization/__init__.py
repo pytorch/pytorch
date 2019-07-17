@@ -3,20 +3,14 @@ from .quantize import *  # noqa: F401
 from .observer import *  # noqa: F401
 from .QConfig import *  # noqa: F401
 from .fake_quantize import *  # noqa: F401
-import torch
 
 def default_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
-    total, correct = 0, 0
     for data, target in calib_data:
-        output = model(data)
-        _, predicted = torch.max(output, 1)
-        total += target.size(0)
-        correct += (predicted == target).sum().item()
-    return correct / total
+        model(data)
 
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
@@ -33,5 +27,5 @@ _all__ = [
     # QConfig
     'QConfig', 'default_qconfig',
     # QAT utilities
-    'default_qat_qconfig',
+    'default_qat_qconfig', 'prepare_qat', 'quantize_qat'
 ]

@@ -108,9 +108,9 @@ class Linear(NNLinear):
             dtype=torch.qint8)
         self.register_buffer('_packed_weight',
                              torch.ops.quantized.fbgemm_linear_prepack(qweight))
-        self.register_buffer('_scale',
+        self.register_buffer('scale',
                              torch.tensor([1.0], dtype=torch.double))
-        self.register_buffer('_zero_point',
+        self.register_buffer('zero_point',
                              torch.tensor([0], dtype=torch.long))
 
     @property
@@ -120,29 +120,6 @@ class Linear(NNLinear):
     @weight.setter
     def weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
-
-    # TODO: These will be duplicated multiple times, should we use multi-inheritance?
-    @property
-    def scale(self):
-        return self._scale.item()
-
-    @scale.setter
-    def scale(self, s):
-        if isinstance(s, torch.Tensor):
-            self._scale = s
-        else:
-            self._scale = torch.tensor([s], dtype=torch.double)
-
-    @property
-    def zero_point(self):
-        return self._zero_point.item()
-
-    @zero_point.setter
-    def zero_point(self, zp):
-        if isinstance(zp, torch.Tensor):
-            self._zero_point = zp
-        else:
-            self._zero_point = torch.tensor([zp], dtype=torch.long)
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
@@ -180,15 +157,14 @@ class Linear(NNLinear):
         """
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
-            activation_observer = mod.observer
             weight_observer = mod.weight_fake_quant
         else:
             assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-            activation_observer = mod.observer
             weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
+        activation_observer = mod.observer
         act_scale, act_zp = activation_observer.calculate_qparams()
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = (wt_scale * act_scale).float()
