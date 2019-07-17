@@ -4,7 +4,6 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/type_map.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 
@@ -1287,15 +1286,13 @@ namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
+    auto tmap = c10::getTypeMap();
     auto res = tmap.find(typeid(T).name());
     if (res == tmap.end()) {
         throw c10::Error("Trying to convert a class that's not registered.", "");
     }
     return std::dynamic_pointer_cast<Type>(res->second.type_);
   }
-//   static_assert(
-//       guts::false_t<T>::value,
-//       "Type could not be converted to any of the known types.");
 };
 
 template<> struct getTypePtr_<at::Tensor> final {

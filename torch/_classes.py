@@ -5,5 +5,5 @@ class _Classes(types.ModuleType):
         super(_Classes, self).__init__('torch.classes')
 
 
-# The ops "namespace"
+# The classes "namespace"
 classes = _Classes()

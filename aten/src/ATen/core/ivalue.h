@@ -573,6 +573,8 @@ struct StrongTypePtr {
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
   std::shared_ptr<ClassType> type_;
 };
+
+std::unordered_map<std::string, c10::StrongTypePtr>& getTypeMap();
 }
 
 #include <ATen/core/ivalue_inl.h>

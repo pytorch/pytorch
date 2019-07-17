@@ -171,4 +171,9 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   std::sort(ordered.begin(), ordered.end(), CompareIValue);
   return ordered;
 }
+
+std::unordered_map<std::string, c10::StrongTypePtr>& getTypeMap() {
+    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+    return tmap;
+}
 } // namespace c10

@@ -1046,6 +1046,8 @@ def _qualified_name(obj):
 
     name = obj.__name__
     module_name = obj.__module__
+    if module_name == "torch._classes":
+        return obj.qualified_name
 
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.

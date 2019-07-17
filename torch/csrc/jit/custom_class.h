@@ -2,19 +2,19 @@
 #pragma once
 
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/type_map.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
-#include <torch/csrc/jit/pybind_utils.h>
 #include <iostream>
 #include <sstream>
 
@@ -51,6 +51,7 @@ class class_ {
   ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
+  const std::string topModule = "__torch__.torch";
 
  public:
   class_(string className_) : className(std::move(className_)) {
@@ -60,20 +61,22 @@ class class_ {
     // (I think)?
     auto obj = py::module::import("torch").attr(parentModule.c_str());
     pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
+    std::string qualifiedName =
+        topModule + "." + parentModule + "." + className;
     auto newClass =
         py::module::import("torch.jit")
-            .attr("_add_script_class")(
-                *pyClass,
-                ("__torch__.torch." + parentModule + "." + className).c_str());
+            .attr("_add_script_class")(*pyClass, qualifiedName.c_str());
 
+    pyClass->attr("qualified_name") = py::str(qualifiedName);
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute.
     classCu = std::make_shared<script::CompilationUnit>();
     auto runtimeClassName = typeid(c10::intrusive_ptr<CurClass>).name();
-    classTypePtr = ClassType::create(
-        c10::QualifiedName("__torch__.torch." + parentModule + "." + className),
-        classCu);
-    tmap.insert({runtimeClassName, StrongTypePtr(classCu, classTypePtr)});
+    std::cout << "76: " << runtimeClassName << std::endl;
+    classTypePtr =
+        ClassType::create(c10::QualifiedName(qualifiedName), classCu);
+    c10::getTypeMap().insert(
+        {runtimeClassName, StrongTypePtr(classCu, classTypePtr)});
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
     torch::jit::get_python_cu()->register_class(classTypePtr);
@@ -86,15 +89,11 @@ class class_ {
     pyClass->def(py::init<Types...>());
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::__init__";
-    // auto qualFuncName = className + "::__init__." + type_name<int64_t,
-    // Types...>();
+    auto qualMethodName =
+        topModule + "." + parentModule + "." + className + ".__init__";
     auto func = [](c10::intrusive_ptr<CurClass> cur, Types... args) {
-      *cur = CurClass(args...); };
-    //  auto func = [](CurClass* cur, Types... args) {
-    //     auto res = new Capsule();
-    //     res->ptr = (void*)(new CurClass(args...));
-    //     return res;
-    //   };
+      *cur = CurClass(args...);
+    };
     std::vector<Value*> inputs = addInputs(func, graph);
     static auto classRegistry =
         torch::RegisterOperators().op(qualFuncName, std::move(func));
@@ -106,7 +105,7 @@ class class_ {
         graph->create(Symbol::fromQualString(qualFuncName), inputs, 0));
     graph->registerOutput(
         graph->insertConstant(IValue())->setType(NoneType::get()));
-    classCu->create_function("__init__", graph);
+    classCu->create_function(qualMethodName, graph);
     return *this;
   }
   template <typename Func>
@@ -156,6 +155,8 @@ class class_ {
   class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {
     pyClass->def(name.c_str(), f);
     auto qualFuncName = className + "::" + name;
+    auto qualMethodName =
+        topModule + "." + parentModule + "." + className + "." + name;
     auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
       return guts::invoke(f, *cur, args...);
     };
@@ -174,7 +175,7 @@ class class_ {
       res = graph->insertConstant(IValue())->setType(NoneType::get());
     }
     graph->registerOutput(res);
-    classCu->create_function(name, graph);
+    classCu->create_function(qualMethodName, graph);
     return *this;
   }
 };

@@ -5,13 +5,11 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
-#include <ATen/core/Capsule.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
-#include <ATen/core/type_map.h>
 
 namespace torch {
 namespace jit {
@@ -453,8 +451,6 @@ T generic_to(
     auto initializedCapsule = IValue(c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(static_cast<intrusive_ptr_target*>(capsulePtr)));
     obj->setAttr("capsule", initializedCapsule);
     return c10::intrusive_ptr<ElemType>::reclaim(static_cast<ElemType*>(initializedCapsule.toCapsule().release()));
-    // return std::static_pointer_cast<T>(capsule.toCapsule());
-    // return reinterpret_cast<T>(capsule.toCapsule());
 }
 
 template <typename Elem>
@@ -761,6 +757,7 @@ IValue from(c10::optional<T> v) { return IValue(v); }
 
 template <typename T>
 IValue from(T x) {
+  auto tmap = c10::getTypeMap();
   auto res = tmap.find(typeid(T).name());
   if (res == tmap.end()) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
@@ -769,7 +766,6 @@ IValue from(T x) {
   retObject->setAttr("capsule", IValue(x));
   auto resIVal = IValue(std::move(retObject));
   return resIVal;
-    // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
 
 }
 }
