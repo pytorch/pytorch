@@ -96,7 +96,7 @@ void Pickler::finish() {
       std::string key = std::to_string(getStorageKey(tensor));
       push<OpCode>(OpCode::BINUNICODE);
       push<uint32_t>(key.size());
-      pushRawStringData(key);
+      pushBytes(key);
     }
     push<OpCode>(OpCode::TUPLE);
     push<OpCode>(OpCode::STOP);
@@ -127,15 +127,15 @@ void Pickler::pushMetadata() {
   start();
   push<OpCode>(OpCode::LONG1);
   // LONG1 size
-  pushRawStringData("\x0a");
+  pushBytes("\x0a");
   // LONG1 data
-  pushRawStringData("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
+  pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
   push<OpCode>(OpCode::STOP);
 
   // Protocol Version (1001)
   start();
   push<OpCode>(OpCode::BININT2);
-  pushRawStringData("\xe9\x03");
+  pushBytes("\xe9\x03");
   push<OpCode>(OpCode::STOP);
 
   // sys_info, this isn't actually used in de-serialization so we can leave this
@@ -260,7 +260,7 @@ void Pickler::pushBinGet(uint32_t memo_id) {
 void Pickler::pushStringImpl(const std::string& string) {
   push<OpCode>(OpCode::BINUNICODE);
   push<uint32_t>(string.size());
-  pushRawStringData(string);
+  pushBytes(string);
 }
 
 void Pickler::pushString(const std::string& string) {
@@ -273,7 +273,7 @@ void Pickler::pushString(const std::string& string) {
   }
 }
 
-void Pickler::pushRawStringData(const std::string& string) {
+void Pickler::pushBytes(const std::string& string) {
   stack_.insert(stack_.end(), string.begin(), string.end());
 }
 
@@ -281,7 +281,7 @@ void Pickler::pushGlobal(const std::string& name_temp) {
   auto memo_entry = memoized_globals_map_.find(name_temp);
   if (memo_entry == memoized_globals_map_.end()) {
     push<OpCode>(OpCode::GLOBAL);
-    pushRawStringData(name_temp);
+    pushBytes(name_temp);
 
     // Push BINPUT without adding anything to the memoized_ivalues_
     size_t memo_id = pushNextBinPut();
@@ -717,7 +717,8 @@ OpCode Unpickler::readInstruction() {
         case PicklerClass::TENSORLIST:
         case PicklerClass::DOUBLELIST:
         case PicklerClass::BOOLLIST:
-          stack_.emplace_back(data);
+          stack_.emplace_back(data->elements().at(0));
+          break;
         default:
           AT_ERROR("Unknown pickler class id");
       }
