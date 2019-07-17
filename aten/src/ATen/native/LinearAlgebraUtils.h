@@ -47,7 +47,7 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
 /* Checks a necessary property for the triu and tril implementations, hence the name.
  * Here batch contiguity is checked for tensors with greater than 4 dimensions.
  * Contiguous tensors and tensors with less than 3 dimensions pass this check
- */ 
+ */
 static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor& tensor) {
   // Complete contiguity is the most desired property, which is why
   // we return true if the tensor is contiguous
@@ -133,7 +133,7 @@ static inline void squareCheckInputs(const Tensor& self) {
  * Given a vector of int64_t infos, obtained after a batch operations,
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
- */ 
+ */
 static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
@@ -159,7 +159,7 @@ static inline void batchCheckErrors(const Tensor& infos, const char* name) {
   auto batch_size = infos.numel();
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data<int>();
-  for (size_t i = 0; i < batch_size; i++) {
+  for (int64_t i = 0; i < batch_size; i++) {
     auto info = infos_data[i];
     if (info < 0) {
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
@@ -230,7 +230,7 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
     perm.push_back(i);
   }
 
-  TORCH_CHECK(perm.size() == ndim,
+  TORCH_CHECK(perm.size() == size_t(ndim),
     "duplicate or invalid axis in 'dim' argument for tensor with ndim==", ndim);
 
   return self.permute(perm);
@@ -280,9 +280,9 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     U_empty = at::empty_strided(sizes, strides, input.options());
   } else {
     // NB: U_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
+    // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
+    // moves the inputs between devices internally.
     U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
@@ -294,9 +294,9 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     VT_empty = at::empty(sizes, input.options());
   } else {
     // NB: VT_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
+    // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
+    // moves the inputs between devices internally.
     VT_empty = at::empty(sizes, input.options().device(at::kCPU));
   }
 
@@ -307,12 +307,12 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     S_empty = at::empty(sizes, input.options());
   } else {
     // NB: S_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
+    // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
+    // moves the inputs between devices internally.
     S_empty = at::empty(sizes, input.options().device(at::kCPU));
   }
-  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);  
+  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
 }
 
 // Function used instead of .to so that the original strides are retained

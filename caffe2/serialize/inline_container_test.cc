@@ -18,13 +18,13 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   PyTorchStreamWriter writer(&oss);
   std::array<char, 127> data1;
 
-  for (int i = 0; i < data1.size(); ++i) {
+  for (size_t i = 0; i < data1.size(); ++i) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   std::array<char, 64> data2;
-  for (int i = 0; i < data2.size(); ++i) {
+  for (size_t i = 0; i < data2.size(); ++i) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());

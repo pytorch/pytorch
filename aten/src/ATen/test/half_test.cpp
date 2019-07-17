@@ -119,6 +119,7 @@ ASSERT_SAME_TYPE(tinyness_before);
 
 TEST(TestHalf, CommonMath) {
   float threshold = 0.00001;
+  (void)threshold;
   assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
   assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
   assert(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);

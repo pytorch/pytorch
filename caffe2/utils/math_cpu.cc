@@ -1299,7 +1299,7 @@ C10_EXPORT void generate_trace_lru(
     /* std::vector<int> cum_map = {0, 0, 0, 0, 0, 1, 2, 2, 3, 4}; */          \
     int k = 10; /* 100; */                                                    \
     std::vector<int> cum_map(k, 0);                                           \
-    for (int j = 0; j < cum_dis.size();) {                                    \
+    for (size_t j = 0; j < cum_dis.size();) {                                 \
       int sz = (int)round(cum_dis[j] * k);                                    \
       for (int i = 0; i < sz; i++) {                                          \
         cum_map[j + i] = j;                                                   \

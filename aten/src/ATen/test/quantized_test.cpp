@@ -63,7 +63,7 @@ TEST(TestQTensor, RoundingMode) {
   Tensor qx = at::quantize_linear(x, /*scale=*/1.0, zero_point, kQUInt8);
 
   auto qx_data = qx.data<quint8>();
-  for (int idx = 0; idx < x_values.size(); ++idx) {
+  for (size_t idx = 0; idx < x_values.size(); ++idx) {
     ASSERT_EQ(qx_expect[idx], qx_data[idx].val_)
       << "Tie breaking during rounding element " << idx << " failed!";
   }

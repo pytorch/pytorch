@@ -65,13 +65,8 @@ TEST(Converter, DeclareExport) {
   // Only 1 external input
   EXPECT_EQ(count, 1);
 
-  // Reset for external output
-  count = 0;
-  for (const auto& exportNode : outputs) {
-    count++;
-  }
   // 2 external outputs
-  EXPECT_EQ(count, 2);
+  EXPECT_EQ(outputs.size(), size_t(2));
 }
 
 TEST(Distributed, InsertDeviceOptions) {
