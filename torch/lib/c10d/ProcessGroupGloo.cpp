@@ -329,6 +329,10 @@ uint32_t ProcessGroupGloo::nextTag() {
   return collectiveCounter_++;
 }
 
+std::shared_ptr<::gloo::Context> ProcessGroupGloo::getContext(uint32_t tag) {
+  return contexts_[tag % contexts_.size()];
+}
+
 void ProcessGroupGloo::runLoop(int workerIndex) {
   std::unique_lock<std::mutex> lock(workMutex_);
 
@@ -492,14 +496,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   }
 
   std::shared_ptr<AsyncBroadcastWork> work;
-  auto& context = contexts_[0];
+  auto tag = nextTag();
+  auto context = getContext(tag);
   if (device.type() == at::kCPU) {
     work = std::make_shared<AsyncBroadcastWork>(
-        context, inputs, opts.rootRank, opts.rootTensor, nextTag());
+        std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = std::make_shared<AsyncBroadcastCUDAWork>(
-        context, inputs, opts.rootRank, opts.rootTensor, nextTag());
+        std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
 #endif
   } else {
     throw std::runtime_error("Invalid backend");
@@ -948,14 +953,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   }
 
   std::shared_ptr<AsyncWork> work;
-  auto& context = contexts_[0];
+  auto tag = nextTag();
+  auto context = getContext(tag);
   if (device.type() == at::kCPU) {
     if (layout == c10::kStrided) {
       work = std::make_shared<AsyncAllreduceWork>(
-          context, inputs, opts.reduceOp, nextTag());
+          std::move(context), inputs, opts.reduceOp, tag);
     } else if (layout == c10::kSparse) {
       work = std::make_shared<AsyncSparseAllreduceWork>(
-          context, inputs, nextTag());
+          std::move(context), inputs, tag);
     } else {
       invalidArgument("unsupported layout");
     }
@@ -963,10 +969,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   } else if (device.type() == at::kCUDA) {
     if (layout == c10::kStrided) {
       work = std::make_shared<AsyncAllreduceCUDAWork>(
-          context, inputs, opts.reduceOp, nextTag());
+          std::move(context), inputs, opts.reduceOp, tag);
     } else if (layout == c10::kSparse) {
       work = std::make_shared<AsyncSparseAllreduceCUDAWork>(
-          context, inputs, nextTag());
+          std::move(context), inputs, tag);
     } else {
       invalidArgument("unsupported layout");
     }
@@ -1118,24 +1124,25 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
   }
 
   std::shared_ptr<AsyncReduceWork> work;
-  auto& context = contexts_[0];
+  auto tag = nextTag();
+  auto context = getContext(tag);
   if (device.type() == at::kCPU) {
     work = std::make_shared<AsyncReduceWork>(
-        context,
+        std::move(context),
         inputs,
         opts.rootRank,
         opts.rootTensor,
         opts.reduceOp,
-        nextTag());
+        tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = std::make_shared<AsyncReduceCUDAWork>(
-        context,
+        std::move(context),
         inputs,
         opts.rootRank,
         opts.rootTensor,
         opts.reduceOp,
-        nextTag());
+        tag);
 #endif
   } else {
     throw std::runtime_error("Invalid backend");
@@ -1324,14 +1331,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   }
 
   std::shared_ptr<AsyncAllgatherWork> work;
-  auto& context = contexts_[0];
+  auto tag = nextTag();
+  auto context = getContext(tag);
   if (device.type() == at::kCPU) {
     work = std::make_shared<AsyncAllgatherWork>(
-        context, outputs, inputs, nextTag());
+        std::move(context), outputs, inputs, tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = std::make_shared<AsyncAllgatherCUDAWork>(
-        context, outputs, inputs, nextTag());
+        std::move(context), outputs, inputs, tag);
 #endif
   } else {
     throw std::runtime_error("Invalid backend");
@@ -1521,14 +1529,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   }
 
   std::shared_ptr<AsyncGatherWork> work;
-  auto& context = contexts_[0];
+  auto tag = nextTag();
+  auto context = getContext(tag);
   if (device.type() == at::kCPU) {
     work = std::make_shared<AsyncGatherWork>(
-        context, outputs, inputs, opts.rootRank, nextTag());
+        std::move(context), outputs, inputs, opts.rootRank, tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = std::make_shared<AsyncGatherCUDAWork>(
-        context, outputs, inputs, opts.rootRank, nextTag());
+        std::move(context), outputs, inputs, opts.rootRank, tag);
 #endif
   } else {
     throw std::runtime_error("Invalid backend");
@@ -1700,14 +1709,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   }
 
   std::shared_ptr<AsyncScatterWork> work;
-  auto& context = contexts_[0];
+  auto tag = nextTag();
+  auto context = getContext(tag);
   if (device.type() == at::kCPU) {
     work = std::make_shared<AsyncScatterWork>(
-        context, outputs, inputs, opts.rootRank, nextTag());
+        std::move(context), outputs, inputs, opts.rootRank, tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = std::make_shared<AsyncScatterCUDAWork>(
-        context, outputs, inputs, opts.rootRank, nextTag());
+        std::move(context), outputs, inputs, opts.rootRank, tag);
 #endif
   } else {
     throw std::runtime_error("Invalid backend");
@@ -1754,7 +1764,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
-  auto& context = contexts_[0];
+  auto context = getContext(tag);
   auto buf = context->createUnboundBuffer(ptr, size);
   buf->send(dstRank, utag);
 
@@ -1773,7 +1783,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
-  auto& context = contexts_[0];
+  auto context = getContext(tag);
   auto buf = context->createUnboundBuffer(ptr, size);
   buf->recv(srcRank, utag);
 
@@ -1791,7 +1801,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
-  auto& context = contexts_[0];
+  auto context = getContext(tag);
   auto buf = context->createUnboundBuffer(ptr, size);
 
   // Build list of ranks that this operation can recv from. In these
@@ -1855,8 +1865,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
     priorWork.insert(priorWork.end(), workQueue_.begin(), workQueue_.end());
   }
 
+  auto tag = nextTag();
+  auto context = getContext(tag);
   auto work = std::make_shared<AsyncBarrierWork>(
-      contexts_[0], std::move(priorWork), nextTag());
+      std::move(context), std::move(priorWork), tag);
   enqueue(work);
   return work;
 }

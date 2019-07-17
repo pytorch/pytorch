@@ -199,6 +199,9 @@ class ProcessGroupGloo : public ProcessGroup {
   // Returns next collective tag to use (uses collectiveCounter_).
   uint32_t nextTag();
 
+  // Returns the context to use for the specified tag.
+  std::shared_ptr<::gloo::Context> getContext(uint32_t tag);
+
   // Entrypoint for worker threads.
   void runLoop(int workerIndex);
 
