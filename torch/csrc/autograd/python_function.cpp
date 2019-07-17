@@ -229,10 +229,6 @@ auto PyFunction::name() const -> std::string {
   return name;
 }
 
-auto PyFunction::get_shared_ptr() -> std::shared_ptr<Function> {
-  return THPFunction_asFunction((THPFunction*)obj);
-}
-
 }} // namespace torch::autograd
 
 // Traverse and clear are required for supporting Python's GC cycle handling.

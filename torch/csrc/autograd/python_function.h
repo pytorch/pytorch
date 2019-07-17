@@ -40,7 +40,6 @@ struct PyFunction : public Function {
 
   void release_variables() override;
   std::string name() const override;
-  std::shared_ptr<Function> get_shared_ptr() override;
   bool is_traceable() override;
 
   // THPFunction this Function is wrapping.  Owning!
