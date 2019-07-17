@@ -33,7 +33,7 @@ struct VariableInfo {
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
 struct PyFunction : public Function {
-  PyFunction(PyObject* obj) : obj(obj) {}
+  PyFunction(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
@@ -43,8 +43,16 @@ struct PyFunction : public Function {
   std::shared_ptr<Function> get_shared_ptr() override;
   bool is_traceable() override;
 
-  // THPFunction this Function is wrapping.
+  // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
+
+  ~PyFunction() {
+    // Can't use THPObjectPtr as a field in this class; destructor won't take
+    // out GIL!  When I forgot to do this by hand
+    // TestAutograd.test_inplace_view_python called me out about it.
+    AutoGIL g;
+    Py_DECREF(obj);
+  }
 };
 
 /**
@@ -89,9 +97,11 @@ struct THPFunction {
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
 
-    // The C++ wrapper for this Python function.
-    // See a comment in THPFunction_asFunction for details about this field.
-    torch::autograd::PyFunction cdata;
+    // The actual PyFunction (in the autograd graph) that this data was
+    // saved for.  This field may be NULL (because a user can construct
+    // a THPFunction directly from Python), but when this field is non-NULL,
+    // it is guaranteed that cdata.lock()->obj == this
+    std::weak_ptr<torch::autograd::PyFunction> cdata;
 };
 
 bool THPFunction_initModule(PyObject *module);

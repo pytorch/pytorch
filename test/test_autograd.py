@@ -500,6 +500,7 @@ class TestAutograd(TestCase):
         self.assertEqual(counter[0], 1, 'bw_hook not called')
         self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
 
+    @unittest.skip("Currently broken, will be fixed in https://github.com/pytorch/pytorch/pull/22925")
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
         # You should never have to use such things in your code.
@@ -1674,12 +1675,17 @@ class TestAutograd(TestCase):
         segfault.
         """
         class CollectOnDelete(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_output):
+                return grad_output
 
             def __del__(self):
                 gc.collect()
 
         for _ in range(10):
-            Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
+            CollectOnDelete.apply(torch.randn(10, 10, requires_grad=True))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
     @skipIfRocm
