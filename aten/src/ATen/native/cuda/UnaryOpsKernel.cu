@@ -25,12 +25,16 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
 
 
 void sign_kernel_cuda(TensorIterator& iter){
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "sign_cuda", [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-            const scalar_t zero = scalar_t(0);
-            return (zero < a) - (a < zero);
+    if (iter.dtype() == ScalarType::Bool) {
+        // sign over Bool tensor is defined as identity function https://github.com/pytorch/pytorch/pull/22861#discussion_r304126678
+    } else {
+        AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "sign_cuda", [&]() {
+            gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+                scalar_t zero = scalar_t(0);
+                return (zero < a) - (a < zero);
+            });
         });
-    });
+    }
 }
 
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
