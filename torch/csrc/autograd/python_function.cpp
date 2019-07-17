@@ -239,15 +239,18 @@ auto PyFunction::get_shared_ptr() -> std::shared_ptr<Function> {
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 {
   auto cdata = self->cdata.lock();
-  TORCH_INTERNAL_ASSERT(cdata);  // could do this optionally
-  for (const auto& hook : cdata->pre_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
-      Py_VISIT(pyhook->dict);
+  // cdata could be null if someone constructed a legacy function but haven't
+  // actually called backward() on it yet.
+  if (cdata) {
+    for (const auto& hook : cdata->pre_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
     }
-  }
-  for (const auto& hook : cdata->post_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
-      Py_VISIT(pyhook->dict);
+    for (const auto& hook : cdata->post_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
     }
   }
   Py_VISIT(self->to_save);
@@ -638,8 +641,34 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   auto& input_info = info_pair.second;
   bool is_executable = input_info.is_executable;
   Py_INCREF(self);
-  auto cdata = std::shared_ptr<PyFunction>(new PyFunction(THPObjectPtr((PyObject*)self)), deleteFunction);
-  self->cdata = cdata;
+  // Needs to be an owning reference to keep it live until the end
+  // of this function, since THPFunction won't keep it live (eventually,
+  // we'll take out an owning reference when we process_outputs).
+  std::shared_ptr<PyFunction> cdata;
+  if (cdata = self->cdata.lock()) {
+    // In some pathological cases, self->cdata can already be set on entry to
+    // this function.  This occurs on misuse of the legacy autograd API in the
+    // following way:
+    //
+    //    f = MyFunction()
+    //    y1 = f(x1)
+    //    y2 = f(x2)  # bad!!
+    //
+    // Historically, we did something very nutty: we set y1.grad_fn ==
+    // y2.grad_fn (even though these variables really have nothing to do with
+    // each other.)  At least now we have a warning.  All of this hoo-ha will
+    // go away when we delete the implementation of legacy autograd.
+    TORCH_WARN(
+      "Legacy autograd function object was called twice.  You will probably "
+      "get incorrect gradients from this computation, as the saved tensors "
+      "from the second invocation will clobber the saved tensors from the "
+      "first invocation.  Please consider rewriting your autograd function "
+      "in the modern style; for information on the new format, please see: "
+      "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd");
+  } else {
+    cdata = std::shared_ptr<PyFunction>(new PyFunction(THPObjectPtr((PyObject*)self)), deleteFunction);
+    self->cdata = cdata;
+  }
   cdata->set_next_edges(std::move(input_info.next_edges));
   self->needs_input_grad = input_info.needs_input_grad.release();
 

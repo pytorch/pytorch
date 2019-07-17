@@ -1685,7 +1685,28 @@ class TestAutograd(TestCase):
                 gc.collect()
 
         for _ in range(10):
-            CollectOnDelete.apply(torch.randn(10, 10, requires_grad=True))
+            CollectOnDelete()(torch.randn(1, requires_grad=True)).backward()
+
+    def test_call_legacy_twice(self):
+        class Id(Function):
+            def forward(self, x):
+                self.save_for_backward(x)
+                return x
+
+            def backward(self, grad_x):
+                x = self.saved_tensors
+                return x
+
+        f = Id()
+        x1 = torch.zeros(1, requires_grad=True)
+        x2 = torch.ones(1, requires_grad=True)
+        y = f(x1)
+        with warnings.catch_warnings(record=True) as w:
+            z = f(x2)
+        self.assertIn('extending-torch-autograd', str(w[0].message))
+        y.backward()
+        # Yeah, uh, this is totally nuts
+        self.assertEqual(x2.grad, x2)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
     @skipIfRocm
