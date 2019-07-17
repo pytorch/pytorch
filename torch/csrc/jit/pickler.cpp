@@ -548,13 +548,24 @@ void Unpickler::setInput(size_t memo_id) {
   }
 }
 
+// emplace_back on bool vectors does not exist on some systems
+// avoid it by calling push_back for bool
+template <typename T>
+inline void append(std::vector<T>& a, T&& e) {
+  a.emplace_back(std::move(e));
+}
+template <>
+inline void append<bool>(std::vector<bool>& a, bool&& e) {
+  a.push_back(e);
+}
+
 template <typename T>
 static IValue toSpecializedList(const IValue& generic) {
   auto ivalues = generic.toGenericListRef();
   std::vector<T> specialized;
   specialized.reserve(ivalues.size());
   for (const IValue& iv : ivalues) {
-    specialized.emplace_back(iv.to<T>());
+    append(specialized, iv.to<T>());
   }
   return IValue(std::move(specialized));
 }

@@ -13341,10 +13341,15 @@ class TestRecursiveScript(JitTestCase):
 
     def test_attributes(self):
         @torch.jit.script
+        class Inner(object):
+            def __init__(self):
+                self.b = "a string"
+
+        @torch.jit.script
         class Foo(object):
             def __init__(self):
                 self.a = 4
-                self.b = "a string"
+                self.inner = Inner()
 
         untyped_values = (
             ('my_dict', {"I": "am", "a test": "test"}),
@@ -13393,7 +13398,7 @@ class TestRecursiveScript(JitTestCase):
                     self.my_empty_dict,
                     self.my_none,
                     self.my_object.a,
-                    self.my_object.b,
+                    self.my_object.inner.b,
                 )
 
         # TODO: as a followup, fix this test
