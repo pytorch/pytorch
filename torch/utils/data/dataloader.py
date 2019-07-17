@@ -240,10 +240,16 @@ class DataLoader(object):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
                 if not multiprocessing._supports_context:
-                    raise RuntimeError('multiprocessing_context relies on Python >= 3.4, with '
-                                       'support for different start methods')
+                    raise ValueError('multiprocessing_context relies on Python >= 3.4, with '
+                                     'support for different start methods')
 
                 if isinstance(multiprocessing_context, string_classes):
+                    valid_start_methods = multiprocessing.get_all_start_methods()
+                    if multiprocessing_context not in valid_start_methods:
+                        raise ValueError(
+                            ('multiprocessing_context option '
+                             'should specify a valid start method in {}, but got '
+                             'multiprocessing_context={}').format(valid_start_methods, multiprocessing_context))
                     multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
