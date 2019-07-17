@@ -6541,8 +6541,6 @@ class _TestTorchMixin(object):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
-    # passes on ROCm w/ python 2.7, fails w/ python 3.6
-    @skipIfRocm
     def test_stft(self):
         self._test_stft(self)
 
