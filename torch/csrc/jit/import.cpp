@@ -36,6 +36,19 @@ using caffe2::serialize::ReadAdapterInterface;
 
 namespace {
 
+struct ClassResolver : public script::Resolver {
+  explicit ClassResolver(std::shared_ptr<script::CompilationUnit> cu)
+      : cu_(std::move(cu)) {}
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      const override {
+    std::cout << "RESOLVING STUFF: " << name << "\n";
+    return cu_->get_type(c10::QualifiedName(name));
+  }
+
+ private:
+  std::shared_ptr<script::CompilationUnit> cu_;
+};
+
 // this is a deserializer class which loads script modules from pt files. the
 // content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h. all the records except the last
@@ -44,6 +57,9 @@ namespace {
 // model, and it is serialized as json.
 class ScriptModuleDeserializer final {
  public:
+  ScriptModuleDeserializer(
+      caffe2::serialize::PyTorchStreamReader reader,
+      script::ModuleLookup module_lookup);
   ScriptModuleDeserializer(
       const std::string& filename,
       script::ModuleLookup module_lookup);
@@ -177,9 +193,16 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
 std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
-  std::tie(attributes_ptr, attributes_size) =
-      reader_.getRecord(name);
-  Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
+  std::tie(attributes_ptr, attributes_size) = reader_.getRecord(name);
+  Unpickler unpickler(
+      attributes_ptr.get(),
+      attributes_size,
+      &tensor_table_,
+      [&](const c10::QualifiedName& qn) {
+        importCallback(qn.prefix());
+        auto cu = main_module_.class_compilation_unit();
+        return c10::StrongTypePtr(cu, cu->get_class(qn));
+      });
   return unpickler.parse_ivalue_list();
 }
 
@@ -310,7 +333,8 @@ void ScriptModuleDeserializer::convertModule(
       module.register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
-  script::ScriptTypeParser typeParser;
+  script::ScriptTypeParser typeParser(
+      std::make_shared<ClassResolver>(main_module_.class_compilation_unit()));
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
     if (module.find_buffer(attr_def.name())) {

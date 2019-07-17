@@ -13340,6 +13340,12 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(M(), (torch.randn(5, 5),))
 
     def test_attributes(self):
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self):
+                self.a = 4
+                self.b = "a string"
+
         untyped_values = (
             ('my_dict', {"I": "am", "a test": "test"}),
             ('my_float', 2.3),
@@ -13358,6 +13364,7 @@ class TestRecursiveScript(JitTestCase):
             ('my_empty_list', []),
             ('my_empty_dict', {}),
             ('my_none', None),
+            ('my_object', Foo()),
         )
 
         class M(torch.nn.Module):
@@ -13385,6 +13392,7 @@ class TestRecursiveScript(JitTestCase):
                     self.my_empty_list,
                     self.my_empty_dict,
                     self.my_none,
+                    self.my_object,
                 )
 
         # TODO: as a followup, fix this test
@@ -13400,6 +13408,7 @@ class TestRecursiveScript(JitTestCase):
             'my_empty_list': List[int],
             'my_empty_dict': Dict[str, int],
             'my_none': Optional[int],
+            'my_object': Foo,
         }
 
         m = M()
