@@ -79,6 +79,7 @@ includes = [
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cudnn/*",
     "aten/src/ATen/native/sparse/cuda/*",
+    "aten/src/ATen/native/quantized/cuda/*",
     "aten/src/THC/*",
     "aten/src/THCUNN/*",
     "aten/src/ATen/test/*",

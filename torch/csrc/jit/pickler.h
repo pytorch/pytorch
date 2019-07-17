@@ -150,7 +150,7 @@ class Pickler {
       const std::function<void(const IValue&)>& item_pusher);
   void pushGlobal(const std::string& name);
   // raw string data is appended directly to the byte stream
-  void pushRawStringData(const std::string& string);
+  void pushBytes(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);
 
   // Add a BINPUT op and return the memoization id used
