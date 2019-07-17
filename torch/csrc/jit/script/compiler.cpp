@@ -3139,10 +3139,6 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->eraseBlock(0);
 }
 
-CompilationUnit& CompilationUnit::_get_python_cu() {
-  static CompilationUnit pyCu;
-  return pyCu;
-}
 } // namespace script
 } // namespace jit
 } // namespace torch

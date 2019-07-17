@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/jit/pybind_utils.h>
 #include <iostream>
 #include <sstream>
 
@@ -74,7 +75,8 @@ class class_ {
         classCu);
     tmap.insert({runtimeClassName, StrongTypePtr(classCu, classTypePtr)});
     classTypePtr->addAttribute("capsule", CapsuleType::get());
-    script::CompilationUnit::_get_python_cu().register_class(classTypePtr);
+
+    torch::jit::get_python_cu()->register_class(classTypePtr);
   }
 
   template <typename... Types>

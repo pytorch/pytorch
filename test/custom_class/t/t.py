@@ -20,6 +20,8 @@ class Bar:
     def display(self, z):
         print(self.x, self.y, z)
 
+val = torch.classes.Foo(5, 3)
+print("24", val.__module__)
 @torch.jit.script
 def f(x):
     val = torch.classes.Foo(5, 3)
@@ -32,5 +34,5 @@ def f(x):
     # val3.display()
     # print(val, val2)
 
-print(f.graph)
+# print(f.graph)
 f(torch.randn(32, 32))

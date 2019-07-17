@@ -731,6 +731,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   }
 }
 
+namespace ivalue {
 #define CREATE_FACTORY_INIT(type) inline IValue from(type v) { return IValue(v); }
 #define CONVERSION_TYPES(_) \
 _(at::Tensor)\
@@ -783,5 +784,6 @@ IValue from(T x) {
   return resIVal;
     // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
 
+}
 }
 } // namespace c10
