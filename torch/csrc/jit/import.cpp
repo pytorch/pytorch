@@ -41,7 +41,6 @@ struct ClassResolver : public script::Resolver {
       : cu_(std::move(cu)) {}
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
       const override {
-    std::cout << "RESOLVING STUFF: " << name << "\n";
     return cu_->get_type(c10::QualifiedName(name));
   }
 

@@ -729,10 +729,11 @@ OpCode Unpickler::readInstruction() {
       stack_.pop_back();
     } break;
     // because we have NEWOBJ do nothing, BUILD and REDUCE end up doing
+    // the same thing
     case OpCode::BUILD:
     case OpCode::REDUCE: {
       // stack is: <functor_idx> <functor_arg>
-      // extrace <functor_idx> and remove from the stack:
+      // extract <functor_idx> and remove from the stack:
       std::swap(*(stack_.end() - 2), *(stack_.end() - 1));
       size_t idx = stack_.back().toInt();
       stack_.pop_back();

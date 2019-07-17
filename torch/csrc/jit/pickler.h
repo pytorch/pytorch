@@ -252,12 +252,6 @@ class Unpickler {
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>* tensor_table_;
 
-  // we need to hint to the EMPTY_LIST constructor what
-  // the type of the list should be for specialized lists.
-  // this is set by the calls to GLOBAL that start list construction
-  // with the right member type and consumed by EMPTY_LIST
-  c10::optional<PicklerClass> list_member_type_;
-
   // optionally nullptr, needs to be present for creating classes
   std::function<c10::StrongTypePtr(const c10::QualifiedName&)> class_resolver_;
   IValue empty_tuple_;
