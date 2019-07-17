@@ -689,7 +689,7 @@ def _operators_to_graph_def(
     if show_simplified:  # use_tensorflow_naming
         _rename_tensorflow_style(shapes, blob_name_tracker, ops)
     producing_ops = {}
-    blobs = []
+    blobs = set()
     input_blobs, inter_blobs, _ = _compute_in_out(ops)
     current_graph = GraphDef()
     seen = set(input_blobs)
@@ -699,9 +699,9 @@ def _operators_to_graph_def(
             [_operator_to_node(shapes, op)]  # .extend() expects an iterable
         current_graph.node.extend(nodes_from_op)
         for input_blob in op.input:
-            blobs.append(input_blob)
+            blobs.add(input_blob)
         for i, output_blob in enumerate(op.output):
-            blobs.append(output_blob)
+            blobs.add(output_blob)
             producing_ops.setdefault(output_blob, []).append((op, i))
 
     if show_simplified:
