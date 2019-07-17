@@ -3,6 +3,7 @@ import shutil
 import sys
 import unittest
 import warnings
+import numpy
 
 import common_utils as common
 import torch
@@ -46,8 +47,8 @@ class TestCppExtension(common.TestCase):
         dont_wipe = hasattr(getattr(self, test_name), "dont_wipe")
         if dont_wipe:
             print(
-                "Test case {} has 'dont_wipe' attribute set, ".format(test_name)
-                + "therefore not wiping extensions build folder before running the test"
+                "Test case {} has 'dont_wipe' attribute set, ".format(test_name) +
+                "therefore not wiping extensions build folder before running the test"
             )
             return
         if sys.platform == "win32":
@@ -624,6 +625,7 @@ class TestCppExtension(common.TestCase):
         finally:
             torch.set_default_dtype(initial_default)
 
+
     def test_compilation_error_formatting(self):
         # Test that the missing-semicolon error message has linebreaks in it. 
         # This'll fail if the message has been munged into a single line.
@@ -636,19 +638,37 @@ class TestCppExtension(common.TestCase):
         pattern = r'.*(\\n|\\r).*'
         self.assertNotRegex(str(e), pattern)
 
-    def test_chunkdataset_bindings(self):
+    def test_dummy_chunkdataset_bindings(self):
+
         """
-        This class serves as an example on how to use ChunkDataset API python bindings
+        This class serves as a basic example on how to use ChunkDataset API python bindings
+
+        The main steps for a ChunkDataset implementation with built-in type Example are:
+        C++ Steps: Check `test/cpp_extensions/extension.cpp`:
+            Step 1: [optional] Make `std::vector<BUILT_IN_TYPE>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
+                        Opaque types prevent memory copy between C++ and Python
+
+        Python Steps: Check `test_dummy_chunkdataset_bindings` below:
+            Step 1: Instantiate a `Sampler` for the chunk sampler
+            Step 2: Instantiate a `SamplerWrapper` for the chunk sampler in the previous step
+            Step 3: Instantiate a `Sampler` for the example sampler
+            Step 4: Instantiate a `SamplerWrapper` for the example sampler in the previous step
+            Step 5: Instantiate a specific `ChunkDataReader`
+            Step 6: Instantiate a `ChunkDatasetOptions`
+            Step 7: Instantiate a `ChunkDataset`
+            Step 8: Instantiate a `ChunkDatasetWrapper`
+            Step 9: Instantiate a `DataLoader`
+            Step 10: Iterate on `DataLoader`
 
         The API is almost identical to the C++ version. The difference is the need for the
         SampleWrapper on Python implementation that is not required by C++ counterpart.
         This is due to the fact that Python DataLoader uses multiprocessing module for
         parallelism as opposed to multi-threading
         """
-        chunk_count=3
-        batch_size=5
-        cache_size=100
-        preloaders=1
+        chunk_count = 3
+        batch_size = 5
+        cache_size = 100
+        preloaders = 1
         chunk_sampler = chunk.SequentialSampler(size=chunk_count)
         example_sampler = chunk.SequentialSampler(size=batch_size)
         chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
@@ -657,15 +677,118 @@ class TestCppExtension(common.TestCase):
         opt = chunk.ChunkDatasetOptions(preloader_count=preloaders, batch_size=batch_size, cache_size=cache_size)
 
         dummy_chunkdataset = cpp_extension.DummyChunkDataset(chunk_reader=reader,
-                                             chunk_sampler=chunk_sampler_wrapper,
-                                             example_sampler=example_sampler_wrapper,
-                                             options=opt)
+                                                             chunk_sampler=chunk_sampler_wrapper,
+                                                             example_sampler=example_sampler_wrapper,
+                                                             options=opt)
 
-        trainset = chunk.ChunkDataset(dummy_chunkdataset)
+        trainset = chunk.ChunkDatasetWrapper(dummy_chunkdataset)
         trainset.reset()
         trainloader = DataLoader(dataset=trainset)
         for i, actual in enumerate(trainloader, 0):
-            expected=[torch.tensor([j], dtype=torch.long) for j in list(range(batch_size*i, batch_size*i+batch_size))]
+            expected = [torch.tensor([j], dtype=torch.long)
+                        for j in list(range(batch_size * i, batch_size * i + batch_size))]
+            self.assertEqual(expected, actual)
+
+    def test_foo_chunkdataset_bindings(self):
+        """
+        This class serves as a more complex example on how to use ChunkDataset API python bindings
+
+        The main steps for a full ChunkDataset implementation are:
+
+        C++ Steps: Check `test/cpp_extensions/extension.cpp`:
+            Step 1: Define `FooExampleType` struct (aka ExampleType)
+            Step 2: Define `FooChunkDataReader` class by extending `torch::data::datasets::ChunkDataReader<FooExampleType>`
+            Step 3: Bind `FooExampleType` struct
+            Step 4: [optional] Make `std::vector<FooExampleType>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
+                        Opaque types prevent memory copy between C++ and Python
+            Step 4.1: Bind `std::vector<FooExampleType>` through `py::bind_vector<FooExampleType>()` (aka BatchType)
+            Step 6: Bind `FooChunkDataReader` binding through `py::class_<FooChunkDataReader>`
+            Step 7: Bind `FooChunkDataset` binding through `py::class_<FooChunkDataReader>`
+
+        Python Steps: Check `test_foo_chunkdataset_bindings` below:
+            Step 1: Instantiate a `Sampler` for the chunk sampler
+            Step 2: Instantiate a `SamplerWrapper` for the chunk sampler in the previous step
+            Step 3: Instantiate a `Sampler` for the example sampler
+            Step 4: Instantiate a `SamplerWrapper` for the example sampler in the previous step
+            Step 5: Instantiate a specific `ChunkDataReader`
+            Step 6: Instantiate a `ChunkDatasetOptions`
+            Step 7: Instantiate a `ChunkDataset`
+            Step 8: Instantiate a `ChunkDatasetWrapper`
+            Step 8.1: [optional] If BatchType doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement `transform_fn`
+            Step 9: Instantiate a `DataLoader`
+            Step 10: Iterate on `DataLoader`
+
+        The API is almost identical to the C++ version. The difference is the need for the
+        SampleWrapper on Python implementation that is not required by C++ counterpart.
+        This is due to the fact that Python DataLoader uses multiprocessing module for
+        parallelism as opposed to multi-threading
+        """
+
+        def transform_fn(batch):
+            if batch is not None:
+                # Output is a dictionary
+                dict = {}
+
+                # Utils to allocate shared memory for tensors
+                # We need to know the exact amount of memory to preallocate it
+                # in shared memory so the main process can access it quickly
+                # Send each tensor individually to shared memory leads to 2x perf hit
+                features = []
+                features_numel = 0
+                features_out = None
+                labels = []
+                labels_numel = 0
+                labels_out = None
+
+                for u in batch:
+                    # C++ FooExampleType to Pytorch Tensors (zero-copy)
+                    feature_tensor = torch.from_numpy(numpy.array(u.feature_))
+                    label_tensor = torch.from_numpy(numpy.array(u.label_))
+
+                    # Determining tensor size for using shared memory
+                    features_numel += feature_tensor.numel()
+                    features.append(feature_tensor)
+                    labels_numel += label_tensor.numel()
+                    labels.append(label_tensor)
+
+                # Allocating shared memory
+                features_shared_storage = features[0].storage(
+                )._new_shared(features_numel)
+                features_out = features[0].new(features_shared_storage)
+                labels_shared_storage = labels[0].storage()._new_shared(labels_numel)
+                labels_out = labels[0].new(labels_shared_storage)
+
+                # Stacking (copying) tensors into shared memory
+                torch.stack(features, out=features_out)
+                torch.stack(labels, out=labels_out)
+
+                # Return shared memory on torch.multprocessing queues (zero-copy)
+                dict['feature'] = features_out
+                dict['label'] = labels_out
+                return dict
+
+        chunk_count = 1
+        batch_size = 5
+        cache_size = 100
+        preloaders = 1
+        chunk_sampler = chunk.SequentialSampler(size=chunk_count)
+        example_sampler = chunk.SequentialSampler(size=batch_size)
+        chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
+        example_sampler_wrapper = chunk.SamplerWrapper(sampler=example_sampler)
+        reader = cpp_extension.FooChunkDataReader()
+        opt = chunk.ChunkDatasetOptions(preloader_count=preloaders, batch_size=batch_size, cache_size=cache_size)
+
+        foo_chunkdataset = cpp_extension.FooChunkDataset(chunk_reader=reader,
+                                                         chunk_sampler=chunk_sampler_wrapper,
+                                                         example_sampler=example_sampler_wrapper,
+                                                         options=opt)
+
+        trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset, transform_fn)
+        trainset.reset()
+        trainloader = DataLoader(dataset=trainset)
+        for i, actual in enumerate(trainloader, 0):
+            expected = {'feature': torch.stack([torch.tensor([j for j in list(range(batch_size * i, batch_size * i + batch_size))])]),
+                        'label': torch.stack([torch.tensor([j for j in list(range(batch_size * i + 1, batch_size * i + 1 + batch_size))])])}
             self.assertEqual(expected, actual)
 
 class TestMSNPUTensor(common.TestCase):

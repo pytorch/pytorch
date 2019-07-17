@@ -167,7 +167,7 @@ class BatchSampler(Sampler):
     r"""Wraps another sampler to yield a mini-batch of indices.
 
     Args:
-        sampler (Sampler): Base sampler.
+        sampler (torch.utils.data.Sampler): Base sampler.
         batch_size (int): Size of mini-batch.
         drop_last (bool): If ``True``, the sampler will drop the last batch if
             its size would be less than ``batch_size``

@@ -72,9 +72,9 @@ class DataLoader(object):
             (default: ``1``).
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: ``False``).
-        sampler (Sampler, optional): defines the strategy to draw samples from
+        sampler (torch.utils.data.Sampler, optional): defines the strategy to draw samples from
             the dataset. If specified, :attr:`shuffle` must be ``False``.
-        batch_sampler (Sampler, optional): like :attr:`sampler`, but returns a batch of
+        batch_sampler (torch.utils.data.Sampler, optional): like :attr:`sampler`, but returns a batch of
             indices at a time. Mutually exclusive with :attr:`batch_size`,
             :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
         num_workers (int, optional): how many subprocesses to use for data

@@ -8,7 +8,7 @@ using namespace torch::data; // NOLINT
  * Each chunk contains 10, 5, 20 examples respectively
  * For this class, BatchType is std::vector<int>, but custom types are supported
  */
-struct DummyChunkDataReader : public datasets::ChunkDataReader<int> {
+class DummyChunkDataReader : public datasets::ChunkDataReader<int> {
  public:
   using BatchType = datasets::ChunkDataReader<int>::ChunkType;
   using DataType = datasets::ChunkDataReader<int>::ExampleType;
