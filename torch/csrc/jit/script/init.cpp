@@ -707,6 +707,10 @@ void initJitScriptBindings(PyObject* module) {
         defined->setSchema(getSchemaWithNameAndDefaults(
             def.range(), defined->getSchema(), def.name().name(), defaults));
         StrongFunctionPtr ret(std::move(cu), defined);
+
+        // Compilation was successful, so remove all info from the thread
+        // local compilation call stack
+        ErrorReport::CallStack::clear();
         didFinishEmitFunction(ret);
         return ret;
       });
