@@ -9,10 +9,9 @@ import torch.nn.functional as F
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import qtensor, array_shapes
+import hypothesis_utils as hu
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS
-from common_utils import skipIfNotRegistered
 from common_quantized import _quantize, _dequantize, _requantize
 
 
@@ -67,8 +66,6 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     return Y_q_ref
 
 
-@skipIfNotRegistered("Relu_ENGINE_FBGEMM",
-                     "fbgemm-based Caffe2 ops are not linked")
 class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
     def _pool_output_shape(self, input_size, kernel_size, padding, stride,
@@ -82,9 +79,10 @@ class TestQuantizedOps(TestCase):
         return output_size
 
     """Tests the correctness of the quantized::relu op."""
-    @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5)))
-    def test_qrelu(self, Q):
-        X, (scale, zero_point), (qmin, qmax), torch_type = Q
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu(self, X):
+        X, (scale, zero_point, torch_type) = X
         relu = torch.ops.quantized.relu
 
         Y = X.copy()
@@ -95,8 +93,9 @@ class TestQuantizedOps(TestCase):
         qY_hat = relu(qX)
 
         Y[Y < 0] = 0
-        qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale, zero_point=zero_point, dtype=torch_type)
-        self.assertEqual(qY, qY_hat)
+        qY_ref = torch.quantize_linear(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+        self.assertEqual(qY_ref, qY_hat)
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
@@ -163,16 +162,15 @@ class TestQuantizedOps(TestCase):
                                 "Quantized addition with ReLU failed.")
 
     """Tests max pool operation on quantized tensors."""
-    @given(Q=qtensor(shapes=array_shapes(min_dims=3, max_dims=4,
-                                         min_side=1, max_side=10)),
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.integers(1, 2),
            dilation=st.integers(1, 2),
            padding=st.integers(0, 2))
-    def test_max_pool2d(self, Q, kernel, stride, dilation, padding):
-        import torch.nn.functional as F
-        X, (scale, zero_point), (qmin, qmax), torch_type = Q
-
+    def test_max_pool2d(self, X, kernel, stride, dilation, padding):
+        X, (scale, zero_point, torch_type) = X
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
@@ -200,8 +198,6 @@ class TestQuantizedOps(TestCase):
                                  dilation=d)
         a_pool_hat = qa_pool_hat.dequantize()
 
-        np.testing.assert_equal(a_pool.numpy(), a_pool_hat.numpy())
-
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
@@ -211,13 +207,11 @@ class TestQuantizedOps(TestCase):
 )
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
-    @given(
-        batch_size=st.integers(1, 4),
-        input_channels=st.integers(16, 32),
-        output_channels=st.integers(4, 8),
-        use_bias=st.booleans(),
-        use_relu=st.booleans(),
-    )
+    @given(batch_size=st.integers(1, 4),
+           input_channels=st.integers(16, 32),
+           output_channels=st.integers(4, 8),
+           use_bias=st.booleans(),
+           use_relu=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels, use_bias, use_relu):
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         if use_relu:
@@ -304,14 +298,16 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
-    @given(Q=qtensor(shapes=array_shapes(2, 2,), dtypes=((torch.qint8, None),)))
-    def test_qlinear_unpack(self, Q):
-        W, (W_scale, W_zp), (qmin, qmax), torch_type = Q
+    @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
+                       qparams=hu.qparams(dtypes=torch.qint8)))
+    def test_qlinear_unpack(self, W):
+        W, (W_scale, W_zp, torch_type) = W
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
 
         W = torch.from_numpy(W)
-        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp,
+                                    dtype=torch_type)
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
@@ -332,22 +328,20 @@ class TestQuantizedLinear(unittest.TestCase):
 )
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
-    @given(
-        batch_size=st.integers(1, 3),
-        input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-        height=st.integers(10, 16),
-        width=st.integers(7, 14),
-        output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-        groups=st.integers(1, 3),
-        kernel_h=st.integers(1, 7),
-        kernel_w=st.integers(1, 7),
-        stride_h=st.integers(1, 2),
-        stride_w=st.integers(1, 2),
-        pad_h=st.integers(0, 2),
-        pad_w=st.integers(0, 2),
-        dilation=st.integers(1, 1),
-        use_bias=st.booleans(),
-    )
+    @given(batch_size=st.integers(1, 3),
+           input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           height=st.integers(10, 16),
+           width=st.integers(7, 14),
+           output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 3),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 1),
+           use_bias=st.booleans())
     def test_qconv(
             self,
             batch_size,
@@ -468,9 +462,12 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
-    @given(Q=qtensor(shapes=array_shapes(4, 4,), dtypes=((torch.qint8, 0),)))
-    def test_qconv_unpack(self, Q):
-        W, (W_scale, W_zp), (qmin, qmax), torch_type = Q
+    @given(W=hu.tensor(shapes=hu.array_shapes(4, 4,),
+                       qparams=hu.qparams(dtypes=torch.qint8,
+                                          zero_point_min=0,
+                                          zero_point_max=0)))
+    def test_qconv_unpack(self, W):
+        W, (W_scale, W_zp, torch_type) = W
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
         qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
 
@@ -495,11 +492,13 @@ class TestQuantizedConv(unittest.TestCase):
                  "QNNPACK does not play well with UBSAN at the moment,"
                  " so we skip the test if we are in a UBSAN environment.")
 class TestQNNPackOps(TestCase):
-
     """Tests the correctness of the quantized::qnnpack_relu op."""
-    @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5), dtypes=((torch.quint8, 0),),))
-    def test_qnnpack_relu(self, Q):
-        X, (scale, zero_point), (qmin, qmax), torch_type = Q
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams(dtypes=torch.quint8,
+                                          zero_point_min=0,
+                                          zero_point_max=0)))
+    def test_qnnpack_relu(self, X):
+        X, (scale, zero_point, torch_type) = X
         relu = torch.ops.quantized.qnnpack_relu
 
         X = torch.from_numpy(X)
@@ -514,9 +513,12 @@ class TestQNNPackOps(TestCase):
 
     """Tests the correctness of the quantized::qnnpack_linear op."""
     @given(output_channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           Q=qtensor(shapes=array_shapes(2, 3, 8, 15), dtypes=((torch.quint8, 0),),))
-    def test_qnnpack_linear(self, output_channels, Q):
-        X, (X_scale, X_zp), (qmin, qmax), torch_type = Q
+           X=hu.tensor(shapes=hu.array_shapes(2, 3, 8, 15),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_qnnpack_linear(self, output_channels, X):
+        X, (X_scale, X_zp, torch_type) = X
+        qmin = torch.iinfo(torch_type).min
+        qmax = torch.iinfo(torch_type).max
 
         input_channels = X.shape[X.ndim - 1]
 
@@ -527,10 +529,7 @@ class TestQNNPackOps(TestCase):
 
         qnnpack_linear = torch.ops.quantized.qnnpack_linear
 
-        X_q0 = np.round(
-            X * (qmin - qmax)
-            + qmin
-        ).astype(np.uint8)
+        X_q0 = np.round(X * (qmin - qmax) + qmin).astype(np.uint8)
 
         W_scale = 0.4
         W_zp = 0
