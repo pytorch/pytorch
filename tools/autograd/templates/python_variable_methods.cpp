@@ -76,6 +76,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "size(int64_t dim)",
+    "size(Dimname dim)",
     "size()",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -88,6 +89,11 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
       return wrap(self_.size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
+    if (jit::tracer::isTracing()) {
+      TORCH_INTERNAL_ASSERT("NYI: Named tensors w/ JIT");
+    }
+    return wrap(self_.size(r.dimname(0)));
+  } else if (r.idx == 2) {
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python.
     return THPSize_New(self_);
@@ -101,6 +107,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "stride(int64_t dim)",
+    "stride(Dimname dim)",
     "stride()",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -109,6 +116,8 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   if (r.idx == 0) {
     return wrap(self_.stride(r.toInt64(0)));
   } else if (r.idx == 1) {
+    return wrap(self_.stride(r.dimname(0)));
+  } else if (r.idx == 2) {
     // yes, this is called strides in ATen.
     IntArrayRef strides = self_.strides();
     // we can't do the normal wrapping here because IntArrayRef maps to both
