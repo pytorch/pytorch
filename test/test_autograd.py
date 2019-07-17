@@ -2123,7 +2123,6 @@ class TestAutograd(TestCase):
         self.assertTrue(a.requires_grad)
         self.assertFalse(b.requires_grad)
         c = F2.apply(a, b)
-        print(c.grad_fn)
         c.backward(torch.ones(c.size()))
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
