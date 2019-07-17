@@ -2824,7 +2824,7 @@ Example::
 
 
 one_hot = _add_docstr(torch._C._nn.one_hot, r"""
-one_hot(tensor, num_classes=0) -> LongTensor
+one_hot(tensor, num_classes=-1) -> LongTensor
 
 Takes LongTensor with index values of shape ``(*)`` and returns a tensor
 of shape ``(*, num_classes)`` that have zeros everywhere except where the

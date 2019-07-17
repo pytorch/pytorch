@@ -191,7 +191,7 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   py::dict dispatched_fn_;
 };
 
-TORCH_API bool& getRecursiveScriptMode();
+TORCH_API bool getRecursiveScriptMode();
 
 } // namespace script
 } // namespace jit

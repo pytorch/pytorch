@@ -377,6 +377,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(SortModel(dim), x)
 
+    def test_masked_fill(self):
+        class MaskedFillModel(torch.nn.Module):
+            def forward(self, x):
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                return x.masked_fill(mask, 2)
+
+        x = torch.zeros(4, 2, 3, requires_grad=True)
+        self.run_test(MaskedFillModel(), x)
+
+        class MaskedFillModel2(torch.nn.Module):
+            def forward(self, x):
+                return x.masked_fill(x > 3, -1)
+
+        x = torch.arange(16).view(2, 2, 4).to(torch.float32)
+        self.run_test(MaskedFillModel2(), x)
+
 
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
@@ -387,6 +403,7 @@ TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
 TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
                               (unittest.TestCase,),
                               dict(TestONNXRuntime.__dict__, opset_version=8))
+
 
 # opset 10 tests
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),

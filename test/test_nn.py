@@ -4028,6 +4028,31 @@ class TestNN(NNTestCase):
     def test_pool_large_size(self, dtype=torch.float):
         self._test_pool_large_size(self, device="cpu")
 
+    @staticmethod
+    def _test_pool_invalid_size(self, device, dtype=torch.float):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                # use a configuration that gives zero outputs only
+                # when doing a correct floor division by the stride
+                x = torch.ones([1, 1] + num_dim * [4],
+                               device=device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, r"too small|smaller than"):
+                    try:
+                        res = fn(x, 3, stride=2, padding=0, dilation=2)
+                    except TypeError:
+                        # some implementations do not support dilation
+                        res = fn(x, 6, stride=2, padding=0)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_pool_invalid_size_cuda(self, dtype=torch.float):
+        self._test_pool_invalid_size(self, device="cuda", dtype=dtype)
+
+    def test_pool_invalid_size(self, dtype=torch.float):
+        self._test_pool_invalid_size(self, device="cpu")
+
     def _test_scatter(self, tensor):
         x = tensor.detach().requires_grad_()
         result = dp.scatter(x, (0, 1))
@@ -5393,7 +5418,7 @@ class TestNN(NNTestCase):
 
         self.assertEqual(l, expected)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 7000), "needs cudnn >= 7.0")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 7000), "needs cudnn >= 7.0")
     def test_CTCLoss_cudnn(self):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
@@ -5834,8 +5859,17 @@ class TestNN(NNTestCase):
         tgt = torch.randn(tgt_length, bsz, d_model)
         tgt_mask = transformer.generate_square_subsequent_mask(tgt_length).double()
         memory_mask = torch.randn(tgt_length, seq_length).double()
+        src_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
+        tgt_key_padding_mask = torch.rand(bsz, tgt_length) >= 0.5
+        memory_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
 
-        output = transformer(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask, memory_mask=memory_mask)
+        output = transformer(src, tgt,
+                             src_mask=src_mask,
+                             tgt_mask=tgt_mask,
+                             memory_mask=memory_mask,
+                             src_key_padding_mask=src_key_padding_mask,
+                             tgt_key_padding_mask=tgt_key_padding_mask,
+                             memory_key_padding_mask=memory_key_padding_mask)
         output.sum().backward()
 
     def test_transformerencoderlayer(self):
@@ -5864,6 +5898,18 @@ class TestNN(NNTestCase):
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        # 0 values are NOT masked. This shouldn't mask anything.
+        mask = torch.Tensor([[0]]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        result = result.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        # 1 values are masked. Since there is only 1 input embedding this
+        # will result in nan.
+        mask = torch.Tensor([[1]]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        result = result.detach().numpy()
+        self.assertTrue(np.isnan(result).all())
 
         # deterministic input
         encoder_input = torch.Tensor([[[1, 2, 3, 4]],
@@ -5871,6 +5917,20 @@ class TestNN(NNTestCase):
         result = model(encoder_input)
         ref_output = torch.Tensor([[[2.272644, 0.119035, -0.691669, 0.153486]],
                                    [[2.272644, 0.119035, -0.691669, 0.153486]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        # all 0 which is no masking
+        mask = torch.Tensor([[0, 0]]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        result = result.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        mask = torch.Tensor([[1, 0]]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor([[[2.301516, 0.092249, -0.679101, 0.103088]],
+                                   [[2.301516, 0.092249, -0.679101, 0.103088]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5898,6 +5958,30 @@ class TestNN(NNTestCase):
                                     [2.433556, 0.021891, -0.598509, -0.086832]],
                                    [[2.416246, 0.017512, -0.610712, -0.082961],
                                     [2.422901, 0.024187, -0.606178, -0.074929]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        # all 0
+        mask = torch.zeros([2, 5]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        result = result.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        mask[0, 1] = 1
+        mask[1, 3] = 1
+        mask[1, 4] = 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
+                                    [2.428811, 0.021445, -0.601912, -0.084252]],
+                                   [[2.425009, 0.019155, -0.604566, -0.085899],
+                                    [2.415408, 0.02249 , -0.611415, -0.073]],
+                                   [[2.434199, 0.021682, -0.598039, -0.087699],
+                                    [2.42598, 0.019941, -0.603896, -0.085091]],
+                                   [[2.436457, 0.022736, -0.59643 , -0.08736],
+                                    [2.434021, 0.022093, -0.598179, -0.08679]],
+                                   [[2.416531, 0.017498, -0.610513, -0.083181],
+                                    [2.4242, 0.024653, -0.605266, -0.074959]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5982,6 +6066,66 @@ class TestNN(NNTestCase):
                                     [2.431970, 0.029387, -0.599789, -0.071621]],
                                    [[2.431934, 0.028196, -0.599802, -0.073809],
                                     [2.432306, 0.028858, -0.599542, -0.072846]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # key_padding_mask
+        key_padding_mask = torch.zeros(2, 3) == 1
+        result = model(decoder_input, memory_input, tgt_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # key_padding_mask
+        key_padding_mask[0, 2] = 1
+        key_padding_mask[1, 1] = 1
+        key_padding_mask[1, 2] = 1
+        result = model(decoder_input, memory_input, tgt_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430025, 0.027643, -0.601164, -0.073476],
+                                    [2.4323, 0.029375, -0.599553, -0.071881]],
+                                   [[2.428523, 0.026838, -0.602226, -0.07391],
+                                    [2.432634, 0.029842, -0.599318, -0.071253]],
+                                   [[2.432278, 0.028152, -0.599555, -0.074139],
+                                    [2.432659, 0.029244, -0.599294, -0.072382]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # memory_key_padding_mask
+        key_padding_mask = torch.zeros(2, 5) == 1
+        result = model(decoder_input, memory_input, memory_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # memory_key_padding_mask
+        key_padding_mask[0, 4] = 1
+        key_padding_mask[1, 3] = 1
+        key_padding_mask[1, 4] = 1
+        result = model(decoder_input, memory_input, memory_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.429757, 0.027358, -0.601351, -0.073816],
+                                    [2.432692, 0.028583, -0.599263, -0.073634]],
+                                   [[2.428247, 0.02662, -0.602419, -0.074123],
+                                    [2.432657, 0.029055, -0.599293, -0.072732]],
+                                   [[2.431515, 0.027687, -0.600096, -0.074459],
+                                    [2.433075, 0.028543, -0.598987, -0.073985]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -6162,7 +6306,9 @@ class TestNN(NNTestCase):
         wrong_nhead = 5
 
         def test(encoder_input_shape, decoder_input_shape,
-                 src_mask_len=None, tgt_mask_len=None, memory_mask_size=None):
+                 src_mask_len=None, tgt_mask_len=None, memory_mask_size=None,
+                 src_key_padding_mask_size=None, tgt_key_padding_mask_size=None,
+                 memory_key_padding_mask_size=None):
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
@@ -6183,9 +6329,30 @@ class TestNN(NNTestCase):
             else:
                 memory_task = None
 
+            if src_key_padding_mask_size is not None:
+                src_key_padding_mask = torch.rand(src_key_padding_mask_size) >= 0.5
+            else:
+                src_key_padding_mask = None
+
+            if tgt_key_padding_mask_size is not None:
+                tgt_key_padding_mask = torch.rand(tgt_key_padding_mask_size) >= 0.5
+            else:
+                tgt_key_padding_mask = None
+
+            if memory_key_padding_mask_size is not None:
+                memory_key_padding_mask = torch.rand(memory_key_padding_mask_size) >= 0.5
+            else:
+                memory_key_padding_mask = None
+
             with self.assertRaises(RuntimeError):
                 model(encoder_input, decoder_input,
-                      src_mask=src_mask, tgt_mask=tgt_mask, memory_mask=memory_task)
+                      src_mask=src_mask,
+                      tgt_mask=tgt_mask,
+                      memory_mask=memory_task,
+                      src_key_padding_mask=src_key_padding_mask,
+                      tgt_key_padding_mask=tgt_key_padding_mask,
+                      memory_key_padding_mask=memory_key_padding_mask)
+
 
         correct_encoder_input_shape = (seq_len, bsz, d_model)
         correct_decoder_input_shape = (tgt_len, bsz, d_model)
@@ -6234,13 +6401,34 @@ class TestNN(NNTestCase):
         wrong_tgt_mask_size = tgt_len + 1
         test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size)
 
-        # Incorrect tgt_mask
+        # Incorrect memory_mask
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
         test(encoder_input_shape, decoder_input_shape,
-             tgt_mask_len=wrong_tgt_mask_size,
              memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size))
+
+        # Incorrect src_key_padding_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        with self.assertRaises(AssertionError):
+            test(encoder_input_shape, decoder_input_shape,
+                 src_key_padding_mask_size=(wrong_bsz, wrong_src_mask_size))
+
+        # Incorrect tgt_key_padding_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        with self.assertRaises(AssertionError):
+            test(encoder_input_shape, decoder_input_shape,
+                 tgt_key_padding_mask_size=(wrong_bsz, wrong_tgt_mask_size))
+
+        # Incorrect memory_key_padding_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        with self.assertRaises(AssertionError):
+            test(encoder_input_shape, decoder_input_shape,
+                 memory_key_padding_mask_size=(wrong_bsz, wrong_src_mask_size))
+
 
     def test_rnn_args_check(self):
         input_size = 3
@@ -6549,13 +6737,13 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
@@ -6598,7 +6786,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         import sys
         if sys.version_info[0] == 2:
@@ -6641,7 +6829,7 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')

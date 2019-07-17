@@ -38,9 +38,11 @@ bool is_quantized(const Tensor& self) {
   return self.is_quantized();
 }
 
-// True if `self` has the same derived type of TensorImpl as `other`.
-bool _has_same_tensorimpl_type(const Tensor& self, const Tensor& other) {
-  return typeid(*(self.unsafeGetTensorImpl())) == typeid(*(other.unsafeGetTensorImpl()));
+// True if `self` and `from` have compatible tensor type so that `from`'s
+// TensorImpl can be copied to `self`.
+bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
+  return self.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
+      from.type_id());
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {

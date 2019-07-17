@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 
 namespace torch {
