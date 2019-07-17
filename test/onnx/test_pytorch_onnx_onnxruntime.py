@@ -39,8 +39,7 @@ def validate_ORT_prediction(ort_sess, input, output, rtol=1e-05, atol=1e-08):
 def run_model_test(self, model, train, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                    example_outputs=None, do_constant_folding=True,
-                   dynamic_axes=None, fixed_batch_size=False,
-                   validate_prediction=True):
+                   dynamic_axes=None, fixed_batch_size=False):
     if not train:
         model.eval()
 
@@ -64,8 +63,7 @@ def run_model_test(self, model, train, batch_size=2, state_dict=None,
                            fixed_batch_size=fixed_batch_size)
 
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        if validate_prediction:
-            validate_ORT_prediction(ort_sess, input, output, rtol=rtol, atol=atol)
+        validate_ORT_prediction(ort_sess, input, output, rtol=rtol, atol=atol)
         return ort_sess
 
 
@@ -75,13 +73,12 @@ class TestONNXRuntime(unittest.TestCase):
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7,
                  do_constant_folding=False, dynamic_axes=None,
-                 fixed_batch_size=False, validate_prediction=True):
+                 fixed_batch_size=False):
         return run_model_test(self, model, False, None,
                               input=input, rtol=rtol, atol=atol,
                               do_constant_folding=do_constant_folding,
                               dynamic_axes=dynamic_axes,
-                              fixed_batch_size=fixed_batch_size,
-                              validate_prediction=True)
+                              fixed_batch_size=fixed_batch_size)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
@@ -241,27 +238,16 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm(self):
         model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
-        model.eval()
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         h0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
         c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
-        ort_session = self.run_test(model, (input, (h0, c0)), validate_prediction=False)
-
-        # LSTM's output is (output, (h, c)) in PyTorch and (output, h, c) in ONNX
-        # This is the reason we don't validate the ORT prediction in run_test for
-        # all the lstm tests below. Instead we do it here.
-        output, (h, c) = model(input, (h0, c0))
-        validate_ORT_prediction(ort_session, (input, h0, c0), (output, h, c), atol=1e-07)
+        self.run_test(model, (input, (h0, c0)), atol=1e-07)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_default_init_state(self):
         model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
-        model.eval()
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
-        ort_session = self.run_test(model, input, validate_prediction=False)
-
-        output, (h, c) = model(input)
-        validate_ORT_prediction(ort_session, input, (output, h, c), atol=1e-07)
+        self.run_test(model, input, atol=1e-07)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_fixed_batch_size(self):
@@ -279,13 +265,9 @@ class TestONNXRuntime(unittest.TestCase):
                 return self.lstm(input, (h0, c0))
 
         model = LSTMModel()
-        model.eval()
 
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
-        ort_session = self.run_test(model, input, fixed_batch_size=True, validate_prediction=False)
-
-        output, (h, c) = model(input)
-        validate_ORT_prediction(ort_session, input, (output, h, c), atol=1e-07)
+        ort_session = self.run_test(model, input, fixed_batch_size=True, atol=1e-07)
 
         # verify with different input of same batch size
         input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
@@ -309,14 +291,10 @@ class TestONNXRuntime(unittest.TestCase):
                 return self.lstm(input, (h0, c0))
 
         model = LSTMModel()
-        model.eval()
 
         input = torch.randn(RNN_SEQUENCE_LENGTH, 1, RNN_INPUT_SIZE)
         ort_session = self.run_test(model, input, dynamic_axes={'input' : {0 : 'seq', 1 : 'batch'}},
-                                    validate_prediction=False)
-
-        output, (h, c) = model(input)
-        validate_ORT_prediction(ort_session, input, (output, h, c), atol=1e-07)
+                                    atol=1e-07)
 
         # verify with different input of different batch size
         input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
