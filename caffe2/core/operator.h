@@ -142,7 +142,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         !std::is_same<T, Tensor>::value,
         "You should use Input<Tensor>(int, DeviceType) for "
         "Tensor.");
-    DCHECK_LT(idx, inputs_.size());
+    DCHECK_LT(idx, int(inputs_.size()));
     try {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
@@ -165,7 +165,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       static_assert(
           std::is_same<T, Tensor>::value,
           "Input(int, DeviceType) is only available for Tensor");
-      DCHECK_LT(idx, inputs_.size());
+      DCHECK_LT(idx, int(inputs_.size()));
       try {
         // TODO(jerryzh): We'll need to check device type in Get<T>() later
         // Get<T>() -> Get<T>(type)
@@ -181,18 +181,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       }
     }
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-    DCHECK_LT(0, newstyle_inputs_.size());
+    DCHECK_LT(0, int(newstyle_inputs_.size()));
     IValue ival;
     if (newstyle_inputs_[0].isTensorList()) {
       // if the first input is a tensor list, we get input tensors by indexing into that list.
       // currently, this means that only tensors from that list are accessible as inputs.
       // any hypothetical input tensors that come after the list are not accessible.
       auto tensorList = newstyle_inputs_[0].toTensorListRef();
-      DCHECK_LT(idx, tensorList.size());
+      DCHECK_LT(idx, int(tensorList.size()));
       ival = tensorList[idx];
     } else {
       // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
-      DCHECK_LT(idx, newstyle_inputs_.size());
+      DCHECK_LT(idx, int(newstyle_inputs_.size()));
       ival = newstyle_inputs_[idx];
     }
     CAFFE_ENFORCE(
