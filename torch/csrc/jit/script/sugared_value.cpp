@@ -207,7 +207,7 @@ void SimpleValue::setAttr(
       if (insertPoint->owningBlock() != topLevelBlock) {
         throw ErrorReport(loc)
             << "First assignment cannot be in a control-flow block. "
-            << "Initialize the field at the top level first.";
+            << "Initialize the field at the top level first";
       }
     } else {
       throw ErrorReport(loc)
@@ -407,7 +407,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   auto self = g.insertNode(g.createObject(type_))->output();
   if (!type_->getMethod("__init__")) {
     throw ErrorReport(loc)
-        << "Class " << type_->basename() << " does not have an __init__ function defined.";
+        << "Class " << type_->basename() << " does not have an __init__ function defined";
   }
 
   // Call the init function
