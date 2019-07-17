@@ -9,7 +9,7 @@ namespace py = pybind11;
 namespace torch {
 namespace data {
 
-/// Main function that calls all python ChunkDataset binding functions
+/// ChunkDataset API bindings
 void init_dataset_bindings(PyObject* module);
 
 namespace samplers {
