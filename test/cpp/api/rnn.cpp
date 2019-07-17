@@ -253,7 +253,7 @@ TEST_F(RNNTest, BidirectionalFlattenParameters) {
 // https://towardsdatascience.com/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
 // Reverse forward of bidrectional GRU should act
 // as regular forward of unidirectional GRU
-TEST_F(RNNTest, BidirectionalGRUReverseForward) {
+void BidirectionalGRUReverseForward(bool cuda) {
   auto options = torch::TensorOptions()
                         .dtype(torch::kFloat32).requires_grad(false);
   auto input =
@@ -265,6 +265,13 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward) {
                   .layers(1).batch_first(false).bidirectional(true)};
   GRU reverse_gru {GRUOptions(1, 1)
                   .layers(1).batch_first(false).bidirectional(false)};
+
+  if (cuda) {
+    bi_grus->to(torch::kCUDA);
+    reverse_gru->to(torch::kCUDA);
+    input = input.to(torch::kCUDA);
+    input_reversed = input_reversed.to(torch::kCUDA);
+  }
 
   // Now make sure the weights of the reverse gru layer match
   // ones of the (reversed) bidirectional's:
@@ -278,6 +285,14 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward) {
 
   auto bi_output = bi_grus->forward(input);
   auto reverse_output = reverse_gru->forward(input_reversed);
+
+  if (cuda) {
+    bi_output.output = bi_output.output.to(torch::kCPU);
+    bi_output.state = bi_output.state.to(torch::kCPU);
+    reverse_output.output = reverse_output.output.to(torch::kCPU);
+    reverse_output.state = reverse_output.state.to(torch::kCPU);
+  }
+
   ASSERT_EQ(bi_output.output.size(0), reverse_output.output.size(0));
   auto size = bi_output.output.size(0);
   for (int i = 0; i < size; i++) {
@@ -290,9 +305,17 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward) {
             reverse_output.state[0][0][0].item<float>());
 }
 
+TEST_F(RNNTest, BidirectionalGRUReverseForward) {
+  BidirectionalGRUReverseForward(false);
+}
+
+TEST_F(RNNTest, BidirectionalGRUReverseForward_CUDA) {
+  BidirectionalGRUReverseForward(true);
+}
+
 // Reverse forward of bidrectional LSTM should act
 // as regular forward of unidirectional LSTM
-TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
+void BidirectionalLSTMReverseForwardTest(bool cuda) {
   auto options = torch::TensorOptions()
                         .dtype(torch::kFloat32).requires_grad(false);
   auto input =
@@ -304,6 +327,13 @@ TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
                   .layers(1).batch_first(false).bidirectional(true)};
   LSTM reverse_lstm {LSTMOptions(1, 1)
                   .layers(1).batch_first(false).bidirectional(false)};
+
+  if (cuda) {
+    bi_lstm->to(torch::kCUDA);
+    reverse_lstm->to(torch::kCUDA);
+    input = input.to(torch::kCUDA);
+    input_reversed = input_reversed.to(torch::kCUDA);
+  }
 
   // Now make sure the weights of the reverse lstm layer match
   // ones of the (reversed) bidirectional's:
@@ -317,17 +347,32 @@ TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
 
   auto bi_output = bi_lstm->forward(input);
   auto reverse_output = reverse_lstm->forward(input_reversed);
+
+  if (cuda) {
+    bi_output.output = bi_output.output.to(torch::kCPU);
+    bi_output.state = bi_output.state.to(torch::kCPU);
+    reverse_output.output = reverse_output.output.to(torch::kCPU);
+    reverse_output.state = reverse_output.state.to(torch::kCPU);
+  }
+
   ASSERT_EQ(bi_output.output.size(0), reverse_output.output.size(0));
   auto size = bi_output.output.size(0);
   for (int i = 0; i < size; i++) {
     ASSERT_EQ(bi_output.output[i][0][1].item<float>(),
               reverse_output.output[size - 1 - i][0][0].item<float>());
   }
-
   // The hidden states of the reversed LSTM sits
   // in the odd indices in the first dimension.
   ASSERT_EQ(bi_output.state[0][1][0][0].item<float>(),
             reverse_output.state[0][0][0][0].item<float>());
   ASSERT_EQ(bi_output.state[1][1][0][0].item<float>(),
             reverse_output.state[1][0][0][0].item<float>());
+}
+
+TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
+  BidirectionalLSTMReverseForwardTest(false);
+}
+
+TEST_F(RNNTest, BidirectionalLSTMReverseForward_CUDA) {
+  BidirectionalLSTMReverseForwardTest(true);
 }
