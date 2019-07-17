@@ -1,6 +1,7 @@
 import torch
 import unittest
 from common_utils import TEST_WITH_NESTEDTENSORS
+import torch.tensortypes.nestedtensor.codegen as codegen
 
 if TEST_WITH_NESTEDTENSORS:
     import torch.tensortypes.nestedtensor as nestedtensor
@@ -19,7 +20,8 @@ def _shape_prod(shape_):
     return start
 
 # From torchaudio by jamarshon
-def random_float_tensor(seed, size, a=22695477, c=1, m=2 ** 32):
+def random_float_tensor(seed, size, a=22695477, c=1, m=2 ** 32,
+                        requires_grad=False):
     """ Generates random tensors given a seed and size
     https://en.wikipedia.org/wiki/Linear_congruential_generator
     X_{n + 1} = (a * X_n + c) % m
@@ -40,7 +42,7 @@ def random_float_tensor(seed, size, a=22695477, c=1, m=2 ** 32):
     for i in range(num_elements - 1):
         arr.append((a * arr[i] + c) % m)
 
-    return torch.tensor(arr).float().view(size) / m
+    return torch.tensor(arr, requires_grad=requires_grad).float().view(size) / m
 
 
 def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 32):
@@ -51,8 +53,8 @@ def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 3
 
 class TestNestedTensor(TestCase):
 
-    def gen_float_tensor(self, seed, shape):
-        return random_float_tensor(seed, shape)
+    def gen_float_tensor(self, seed, shape, requires_grad=False):
+        return random_float_tensor(seed, shape, requires_grad=requires_grad)
 
     def test_constructor(self):
         tensors = []
@@ -114,34 +116,96 @@ class TestNestedTensor(TestCase):
 
 
     def test_unary(self):
-        a1 = torch.nestedtensor([self.gen_float_tensor(1, (2,)),
-                                 self.gen_float_tensor(2, (2,))])
-        a2 = torch.nestedtensor([self.gen_float_tensor(1, (2,)).exp_(),
-                                 self.gen_float_tensor(2, (2,)).exp_()])
-        assert (torch.exp(a1) == a2).all()
-        assert not (a1 == a2).any()
-        assert (a1.exp() == a2).all()
-        assert not (a1 == a2).any()
-        assert (a1.exp_() == a2).all()
-        assert (a1 == a2).all()
+        for func in codegen.extension.get_unary_functions():
+            data = [self.gen_float_tensor(1, (2, 3)) - 0.5,
+                    self.gen_float_tensor(2, (2, 3)) - 0.5]
+            if func in ['log', 'log10', 'log2', 'rsqrt', 'sqrt']:
+                data = list(map(lambda x: x.abs(), data))
+            a1 = torch.nestedtensor(data)
+            a2 = torch.nestedtensor(list(map(lambda x: getattr(torch, func)(x), data)))
+            assert (getattr(torch, func)(a1) == a2).all()
+            assert (getattr(a1, func)() == a2).all()
+            assert (getattr(a1, func + "_")() == a2).all()
+            assert (a1 == a2).all()
 
 
     def test_binary(self):
-        a = self.gen_float_tensor(1, (2,))
-        b = self.gen_float_tensor(2, (2,))
-        c = self.gen_float_tensor(3, (2,))
-        # The constructor is suppoed to copy!
-        a1 = torch.nestedtensor([a, b])
-        a2 = torch.nestedtensor([b, c])
-        a3 = torch.nestedtensor([a + b, b + c])
-        assert (a3 == torch.add(a1, a2)).all()
-        assert not (a3 == a1).any()
-        assert not (a3 == a2).any()
-        assert (a3 == a1.add(a2)).all()
-        assert not (a3 == a1).any()
-        assert not (a3 == a2).any()
-        assert (a3 == a1.add_(a2)).all()
-        assert (a3 == a1).all()
+        for func in codegen.extension.get_binary_functions():
+            a = self.gen_float_tensor(1, (2, 3))
+            b = self.gen_float_tensor(2, (2, 3))
+            c = self.gen_float_tensor(3, (2, 3))
+            # The constructor is supposed to copy!
+            a1 = torch.nestedtensor([a, b])
+            a2 = torch.nestedtensor([b, c])
+            a3 = torch.nestedtensor([getattr(torch, func)(a, b),
+                                     getattr(torch, func)(b, c)])
+            assert (a3 == getattr(torch, func)(a1, a2)).all()
+            assert not (a3 == a1).any()
+            assert not (a3 == a2).any()
+            assert (a3 == getattr(a1, func)(a2)).all()
+            assert not (a3 == a1).any()
+            assert not (a3 == a2).any()
+            assert (a3 == getattr(a1, func + "_")(a2)).all()
+            assert (a3 == a1).all()
+
+    def test_detach(self):
+        data = [self.gen_float_tensor(1, (10, 10)),
+                self.gen_float_tensor(2, (10, 10)),
+                self.gen_float_tensor(3, (10, 10))]
+        ones_data = [torch.ones(10, 10),
+                     torch.ones(10, 10),
+                     torch.ones(10, 10)]
+        # We don't support scalar arguments yet (broadcasting)
+        # This will be part of NestedTensor 0.0.3
+        twos_data = [torch.ones(10, 10) * 2,
+                     torch.ones(10, 10) * 2,
+                     torch.ones(10, 10) * 2]
+        fours_data = [torch.ones(10, 10) * 4,
+                      torch.ones(10, 10) * 4,
+                      torch.ones(10, 10) * 4]
+        ones = torch.nestedtensor(ones_data).to(torch.float)
+        twos = torch.nestedtensor(twos_data).to(torch.float)
+        fours = torch.nestedtensor(fours_data).to(torch.float)
+        x = torch.nestedtensor(data, requires_grad=True)
+        y = x + twos
+        y = y.detach()
+        z = y * fours + twos
+        self.assertFalse(y.requires_grad)
+        self.assertFalse(z.requires_grad)
+
+        x = torch.nestedtensor(data, requires_grad=True)
+        y = x * twos
+        y = y.detach()
+        self.assertFalse(y.requires_grad)
+        self.assertIsNone(y.grad_fn)
+        z = x + y
+        z.sum().backward()
+
+        # This is an incorrect gradient, but we assume that's what the user
+        # wanted. detach() is an advanced option.
+        self.assertTrue((x.grad.data == ones).all())
+
+        # in-place detach
+        x = torch.nestedtensor(data, requires_grad=True)
+        y = torch.nestedtensor(data, requires_grad=True)
+        a = x * twos
+        (y + a).sum().backward(retain_graph=True)
+        a.detach_()
+        self.assertFalse(a.requires_grad)
+        (y + a).sum().backward()  # this won't backprop to x
+        self.assertTrue((x.grad.data == ones * twos).all())
+        self.assertTrue((y.grad.data == ones * twos).all())
+
+        # TODO: view semantics will be defined by NestedTensor 0.0.3 or 0.0.4
+        # in-place deatch on a view raises an exception
+        # view = x.narrow(0, 1, 4)
+        # self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
+
+    def test_detach_base(self):
+        "detaching base does not detach view"
+        x = torch.nestedtensor([torch.randn(10, 10)], requires_grad=True)
+        x.detach_()
+        self.assertFalse(x.requires_grad)
 
 if __name__ == "__main__":
     unittest.main()

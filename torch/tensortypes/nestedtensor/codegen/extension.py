@@ -2,6 +2,12 @@ import torch
 from functools import wraps
 from collections import namedtuple
 
+# Stores the relationship between a torch module function
+# and a torch.Tensor method. For example torch.add
+# maps to torch.Tensor.add and torch.Tensor.add can either
+# be inplace or not.
+Signature = namedtuple('Signature', ['torch', 'tensor', 'inplace'])
+
 # These functions only take two inputs. An input and a output.
 # No scalars etc.
 def get_unary_functions():
@@ -10,11 +16,10 @@ def get_unary_functions():
         'acos',
         'asin',
         'atan',
-        # 'atan2',
         # 'byte',
         'ceil',
         # 'char',
-        'clamp',
+        # 'clamp', # TODO: Requires extra kwargs
         # 'clone',
         # 'contiguous',
         'cos',
@@ -44,10 +49,9 @@ def get_unary_functions():
         'log1p',
         'log2',
         # 'long',
-        # 'lt',
         # 'mvlgamma',
         'neg',
-        'nonzero',
+        # 'nonzero', #TODO: Special case because it modifies dtype
         # 'polygamma',
         # 'pow',
         # 'prelu', # TODO: no prelu_out
@@ -92,6 +96,11 @@ def get_comparison_functions():
     ]
 
 
+# Adds dispatch based on isinstance to torch function
+# tfunc by wrapping the current torch.tfunc function
+# and overwriting it with a function that dispatches
+# to func(tfunc, reference_to_tfunc, *args, **kwargs)
+# if the first argument is of instance cls.
 def set_function(module, cls, tfunc, func):
     def _gen_func(tfunc):
         orig_tfunc = getattr(torch, tfunc)
@@ -117,7 +126,7 @@ def _check_meaningful_overwrite(cls, method_name):
 
 def set_unary_method(cls, tfunc, method_name, inplace):
     def _gen_func(method_name):
-        def _func(self: cls):
+        def _func(self):
             assert isinstance(self, cls)
             if inplace:
                 return getattr(torch, tfunc)(self, out=self)
@@ -130,7 +139,7 @@ def set_unary_method(cls, tfunc, method_name, inplace):
 
 def set_binary_method(cls, tfunc, method_name, inplace):
     def _gen_func(tfunc):
-        def _func(self: cls, other: cls):
+        def _func(self, other):
             if inplace:
                 return getattr(torch, tfunc)(self, other, out=self)
             else:
@@ -143,54 +152,58 @@ def set_binary_method(cls, tfunc, method_name, inplace):
 def get_unary_method_signatures():
     signatures = []
     for method_name in get_unary_functions():
-        signatures.append({'torch': method_name, 'Tensor': method_name, 'inplace': False})
-        signatures.append({'torch': method_name, 'Tensor': method_name + "_", 'inplace': True})
+        signatures.append(Signature(method_name, method_name, False))
+        signatures.append(Signature(method_name, method_name + "_", True))
     return signatures
 
 
 def get_binary_method_signatures():
     signatures = []
     for method_name in get_binary_functions():
-        signatures.append({'torch': method_name, 'Tensor': method_name, 'inplace': False})
-        signatures.append({'torch': method_name, 'Tensor': method_name + "_", 'inplace': True})
+        signatures.append(Signature(method_name, method_name, False))
+        signatures.append(Signature(method_name, method_name + "_", True))
 
-    for method_name in ['add', 'mul', 'sub']:
-        signatures.append({'torch': method_name, 'Tensor': "__" + method_name + "__", 'inplace': False})
-        signatures.append({'torch': method_name, 'Tensor': "__i" + method_name + "__", 'inplace': True})
-    signatures.append({'torch': 'div', 'Tensor': "__" + 'div' + "__", 'inplace': False})
-    signatures.append({'torch': 'div', 'Tensor': "__i" + 'div' + "__", 'inplace': True})
+    for method_name in ['add', 'mul', 'sub', 'div']:
+        signatures.append(Signature(method_name, "__" + method_name + "__", False))
+        signatures.append(Signature(method_name, "__i" + method_name + "__", True))
     return signatures
 
 
 def get_comparison_method_signatures():
     signatures = []
     for method_name in get_comparison_functions():
-        signatures.append({'torch': method_name, 'Tensor': method_name, 'inplace': False})
-        signatures.append({'torch': method_name, 'Tensor': method_name + "_", 'inplace': True})
-        signatures.append({'torch': method_name, 'Tensor': "__" + method_name + "__", 'inplace': False})
+        signatures.append(Signature(method_name, method_name, False))
+        signatures.append(Signature(method_name, method_name + "_", True))
+        signatures.append(Signature(method_name, "__" + method_name + "__", False))
     return signatures
 
 
+# Add cls dispatch for unary functions and setting the unary methods of
+# cls to call into the new unary functions.
 def add_pointwise_unary_functions(module, cls, func):
     for function_name in get_unary_functions():
         set_function(module, cls, function_name, func)
     for signature in get_unary_method_signatures():
-        set_unary_method(cls, signature['torch'], signature['Tensor'], signature['inplace'])
+        set_unary_method(cls, signature.torch, signature.tensor, signature.inplace)
     return module, cls
 
 
+# Add cls dispatch for binary functions and setting the binary methods of
+# cls to call into the new binary functions.
 def add_pointwise_binary_functions(module, cls, func):
     for function_name in get_binary_functions():
         set_function(module, cls, function_name, func)
     for signature in get_binary_method_signatures():
-        set_binary_method(cls, signature['torch'], signature['Tensor'], signature['inplace'])
+        set_binary_method(cls, signature.torch, signature.tensor, signature.inplace)
     return module, cls
 
 
+# Add cls dispatch for comparison functions and setting the comparison methods of
+# cls to call into the new comparison functions.
 # It's up to the user to make sure that output is of type torch.uint8
 def add_pointwise_comparison_functions(module, cls, func):
     for function_name in get_comparison_functions():
         set_function(module, cls, function_name, func)
     for signature in get_comparison_method_signatures():
-        set_binary_method(cls, signature['torch'], signature['Tensor'], signature['inplace'])
+        set_binary_method(cls, signature.torch, signature.tensor, signature.inplace)
     return module, cls
