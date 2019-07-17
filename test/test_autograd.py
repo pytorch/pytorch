@@ -169,15 +169,21 @@ class TestAutograd(TestCase):
 
     def test_legacy_function_deprecation_warning(self):
         with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+
+            # Trigger Warning
             class MyFunction(Function):
                 def forward(self, x):
                     return x
 
                 def backward(self, grad_output):
                     return grad_output
-        self.assertIn(
-            'Legacy autograd function with non-static forward method is deprecated',
-            str(w[0].message))
+
+            # Check warning occurs
+            self.assertIn(
+                'Legacy autograd function with non-static forward method is deprecated',
+                str(w[0]))
 
     def test_invalid_gradients(self):
         class MyFunction(Function):
