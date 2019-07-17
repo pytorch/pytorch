@@ -1290,6 +1290,7 @@ new_module_tests = [
         input_size=(2, 3, 8, 8),
         cudnn=True,
         desc='dilated',
+        check_with_long_tensor=True,
     ),
     dict(
         module_name='Conv2d',
@@ -1317,6 +1318,7 @@ new_module_tests = [
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cudnn=True,
         input_size=(1, 3, 7, 6),
+        check_with_long_tensor=True,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1324,6 +1326,7 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='dilated',
+        check_with_long_tensor=True,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1331,12 +1334,14 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='no_bias',
+        check_with_long_tensor=True,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
         constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
         input_size=(1, 2, 4, 5),
         cudnn=True,
+        check_with_long_tensor=True,
     ),
     dict(
         fullname='Conv2d_depthwise',
