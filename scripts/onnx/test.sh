@@ -25,9 +25,6 @@ set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
 pip install pytest scipy hypothesis
 
-# JIT C++ extensions require ninja, so put it into PATH.
-export PATH="/var/lib/jenkins/.local/bin:$PATH"
-
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
