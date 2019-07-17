@@ -7,6 +7,19 @@ import torch.nn.quantized as nnq
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, default_qconfig
 
+def test_only_eval_fn(model, calib_data):
+    r"""
+    Default evaluation function takes a torch.utils.data.Dataset or a list of
+    input Tensors and run the model on the dataset
+    """
+    total, correct = 0, 0
+    for data, target in calib_data:
+        output = model(data)
+        _, predicted = torch.max(output, 1)
+        total += target.size(0)
+        correct += (predicted == target).sum().item()
+    return correct / total
+
 default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=default_loss_fn):
     r"""
