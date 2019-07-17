@@ -255,7 +255,7 @@ else
 
   # sccache will be stuck if  all cores are used for compiling
   # see https://github.com/pytorch/pytorch/pull/7361
-  if [[ -n "${SCCACHE}" && $BUILD_ENVIRONMENT != *rocm* ]]; then
+  if [[ -n "${SCCACHE}" ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
