@@ -505,21 +505,28 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto pyCu = get_python_cu();
     if (auto classType = pyCu->get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
-    } else if (getRecursiveScriptMode()) {
-      // Register class
-      auto rcb = py::module::import("torch._jit_internal")
-                     .attr("createResolutionCallbackForClassMethods")(obj);
-      py::module::import("torch.jit")
-          .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
+    } else {
+      // If we can't get the source code for the type, it's implemented in C and
+      // probably part of the standard library, so give up and leave it as a
+      // call to Python
+      bool can_compile_class = py::cast<bool>(
+          py::module::import("torch._jit_internal").attr("can_compile_class")(obj));
+      if (can_compile_class) {
+        // Register class
+        auto rcb = py::module::import("torch._jit_internal")
+                       .attr("createResolutionCallbackForClassMethods")(obj);
+        py::module::import("torch.jit")
+            .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
 
-      // Return class
-      auto classType = pyCu->get_class(c10::QualifiedName(qualifiedName));
-      AT_ASSERT(
-          classType,
-          "Class '",
-          qualifiedName,
-          "' should have been compiled but was not");
-      return std::make_shared<ClassValue>(classType);
+        // Return class
+        auto newClassType = pyCu->get_class(c10::QualifiedName(qualifiedName));
+        AT_ASSERT(
+            newClassType,
+            "Class '",
+            qualifiedName,
+            "' should have been compiled but was not");
+        return std::make_shared<ClassValue>(newClassType);
+      }
     }
   }
 

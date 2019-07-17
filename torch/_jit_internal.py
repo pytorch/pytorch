@@ -90,14 +90,22 @@ def createResolutionCallbackFromClosure(fn):
     return env
 
 
-def createResolutionCallbackForClassMethods(obj):
+def can_compile_class(cls):
+    # If any of the functions on a type don't have a code object, this type can't
+    # be compiled and is probably a builtin / bound from C
+    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    has_code = [hasattr(fn, '__code__') for fn in fns]
+    return all(has_code)
+
+
+def createResolutionCallbackForClassMethods(cls):
     """
     This looks at all the methods defined in a class and pulls their closed-over
     variables into a dictionary and uses that to resolve variables.
     """
-    # obj is a type here, so `ismethod` is false since the methods on the type
+    # cls is a type here, so `ismethod` is false since the methods on the type
     # aren't bound to anything, so Python treats them as regular functions
-    fns = [getattr(obj, name) for name in obj.__dict__ if inspect.isroutine(getattr(obj, name))]
+    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
     captures = {}
 
     for fn in fns:
