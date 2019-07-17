@@ -3710,7 +3710,7 @@ a")
     def test_index_ellipses(self):
         vals = [":", 1, None]
         for _ in range(100):
-            indices = list(random.choices(vals, k=4))
+            indices = [random.choice(vals) for _ in range(4)]
             indices[random.randint(0, len(indices) - 1)] = "..."
             test_str = dedent("""
             def f():
