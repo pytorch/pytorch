@@ -96,7 +96,7 @@ void Pickler::finish() {
       std::string key = std::to_string(getStorageKey(tensor));
       push<OpCode>(OpCode::BINUNICODE);
       push<uint32_t>(key.size());
-      pushString(key);
+      pushBytes(key);
     }
     push<OpCode>(OpCode::TUPLE);
     push<OpCode>(OpCode::STOP);
@@ -127,15 +127,15 @@ void Pickler::pushMetadata() {
   start();
   push<OpCode>(OpCode::LONG1);
   // LONG1 size
-  pushString("\x0a");
+  pushBytes("\x0a");
   // LONG1 data
-  pushString("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
+  pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
   push<OpCode>(OpCode::STOP);
 
   // Protocol Version (1001)
   start();
   push<OpCode>(OpCode::BININT2);
-  pushString("\xe9\x03");
+  pushBytes("\xe9\x03");
   push<OpCode>(OpCode::STOP);
 
   // sys_info, this isn't actually used in de-serialization so we can leave this
@@ -145,18 +145,8 @@ void Pickler::pushMetadata() {
   push<OpCode>(OpCode::STOP);
 }
 
-void Pickler::addIValue(const IValue& ivalue) {
-  // Check if reference ivalue has been saved before
-  const void* ivalue_ptr = getPointer(ivalue);
-  if (ivalue_ptr) {
-    auto memo_entry = memo_map_.find(ivalue_ptr);
-    if (memo_entry != memo_map_.end()) {
-      // This value has already been pushed, just do a BINGET
-      pushBinGet(memo_entry->second);
-      return;
-    }
-  }
-
+// unmemoized version called by addIValue
+void Pickler::addIValueImpl(const IValue& ivalue) {
   if (ivalue.isTensor()) {
     pushTensor(ivalue);
   } else if (ivalue.isTuple()) {
@@ -172,7 +162,7 @@ void Pickler::addIValue(const IValue& ivalue) {
       push<OpCode>(OpCode::NEWFALSE);
     }
   } else if (ivalue.isString()) {
-    pushMemoizedString(ivalue);
+    pushStringImpl(ivalue.toStringRef());
   } else if (ivalue.isGenericList()) {
     pushGenericList(ivalue);
   } else if (ivalue.isGenericDict()) {
@@ -212,18 +202,28 @@ void Pickler::addIValue(const IValue& ivalue) {
   }
 }
 
-/// Returns a void* uniquely identifying this IValue's data. For non-containers,
-/// returns nullptr. Also adds the ivalue to the Pickler's list of memoized
-/// IValues so the pointers are guaranteed to be valid for the Pickler's
-/// lifetime.
-const void* Pickler::getPointer(const IValue& ivalue) {
-  if (ivalue.isGenericDict() || ivalue.isGenericList() || ivalue.isTuple()
-    || ivalue.isString() || ivalue.isIntList() || ivalue.isTensorList()
-    || ivalue.isDoubleList() || ivalue.isBoolList()) {
-      return ivalue.internalToPointer();
+void Pickler::addIValue(const IValue& ivalue) {
+  // Check if reference ivalue has been saved before
+  if (ivalue.isPtrType()) {
+    const void* ptr = ivalue.internalToPointer();
+    TORCH_CHECK(
+        ptr != nullptr,
+        "Pickler cannot memoize ",
+        ivalue.tagKind(),
+        " IValue ",
+        ivalue);
+    auto memo_entry = memoized_ivalue_map_.find(ptr);
+    if (memo_entry != memoized_ivalue_map_.end()) {
+      // This value has already been pushed, just do a BINGET
+      pushBinGet(memo_entry->second);
+      return;
+    }
   }
-
-  return nullptr;
+  addIValueImpl(ivalue);
+  if (ivalue.isPtrType()) {
+    memoized_ivalues_.push_back(ivalue);
+    memoized_ivalue_map_[ivalue.internalToPointer()] = pushNextBinPut();
+  }
 }
 
 void Pickler::pushInt(const IValue& ivalue) {
@@ -256,28 +256,36 @@ void Pickler::pushBinGet(uint32_t memo_id) {
   }
 }
 
-void Pickler::pushMemoizedString(const IValue& ivalue) {
-  const auto& string = ivalue.toStringRef();
-
+// unmemoized encoding of a string
+void Pickler::pushStringImpl(const std::string& string) {
   push<OpCode>(OpCode::BINUNICODE);
   push<uint32_t>(string.size());
-  pushString(string);
-  pushMemoization(ivalue);
+  pushBytes(string);
 }
 
 void Pickler::pushString(const std::string& string) {
+  auto it = memoized_strings_map_.find(string);
+  if (it == memoized_strings_map_.end()) {
+    pushStringImpl(string);
+    memoized_strings_map_[string] = pushNextBinPut();
+  } else {
+    pushBinGet(it->second);
+  }
+}
+
+void Pickler::pushBytes(const std::string& string) {
   stack_.insert(stack_.end(), string.begin(), string.end());
 }
 
 void Pickler::pushGlobal(const std::string& name_temp) {
-  auto memo_entry = memoized_strings_map_.find(name_temp);
-  if (memo_entry == memoized_strings_map_.end()) {
+  auto memo_entry = memoized_globals_map_.find(name_temp);
+  if (memo_entry == memoized_globals_map_.end()) {
     push<OpCode>(OpCode::GLOBAL);
-    pushString(name_temp);
+    pushBytes(name_temp);
 
-    // Push BINPUT without adding anything to the memo_map_
+    // Push BINPUT without adding anything to the memoized_ivalues_
     size_t memo_id = pushNextBinPut();
-    memoized_strings_map_.insert({name_temp, memo_id});
+    memoized_globals_map_.insert({name_temp, memo_id});
   } else {
     pushBinGet(memo_entry->second);
   }
@@ -309,15 +317,15 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // Tuple for persistent_load
   push<OpCode>(OpCode::MARK);
   // typename
-  pushMemoizedString(std::string("storage"));
+  pushString("storage");
   // data_type
   std::stringstream data_type;
   data_type << "torch\n" << toString(tensor.scalar_type()) << "Storage\n";
   pushGlobal(data_type.str());
   // root_key
-  pushMemoizedString(std::to_string(getStorageKey(tensor)));
+  pushString(std::to_string(getStorageKey(tensor)));
   // location
-  pushMemoizedString(std::string("cpu"));
+  pushString("cpu");
   // size
   pushInt(tensor.numel());
   // view_metadata
@@ -403,7 +411,6 @@ void Pickler::pushSpecializedList(
 
   // Call reduce
   push<OpCode>(OpCode::REDUCE);
-  pushMemoization(ivalue);
 }
 
 void Pickler::pushDouble(const IValue& ivalue) {
@@ -419,7 +426,6 @@ void Pickler::pushDouble(const IValue& ivalue) {
 
 void Pickler::pushDict(const IValue& ivalue) {
   push<OpCode>(OpCode::EMPTY_DICT);
-  pushMemoization(ivalue);
 
   push<OpCode>(OpCode::MARK);
 
@@ -431,11 +437,6 @@ void Pickler::pushDict(const IValue& ivalue) {
   }
 
   push<OpCode>(OpCode::SETITEMS);
-}
-
-void Pickler::pushMemoization(const void* item) {
-  TORCH_CHECK(item != nullptr, "Pickler cannot memoize a nullptr");
-  memo_map_[item] = pushNextBinPut();
 }
 
 size_t Pickler::pushNextBinPut() {
@@ -452,22 +453,9 @@ size_t Pickler::pushNextBinPut() {
   return memo_id_ - 1;
 }
 
-void Pickler::pushMemoization(const IValue& ivalue) {
-  auto ptr = getPointer(ivalue);
-  memoized_ivalues_.push_back(ivalue);
-  TORCH_CHECK(
-      ptr != nullptr,
-      "Pickler cannot memoize ",
-      ivalue.tagKind(),
-      " IValue ",
-      ivalue)
-  pushMemoization(ptr);
-}
-
 void Pickler::pushGenericList(const IValue& ivalue) {
   auto list = ivalue.toGenericListRef();
   push<OpCode>(OpCode::EMPTY_LIST);
-  pushMemoization(ivalue);
 
   push<OpCode>(OpCode::MARK);
 
@@ -488,7 +476,6 @@ void Pickler::pushTuple(const IValue& ivalue) {
   }
 
   push<OpCode>(OpCode::TUPLE);
-  pushMemoization(ivalue);
 }
 
 std::vector<IValue> Unpickler::parse_ivalue_list() {
