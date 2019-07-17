@@ -99,7 +99,7 @@ static void neg_kernel(TensorIterator& iter) {
 }
 
 static void sign_kernel(TensorIterator& iter){
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
       cpu_kernel(
           iter,
           [=](scalar_t a) -> scalar_t {
