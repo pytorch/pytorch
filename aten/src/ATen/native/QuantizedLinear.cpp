@@ -32,7 +32,7 @@ namespace native {
 
 #ifdef USE_FBGEMM
 
-Tensor fbgemm_linear_int8_weight(
+Tensor fbgemm_linear_int8_weight_fp32_activation(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& packed,
@@ -330,7 +330,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
 }
 
-Tensor fbgemm_linear_fp16_weight(
+Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
     const Tensor& bias) {
@@ -371,7 +371,7 @@ Tensor fbgemm_linear_fp16_weight(
 
 #else // USE_FBGEMM
 
-Tensor fbgemm_linear_int8_weight(
+Tensor fbgemm_linear_int8_weight_fp32_activation(
     const Tensor& /*input*/,
     const Tensor& /*weight*/,
     const Tensor& /*packed*/,
@@ -415,7 +415,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(
       false, "This PyTorch installation was not built with FBGEMM operators");
 }
 
-Tensor fbgemm_linear_fp16_weight(
+Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
     const Tensor& bias) {
