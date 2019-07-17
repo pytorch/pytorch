@@ -500,6 +500,13 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def(
+      "_jit_get_all_schemas", []() {
+    auto operations = getAllOperators();
+    return fmap(operations, [](const std::shared_ptr<Operator>& op) {
+      return op->schema();
+    });
+  });
 
   struct PythonFutureWrapper {
     explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
