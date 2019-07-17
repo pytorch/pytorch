@@ -63,6 +63,7 @@ class _OpNamespace(types.ModuleType):
         # with qualified_op_name
         torch.jit._register_builtin(op, qualified_op_name)
         setattr(self, op_name, op)
+        op.__module__ = self.__module__ + "." + self.name
         return op
 
 
