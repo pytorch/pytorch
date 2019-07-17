@@ -126,6 +126,7 @@ class Pickler {
   void endTuple();
 
  private:
+  void addIValueImpl(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
   void pushDouble(const IValue& ivalue);
   void pushGenericList(const IValue& ivalue);
@@ -134,10 +135,12 @@ class Pickler {
   void pushList(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
   void pushMemoization(const IValue& ivalue);
-  void pushMemoizedString(const IValue& ivalue);
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
+  void pushString(const std::string& string);
+  // unmemoized version
+  void pushStringImpl(const std::string& string);
 
   void pushBinGet(uint32_t memo_id);
   void pushClass(PicklerClass cls);
@@ -146,8 +149,8 @@ class Pickler {
       PicklerClass cls,
       const std::function<void(const IValue&)>& item_pusher);
   void pushGlobal(const std::string& name);
-  void pushMemoization(const void* item);
-  void pushString(const std::string& string);
+  // raw string data is appended directly to the byte stream
+  void pushBytes(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);
 
   // Add a BINPUT op and return the memoization id used
@@ -168,10 +171,6 @@ class Pickler {
   // Stack of opcodes/data
   std::vector<char> stack_;
 
-  // Memoization of IValues that have been written (index in table is used for
-  // BINPUT opcodes) to enable shared references
-  std::unordered_map<const void*, uint32_t> memo_map_;
-
   // External table of tensors to serialize. If this is missing, then tensors
   // are serialized directly into the pickle
   std::vector<at::Tensor>* tensor_table_;
@@ -183,9 +182,17 @@ class Pickler {
   // and only memoize those)
   uint32_t memo_id_ = 0;
 
-  // When arbitrary (maybe temporary) values are saved, keep them here so they
-  // can be memoized correctly
-  std::vector<c10::IValue> memoized_ivalues_;
+  // Memoization of IValues that have been written (index in table is used for
+  // BINPUT opcodes) to enable shared references
+  std::unordered_map<const void*, uint32_t> memoized_ivalue_map_;
+
+  // because we de-dup ivalues based on their raw pointer address in the above
+  // map we need to keep all the memoized values alive during the pickle.
+  // Otherwise, it is possible that a raw address gets reused for another
+  // object, and we will alias it to the old object at that address.
+  std::vector<IValue> memoized_ivalues_;
+
+  std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
 };
 
