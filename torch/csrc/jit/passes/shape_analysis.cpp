@@ -170,7 +170,7 @@ class ShapePropagator {
     // prevented it
     std::stringstream ss;
     ss << "unable to create representative value for: " << type_->str()
-       << ". File a bug report.";
+       << ". File a bug report";
     throw std::runtime_error(ss.str());
   }
 

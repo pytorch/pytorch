@@ -108,8 +108,8 @@ struct TORCH_API Method {
 };
 
 struct TORCH_API Module {
-  Module(std::string class_name)
-      : module_value_(create_module_object(std::move(class_name))) {}
+  explicit Module(c10::QualifiedName class_name);
+  Module(c10::QualifiedName, std::shared_ptr<CompilationUnit> cu);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
@@ -320,14 +320,8 @@ struct TORCH_API Module {
     return c10::nullopt;
   }
 
-  ModulePtr module_object() const {
-    if (!module_value_) {
-      // User has created a Model without assigning it to something already
-      // loaded. This is done in tests, and when using the .define method.
-      module_value_ = create_module_object("__main__");
-    }
-    return module_value_;
-  }
+  ModulePtr module_object() const;
+
   ClassTypePtr type() const {
     return module_object()->type();
   }
@@ -430,16 +424,6 @@ struct TORCH_API Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
-  static void clearMethods(c10::ivalue::Object* self) {
-    self->compilation_unit()->drop_all_functions();
-  }
-  static ModulePtr create_module_object(std::string class_name) {
-    auto cu = std::make_shared<CompilationUnit>();
-    auto cls = ClassType::create(
-        QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
-    return c10::ivalue::Object::create(
-        c10::StrongTypePtr(std::move(cu), std::move(cls)), 0, clearMethods);
-  }
   // mutable be we lazily initialize in module_object.
   mutable ModulePtr module_value_;
 };

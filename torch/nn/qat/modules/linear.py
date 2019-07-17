@@ -16,7 +16,7 @@ class Linear(NNLinear):
 
     Attributes:
         observer: fake quant module for output activation, it's called observer
-            to align with post training flow, TODO: rename?
+            to align with post training flow
         weight: fake quant module for weight
 
     Examples::
@@ -29,12 +29,14 @@ class Linear(NNLinear):
     """
     __constants__ = ['bias', 'in_features', 'out_features']
 
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, in_features, out_features, bias=True,
+                 activation_fake_quant=default_qat_config.activation(),
+                 weight_fake_quant=default_qat_qconfig.weight()):
         assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
         # fake quant module for output activation
-        self.observer = default_qat_qconfig.activation()
-        self.weight_fake_quant = default_qat_qconfig.weight()
+        self.observer = activation_fake_quant
+        self.weight_fake_quant = weight_fake_quant
 
     def forward(self, input):
         return self.observer(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
@@ -50,9 +52,9 @@ class Linear(NNLinear):
         assert type(mod) == NNLinear, 'qat.Linear.from_float only works for nn.Linear'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-        qat_linear = Linear(mod.in_features, mod.out_features)
+        qat_linear = Linear(mod.in_features, mod.out_features,
+                            activation_fake_quant=mod.qconfig.activation(),
+                            weight_fake_quant=mod.qconfig.weight())
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias
-        qat_linear.observer = mod.qconfig.activation()
-        qat_linear.weight_fake_quant = mod.qconfig.weight()
         return qat_linear
