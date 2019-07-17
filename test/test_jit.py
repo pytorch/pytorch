@@ -13392,7 +13392,8 @@ class TestRecursiveScript(JitTestCase):
                     self.my_empty_list,
                     self.my_empty_dict,
                     self.my_none,
-                    self.my_object,
+                    self.my_object.a,
+                    self.my_object.b,
                 )
 
         # TODO: as a followup, fix this test
