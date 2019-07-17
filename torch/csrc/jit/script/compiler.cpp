@@ -2625,6 +2625,20 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
+    // Overall, to handle indexing (other than Tensors), we need to handle a couple different things.
+    // For example, for x[1:3, None, 4], each of these different index types
+    // (slice, None, and integer) result in different number of dimensions.
+    // Slicing doesn't change the number of dimensions, None adds a dimension,
+    // and integer removes a dimension. As these indexing operations are applied
+    // left to right, the actual index that it's being applied to depends on the
+    // previous operations.
+    // Ellipses indexing throws another wrinkle. Ellipses selects any remaining
+    // unspecified dimensions. Thus, for indexes following an ellipses, the
+    // actual index an indexing operation is being applied to depends on the
+    // operations to the right.
+    // Thus, we do two passes, one from left to right up until the ellipses, and
+    // one from right to left.
+
     std::vector<Value*> tensor_indices;
 
     auto insert_value_for_dim = [&](int64_t dim) {
@@ -2674,6 +2688,7 @@ struct to_ir {
             << "'. Only ints, slices, and tensors are supported";
       }
     };
+
     size_t idx = 0;
     int64_t dim = 0;
     for (; idx < subscript_exprs.size(); idx++) {
@@ -2687,6 +2702,10 @@ struct to_ir {
     for (size_t rev_idx = subscript_exprs.size() - 1; rev_idx > idx;
          rev_idx--) {
       auto subscript_expr = subscript_exprs[rev_idx];
+      if (subscript_expr.kind() == TK_DOTS) {
+          throw ErrorReport(loc)
+            << "An index can only have a single ellipsis ('...')";
+      }
       rdim =
           handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
     }

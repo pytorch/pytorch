@@ -3707,7 +3707,7 @@ a")
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
-    def test_index_fuzz(self):
+    def test_index_ellipses(self):
         vals = [":", 1, None]
         for _ in range(100):
             indices = list(random.choices(vals, k=4))
