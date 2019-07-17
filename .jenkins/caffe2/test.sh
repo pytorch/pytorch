@@ -126,9 +126,9 @@ pip install --user pytest-sugar
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user git+https://github.com/pytorch/vision.git
-  pip install --user ninja
+  pip install -q --user ninja
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    pip install --user onnxruntime
+    pip install -q --user onnxruntime
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
