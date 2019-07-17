@@ -378,7 +378,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SortModel(dim), x)
 
 
-
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
                               (unittest.TestCase,),
