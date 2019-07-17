@@ -1079,13 +1079,6 @@ bool THPFunction_initModule(PyObject *module)
   return true;
 }
 
-struct Decref {
-  void operator()(PyFunction* p) const {
-    AutoGIL gil;
-    Py_DECREF(p->obj);
-  }
-};
-
 // Similar to shared_from_this. There's a problem that the Python object
 // and its cdata depend on each other being alive, so we can't keep
 // shared_ptrs as members, but we'd like to be able to manage the lifetime of
