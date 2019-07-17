@@ -143,8 +143,11 @@ def prepare(model, qconfig_dict=None):
     if qconfig_dict:
         model = add_quant_dequant(model)
     add_observer(model)
-    if model.training:
-        model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
+    return model
+
+def prepare_qat(model, qconfig_dict=None):
+    model = prepare(model, qconfig_dict)
+    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
     return model
 
 class QuantStub(nn.Module):
@@ -202,7 +205,17 @@ def quantize(model, run_fn, run_args, qconfig_dict=None):
     Return:
         A quantized model
     """
+    model.eval()
     model = prepare(model, qconfig_dict)
+    run_fn(model, run_args)
+    convert(model)
+    return model
+
+def quantize_qat(model, run_fn, run_args, qconfig_dict=None):
+    r"""Do quantization aware training and output a quantized model
+    """
+    model.train()
+    model = prepare_qat(model, qconfig_dict)
     run_fn(model, run_args)
     convert(model)
     return model

@@ -3,7 +3,7 @@ import torch
 import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
     default_qconfig, default_qat_qconfig, default_observer, quantize, prepare, \
-    convert
+    convert, prepare_qat, quantize_qat
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
@@ -268,7 +268,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = ManualQATModel()
         model.qconfig = default_qat_qconfig
 
-        model = prepare(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
 
         test_only_train_fn(model, train_data)
@@ -281,7 +281,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
         model = ManualQATModel()
         model.qconfig = default_qat_qconfig
-        model = quantize(model, test_only_train_fn, train_data)
+        model = quantize_qat(model, test_only_train_fn, train_data)
         checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
@@ -292,7 +292,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = ManualQATModel()
         model.qconfig = default_qat_qconfig
 
-        model = prepare(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
 
         model.eval()

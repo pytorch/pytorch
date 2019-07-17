@@ -10,7 +10,7 @@ def default_eval_fn(model, calib_data):
     input Tensors and run the model on the dataset
     """
     for data, target in calib_data:
-        output = model(data)
+        model(data)
 
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
@@ -27,5 +27,5 @@ _all__ = [
     # QConfig
     'QConfig', 'default_qconfig',
     # QAT utilities
-    'default_qat_qconfig',
+    'default_qat_qconfig', 'prepare_qat', 'quantize_qat'
 ]
