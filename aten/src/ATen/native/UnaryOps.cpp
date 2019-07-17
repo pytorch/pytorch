@@ -131,8 +131,14 @@ Tensor& sign_(Tensor& self) {
 Tensor& sign_out(Tensor& result, const Tensor& self) {
     checkBackend("sign", result, self.type().backend());
     assert_no_internal_overlap(result, "sign");
-    auto iter = TensorIterator::unary_op(result, self);
-    sign_stub(iter->device_type(), *iter);
+
+    // In the case of BoolTensor sign() is defined as the identity function
+    if(self.dtype() == at::ScalarType::Bool){
+        result.copy_(self);
+    }else{
+        auto iter = TensorIterator::unary_op(result, self);
+        sign_stub(iter->device_type(), *iter);
+    }
 #ifdef BUILD_NAMEDTENSOR
     at::namedinference::propagate_names(result, self);
 #endif

@@ -99,18 +99,14 @@ static void neg_kernel(TensorIterator& iter) {
 }
 
 static void sign_kernel(TensorIterator& iter){
-  if (iter.dtype() == ScalarType::Bool) {
-      // sign over Bool tensor is defined as identity function https://github.com/pytorch/pytorch/pull/22861#discussion_r304126678
-  } else {
-      AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
-          cpu_kernel(
-              iter,
-              [=](scalar_t a) -> scalar_t {
-                  scalar_t zero = scalar_t(0);
-                  return (zero < a) - (a < zero);
-              });
-      });
-  }
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
+      cpu_kernel(
+          iter,
+          [=](scalar_t a) -> scalar_t {
+              scalar_t zero = scalar_t(0);
+              return (zero < a) - (a < zero);
+          });
+  });
 }
 
 static void sinh_kernel(TensorIterator& iter) {
