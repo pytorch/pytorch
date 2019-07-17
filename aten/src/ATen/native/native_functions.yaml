@@ -83,22 +83,18 @@
 - func: dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  variant: function, method
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  variant: function, method
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  variant: function, method
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
 
 - func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  variant: function, method
 
 - func: abs(Tensor self) -> Tensor
   variants: function, method

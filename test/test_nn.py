@@ -4028,6 +4028,31 @@ class TestNN(NNTestCase):
     def test_pool_large_size(self, dtype=torch.float):
         self._test_pool_large_size(self, device="cpu")
 
+    @staticmethod
+    def _test_pool_invalid_size(self, device, dtype=torch.float):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                # use a configuration that gives zero outputs only
+                # when doing a correct floor division by the stride
+                x = torch.ones([1, 1] + num_dim * [4],
+                               device=device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, r"too small|smaller than"):
+                    try:
+                        res = fn(x, 3, stride=2, padding=0, dilation=2)
+                    except TypeError:
+                        # some implementations do not support dilation
+                        res = fn(x, 6, stride=2, padding=0)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_pool_invalid_size_cuda(self, dtype=torch.float):
+        self._test_pool_invalid_size(self, device="cuda", dtype=dtype)
+
+    def test_pool_invalid_size(self, dtype=torch.float):
+        self._test_pool_invalid_size(self, device="cpu")
+
     def _test_scatter(self, tensor):
         x = tensor.detach().requires_grad_()
         result = dp.scatter(x, (0, 1))
