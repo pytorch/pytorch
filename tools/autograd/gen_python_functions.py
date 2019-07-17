@@ -706,6 +706,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             typedef, next_index = emit_namedtuple_return_type_def(declaration, next_index)
             env['declare_namedtuple_return_types'] += typedef
 
+        # In-place operator, should be method only. Deprecate it.
+        if not is_module and not has_self and name.endswith('_') and not name.startswith('_'):
+            # After the deprecated functions are removed, replace this block with an AssertionError to ensure that
+            # future in-place operators won't be exposed as functions.
+            env['deprecation_message'] = ('PyErr_WarnEx(PyExc_DeprecationWarning, '
+                                          '"In-place functions such as torch.{name} are deprecated '
+                                          'and will be removed in the next release. '
+                                          'Please use their in-place method counterparts (Tensor.{name}) instead.", 1);'
+                                          ).format(name=name)
+            env['deprecated'] = True
+
         # emit dispatch
         grouped = group_declarations(declarations)
         for i, dictionary in enumerate(grouped):
@@ -724,13 +735,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['dispatch'].append('}')
 
         env['traceable'] = 'true' if all(should_trace(d) for d in declarations) else 'false'
-
-        # In-place operator, should be method only. Deprecate it.
-        if not is_module and not has_self and name.endswith('_') and not name.startswith('_'):
-            env['deprecation_message'] = ('PyErr_WarnEx(PyExc_DeprecationWarning, '
-                                          '"In-place functions such as torch.{name} are deprecated. '
-                                          'Use their in-place method counterparts (Tensor.{name}) instead.", 1);'
-                                          ).format(name=name)
 
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
             tmpl = PY_VARIABLE_METHOD_NOARGS
