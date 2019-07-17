@@ -1,6 +1,7 @@
 import torch
 import unittest
 from common_utils import TEST_WITH_NESTEDTENSORS
+import torch.tensortypes.nestedtensor.codegen as codegen
 
 if TEST_WITH_NESTEDTENSORS:
     import torch.tensortypes.nestedtensor as nestedtensor
@@ -53,7 +54,7 @@ def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 3
 class TestNestedTensor(TestCase):
 
     def gen_float_tensor(self, seed, shape, requires_grad=False):
-        return random_float_tensor(seed, shape, requires_grad)
+        return random_float_tensor(seed, shape, requires_grad=requires_grad)
 
     def test_constructor(self):
         tensors = []
@@ -114,34 +115,37 @@ class TestNestedTensor(TestCase):
 
 
     def test_unary(self):
-        a1 = torch.nestedtensor([self.gen_float_tensor(1, (2,)),
-                                 self.gen_float_tensor(2, (2,))])
-        a2 = torch.nestedtensor([self.gen_float_tensor(1, (2,)).exp_(),
-                                 self.gen_float_tensor(2, (2,)).exp_()])
-        assert (torch.exp(a1) == a2).all()
-        assert not (a1 == a2).any()
-        assert (a1.exp() == a2).all()
-        assert not (a1 == a2).any()
-        assert (a1.exp_() == a2).all()
-        assert (a1 == a2).all()
+        for func in codegen.extension.get_unary_functions():
+            data = [self.gen_float_tensor(1, (2, 3)) - 0.5,
+                    self.gen_float_tensor(2, (2, 3)) - 0.5]
+            if func in ['log', 'log10', 'log2', 'rsqrt', 'sqrt']:
+                data = list(map(lambda x: x.abs(), data))
+            a1 = torch.nestedtensor(data)
+            a2 = torch.nestedtensor(list(map(lambda x: getattr(torch, func)(x), data)))
+            assert (getattr(torch, func)(a1) == a2).all()
+            assert (getattr(a1, func)() == a2).all()
+            assert (getattr(a1, func + "_")() == a2).all()
+            assert (a1 == a2).all()
 
 
     def test_binary(self):
-        a = self.gen_float_tensor(1, (2,))
-        b = self.gen_float_tensor(2, (2,))
-        c = self.gen_float_tensor(3, (2,))
-        # The constructor is suppoed to copy!
-        a1 = torch.nestedtensor([a, b])
-        a2 = torch.nestedtensor([b, c])
-        a3 = torch.nestedtensor([a + b, b + c])
-        assert (a3 == torch.add(a1, a2)).all()
-        assert not (a3 == a1).any()
-        assert not (a3 == a2).any()
-        assert (a3 == a1.add(a2)).all()
-        assert not (a3 == a1).any()
-        assert not (a3 == a2).any()
-        assert (a3 == a1.add_(a2)).all()
-        assert (a3 == a1).all()
+        for func in codegen.extension.get_binary_functions():
+            a = self.gen_float_tensor(1, (2, 3))
+            b = self.gen_float_tensor(2, (2, 3))
+            c = self.gen_float_tensor(3, (2, 3))
+            # The constructor is supposed to copy!
+            a1 = torch.nestedtensor([a, b])
+            a2 = torch.nestedtensor([b, c])
+            a3 = torch.nestedtensor([getattr(torch, func)(a, b),
+                                     getattr(torch, func)(b, c)])
+            assert (a3 == getattr(torch, func)(a1, a2)).all()
+            assert not (a3 == a1).any()
+            assert not (a3 == a2).any()
+            assert (a3 == getattr(a1, func)(a2)).all()
+            assert not (a3 == a1).any()
+            assert not (a3 == a2).any()
+            assert (a3 == getattr(a1, func + "_")(a2)).all()
+            assert (a3 == a1).all()
 
     def test_detach(self):
         data = [self.gen_float_tensor(1, (10, 10)),

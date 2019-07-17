@@ -16,11 +16,10 @@ def get_unary_functions():
         'acos',
         'asin',
         'atan',
-        # 'atan2',
         # 'byte',
         'ceil',
         # 'char',
-        'clamp',
+        # 'clamp', # TODO: Requires extra kwargs
         # 'clone',
         # 'contiguous',
         'cos',
@@ -50,10 +49,9 @@ def get_unary_functions():
         'log1p',
         'log2',
         # 'long',
-        # 'lt',
         # 'mvlgamma',
         'neg',
-        'nonzero',
+        # 'nonzero', #TODO: Special case because it modifies dtype
         # 'polygamma',
         # 'pow',
         # 'prelu', # TODO: no prelu_out
