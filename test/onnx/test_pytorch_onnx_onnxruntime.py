@@ -300,20 +300,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(10)
-    def test_interpolate_downsample(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=[1, 1, 0.5, 0.5])
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(MyModel(), x)
-
-    @skipIfUnsupportedMinOpsetVersion(10)
-    def test_upsample(self):
-        x = torch.randn(1, 2, 3, 4)
-        model = torch.nn.Upsample(mode="nearest", size=[v * 2 for v in x.size()[2:]])
-        self.run_test(model, x)
-
+    # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_interpolate_upsample(self):
         class MyModel(torch.nn.Module):
@@ -321,8 +308,15 @@ class TestONNXRuntime(unittest.TestCase):
                 size = [v * 2 for v in x.size()[2:]]
                 # work around for now: turn the dynamic sizes into constant
                 size = [int(i) for i in size]
-                return torch.nn.functional.interpolate(x, mode="nearest", size=(6, 8))
+                return torch.nn.functional.interpolate(x, mode="nearest", size=size)
 
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_test(MyModel(), x)
+
+    def test_interpolate_downsample(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=[1, 1, 0.5, 0.5])
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
