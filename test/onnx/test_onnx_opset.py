@@ -132,6 +132,45 @@ class TestONNXOpset(TestCase):
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
 
+    def test_upsample(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                size = [int(i) for i in size]
+                return torch.nn.functional.interpolate(x, size=size, mode='nearest')
+
+        module = MyModule()
+        ops8 = [{"op_name" : "Upsample", "attributes" : [{"name": "mode", "s": ("nearest").encode(), "type": 3},
+                {"name": "scales", "floats": [1.0, 1.0, 2.0, 2.0], "type": 6}]}]
+        ops9 = [{"op_name" : "Constant"},
+                {"op_name" : "Upsample", "attributes" : [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops = {8 : ops8, 9 : ops9}
+        x = torch.randn(2, 2, 2, 2)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[8, 9])
+
+    def test_cast_constant(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return torch._dim_arange(x, 1)
+
+        module = MyModule()
+        ops_8 = [{"op_name" : "Shape"}, {"op_name" : "Constant"},
+                 {"op_name" : "Cast", "attributes": [{"name": "to", "i": 7, "type": 2}]},
+                 {"op_name" : "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
+                 {"op_name" : "Range"}]
+        ops_9 = [{"op_name" : "Shape"}, {"op_name" : "Constant"},
+                 {"op_name" : "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
+                 {"op_name" : "Range"}]
+        ops = {8 : ops_8, 9 : ops_9}
+        x = torch.ones(5, 6)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[8, 9])
+
     def test_slice(self):
         class MyModule(Module):
             def forward(self, x):
