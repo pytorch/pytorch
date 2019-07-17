@@ -1362,7 +1362,7 @@ struct to_ir {
     auto body = stmt.body();
     if (stmt.itrs().size() != 1) {
       throw ErrorReport(stmt)
-          << "List of iterables is not supported currently.";
+          << "List of iterables is not supported currently";
     }
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
@@ -1464,19 +1464,19 @@ struct to_ir {
         num_starred++;
       } else {
         throw ErrorReport(assignee) << "lhs of assignment must be a variable, "
-                                    << "subscript, or starred expression.";
+                                    << "subscript, or starred expression";
       }
     }
 
     if (num_starred > 1) {
       throw ErrorReport(r)
-          << "Only one starred expression is allowed on the lhs.";
+          << "Only one starred expression is allowed on the lhs";
     }
 
     if (num_starred > 0 && num_normal_assign == 0) {
       throw ErrorReport(r) << "A Starred expression may only appear on the "
                            << "lhs within the presence of another non-starred"
-                           << " expression.";
+                           << " expression";
     }
 
     return num_starred;
@@ -1523,7 +1523,7 @@ struct to_ir {
       default:
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on "
-            << "left-hand side of augmented assignment.";
+            << "left-hand side of augmented assignment";
     }
   }
 
@@ -1665,7 +1665,7 @@ struct to_ir {
         throw ErrorReport(subscriptExprs)
             << "Sliced expression not yet supported for"
             << " subscripted list augmented assignment. "
-            << "File a bug if you want this.";
+            << "File a bug if you want this";
       }
       const auto idxValue = emitExpr(subscriptExprs[0]);
 
@@ -1735,7 +1735,7 @@ struct to_ir {
         throw ErrorReport(subscript)
             << "Sliced expression not yet supported for"
             << " subscripted list assignment. "
-            << "File a bug if you want this.";
+            << "File a bug if you want this";
       }
 
       std::vector<NamedValue> args;
@@ -1798,7 +1798,7 @@ struct to_ir {
           auto var = Starred(assignee).expr();
           if (var.kind() != TK_VAR) {
             throw ErrorReport(var)
-                << "Cannot pack a tuple into a non-variable.";
+                << "Cannot pack a tuple into a non-variable";
           }
           size_t n_matched = outputs.size() - n_binders;
           ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
@@ -1850,7 +1850,7 @@ struct to_ir {
         break;
       default:
         throw ErrorReport(stmt.lhs())
-            << "unexpected expression on left-hand side of assignment.";
+            << "unexpected expression on left-hand side of assignment";
     }
   }
 
@@ -2443,7 +2443,7 @@ struct to_ir {
       }
       case TK_STARRED: {
         throw ErrorReport(tree)
-            << "Unexpected starred expansion. File a bug report.";
+            << "Unexpected starred expansion. File a bug report";
       }
       case TK_CONST: {
         return emitConst(Const(tree));
@@ -2751,7 +2751,7 @@ struct to_ir {
     if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
       throw ErrorReport(loc)
           << "Unsupported operation: attempted to use multidimensional "
-          << "indexing on a non-tensor type.";
+          << "indexing on a non-tensor type";
     }
 
     std::vector<Value*> tensor_indices;
