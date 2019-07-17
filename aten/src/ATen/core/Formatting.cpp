@@ -277,9 +277,9 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "} ]";
     }
     if (tensor_.is_quantized()) {
+      stream << ", qscheme: " << toString(tensor_.qscheme());
       stream << ", scale: " << tensor_.q_scale();
       stream << ", zero_point: " << tensor_.q_zero_point();
-      stream << ", qscheme: " << toString(tensor_.qscheme());
     }
     stream << " ]";
   }
