@@ -129,6 +129,73 @@ C10_HOST_DEVICE typename traits::result_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
   using Indices = c10::guts::make_index_sequence<traits::arity>;
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
+
+template <typename traits, typename index_t, std::size_t... I>
+C10_HOST_DEVICE typename traits::ArgsTuple
+invoke_with_index_impl(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], int i, int idx,
+                       c10::guts::index_sequence<I...>) {
+  return f(*(typename traits::template arg<I>::type*)(data[I] + i * strides[I])..., idx);
+}
+
+template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
+C10_HOST_DEVICE typename traits::result_type
+invoke_with_index(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], int i, int idx) {
+  // index at last position
+  using Indices = c10::guts::make_index_sequence<traits::arity-1>;
+  return invoke_with_index_impl<traits>(f, data, strides, i, idx, Indices{});
+}
+
+template <typename func_t>
+void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  using arg0_t = typename traits::result_type;
+  // need to +1(output) and -1(index)
+  constexpr int ntensors = traits::arity;
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity);
+
+  at::detail::Array<char*, ntensors> data;
+  for (int i = 0; i < ntensors; i++) {
+    data[i] = (char*)iter.data_ptr(i);
+  }
+
+  int64_t numel = iter.numel();
+  if (iter.is_trivial_1d()) {
+    auto inner_strides = iter.get_inner_strides();
+    at::detail::Array<int, ntensors> strides;
+    for (int i = 0; i < ntensors; i++) {
+      strides[i] = inner_strides[i];
+    }
+    launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
+      *out = invoke_with_index(f, &data.data[1], &strides.data[1], idx, idx);
+    });
+  } else {
+      auto offset_calc = make_offset_calculator<traits::arity>(iter);
+    launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      auto offsets = offset_calc.get(idx);
+      arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+      *out = invoke_with_index(f, &data.data[1], &offsets.data[1], 1, idx);
+    });
+  }
+}
+
+template <typename func_t>
+void gpu_kernel_with_index(TensorIterator& iter, const func_t& f) {
+  ASSERT_HOST_DEVICE_LAMBDA(func_t);
+
+  for (int arg = 0; arg < iter.ntensors(); arg++) {
+    TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda(), "gpu_kernel_with_index only support cuda tensor.");
+  }
+
+  if (iter.numel() == 0) {
+    return;
+  }
+
+  // Split will change index, thus is not supported
+  // The caller should handle the split and pass in different func
+  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing(), "gpu_kernel_with_index only support 32-bit indexing.");
+
+  gpu_kernel_with_index_impl(iter, f);
 }
 
 template <typename func_t>
