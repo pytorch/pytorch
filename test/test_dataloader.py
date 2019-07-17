@@ -1030,7 +1030,7 @@ class TestDataLoader(TestCase):
         counting_ds_n = 11
         dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
-            ds_cls = CUDACountingDataset if ctx == 'spawn' else CountingDataset
+            ds_cls = CUDACountingDataset if (ctx in ['spawn', 'forkserver'] and TEST_CUDA) else CountingDataset
             self.assertEqual(
                 reference, list(DataLoader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
             if ctx is not None:
