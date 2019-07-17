@@ -57,11 +57,6 @@
 #endif
 #endif
 
-#ifdef BUILD_NESTEDTENSOR
-#include <torch/csrc/tensortypes/nestedtensor/nestedtensor.h>
-#endif
-
-
 #define WITH_NUMPY_IMPORT_ARRAY
 #include <torch/csrc/utils/numpy_stub.h>
 
@@ -631,10 +626,6 @@ PyObject* initModule() {
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
-#endif
-
-#ifdef BUILD_NESTEDTENSOR
-  THPUtils_addPyMethodDefs(methods, torch::tensortypes::nestedtensor::python_functions());
 #endif
 
 #if PY_MAJOR_VERSION == 2

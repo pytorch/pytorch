@@ -19,7 +19,8 @@ def _shape_prod(shape_):
     return start
 
 # From torchaudio by jamarshon
-def random_float_tensor(seed, size, a=22695477, c=1, m=2 ** 32):
+def random_float_tensor(seed, size, a=22695477, c=1, m=2 ** 32,
+                        requires_grad=False):
     """ Generates random tensors given a seed and size
     https://en.wikipedia.org/wiki/Linear_congruential_generator
     X_{n + 1} = (a * X_n + c) % m
@@ -40,7 +41,7 @@ def random_float_tensor(seed, size, a=22695477, c=1, m=2 ** 32):
     for i in range(num_elements - 1):
         arr.append((a * arr[i] + c) % m)
 
-    return torch.tensor(arr).float().view(size) / m
+    return torch.tensor(arr, requires_grad=requires_grad).float().view(size) / m
 
 
 def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 32):
@@ -51,8 +52,8 @@ def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 3
 
 class TestNestedTensor(TestCase):
 
-    def gen_float_tensor(self, seed, shape):
-        return random_float_tensor(seed, shape)
+    def gen_float_tensor(self, seed, shape, requires_grad=False):
+        return random_float_tensor(seed, shape, requires_grad)
 
     def test_constructor(self):
         tensors = []
@@ -141,6 +142,69 @@ class TestNestedTensor(TestCase):
         assert not (a3 == a2).any()
         assert (a3 == a1.add_(a2)).all()
         assert (a3 == a1).all()
+
+    def test_detach(self):
+        data = [self.gen_float_tensor(1, (10, 10), requires_grad=True),
+                self.gen_float_tensor(2, (10, 10), requires_grad=True),
+                self.gen_float_tensor(3, (10, 10), requires_grad=True)]
+        ones_data = [torch.ones(10, 10),
+                     torch.ones(10, 10),
+                     torch.ones(10, 10)]
+        # We don't support scalar arguments yet (broadcasting)
+        # This will be part of NestedTensor 0.0.3
+        twos_data = [torch.ones(10, 10) * 2,
+                     torch.ones(10, 10) * 2,
+                     torch.ones(10, 10) * 2]
+        fours_data = [torch.ones(10, 10) * 4,
+                      torch.ones(10, 10) * 4,
+                      torch.ones(10, 10) * 4]
+        twos = torch.nestedtensor(twos_data).to(torch.float)
+        fours = torch.nestedtensor(fours_data).to(torch.float)
+        x = torch.nestedtensor(data, requires_grad=True)
+        y = x + twos
+        y = y.detach()
+        z = y * fours + twos
+        self.assertFalse(y.requires_grad)
+        self.assertFalse(z.requires_grad)
+
+        x = torch.nestedtensor(data)
+        y = x * twos
+        y = y.detach()
+        self.assertFalse(y.requires_grad)
+        self.assertIsNone(y.grad_fn)
+        z = x + y
+        print(z.sum())
+        z.sum().backward()
+
+        # This is an incorrect gradient, but we assume that's what the user
+        # wanted. detach() is an advanced option.
+        self.assertEqual(x.grad.data, torch.nestedtensor(ones_data))
+
+        # in-place detach
+        x = torch.nestedtensor(data)
+        y = torch.nestedtensor(data)
+        a = x * twos
+        (y + a).sum().backward(retain_graph=True)
+        a.detach_()
+        self.assertFalse(a.requires_grad)
+        (y + a).sum().backward()  # this won't backprop to x
+        self.assertEqual(x.grad.data, torch.nestedtensor(ones_data) * 2)
+        self.assertEqual(y.grad.data, torch.nestedtensor(ones_data) * 2)
+
+        # TODO: view semantics will be defined by NestedTensor 0.0.3 or 0.0.4
+        # in-place deatch on a view raises an exception
+        # view = x.narrow(0, 1, 4)
+        # self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
+
+    # def test_detach_base(self):
+    #     "detaching base does not detach view"
+    #     x = torch.randn(10, 10, requires_grad=True)
+    #     view = x.narrow(0, 1, 4)
+    #     x.detach_()
+    #     self.assertFalse(x.requires_grad)
+    #     self.assertTrue(view.requires_grad)
+    #     self.assertIsNotNone(view.grad_fn)
+    #     self.assertIs(view._base, x)
 
 if __name__ == "__main__":
     unittest.main()

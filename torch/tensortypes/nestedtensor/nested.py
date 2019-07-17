@@ -1,5 +1,7 @@
 import torch
 
+# This implementation is based on NestedTensor 0.0.1
+# RFC: https://github.com/pytorch/pytorch/issues/22169
 
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
@@ -9,17 +11,22 @@ def is_nested_tensor(obj):
 def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False):
     if is_nested_tensor(data):
         # This is consistent with torch.tensor(torch.Tensor)
-        return data.clone().detach()
+        # but errors out.
+        raise ValueError("UserWarning: To copy construct from a NestedTensor, "
+                         "use sourceTensor.clone().detach() or "
+                         "sourceTensor.clone().detach().requires_grad_(True), "
+                         "rather than torch.tensor(sourceTensor).")
     elif torch.is_tensor(data):
         # The user has the right to expect a NestedTensor from this
         # function, but we can't meaningfully provide one if passed a Tensor
         raise ValueError("Can't construct a NestedTensor from a Tensor")
     else:
-        assert isinstance(data, list)
-        if len(data) == 0:
-            return NestedTensor([])
+        if not (isinstance(data, list) or isinstance(data, tuple)):
+            raise ValueError("Pass a list or tuple to construct NestedTensor.")
         for data_ in data:
-            assert(torch.is_tensor(data_))
+            if not torch.is_tensor(data_):
+                raise ValueError("Each element of the tuple or list must "
+                                 "be a torch.Tensor")
         tensors = []
         for data_ in data:
             # torch.tensor copies on construction
@@ -67,8 +74,8 @@ class NestedTensor():
                         requires_grad == tensor.requires_grad and
                         is_pinned == tensor.is_pinned()):
                     raise ValueError("Each passed Tensor "
-                            "must match in dim, layout, "
-                            "device, dtype and requires_grad")
+                                     "must match in dim, layout, "
+                                     "device, dtype and requires_grad")
         else:
             # Carrying around information as member variables vs.
             # checking one entry of the owned Tensors is annoying
@@ -83,15 +90,27 @@ class NestedTensor():
             raise NotImplementedError()
         if attr == 'requires_grad':
             return self.tensors[0].requires_grad
+        if attr == 'grad_fn':
+            # We're assuming len(self.tensors) is non-zero
+            if self.tensors[0].grad_fn is None:
+                for i in range(1, len(self.tensors)):
+                    assert self.tensors[i].grad_fn is None
+                return None
+
+            def create_grad_fn(nested_tensor):
+                def _func(*args, **kwargs):
+                    for tensor in nested_tensor.tensors:
+                        tensor.grad_fn(*args, **kwargs)
+                return _func
+            return create_grad_fn(self)
         return super().__getattribute__(attr)
 
     def __len__(self):
         return len(self.tensors)
 
     def __bool__(self):
-        # Explicitly punt on this until we have fully
-        # specificed reduction semantics.
-        raise NotImplementedError()
+        raise NotImplementedError(
+            "This has not been covered by NestedTensor 0.0.1")
 
     def __str__(self):
         tensors = self.unbind()
@@ -110,7 +129,8 @@ class NestedTensor():
         return result
 
     def is_empty(self):
-        return len(self.tensors) == 0
+        # This condition can never be true, since we disallow an empty list for now.
+        raise ValueError("self.tensors cannot be empty under current constraints.")
 
     def __loop__apply(self, fn):
         tensors = []
@@ -139,9 +159,20 @@ class NestedTensor():
             ret = ret or tensor.any()
         return ret
 
+    # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
+    def sum(self):
+        # We currently assume len(self.tensors) is always non-zero
+        ret = self.tensors[0].sum()
+        for i in range(1, len(self.tensors)):
+            ret = ret + self.tensors[i].sum()
+        return ret
+
     # Tensor ops
     def detach(self):
         return self.__loop__apply(lambda x: x.detach())
+
+    def detach_(self):
+        return self.__loop__apply(lambda x: x.detach_())
 
     def backward(self):
         for tensor in self.tensors:
