@@ -10,7 +10,7 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = TEST_CUDA and torch.device("cuda:0")
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
 TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
-TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
+TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 
 if TEST_NUMBA:
     import numba.cuda

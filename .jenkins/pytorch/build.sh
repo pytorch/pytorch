@@ -104,10 +104,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
-  $PYTHON tools/amd_build/build_amd.py
+  python tools/amd_build/build_amd.py
   # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
-  USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 $PYTHON setup.py install --user
+  USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
 
   ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
   if [ -e $ORIG_COMP ]; then
