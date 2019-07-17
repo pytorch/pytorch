@@ -58,9 +58,6 @@ struct ClassResolver : public script::Resolver {
 class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
-      caffe2::serialize::PyTorchStreamReader reader,
-      script::ModuleLookup module_lookup);
-  ScriptModuleDeserializer(
       const std::string& filename,
       script::ModuleLookup module_lookup);
   ScriptModuleDeserializer(
