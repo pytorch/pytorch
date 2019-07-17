@@ -102,21 +102,72 @@ inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::opt
     return !rhs.has_value();
   }
 }
+
+
 }
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
-  return lhs.name() == rhs.name()
-          && lhs.type() == rhs.type()
+  bool result = lhs.name() == rhs.name()
+          && *lhs.type() == *rhs.type()
           && lhs.N() == rhs.N()
           && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
           && lhs.kwarg_only() == rhs.kwarg_only()
           && lhs.alias_info() == rhs.alias_info();
+  std::cout << "--arg name: " << (lhs.name() == rhs.name()) << std::endl;
+  std::cout << "--arg typeptr: " << (lhs.type() == rhs.type()) << std::endl;
+  std::cout << "--arg type: " << (*lhs.type() == *rhs.type()) << std::endl;
+  std::cout << "--arg N: " << (lhs.N() == rhs.N()) << std::endl;
+  std::cout << "--arg detail: " << detail::defaultValueEquals_(lhs.default_value(), rhs.default_value()) << std::endl;
+  std::cout << "--arg kwarg_only: " << (lhs.kwarg_only() == rhs.kwarg_only()) << std::endl;
+  std::cout << "--arg alias_info: " << (lhs.alias_info() == rhs.alias_info()) << std::endl;
+  return result;
 }
 
 struct OperatorName final {
   std::string name;
   std::string overload_name;
 };
+
+
+inline std::string expand_escapes(const std::string& before) {
+  std::stringstream oss;
+
+  for (const char c : before) {
+    switch(c) {
+      case '\a':
+        oss << "\\a";
+        break;
+      case '\b':
+        oss << "\\b";
+        break;
+      case '\t':
+        oss << "\\t";
+        break;
+      case '\n':
+        oss << "\\n";
+        break;
+      case '\v':
+        oss << "\\v";
+        break;
+      case '\f':
+        oss << "\\f";
+        break;
+      case '\r':
+        oss << "\\r";
+        break;
+      case '\\':
+        oss << "\\\\";
+        break;
+      case '\"':
+        oss << "\\\"";
+        break;
+      default:
+        oss << c;
+    }
+  }
+
+  return oss.str();
+}
 
 struct FunctionSchema {
   FunctionSchema(
@@ -228,13 +279,28 @@ public:
   void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
 };
 
+inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
+
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
-  return lhs.name() == rhs.name()
+  bool result  = lhs.name() == rhs.name()
       && lhs.overload_name() == rhs.overload_name()
       && lhs.arguments() == rhs.arguments()
       && lhs.returns() == rhs.returns()
       && lhs.is_vararg() == rhs.is_vararg()
       && lhs.is_varret() == rhs.is_varret();
+
+  std::cout << "=======>" << result << std::endl;
+  std::cout << lhs << std::endl;
+  std::cout << rhs << std::endl;
+  std::cout << "name equal: " << (lhs.name() == rhs.name()) << std::endl;
+  std::cout << "overloaded name equal: " << (lhs.overload_name() == rhs.overload_name()) << std::endl;
+  std::cout << "arguments equal: " << (lhs.arguments() == rhs.arguments()) << std::endl;
+  std::cout << "returns sizes: " << lhs.returns().size() << ", " << rhs.returns().size() << std::endl;
+  std::cout << "returns equal: " << (lhs.returns() == rhs.returns()) << std::endl;
+  std::cout << "is_vararg equal: " << (lhs.is_vararg() == rhs.is_vararg()) << std::endl;
+  std::cout << "is_varret equal: " << (lhs.is_varret() == rhs.is_varret()) << std::endl;
+  return result;
+
 }
 
 inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
@@ -243,10 +309,47 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
 
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  return out << arg.type()->str() << " " << arg.name() << (arg.default_value() ? "=<default>" : "");
+  // TODO refine the code a bit
+  bool optional_type = arg.type()->isSubclass(TypeKind::OptionalType);
+  std::stringstream oss;  // for adjusting the ? position
+  if (arg.type()->isSubclass(TypeKind::ListType) && arg.N().has_value()) {
+    oss << std::static_pointer_cast<const ListType>(arg.type())->getElementType()->str();
+    oss << "[" << arg.N().value() << "]";
+  } else {
+    oss << arg.type()->str();
+  }
+  if (optional_type) {
+    oss.seekp(oss.str().size() - 1);
+  }
+  if (arg.alias_info()) {
+    oss << arg.alias_info().value();
+  }
+  if (optional_type) {
+    oss << "?";
+  }
+  out << oss.str();
+  if (!arg.name().empty()) {
+    out << " " << arg.name();
+  }
+  if (arg.default_value()) {
+    out << "=";
+    //out << expand_escapes(arg.default_value().value().toStringRef());
+    if (arg.type()->kind() == c10::TypeKind::StringType) {
+        out << "\'";
+        std::ios_base::fmtflags flags(out.flags());
+        for (unsigned char c : arg.default_value().value().toStringRef()) {
+          out << "\\" << std::oct << std::setfill('0') << std::setw(3)
+            << static_cast<uint64_t>(c);
+        }
+        out.flags(flags);
+        out << "\'";
+    } else {
+      out << arg.default_value().value();
+    }
+  }
+  return out;
 }
 
-inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
 
 inline std::string toString(const FunctionSchema& schema) {
   std::ostringstream str;

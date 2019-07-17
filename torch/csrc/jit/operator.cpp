@@ -118,7 +118,7 @@ struct OperatorRegistry {
   const std::vector<std::shared_ptr<Operator>>& getAllOperators() {
     std::lock_guard<std::mutex> guard(lock);
     registerPendingOperators();
-    static std::vector<std::shared_ptr<Operator>> values(operators.size());
+    static std::vector<std::shared_ptr<Operator>> values;
     values.clear();
     for (auto it = operators.begin(); it != operators.end(); ++it) {
       values.insert(values.end(), it->second.begin(), it->second.end());
@@ -131,6 +131,7 @@ OperatorRegistry& getRegistry() {
   static OperatorRegistry r;
   return r;
 }
+
 } // anonymous namespace
 
 void registerOperator(Operator&& op) {
@@ -191,6 +192,54 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
 
   out << ") -> ";
   if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
+    out << "(";
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
+      if (i > 0)
+        out << ", ";
+      out << schema.returns()[i].type()->str();
+    }
+    out << ")";
+  }
+  return out.str();
+}
+
+std::string parsableString(const FunctionSchema& schema) {
+  std::ostringstream out;
+
+  out << schema.name();
+  out << "(";
+
+  bool seen_kwarg_only = false;
+  for (size_t i = 0; i < schema.arguments().size(); ++i) {
+    if (i > 0)
+      out << ", ";
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
+      out << "*, ";
+      seen_kwarg_only = true;
+    }
+    const auto& arg = schema.arguments()[i];
+    out << arg.type()->str() << " " << arg.name();
+    if (arg.default_value().has_value()) {
+      out << "=";
+      if (arg.type()->kind() == c10::TypeKind::StringType) {
+        out << "\"";
+        for (unsigned char c : arg.default_value().value().toStringRef()) {
+          out << "\\x" << std::hex << std::setfill('0') << std::setw(2)
+            << static_cast<uint64_t>(c);
+        }
+        out << "\"";
+      } else {
+        out << arg.default_value().value();
+      }
+    }
+  }
+
+  out << ") -> ";
+  if (schema.returns().size() == 0) {
+    out << "void";
+  } else if (schema.returns().size() == 1) {
     out << schema.returns().at(0).type()->str();
   } else if (schema.returns().size() > 1) {
     out << "(";

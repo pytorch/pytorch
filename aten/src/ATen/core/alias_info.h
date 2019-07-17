@@ -98,11 +98,27 @@ inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
     }
     out << set.toUnqualString();
   }
+  if (aliasInfo.isWrite()) {
+    out << "!";
+  }
+  if (aliasInfo.beforeSets() != aliasInfo.afterSets()) {
+    out << " -> ";
+    first = true;
+    for (const auto& set : aliasInfo.afterSets()) {
+      if (first) {
+        first = false;
+      } else {
+        out << "|";
+      }
+      out << set.toUnqualString();
+    }
+  }
+
   out << ")";
 
-  if (!aliasInfo.containedTypes().empty()) {
-    out << " CONTAINS " << aliasInfo.containedTypes()[0];
-  }
+  //if (!aliasInfo.containedTypes().empty()) {
+  //  out << " CONTAINS " << aliasInfo.containedTypes()[0];
+  //}
   return out;
 }
 } // namespace c10

@@ -464,6 +464,8 @@ void initJITBindings(PyObject* module) {
     return graph;
   });
 
+  m.def("parse_schema", parseSchema);
+
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
@@ -474,6 +476,13 @@ void initJITBindings(PyObject* module) {
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](FunctionSchema& self) { return self.returns(); })
+      .def_property_readonly(
+          "canonical_str", [](FunctionSchema& self) { return canonicalSchemaString(self); })
+      .def_property_readonly(
+          "parsable_str", [](FunctionSchema& self) { return parsableString(self); })
+      .def("__eq__", [](const FunctionSchema& self, const FunctionSchema& other) {
+          return self == other;
+          })
       .def("__str__", [](FunctionSchema& self) {
         std::stringstream ss;
         ss << self;

@@ -71,7 +71,7 @@ inline std::string parseStringLiteral(
         throw ErrorReport(range) << "unsupported hex specifier";
       default:
         // \0NN
-        if (auto v = parseOctal(str, pos + 1)) {
+        if (auto v = parseOctal(ret_str, pos)) {
           to_erase = 4;
           c = *v;
         } else {
