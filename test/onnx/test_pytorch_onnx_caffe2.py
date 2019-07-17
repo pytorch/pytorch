@@ -1956,6 +1956,24 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         inputs = torch.randn(3, 2, 1)
         self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
 
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_masked_fill(self):
+        class MaskedFillModel(torch.nn.Module):
+            def forward(self, x):
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                return x.masked_fill(mask, 2)
+
+        x = torch.zeros(4, 2, 3, requires_grad=True)
+        self.run_model_test(MaskedFillModel(), input=(x, ), train=False, batch_size=BATCH_SIZE)
+
+        class MaskedFillModel2(torch.nn.Module):
+            def forward(self, x):
+                return x.masked_fill(x > 3, -1)
+
+        x = torch.arange(16).view(2, 2, 4).to(torch.float32)
+        self.run_model_test(MaskedFillModel2(), input=(x, ), train=False, batch_size=BATCH_SIZE)
+
 # a bit of metaprogramming to set up all the rnn tests
 
 

@@ -39,6 +39,7 @@ import warnings
 
 black_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
+    "masked_fill"
 ]
 
 for black_listed_op in black_listed_operators:
