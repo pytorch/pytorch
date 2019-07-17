@@ -130,13 +130,18 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             torch.jit.load('scriptmodule.pt', _extra_files = files)
             print (files['metadata.json'])
     """
-    m = ScriptModule()
+    base_name = "__main__"
+    cu = torch._C.CompilationUnit()
+    m = ScriptModule(_qualified_name=base_name, _compilation_unit=cu)
 
     def module_lookup(names):
         curr = m
+        qualified_name = base_name
         for name in names:
+            qualified_name += "." + name
             if not hasattr(curr, name):
-                setattr(curr, name, ScriptModule())
+                setattr(curr, name, ScriptModule(_qualified_name=qualified_name,
+                                                 _compilation_unit=cu))
             curr = getattr(curr, name)
         return curr._c
     if isinstance(f, string_classes):
@@ -1039,22 +1044,6 @@ def whichmodule(obj):
     return '__main__'
 
 
-def _is_recursive_script_enabled(value):
-    # TODO: [enable recursive script]
-    # when recursive script is made the default, remove this method
-    enabled = torch._C._jit_recursive_script()
-    module = inspect.getmodule(value)
-    if module is not None and 'torch.nn' in module.__name__:
-        enabled = True
-    return enabled
-
-@contextlib.contextmanager
-def _enable_recursive_script():
-    torch._C._jit_recursive_script(True)
-    yield
-    torch._C._jit_recursive_script(False)
-
-
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
@@ -1062,8 +1051,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
 
     if isinstance(obj, torch.nn.Module):
-        if _is_recursive_script_enabled(obj):
-            return _convert_to_script_module(obj)
+        return _convert_to_script_module(obj)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
@@ -1454,10 +1442,13 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, optimize=True, _name=None):
-            if _name is None:
-                _name = type(self).__name__
-            self.__dict__['_c'] = torch._C.ScriptModule(_name)
+        def __init__(self, optimize=True, _qualified_name=None, _compilation_unit=None):
+            if _qualified_name is None:
+                _qualified_name = type(self).__name__
+            if _compilation_unit is None:
+                _compilation_unit = torch._C.CompilationUnit()
+            self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit)
+
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
@@ -1591,7 +1582,7 @@ if _enabled:
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
-            super(WeakScriptModuleProxy, self).__init__(_name=type(original).__name__)
+            super(WeakScriptModuleProxy, self).__init__(_qualified_name=_qualified_name(type(original)))
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
@@ -1612,15 +1603,6 @@ if _enabled:
                 elif item is self:
                     continue
                 elif isinstance(item, (Parameter, Module, Attribute)):
-                    if isinstance(item, (ModuleList, Sequential)):
-                        # These are in __constants__, so ignore them here
-
-                        if not _is_recursive_script_enabled(item):
-                            # For recursive script, these are constantified after
-                            # they are used, so they don't need to be in constants.
-                            # The `continue` here should be deleted along with
-                            # [weak script refactor]
-                            continue
                     ScriptModule.__setattr__(self, name, item)
 
             # Copy buffers
@@ -1667,6 +1649,7 @@ if _enabled:
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
 
             self.__dict__["_initialized"] = True
+            self.__dict__["_original_type"] = type(original)
             _create_methods_from_stubs(self, stubs)
 
         def __getattr__(self, attr):
@@ -1680,7 +1663,13 @@ if _enabled:
                 if original_module and self.__dict__["_initialized"]:
                     # get attr from original if it is still alive
                     return getattr(original_module, attr)
-
+                elif self.__dict__["_initialized"]:
+                    # original module is dead, try looking up the value on the
+                    # original type
+                    fn = getattr(self.__dict__["_original_type"], attr, None)
+                    if fn is not None and inspect.isroutine(fn):
+                        # bind the function to this instance and return it
+                        return fn.__get__(self, self.__dict__["_original_type"])
                 # If it's not on this module and it wasn't on the original
                 # module (or the original is dead), throw the exception
                 raise e
@@ -1709,8 +1698,7 @@ def _convert_to_script_module(mod):
     """
     Makes a ScriptModule from an nn.Module. If `_methods` is provided,
     these methods are treated as @script_methods. If not, it defaults to
-    `('forward',)`. Methods accessed in forward are scripted on demand if
-    `_enable_recursive_script()` is used.
+    `('forward',)`. Methods accessed in forward are scripted on demand.
     """
     if isinstance(mod, ScriptModule):
         return mod
@@ -1722,8 +1710,6 @@ def _convert_to_script_module(mod):
     methods = ()
     if hasattr(mod, 'forward'):
         if mod.forward.__func__ == torch.nn.Module.forward:
-            # TODO: [enable recursive script]
-            # forward was not overrided
             raise RuntimeError("No forward method was defined on {}".format(mod))
         if not _jit_internal.is_ignored_fn(mod.forward):
             methods = ('forward',)
@@ -1838,12 +1824,12 @@ class _ConstModuleList(ScriptModule):
 
         if isinstance(modules, OrderedDict):
             for key, module in modules.items():
-                if isinstance(module, torch.nn.Module) and _is_recursive_script_enabled(module):
+                if isinstance(module, torch.nn.Module):
                     module = _convert_to_script_module(module)
                 self.add_module(key, module)
         else:
             for i, module in enumerate(modules):
-                if isinstance(module, torch.nn.Module) and _is_recursive_script_enabled(module):
+                if isinstance(module, torch.nn.Module):
                     module = _convert_to_script_module(module)
                 self.add_module(str(i), module)
 
