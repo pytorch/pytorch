@@ -722,7 +722,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             # future in-place operators won't be exposed as functions.
             env['deprecation_message'] = ('TORCH_WARN("In-place functions such as torch.{name} are deprecated '
                                           'and will be removed in the next release. '
-                                          'Please use their in-place method counterparts (Tensor.{name}) instead.", 1);'
+                                          'Please use their in-place method counterparts (Tensor.{name}) instead.");'
                                           ).format(name=name)
             env['deprecated'] = True
 
