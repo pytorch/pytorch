@@ -589,12 +589,8 @@ class TestONNXRuntime(unittest.TestCase):
     def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
                         initial_state, packed_sequence, dropout):
         batch_first = True if packed_sequence == 2 else False
-        model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE,
-                       layers,
-                       nonlinearity=nonlinearity,
-                       bidirectional=bidirectional,
-                       dropout=dropout,
-                       batch_first=batch_first)
+        model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
+                             bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
 
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
@@ -666,7 +662,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         # test that the model still runs with a different batch size
 
-
     def _gru_test(self, layers, bidirectional, initial_state,
                   packed_sequence, dropout):
         batch_first = True if packed_sequence == 2 else False
@@ -701,7 +696,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, input, batch_size=RNN_BATCH_SIZE,)
 
         # test that the model still runs with a different batch size
-
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
@@ -776,6 +770,8 @@ def setup_rnn_tests():
     # make sure no one accidentally disables all the tests without
     # noticing
     assert test_count == 192, test_count
+
+
 setup_rnn_tests()
 
 # opset 7 tests
