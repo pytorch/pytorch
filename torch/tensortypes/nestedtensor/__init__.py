@@ -1,8 +1,14 @@
 import torch
 from . import nested
 import torch.tensortypes.nestedtensor.codegen as codegen
+import os
 
 NestedTensor = nested.NestedTensor
+
+BUILD_NESTEDTENSOR = os.getenv('BUILD_NESTEDTENSOR', 'OFF') == 'ON'
+if not BUILD_NESTEDTENSOR:
+    raise RuntimeError("Building NestedTensor without environment variable "
+                       "BUILD_NESTEDTENSOR set to ON. Did you mean to do this?")
 
 
 def _nary_gen(out_dtype=None):

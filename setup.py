@@ -79,9 +79,6 @@
 #   USE_LMDB
 #     enables use of LMDB for storage
 #
-#   BUILD_NESTEDTENSOR
-#     enables building the NestedTensor features
-#
 #   BUILD_BINARY
 #     enables the additional binaries/ build
 #
