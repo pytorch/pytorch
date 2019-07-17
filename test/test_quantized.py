@@ -72,7 +72,7 @@ class TestQuantizedOps(TestCase):
                            dilation, ceiling_mode=False):
         output_size = (
             (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
-             + (stride - 1 if ceiling_mode else 0)) / stride + 1)
+             + (stride - 1 if ceiling_mode else 0)) // stride + 1)
         if (padding > 0 and
                 ((output_size - 1) * stride >= input_size + padding)):
             output_size += 1
