@@ -20,7 +20,7 @@ class CreateDBOp final : public Operator<Context> {
             OperatorBase::template GetSingleArgument<int>("num_shards", 1)),
         shard_id_(
             OperatorBase::template GetSingleArgument<int>("shard_id", 0)) {
-    CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
+    CAFFE_ENFORCE_GT(db_name_.size(), size_t(0), "Must specify a db name.");
   }
 
   bool RunOnDevice() final {

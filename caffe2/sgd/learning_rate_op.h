@@ -149,7 +149,7 @@ class LearningRateOp final : public Operator<Context> {
       std::list<CompositeLearningRateItem<T>> sub_policies;
       CAFFE_ENFORCE_GT(
           sub_policy_num_iters.size(),
-          0,
+          size_t(0),
           "Must specify at least one sub learning rate policy.");
       for (int i = 0; i < sub_policy_num_iters.size(); ++i) {
         CAFFE_ENFORCE_GT(

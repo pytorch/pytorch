@@ -526,7 +526,7 @@ void TensorDeserializer::DeserializeToTensor(
       // field we will have it special cased.
       CAFFE_ENFORCE_EQ(
           chunkSize,
-          tensor_proto.byte_data().size(),
+          long(tensor_proto.byte_data().size()),
           "Incorrect proto field size.");
       context->template CopyToCPU<uint8_t>(
           chunkSize,
@@ -594,7 +594,7 @@ void TensorDeserializer::DeserializeToTensor(
             "is not written yet.");
         CAFFE_ENFORCE_EQ(
             2 * chunkSize,
-            tensor_proto.byte_data().size(),
+            long(tensor_proto.byte_data().size()),
             "Incorrect proto field size.");
         context->template CopyToCPU<at::Half>(
             chunkSize,

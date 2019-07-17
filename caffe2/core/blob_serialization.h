@@ -198,7 +198,7 @@ inline void CopyFromProtoAsIs(
       sizeof(SrcType) == sizeof(DstType),
       "The source type and dest type cannot be copied as-is. Did "
       "you mean CopyFromProtoWithCast?");
-  CAFFE_ENFORCE_EQ(size, field.size(), "Incorrect proto field size.");
+  CAFFE_ENFORCE_EQ(size, size_t(field.size()), "Incorrect proto field size.");
   context->template CopyFromCPU<DstType>(
       size, reinterpret_cast<const DstType*>(field.data()), dst);
 }
@@ -209,7 +209,7 @@ inline void CopyFromProtoWithCast(
     const google::protobuf::RepeatedField<SrcType>& field,
     DstType* dst,
     BaseContext* context) {
-  CAFFE_ENFORCE_EQ(size, field.size(), "Incorrect proto field size.");
+  CAFFE_ENFORCE_EQ(size, size_t(field.size()), "Incorrect proto field size.");
   // TODO: we are having one unnecessary copy here if the context is already
   // CPUContext. Remove it if it is performance critical.
   unique_ptr<DstType[]> buffer(new DstType[size]);

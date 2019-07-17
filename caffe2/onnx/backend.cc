@@ -40,7 +40,7 @@ bool TryConvertingTensorRawValues(
   }
 
   size_t raw_size = onnx_tensor.raw_data().size();
-  CAFFE_ENFORCE_EQ(raw_size % sizeof(T), 0);
+  CAFFE_ENFORCE_EQ(raw_size % sizeof(T), size_t(0));
 
   size_t num_elements = raw_size / sizeof(T);
   const void* src_ptr = static_cast<const void*>(onnx_tensor.raw_data().data());

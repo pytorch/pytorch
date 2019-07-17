@@ -438,7 +438,7 @@ GradientOpsMeta GetGradientForOp(
   }
   // Check if the gradient computation has returned the right size for the
   // gradient vector.
-  CAFFE_ENFORCE_EQ(meta.g_input_.size(), def.input_size());
+  CAFFE_ENFORCE_EQ(meta.g_input_.size(), size_t(def.input_size()));
   VLOG(1) << "Gradients:";
   for (const GradientWrapper& grad : meta.g_input_) {
     // The gradient should either be (1) not set, or (2) dense, or (3) sparse,

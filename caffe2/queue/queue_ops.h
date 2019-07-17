@@ -182,7 +182,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE(queue);
 
     auto size = queue->getNumBlobs();
-    CAFFE_ENFORCE_EQ(OutputSize(), size + 1);
+    CAFFE_ENFORCE_EQ(size_t(OutputSize()), size + 1);
 
     bool status = numRecords_ > 1 ? dequeueMany(queue) : dequeueOne(queue);
 

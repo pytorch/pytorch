@@ -333,7 +333,7 @@ class WorkersPool {
   WorkersPool() {}
 
   void Execute(const std::vector<std::shared_ptr<Task>>& tasks) {
-    CAFFE_ENFORCE_GE(tasks.size(), 1);
+    CAFFE_ENFORCE_GE(tasks.size(), size_t(1));
     // One of the tasks will be run on the current thread.
     int workers_count = tasks.size() - 1;
     CreateWorkers(workers_count);

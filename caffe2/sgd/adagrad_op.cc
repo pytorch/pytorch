@@ -41,7 +41,7 @@ static OpSchema::Cost CostInferenceForSparseAdagrad(
     const OperatorDef& /* unused */,
     const vector<TensorShape>& inputs) {
   CAFFE_ENFORCE_GE(
-      inputs.size(), 4, "SparseAdagrad requires at least 4 inputs");
+      inputs.size(), size_t(4), "SparseAdagrad requires at least 4 inputs");
 
   const TensorShape param = inputs[0];
   const TensorShape moment = inputs[1];

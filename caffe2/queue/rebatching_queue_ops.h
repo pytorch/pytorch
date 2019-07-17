@@ -29,7 +29,7 @@ class EnqueueRebatchingQueueOp : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& queue = Inputs()[0]->template Get<RebatchingQueuePtr>();
     CHECK(queue);
-    CAFFE_ENFORCE_EQ(InputSize(), queue->numBlobs() + 1);
+    CAFFE_ENFORCE_EQ(size_t(InputSize()), queue->numBlobs() + 1);
     std::vector<const Tensor*> inputTensors;
     inputTensors.reserve(InputSize() - 1);
     for (int i = 1; i < InputSize(); ++i) {

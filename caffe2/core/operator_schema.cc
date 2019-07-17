@@ -336,7 +336,7 @@ void SparseLengthsFillerHelper(
     size_t value_index,
     size_t length_index,
     std::vector<TensorFiller>* fillers) {
-  CAFFE_ENFORCE_EQ(shapes[length_index].size(), 1);
+  CAFFE_ENFORCE_EQ(shapes[length_index].size(), size_t(1));
   // filler.h: SparseLengths->FixedSum will select FD_FIXEDSUM distribution
   (*fillers)[length_index].SparseLengths(shapes[value_index].front());
 }
@@ -356,7 +356,7 @@ void SparseSegmentsFillerHelper(
     size_t value_index,
     size_t segment_index,
     std::vector<TensorFiller>* fillers) {
-  CAFFE_ENFORCE_EQ(shapes[segment_index].size(), 1);
+  CAFFE_ENFORCE_EQ(shapes[segment_index].size(), size_t(1));
   // filler.h SparseSegments will select FD_UNIFORM or FD_SYNTHETIC distribution
   (*fillers)[value_index]
       .Min(0)

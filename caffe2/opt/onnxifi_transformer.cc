@@ -216,7 +216,7 @@ OnnxifiTransformer::OnnxifiTransformer(const OnnxifiTransformerOptions& opts)
       lib_->onnxGetBackendIDs(nullptr, &num_backends_),
       ONNXIFI_STATUS_FALLBACK);
   CAFFE_ENFORCE_GT(
-      num_backends_, 0, "At least 1 onnxifi backend should be available");
+      num_backends_, size_t(0), "At least 1 onnxifi backend should be available");
   backend_ids_.resize(num_backends_);
   CAFFE_ENFORCE_EQ(
       lib_->onnxGetBackendIDs(backend_ids_.data(), &num_backends_),

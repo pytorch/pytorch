@@ -190,9 +190,9 @@ class OnnxifiOp final : public Operator<Context> {
           lib_->onnxGetBackendIDs(nullptr, &num_backends),
           ONNXIFI_STATUS_FALLBACK);
       CAFFE_ENFORCE_GT(
-          num_backends, 0, "At least 1 onnxifi backend should be available");
+          num_backends, size_t(0), "At least 1 onnxifi backend should be available");
       CAFFE_ENFORCE_LT(
-          backend_index,
+          size_t(backend_index),
           num_backends,
           "Backend idx out of bound: ",
           backend_index,

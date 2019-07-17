@@ -578,7 +578,7 @@ TEST(NetTest, DISABLED_FailingOperator) {
   }
 }
 
-const int kTestPoolSize = 4;
+const size_t kTestPoolSize = 4;
 
 class ExecutorHelperDummyOp final : public OperatorBase {
  public:

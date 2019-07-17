@@ -56,8 +56,8 @@ DataRandomFiller::DataRandomFiller(
     const std::vector<std::vector<std::vector<int64_t>>>& input_dims,
     const std::vector<std::vector<std::string>>& input_types) {
   // parse dimensions
-  CAFFE_ENFORCE_EQ(input_dims.size(), run_net.op_size());
-  CAFFE_ENFORCE_EQ(input_types.size(), run_net.op_size());
+  CAFFE_ENFORCE_EQ(input_dims.size(), size_t(run_net.op_size()));
+  CAFFE_ENFORCE_EQ(input_types.size(), size_t(run_net.op_size()));
 
   // load op inputs and outputs
   std::unordered_set<std::string> output_names;

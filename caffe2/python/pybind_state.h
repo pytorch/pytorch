@@ -332,7 +332,7 @@ class PythonOpBase : public Operator<Context> {
         CAFFE_ENFORCE(loads);
         auto builder_call = loads(py::bytes(pickled)).cast<py::tuple>();
         CAFFE_ENFORCE(builder_call);
-        CAFFE_ENFORCE_EQ(py::len(builder_call), 3);
+        CAFFE_ENFORCE_EQ(int(py::len(builder_call)), 3);
         auto func = builder_call[0].cast<py::object>();
         auto args = builder_call[1].cast<py::tuple>();
         auto kwargs = builder_call[2].cast<py::dict>();

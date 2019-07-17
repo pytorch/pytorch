@@ -543,7 +543,7 @@ ConvertedResult OnnxExporter::CreateArgMaxMinOpNodes(
   auto result = CommonCaffe2OpToOnnxNodes(def);
   auto& nodes = result.first;
 
-  CAFFE_ENFORCE_EQ(nodes.size(), 1);
+  CAFFE_ENFORCE_EQ(nodes.size(), size_t(1));
   auto& node = nodes.back();
 
   if (!ArgumentHelper::HasArgument(def, "axis")) {

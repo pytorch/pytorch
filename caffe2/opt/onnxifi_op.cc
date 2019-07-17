@@ -250,7 +250,7 @@ void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     CAFFE_ENFORCE(it != shape_info.end());
     const auto& real_shape = it->second.shape;
     const auto& max_shape = output_shapes_[i];
-    CAFFE_ENFORCE_EQ(real_shape.dims_size(), max_shape.size());
+    CAFFE_ENFORCE_EQ(size_t(real_shape.dims_size()), max_shape.size());
     const auto dim_size = real_shape.dims_size();
     auto& begin = output_reshape_info_.begins[i];
     begin.Resize(dim_size);
@@ -262,7 +262,7 @@ void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     for (int j = 0; j < dim_size; ++j) {
       CAFFE_ENFORCE_GE(
           max_shape[j],
-          real_shape.dims(j),
+          uint64_t(real_shape.dims(j)),
           "It is weird that max shape of ",
           output_names_[i],
           " is smaller than real shape at dim ",
@@ -307,7 +307,7 @@ void OnnxifiOp<CPUContext>::maybeAdjustOutputBatchSizes() {
 
 template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
-  CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
+  CAFFE_ENFORCE_EQ(input_desc_.size(), size_t(InputSize()));
   for (unsigned i = 0U; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
     const at::IntArrayRef tensor_dims = input_tensor.sizes();

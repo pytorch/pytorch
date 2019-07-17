@@ -71,7 +71,7 @@ class AllreduceOp final : public Operator<Context> {
     }
 
     // Verify tensors all have same size
-    size_t size = Input(1).numel();
+    auto size = Input(1).numel();
     for (auto i = 2; i < InputSize(); i++) {
       CAFFE_ENFORCE_EQ(Input(i).numel(), size);
     }

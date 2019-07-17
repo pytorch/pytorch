@@ -48,7 +48,7 @@ bool AsyncTaskGraph::AddDependency(
         caffe2::make_unique<AsyncTaskFuture>(parent_futures));
     parents_future = edge_futures_.back().get();
   } else {
-    CAFFE_ENFORCE_EQ(parent_futures.size(), 1);
+    CAFFE_ENFORCE_EQ(parent_futures.size(), size_t(1));
     parents_future = parent_futures.back();
   }
 

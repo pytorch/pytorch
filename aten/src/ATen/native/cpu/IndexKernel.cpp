@@ -20,8 +20,8 @@ struct Indexer {
     , indexer_strides(indexer_strides)
     , original_strides(original_strides.data())
     , original_sizes(original_sizes.data()) {
-    AT_ASSERT(original_strides.size() == num_indexers);
-    AT_ASSERT(original_sizes.size() == num_indexers);
+    AT_ASSERT(int64_t(original_strides.size()) == num_indexers);
+    AT_ASSERT(int64_t(original_sizes.size()) == num_indexers);
   }
 
   int64_t num_indexers;

@@ -140,7 +140,7 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorShapeAndType(
   }
   if (!rt.second) {
     // Check shape consistency
-    CAFFE_ENFORCE_EQ(shape.dims_size(), bound_dims.size());
+    CAFFE_ENFORCE_EQ(size_t(shape.dims_size()), bound_dims.size());
     // For shapes that was provided as a hint at the input of the net, fix the
     // batch size first.
     if (shape.dims_size() > 0 &&
@@ -466,7 +466,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   std::vector<TensorShape> input_shapes{
       shape_info_[op.input(0)].shape, w_shape_info.shape, b_shape_info.shape};
   std::vector<TensorShape> output_shapes = InferOutput(op, input_shapes);
-  CAFFE_ENFORCE_EQ(output_shapes.size(), 1);
+  CAFFE_ENFORCE_EQ(output_shapes.size(), size_t(1));
   CheckAndSetTensorShapeAndType(
       op.output(0),
       ShapeInfo::DimType::BATCH,
