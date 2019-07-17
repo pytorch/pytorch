@@ -1,13 +1,14 @@
 r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
+from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import torch.nn.quantized as nnq
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, default_qconfig
 
 default_loss_fn = torch.nn.CrossEntropyLoss()
-def default_train_fn(model, train_data, loss_fn=default_loss_fn):
+def test_only_train_fn(model, train_data, loss_fn=default_loss_fn):
     r"""
     Default train function takes a torch.utils.data.Dataset and train the model
     on the dataset

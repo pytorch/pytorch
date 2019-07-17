@@ -7,7 +7,7 @@ from torch.quantization import default_eval_fn, QConfig, \
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
-    ManualQATModel, default_train_fn
+    ManualQATModel, test_only_train_fn
 
 calib_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
 train_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
@@ -271,7 +271,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = prepare(model)
         self.checkObservers(model)
 
-        default_train_fn(model, train_data)
+        test_only_train_fn(model, train_data)
         convert(model)
 
         def checkQuantized(model):
@@ -281,10 +281,14 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
         model = ManualQATModel()
         model.qconfig = default_qat_qconfig
-        model = quantize(model, default_train_fn, train_data)
+        model = quantize(model, test_only_train_fn, train_data)
         checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
+        r"""Using FakeQuant in evaluation only mode,
+        this is useful for estimating accuracy loss when we quantize the
+        network
+        """
         model = ManualQATModel()
         model.qconfig = default_qat_qconfig
 

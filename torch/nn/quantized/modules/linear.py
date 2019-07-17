@@ -157,15 +157,14 @@ class Linear(NNLinear):
         """
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
-            activation_observer = mod.observer
             weight_observer = mod.weight_fake_quant
         else:
             assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-            activation_observer = mod.observer
             weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
+        activation_observer = mod.observer
         act_qparams = activation_observer.calculate_qparams()
         wt_qparams = weight_observer.calculate_qparams()
         bias_scale = (wt_qparams[0] * act_qparams[0]).float()
