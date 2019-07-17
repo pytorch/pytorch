@@ -714,16 +714,10 @@ OpCode Unpickler::readInstruction() {
               tensor_table_->at(data->elements().at(0).toInt()));
           break;
         case PicklerClass::INTLIST:
-          stack_.emplace_back(data->elements().at(0).toIntList());
-          break;
         case PicklerClass::TENSORLIST:
-          stack_.emplace_back(data->elements().at(0).toTensorList());
-          break;
         case PicklerClass::DOUBLELIST:
-          stack_.emplace_back(data->elements().at(0).toDoubleList());
-          break;
         case PicklerClass::BOOLLIST:
-          stack_.emplace_back(data->elements().at(0).toBoolList());
+          stack_.emplace_back(data->elements().at(0));
           break;
         default:
           AT_ERROR("Unknown pickler class id");
