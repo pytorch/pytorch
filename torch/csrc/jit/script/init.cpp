@@ -347,7 +347,7 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module>(m, "ScriptModule")
-      .def(py::init<std::string>())
+      .def(py::init<std::string, std::shared_ptr<CompilationUnit>>())
       .def(
           "save",
           [](Module& m,
@@ -686,12 +686,6 @@ void initJitScriptBindings(PyObject* module) {
             ss, source_ranges, self.function(), true, tensors, classes, false);
         return ss.str();
       });
-  m.def(
-      "_jit_recursive_script",
-      []() { return getRecursiveScriptMode(); });
-  m.def(
-      "_jit_recursive_script",
-      [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
       [](const std::string& qualname,

@@ -93,7 +93,7 @@ struct ConstantTableValue : public SugaredValue {
     if (offset < 0 || size_t(offset) >= constants_.size()) {
       throw ErrorReport(loc) << "constant index " << offset
                              << " is out of bounds (constant table has "
-                             << constants_.size() << " entries).";
+                             << constants_.size() << " entries)";
     }
     Value* value = m.graph()->insertConstant(constants_[offset], nullptr, loc);
     return std::make_shared<SimpleValue>(value);
@@ -176,7 +176,7 @@ struct SourceImporter {
       throw ErrorReport(p_.lexer().cur().range)
           << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
           << CURRENT_OP_VERSION_SET
-          << " but the script being loaded is version " << version_ << ".";
+          << " but the script being loaded is version " << version_;
     }
   }
 

@@ -35,13 +35,11 @@ _ENFORCED_ZERO_POINT = defaultdict(lambda: None, {
 def _get_valid_min_max(qparams):
     scale, zero_point, quantized_type = qparams
     adjustment = 1 + torch.finfo(torch.float).eps
-
     _long_type_info = torch.iinfo(torch.long)
     long_min, long_max = _long_type_info.min / adjustment, _long_type_info.max / adjustment
     # make sure intermediate results are within the range of long
     min_value = max((long_min - zero_point) * scale, (long_min / scale + zero_point))
     max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point))
-
     return min_value, max_value
 
 """Hypothesis filter to avoid overflows with quantized tensors.
@@ -77,8 +75,8 @@ Args:
               by the data type itself.
 
 Generates:
-    (scale, zero_point): Sampled dcale and zero_point.
-    (qmin, qmax): Quantized minimum and maximum (depends on `quantized_type`).
+    scale: Sampled scale.
+    zero_point: Sampled zero point.
     quantized_type: Sampled quantized type.
 """
 @st.composite

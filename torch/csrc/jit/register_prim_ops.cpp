@@ -2439,7 +2439,7 @@ RegisterOperators reg2({
           " key, t default_value) -> t(*)",                                   \
           dictGet<true>),                                                     \
       Operator(                                                               \
-          "aten::setdefault(Dict(" key_type ", t) self, " key_type            \
+          "aten::setdefault(Dict(" key_type ", t)(a!) self, " key_type        \
           " key, t default_value) -> t(*)",                                   \
           dictSetDefault),                                                    \
       Operator(                                                               \
