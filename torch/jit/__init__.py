@@ -129,13 +129,18 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             torch.jit.load('scriptmodule.pt', _extra_files = files)
             print (files['metadata.json'])
     """
-    m = ScriptModule()
+    base_name = "__main__"
+    cu = torch._C.CompilationUnit()
+    m = ScriptModule(_qualified_name=base_name, _compilation_unit=cu)
 
     def module_lookup(names):
         curr = m
+        qualified_name = base_name
         for name in names:
+            qualified_name += "." + name
             if not hasattr(curr, name):
-                setattr(curr, name, ScriptModule())
+                setattr(curr, name, ScriptModule(_qualified_name=qualified_name,
+                                                 _compilation_unit=cu))
             curr = getattr(curr, name)
         return curr._c
     if isinstance(f, string_classes):
@@ -1470,10 +1475,13 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, optimize=True, _name=None):
-            if _name is None:
-                _name = type(self).__name__
-            self.__dict__['_c'] = torch._C.ScriptModule(_name)
+        def __init__(self, optimize=True, _qualified_name=None, _compilation_unit=None):
+            if _qualified_name is None:
+                _qualified_name = type(self).__name__
+            if _compilation_unit is None:
+                _compilation_unit = torch._C.CompilationUnit()
+            self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit)
+
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
@@ -1607,7 +1615,7 @@ if _enabled:
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
-            super(WeakScriptModuleProxy, self).__init__(_name=type(original).__name__)
+            super(WeakScriptModuleProxy, self).__init__(_qualified_name=_qualified_name(type(original)))
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
