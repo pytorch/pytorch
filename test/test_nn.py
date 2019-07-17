@@ -3952,6 +3952,12 @@ class TestNN(NNTestCase):
     def test_MaxPool2d_indices(self):
         self._test_maxpool_indices(2)
 
+    def test_MaxPool2d_ceil_mode_size_too_small(self):
+        input = torch.randn(1, 1, 16, 1)
+        m = nn.MaxPool2d(2, stride=2)
+        self.assertRaisesRegex(RuntimeError, 'Output size is too small',
+                               lambda: m(input))
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_MaxPool2d_indices_cuda(self, dtype=torch.float):
