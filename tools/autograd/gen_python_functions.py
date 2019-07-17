@@ -35,6 +35,7 @@ SKIP_PYTHON_BINDINGS = [
     'nonzero(_(out|numpy))?',
     'set_quantizer_',
     'set_data',
+    's_native_addmm_'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
