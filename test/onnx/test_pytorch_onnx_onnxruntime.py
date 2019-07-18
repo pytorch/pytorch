@@ -610,6 +610,10 @@ class TestONNXRuntime(unittest.TestCase):
         input = make_input(RNN_BATCH_SIZE)
         self.run_test(model, input, batch_size=RNN_BATCH_SIZE, atol=1e-7)
 
+        # test that the model still runs with a different batch size
+        other_input = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
+
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
         batch_first = True if packed_sequence == 2 else False
@@ -645,6 +649,10 @@ class TestONNXRuntime(unittest.TestCase):
         input = make_input(RNN_BATCH_SIZE)
         self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
+        # test that the model still runs with a different batch size
+        other_input = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
+
     def _gru_test(self, layers, bidirectional, initial_state,
                   packed_sequence, dropout):
         batch_first = True if packed_sequence == 2 else False
@@ -677,6 +685,10 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = make_input(RNN_BATCH_SIZE)
         self.run_test(model, input, batch_size=RNN_BATCH_SIZE,)
+
+        # test that the model still runs with a different batch size
+        other_input = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
