@@ -2,15 +2,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
-    default_qconfig, default_qat_qconfig, default_observer, quantize, prepare, \
-    convert, prepare_qat, quantize_qat
+    default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
+    quantize, prepare, convert, prepare_qat, quantize_qat
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
     ManualQATModel, test_only_eval_fn, test_only_train_fn
-
-calib_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
-train_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
 
 class PostTrainingQuantTest(QuantizationTestCase):
 
@@ -28,19 +25,19 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkHasPrepModules(model.fc1)
         self.checkObservers(model)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
             self.checkHasPrepModules(model.fc1)
             self.checkQuantizedLinear(model.fc1)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(SingleLayerLinearModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(SingleLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -58,7 +55,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkNoPrepModules(model.fc1)
         self.checkHasPrepModules(model.fc2)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -67,12 +64,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkHasPrepModules(model.fc2)
             self.assertEqual(type(model.fc1), torch.nn.Linear)
             self.checkQuantizedLinear(model.fc2)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(TwoLayerLinearModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(TwoLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
     def test_nested1(self):
@@ -99,7 +96,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         model = prepare(model, qconfig_dict)
         checkPrepModules(model, True)
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -108,12 +105,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantizedLinear(model.fc3)
             self.checkQuantizedLinear(model.sub2.fc1)
             self.checkLinear(model.sub2.fc2)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(NestedModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
 
@@ -145,7 +142,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkPrepModules(model, True)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -155,12 +152,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantizedLinear(model.sub2.fc1)
             self.checkQuantizedLinear(model.sub2.fc2)
             self.checkQuantizedLinear(model.fc3)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(NestedModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
     def test_nested3(self):
@@ -172,7 +169,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_qconfig = QConfig(weight=default_observer(),
+        custom_qconfig = QConfig(weight=default_weight_observer(),
                                  activation=default_observer(**custum_options))
         qconfig_dict = {
             'fc3': default_qconfig,
@@ -195,7 +192,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkPrepModules(model, True)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -203,12 +200,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantizedLinear(model.sub2.fc1)
             self.checkQuantizedLinear(model.sub2.fc2)
             self.checkQuantizedLinear(model.fc3)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(NestedModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
     def test_quant_wrapper(self):
@@ -222,7 +219,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         prepare(model)
         self.checkObservers(model)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -231,12 +228,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.assertEqual(type(model.sub.module.fc1), nnq.Linear)
             self.assertEqual(type(model.sub.module.fc2), nnq.Linear)
             self.assertEqual(type(model.sub.module.relu), nnq.ReLU)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(WrappedModel().eval(), test_only_eval_fn, calib_data, {})
+        model = quantize(WrappedModel().eval(), test_only_eval_fn, self.calib_data, {})
         checkQuantized(model)
 
 
@@ -250,17 +247,17 @@ class PostTrainingQuantTest(QuantizationTestCase):
         prepare(model)
         self.checkObservers(model)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc), nnq.Linear)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(ManualQuantModel().eval(), test_only_eval_fn, calib_data)
+        model = quantize(ManualQuantModel().eval(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
 class QuantizationAwareTrainingTest(QuantizationTestCase):
@@ -271,17 +268,17 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = prepare_qat(model)
         self.checkObservers(model)
 
-        test_only_train_fn(model, train_data)
+        test_only_train_fn(model, self.train_data)
         convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), nnq.Linear)
             self.assertEqual(type(model.fc2), nnq.Linear)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         model = ManualQATModel()
         model.qconfig = default_qat_qconfig
-        model = quantize_qat(model, test_only_train_fn, train_data)
+        model = quantize_qat(model, test_only_train_fn, self.train_data)
         checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
@@ -296,7 +293,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         self.checkObservers(model)
 
         model.eval()
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
 
 if __name__ == '__main__':
     run_tests()
