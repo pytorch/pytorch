@@ -40,23 +40,23 @@ class Conv2d(NNConv2d):
                              self.weight_fake_quant(self.weight), self.bias,
                              self.stride, self.dilation, self.groups))
 
-    # TODO: support initializing from qconfig
-    @staticmethod
-    def from_float(mod):
+    @classmethod
+    def from_float(cls, mod, qconfig=None):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == NNConv2d, 'qat.Conv2d.from_float only works for nn.Conv2d'
-        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-        qat_conv = Conv2d(mod.in_channels, mod.out_channels, mod.kernel_size,
-                          stride=mod.stride, padding=mod.padding, dilation=mod.dilation,
-                          groups=mod.groups, bias=mod.bias is not None,
-                          padding_mode=mod.padding_mode,
-                          activation_fake_quant=mod.qconfig.activation(),
-                          weight_fake_quant=mod.qconfig.weight())
+        if not qconfig:
+            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+            assert mod.qconfig, 'Input float module must have a valid qconfig'
+            qconfig = mod.qconfig
+        qat_conv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+                       stride=mod.stride, padding=mod.padding, dilation=mod.dilation,
+                       groups=mod.groups, bias=mod.bias is not None,
+                       padding_mode=mod.padding_mode,
+                       activation_fake_quant=qconfig.activation(),
+                       weight_fake_quant=qconfig.weight())
         qat_conv.weight = mod.weight
         qat_conv.bias = mod.bias
         return qat_conv
