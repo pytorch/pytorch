@@ -1,10 +1,14 @@
-import sys
-import torch
-from torch.testing import FileCheck
 from common_utils import run_tests
 from contextlib import contextmanager
 from jit_utils import JitTestCase
+from torch.testing import FileCheck
 from typing import NamedTuple, List
+
+import os
+import sys
+import tempfile
+import torch
+
 
 WINDOWS = sys.platform == 'win32'
 
@@ -211,6 +215,26 @@ class TestScriptPy3(JitTestCase):
 
         for name in ['a', 'b', 'c']:
             self.assertEqual(getattr(out_loaded, name), getattr(out, name))
+
+    def test_type_annotate_py3(self):
+        def fn():
+            a : List[int] = []
+            b : torch.Tensor = torch.ones(2, 2)
+            c : Optional[torch.Tensor] = None
+            for _ in range(10):
+                a.append(4)
+                c = torch.ones(2, 2)
+            return a, b, c
+
+        self.checkScript(fn, ())
+
+        def wrong_type():
+            wrong : List[int] = [0.5]
+            return wrong
+
+        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+            torch.jit.script(wrong_type)
+
 
 if __name__ == '__main__':
     run_tests()
