@@ -54,8 +54,8 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
   int device;
-  THCudaCheck(cudaGetDevice(&device));
   torch::utils::cuda_lazy_init();
+  THCudaCheck(cudaGetDevice(&device));
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
 }
