@@ -2456,12 +2456,7 @@ struct to_ir {
         return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
-        auto constant = graph->insertConstant(IValue(), nullptr, tree->range());
-        if (type_hint) {
-          AT_ASSERT(type_hint->kind() == TypeKind::OptionalType);
-          constant->setType(type_hint);
-        }
-        return constant;
+        return graph->insertConstant(IValue(), type_hint, tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));

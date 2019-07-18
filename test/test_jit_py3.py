@@ -1,58 +1,12 @@
 from common_utils import run_tests
-from contextlib import contextmanager
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
 from typing import NamedTuple, List
 
-import os
-import sys
-import tempfile
 import torch
 
 
-WINDOWS = sys.platform == 'win32'
-
 class TestScriptPy3(JitTestCase):
-    @contextmanager
-    def capture_stdout(self):
-        # No idea how to capture stdout from C++ on Windows
-        if WINDOWS:
-            yield ['']
-            return
-        import os
-        import fcntl
-        import errno
-        sys.stdout.flush()
-        stdout_fd = os.dup(1)
-        r, w = os.pipe()
-        try:
-            # Override stdout with r - dup is guaranteed to return the lowest free fd
-            os.close(1)
-            os.dup(w)
-
-            captured_stdout = ['']
-            yield captured_stdout
-            sys.stdout.flush()  # Make sure that Python hasn't buffered anything
-
-            # Do the ugly dance to read all the data that was written into the pipe
-            fcntl.fcntl(r, fcntl.F_SETFL, os.O_NONBLOCK)
-            total_stdout = ''
-            while True:
-                try:
-                    total_stdout += os.read(r, 1000).decode('ascii')
-                except OSError as e:
-                    if e.errno != errno.EAGAIN:
-                        raise
-                    break
-            captured_stdout[0] = total_stdout
-        finally:
-            # Revert the change, and clean up all fds
-            os.close(1)
-            os.dup(stdout_fd)
-            os.close(stdout_fd)
-            os.close(r)
-            os.close(w)
-
     def test_joined_str(self):
         def func(x):
             hello, test = "Hello", "test"

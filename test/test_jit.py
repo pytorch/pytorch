@@ -2850,21 +2850,6 @@ graph(%Ra, %Rb):
 
 
 class TestScript(JitTestCase):
-    class capture_stdout(list):
-        """
-        Replace sys.stdout with a temporary StringIO
-        """
-        def __enter__(self):
-            self.sys_stdout = sys.stdout
-            self.stringio = StringIO()
-            sys.stdout = self.stringio
-            return self
-
-        def __exit__(self, *args):
-            self.append(str(self.stringio.getvalue()))
-            del self.stringio
-            sys.stdout = self.sys_stdout
-
     def test_sequence_parsing(self):
         tests = [
             ("return [x, x,]", True),
