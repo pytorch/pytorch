@@ -12279,6 +12279,43 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
+    def test_sign(self):
+
+        # Check sign for on all supported backends
+        for device in torch.testing.get_all_device_types():
+
+            # Check sign for all maths dtype
+            for dtype in torch.testing.get_all_math_dtypes(device):
+
+                # Include NaN for floating point numbers
+                if dtype.is_floating_point:
+                    dt_info = torch.finfo(dtype)
+
+                    # Create tensor (with NaN checking)
+                    a = torch.tensor([float('nan'), -12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
+                    a_target = torch.tensor([0, -1, 0, 1, -1, 1], device=device, dtype=dtype)
+
+                else:
+                    dt_info = torch.iinfo(dtype)
+
+                    # If unsigned type, everything should be > 0
+                    if dt_info.min == 0:
+                        # Create tensor
+                        a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
+                        a_target = torch.tensor([1, 0, 1, 0, 1], device=device, dtype=dtype)
+                    else:
+                        # Create tensor
+                        a = torch.tensor([-12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
+                        a_target = torch.tensor([-1, 0, 1, -1, 1], device=device, dtype=dtype)
+
+                self.assertEqual(a.sign(), a_target, 'sign device={} dtype={}'.format(device, dtype))
+
+            # Include test for bool dtype
+            a_bool = torch.tensor([True, True, False, float('nan')], device=device).bool()
+            a_bool_target = torch.tensor([True, True, False, True], device=device).bool()
+            self.assertEqual(a_bool.sign(), a_bool_target, 'sign device={} dtype=bool'.format(device))
+
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
