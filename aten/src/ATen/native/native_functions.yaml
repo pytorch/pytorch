@@ -414,6 +414,7 @@
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   named_guard: False
@@ -1436,6 +1437,7 @@
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -1850,6 +1852,7 @@
 - func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   variants: function, method
@@ -1910,10 +1913,12 @@
 - func: split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
