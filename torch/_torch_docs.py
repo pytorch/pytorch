@@ -3778,7 +3778,7 @@ The returned tensor :attr:`out` is of the same shape as :attr:`exponent`
 The operation applied is:
 
 .. math::
-    out_i = self ^ {exponent_i}
+    \text{out}_i = \text{self} ^ {\text{exponent}_i}
 
 Args:
     self (float): the scalar base value for the power operation
@@ -5866,9 +5866,9 @@ Return a tensor of elements selected from either :attr:`input` or :attr:`other`,
 The operation is defined as:
 
 .. math::
-    out_i = \begin{cases}
-        input_i & \text{if } \text{condition}_i \\
-        other_i & \text{otherwise} \\
+    \text{out}_i = \begin{cases}
+        \text{input}_i & \text{if } \text{condition}_i \\
+        \text{other}_i & \text{otherwise} \\
     \end{cases}
 
 .. note::
