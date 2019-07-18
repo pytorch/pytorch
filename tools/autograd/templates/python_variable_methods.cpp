@@ -94,8 +94,9 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python.
     return THPSize_New(self_);
+  }
 #ifdef BUILD_NAMEDTENSOR
-  } else if (r.idx == 2) {
+  else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
       TORCH_INTERNAL_ASSERT("NYI: Named tensors w/ JIT");
     }
@@ -127,8 +128,9 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
     return THPUtils_packInt64Array(strides.size(), strides.data());
+  }
 #ifdef BUILD_NAMEDTENSOR
-  } else if (r.idx == 2) {
+  else if (r.idx == 2) {
     return wrap(self_.stride(r.dimname(0)));
   }
 #endif
