@@ -683,7 +683,9 @@ class TestCppExtension(common.TestCase):
 
         trainset = chunk.ChunkDatasetWrapper(dummy_chunkdataset)
         trainset.reset()
-        trainloader = DataLoader(dataset=trainset)
+        trainloader = DataLoader(dataset=trainset,
+                                 batch_size=None,
+                                 pin_memory=True)
         for i, actual in enumerate(trainloader, 0):
             expected = [torch.tensor([j], dtype=torch.long)
                         for j in list(range(batch_size * i, batch_size * i + batch_size))]
@@ -767,10 +769,24 @@ class TestCppExtension(common.TestCase):
                 dict['label'] = labels_out
                 return dict
 
+        def worker_init_fn(worker_id):
+            # A recent change on pytorch enabled multithreading by default
+            # Dataloader logic requires a single thread, though
+            # Until the https://github.com/pytorch/pytorch/issues/19213 is resolved,
+            # you have to create an environment variable OMP_NUM_THREADS=1 as a workaround
+            torch.set_num_threads(1)
+            print('Initializing worker {} with {} threads'.format(
+                worker_id, torch.get_num_threads()))
+            dataset = torch.utils.data.get_worker_info().dataset
+            chunk_sampler = dataset.chunk_sampler()
+            chunk_sampler.set_current_stride(stride=worker_id)
+            dataset.reset()
+
         chunk_count = 1
         batch_size = 5
         cache_size = 100
         preloaders = 1
+        num_workers = 1
         chunk_sampler = chunk.SequentialSampler(size=chunk_count)
         example_sampler = chunk.SequentialSampler(size=batch_size)
         chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
@@ -785,10 +801,14 @@ class TestCppExtension(common.TestCase):
 
         trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset, transform_fn)
         trainset.reset()
-        trainloader = DataLoader(dataset=trainset)
+        trainloader = DataLoader(dataset=trainset,
+                                 num_workers=num_workers,
+                                 batch_size=None,
+                                 pin_memory=True,
+                                 worker_init_fn=worker_init_fn)
         for i, actual in enumerate(trainloader, 0):
-            expected = {'feature': torch.stack([torch.tensor([j for j in list(range(batch_size * i, batch_size * i + batch_size))])]),
-                        'label': torch.stack([torch.tensor([j for j in list(range(batch_size * i + 1, batch_size * i + 1 + batch_size))])])}
+            expected = {'feature': torch.tensor([j for j in list(range(batch_size * i, batch_size * i + batch_size))]),
+                        'label': torch.tensor([j for j in list(range(batch_size * i + 1, batch_size * i + 1 + batch_size))])}
             self.assertEqual(expected, actual)
 
 class TestMSNPUTensor(common.TestCase):

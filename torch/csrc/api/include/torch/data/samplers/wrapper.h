@@ -93,12 +93,12 @@ class SamplerWrapper : public Sampler<> {
     }
   }
 
-  /// Serializes the `RandomSampler` to the `archive`.
+  /// Serializes the internal `Sampler` to the `archive`.
   void save(serialize::OutputArchive& archive) const override {
     sampler_->save(archive);
   }
 
-  /// Deserializes the `RandomSampler` from the `archive`.
+  /// Deserializes the internal `Sampler` from the `archive`.
   TORCH_API void load(serialize::InputArchive& archive) override {
     sampler_->load(archive);
   }

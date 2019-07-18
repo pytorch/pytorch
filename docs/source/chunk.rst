@@ -159,10 +159,13 @@ The main steps for a `ChunkDataset` implementation with built-in type `Example` 
   d) Instantiate a `SamplerWrapper` for example sampler
   e) Instantiate a specific `ChunkDataReader`
   f) Instantiate a `ChunkDatasetOptions`
-  g) Instantiate a `ChunkDataset`
+  g) Instantiate a specific `ChunkDataset` implementation
   h) Instantiate a `ChunkDatasetWrapper`
   i) Instantiate a `DataLoader`
-  j) Iterate on `DataLoader`
+  j) [optional] Set `DataLoader`'s :attr:`batch_size=None` to disable `auto collation`
+  k) [optional] Set `DataLoader`'s :attr:`pin_memory=True` to pin memory
+  l) [optional] If DataLoader's :attr:`num_workers` > 1, implement a worker initialization function and set :attr:`worker_init_fn` on :py:class:`DataLoader` constructor
+  m) Iterate over `DataLoader`
 
 *ps: Opaque types prevent memory copy between C++ and Python*
 
@@ -188,7 +191,7 @@ Python snippet::
 >>> trainset = chunk.ChunkDataset(dummy_chunkdataset)
 >>> trainset.reset()
 >>> # Integrating with Python DataLoader
->>> trainloader = DataLoader(dataset=trainset)
+>>> trainloader = DataLoader(dataset=trainset, num_workers=1)
 >>> # Iterating over the ChunkDataset
 >>> for i, batch in enumerate(trainloader, 0):
 >>>   print('Batch {} is {} examples long'.format(i, len(actual)))
@@ -219,11 +222,14 @@ The main steps for a `ChunkDataset` implementation with custom type `Example` ar
   d) Instantiate a `SamplerWrapper` for the example sampler in the previous step
   e) Instantiate a specific `ChunkDataReader`
   f) Instantiate a `ChunkDatasetOptions`
-  g) Instantiate a `ChunkDataset`
+  g) Instantiate a specific `ChunkDataset` implementation
   h) Instantiate a `ChunkDatasetWrapper`
-  i) [optional] If BatchType doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement `transform_fn`
+  i) [optional] If `ChunkDataset::BatchType` doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement a transformation function and set :attr:`transform_fn` on :py:class:`ChunkDatasetWrapper` constructor
   j) Instantiate a `DataLoader`
-  k) Iterate on `DataLoader`
+  k) [optional] Set `DataLoader`'s :attr:`batch_size=None` to disable `auto collation`
+  l) [optional] Set `DataLoader`'s :attr:`pin_memory=True` to pin memory
+  m) [optional] If DataLoader's :attr:`num_workers` > 1, implement a worker initialization function and set :attr:`worker_init_fn` on :py:class:`DataLoader` constructor
+  n) Iterate over `DataLoader`
 
 ps: Opaque types prevent memory copy between C++ and Python
 
@@ -406,10 +412,22 @@ Python snippet:
           dict['label'] = labels_out
           return dict
 
+  def worker_init_fn(worker_id):
+    # A recent change on pytorch enabled multithreading by default
+    # Dataloader logic requires a single thread, though
+    # Until the https://github.com/pytorch/pytorch/issues/19213 is resolved,
+    # you have to create an environment variable OMP_NUM_THREADS=1 as a workaround
+    torch.set_num_threads(1)
+    dataset = torch.utils.data.get_worker_info().dataset
+    chunk_sampler = dataset.chunk_sampler()
+    chunk_sampler.set_current_stride(stride=worker_id)
+    dataset.reset()
+
   chunk_count = 1
   batch_size = 5
   cache_size = 100
   preloaders = 1
+  num_workers = 2
   chunk_sampler = chunk.SequentialSampler(size=chunk_count)
   example_sampler = chunk.SequentialSampler(size=batch_size)
   chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
@@ -418,12 +436,14 @@ Python snippet:
   opt = chunk.ChunkDatasetOptions(preloader_count=preloaders, batch_size=batch_size, cache_size=cache_size)
 
   foo_chunkdataset = cpp_extension.FooChunkDataset(chunk_reader=reader,
-                                                    chunk_sampler=chunk_sampler_wrapper,
-                                                    example_sampler=example_sampler_wrapper,
-                                                    options=opt)
+                                                   chunk_sampler=chunk_sampler_wrapper,
+                                                   example_sampler=example_sampler_wrapper,
+                                                   options=opt)
 
   trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset, transform_fn)
   trainset.reset()
-  trainloader = DataLoader(dataset=trainset)
+  trainloader = DataLoader(dataset=trainset,
+                           num_workers=num_workers,
+                           worker_init_fn=worker_init_fn)
   for i, batch in enumerate(trainloader, 0):
     print('Batch {}: {}'.format(i, batch))
