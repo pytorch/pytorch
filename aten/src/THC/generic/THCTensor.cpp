@@ -161,7 +161,9 @@ THCTensor *THCTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t siz
 THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
 {
   THCTensor *tensor = THCTensor_(new)(state);
-  THCTensor_(resizeAs)(state, tensor, self);
+  at::Tensor tensor_wrap = THTensor_wrap(tensor);
+  at::Tensor self_wrap = THTensor_wrap(self);
+  tensor.resize_as_(self);
   THCTensor_(copy)(state, tensor, self);
   return tensor;
 }

@@ -154,9 +154,9 @@ THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, 
 THTensor *THTensor_(newClone)(THTensor *self)
 {
   THTensor *tensor = THTensor_(new)();
-  THTensor_(resizeAs)(tensor, self);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
+  tensor.resize_as_(self);
   at::native::copy_(tensor_wrap, self_wrap, false);
   return tensor;
 }

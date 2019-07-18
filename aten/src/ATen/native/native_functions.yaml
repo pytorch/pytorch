@@ -2346,8 +2346,8 @@
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_resize_as_
-    CUDA: legacy::cuda::_th_resize_as_
+    CPU: resize_as_cpu_
+    CUDA: resize_as_cuda_
     SparseCPU: resize_as_sparse_
     SparseCUDA: resize_as_sparse_
 
