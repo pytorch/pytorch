@@ -69,8 +69,6 @@ def get_unary_functions():
         # 'sub',
         'tan',
         'tanh',
-        'tril',
-        'triu',
         'trunc']
 
 

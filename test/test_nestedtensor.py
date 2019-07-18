@@ -174,15 +174,27 @@ class TestNestedTensor(TestCase):
         self.assertFalse(z.requires_grad)
 
         x = torch.nestedtensor(data, requires_grad=True)
+        print('1 x.requires_grad')
+        print(x.requires_grad)
         y = x * twos
+        print('2 x.requires_grad')
+        print(x.requires_grad)
         y = y.detach()
         self.assertFalse(y.requires_grad)
         self.assertIsNone(y.grad_fn)
         z = x + y
+        print('3 x.requires_grad')
+        print(x.requires_grad)
         z.sum().backward()
 
         # This is an incorrect gradient, but we assume that's what the user
         # wanted. detach() is an advanced option.
+        print('4 x.requires_grad')
+        print(x.requires_grad)
+        print('x.grad')
+        print(x.grad)
+        # print('x.buffer().grad')
+        # print(x.buffer().grad)
         self.assertTrue((x.grad.data == ones).all())
 
         # in-place detach

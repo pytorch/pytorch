@@ -32,8 +32,11 @@ def _nary_gen(out_dtype=None):
                 assert out.tensors[i].size() == inputs[0].tensors[i].size()
             if out_dtype is not None:
                 out = out.to(out_dtype)
-            for i in range(len(inputs[0])):
-                func(*list(map(lambda x: x.tensors[i], inputs)), out=out.tensors[i])
+            if all(nested_tensor.is_contiguous() for nested_tensor in inputs):
+                func(*list(map(lambda x: x.buffer(), inputs)), out=out.buffer())
+            else:
+                for i in range(len(inputs[0])):
+                    func(*list(map(lambda x: x.tensors[i], inputs)), out=out.tensors[i])
             return out
     return _nary
 

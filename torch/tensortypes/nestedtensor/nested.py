@@ -60,18 +60,13 @@ def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_m
             if not torch.is_tensor(data_):
                 raise ValueError("Each element of the tuple or list must "
                                  "be a torch.Tensor")
-        tensors = []
-        for data_ in data:
-            # torch.tensor copies on construction
-            new_data = torch.empty_like(data_)
-            new_data.copy_(data_)
-            new_data = new_data.to(dtype)
-            new_data = new_data.to(device)
-            new_data = new_data.requires_grad_(requires_grad)
-            if pin_memory:
-                new_data = new_data.pin_memory()
-            tensors.append(new_data)
-        return NestedTensor(tensors).contiguous()
+        ret = as_nestedtensor(data).clone().detach()
+        ret = ret.to(dtype)
+        ret = ret.to(device)
+        ret.requires_grad_(requires_grad)
+        if pin_memory:
+            ret.pin_memory()
+        return ret #.contiguous()
 
 def as_nestedtensor(data, dtype=None, device=None):
     ret = NestedTensor(data)
@@ -128,6 +123,8 @@ class NestedTensor():
             grads = []
             for tensor in self.tensors:
                 grads.append(tensor.grad)
+            print('grads')
+            print(grads)
             if all(grad is None for grad in grads):
                 return None
             else:
@@ -208,6 +205,9 @@ class NestedTensor():
     def detach_(self):
         return NestedTensor(self.__loop__apply(lambda x: x.detach_()))
 
+    def pin_memory(self, *args, **kwargs):
+        return NestedTensor(self.__loop__apply(lambda x: x.pin_memory(*args, **kwargs)))
+
     def backward(self, *args, **kwargs):
         self.tensors = self.__loop__apply(lambda x: x.backward(*args, **kwargs))
 
@@ -221,7 +221,7 @@ class NestedTensor():
         return NestedTensor(self.__loop__apply(lambda x: x.to(*args, **kwargs)))
 
     def requires_grad_(self, *args, **kwargs):
-        return NestedTensor(self.__loop__apply(lambda x: x.requires_grad_(*args, **kwargs)))
+        self.__loop__apply(lambda x: x.requires_grad_(*args, **kwargs))
 
     def unbind(self):
         return tuple(self.tensors)
@@ -244,10 +244,14 @@ class NestedTensor():
         self.buffer_ = torch.cat(flat_tensors)
         current_offset = 0
         for i in range(len(self.tensors)):
-            self.tensors[i].set_(self.buffer_.storage(),
-                        storage_offset=current_offset,
-                        size=self.tensors[i].size(),
-                        stride=self.tensors[i].stride())
+            new_tensor = torch.empty_like(self.tensors[i], dtype=self.dtype, layout=self.layout, device=self.device)
+            new_tensor.set_(self.buffer_.storage(),
+                            storage_offset=current_offset,
+                            size=self.tensors[i].size(),
+                            stride=self.tensors[i].stride())
+            new_tensor.copy_(self.tensors[i])
+            new_tensor.requires_grad_(self.requires_grad)
+            self.tensors[i] = new_tensor
             current_offset += self.tensors[i].numel()
         return self
 
