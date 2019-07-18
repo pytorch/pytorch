@@ -363,7 +363,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(9)
     def test_sort(self):
         class SortModel(torch.nn.Module):
             def __init__(self, dim):
@@ -377,6 +376,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(SortModel(dim), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, x):
