@@ -163,7 +163,7 @@ THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
   THCTensor *tensor = THCTensor_(new)(state);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
-  tensor.resize_as_(self);
+  tensor_wrap.resize_as_(self_wrap);
   THCTensor_(copy)(state, tensor, self);
   return tensor;
 }

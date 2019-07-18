@@ -156,7 +156,7 @@ THTensor *THTensor_(newClone)(THTensor *self)
   THTensor *tensor = THTensor_(new)();
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
-  tensor.resize_as_(self);
+  tensor_wrap.resize_as_(self_wrap);
   at::native::copy_(tensor_wrap, self_wrap, false);
   return tensor;
 }

@@ -2336,8 +2336,8 @@
 - func: clone(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_clone
-    CUDA: legacy::cuda::_th_clone
+    CPU: clone
+    CUDA: clone
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
