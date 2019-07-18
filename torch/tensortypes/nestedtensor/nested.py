@@ -202,9 +202,6 @@ class NestedTensor():
     def clone(self):
         return NestedTensor(self.__loop__apply(lambda x: x.clone()))
 
-    def type(self, dtype):
-        return NestedTensor(self.__loop__apply(lambda x: x.type(dtype)))
-
     def to(self, *args, **kwargs):
         return NestedTensor(self.__loop__apply(lambda x: x.to(*args, **kwargs)))
 
