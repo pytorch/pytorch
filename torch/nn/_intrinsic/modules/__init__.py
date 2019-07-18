@@ -1,13 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 
-class ConvReLU2d(torch.nn.Sequential):
-    def __init__(self, conv, relu):
-        super(ConvReLU2d, self).__init__(conv, relu)
-
-class LinearReLU(torch.nn.Sequential):
-    def __init__(self, linear, relu):
-        super(LinearReLU, self).__init__(linear, relu)
+from .conv_relu import ConvReLU2d
+from .linear_relu import LinearReLU
 
 class ConvBn2d(torch.nn.Sequential):
     def __init__(self, conv, bn):
