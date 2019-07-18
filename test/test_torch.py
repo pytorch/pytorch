@@ -12053,6 +12053,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         TestTorch.unary_check_mem_overlap(self, lambda t: t.round_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.rsqrt_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.sin_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.sign_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.sqrt_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tan_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
@@ -12281,7 +12282,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_sign(self):
 
-        # Check sign for on all supported backends
+        # Check sign on all supported backends
         for device in torch.testing.get_all_device_types():
 
             # Check sign for all maths dtype
@@ -12298,13 +12299,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 else:
                     dt_info = torch.iinfo(dtype)
 
-                    # If unsigned type, everything should be > 0
+                    # If unsigned type, everything should be >= 0
                     if dt_info.min == 0:
-                        # Create tensor
                         a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
                         a_target = torch.tensor([1, 0, 1, 0, 1], device=device, dtype=dtype)
                     else:
-                        # Create tensor
                         a = torch.tensor([-12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
                         a_target = torch.tensor([-1, 0, 1, -1, 1], device=device, dtype=dtype)
 
