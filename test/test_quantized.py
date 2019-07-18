@@ -493,6 +493,7 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
+@unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
 @unittest.skipIf(TEST_WITH_UBSAN,
                  "QNNPACK does not play well with UBSAN at the moment,"
                  " so we skip the test if we are in a UBSAN environment.")
