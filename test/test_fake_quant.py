@@ -7,7 +7,7 @@ import numpy as np
 import unittest
 from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis_utils import qtensor, array_shapes
+import hypothesis_utils as hu
 from common_utils import run_tests
 from torch.quantization import FakeQuantize
 
@@ -34,12 +34,16 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
 
     # Note:
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
-    def test_forward(self, device, Q):
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_forward(self, device, X):
         r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
         """
         np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point), (quant_min, quant_max), torch_type = Q
+        X, (scale, zero_point, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
         X = torch.tensor(X).to(dtype=torch.float, device=device)
         Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
         Y_prime = torch.fake_quantize_per_tensor_affine(
@@ -47,13 +51,17 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
-    def test_backward(self, device, Q):
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_backward(self, device, X):
         r"""Tests the backward method. Note that this runs the reference quantization
         and thus the errors might be originating there.
         """
         np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point), (quant_min, quant_max), torch_type = Q
+        X, (scale, zero_point, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
         X = torch.tensor(X).to(dtype=torch.float, device=device)
         X.requires_grad_()
         Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
@@ -66,12 +74,16 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
-    def test_numerical_consistency(self, device, Q):
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_numerical_consistency(self, device, X):
         r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         """
         np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point), (quant_min, quant_max), torch_type = Q
+        X, (scale, zero_point, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
         X = torch.tensor(X).to(dtype=torch.float, device=device)
         # quantize_linear and dequantize are only implemented in CPU
         Y = torch.dequantize(torch.quantize_linear(X.cpu(), scale, zero_point, torch_type))
@@ -80,10 +92,14 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           Q=qtensor(shapes=array_shapes(1, 5,), dtypes=((torch.quint8, None),)))
-    def test_fq_module(self, device, Q):
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_fq_module(self, device, X):
         np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point), (quant_min, quant_max), torch_type = Q
+        X, (scale, zero_point, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
         X = torch.tensor(X).to(dtype=torch.float, device=device)
         X.requires_grad_()
         fq_module = FakeQuantize(torch_type, torch.per_tensor_affine, quant_min, quant_max)
