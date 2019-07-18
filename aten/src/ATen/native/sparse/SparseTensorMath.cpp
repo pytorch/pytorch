@@ -290,7 +290,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
     // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
     // and we concat the indices and values tensors instead.
     AT_DISPATCH_ALL_TYPES(
-      s_values.scalar_type(), "add_out_sparse_cuda", [&] {
+      s_values.scalar_type(), "add_out_sparse_cpu", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             s_values = s_values.mul(value);
           }
@@ -310,7 +310,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 // --------------------------------------------------------------------
 
 template <typename scalar_t>
-void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
+void add_dense_sparse_worker_scalar_cpu(Tensor& r, Scalar value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto values_accessor = values.accessor<scalar_t, 1>();
 
@@ -328,6 +328,41 @@ void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sp
   });
 }
 
+template <typename scalar_t>
+void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
+
+  int64_t values_dense_size = values.stride(0);
+  AT_ASSERT(values_dense_size > 0);
+  AT_ASSERT(values.is_contiguous());
+
+  auto indices_accessor = indices.accessor<int64_t, 2>();
+
+  scalar_t* r_ptr = r.data<scalar_t>();
+  AT_ASSERT(r_ptr != nullptr);
+  auto r_offset = r.storage_offset();
+
+  scalar_t* v_ptr = values.data<scalar_t>();
+  AT_ASSERT(v_ptr != nullptr);
+  auto v_offset = values.storage_offset();
+
+  scalar_t cast_value = value.to<scalar_t>();
+  at::parallel_for(0, sparse._nnz(), 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++) {
+      auto r_index = r_offset;
+      for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
+        r_index += r.stride(d) * indices_accessor[d][k];
+      }
+      auto v_index = v_offset + k * values_dense_size;
+      //THBlas_axpy<scalar_t>(values_dense_size, cast_value, v_ptr + v_index, 1, r_ptr + r_index, 1);
+      //#pragma omp simd
+      for (auto v = 0; v < values_dense_size; v++) {
+        r_ptr[r_index + v] += cast_value * v_ptr[v_index + v];
+      }
+    }
+  });
+}
+
+
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value) {
   AT_ASSERT(!r.is_sparse());
   AT_ASSERT(!dense.is_sparse());
@@ -341,33 +376,44 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
     dense.sizes(), " while other has size ", sparse_.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
 
   r.resize_as_(dense);
+  if (!is_same_tensor(r, dense)) r.copy_(dense);
+  if (sparse_._nnz() == 0) return r;
+
+  AT_ASSERT(r.has_storage());
   SparseTensor sparse = sparse_.coalesce();
 
   LongTensor indices = sparse._indices();
   Tensor values = sparse._values();
+  AT_ASSERT(values.has_storage());
   int64_t nDim = dense.dim();
   int64_t nDimI = sparse.sparse_dim();
 
-  if (!is_same_tensor(r, dense)) r.copy_(dense);
-  if (sparse._nnz() == 0) return r;
-
   // accessors rely on nnz test
-  if (nDim > nDimI) {
-    auto indices_accessor = indices.accessor<int64_t, 2>();
-    for (int64_t k = 0; k < sparse._nnz(); k++) {
-      Tensor dstBuffer = r;
-      for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
-        dstBuffer = dstBuffer.select(0, indices_accessor[d][k]);
-      }
-      Tensor srcBuffer = values.select(0, k);
-      dstBuffer.add_(srcBuffer, value);
-    }
-  } else {
+  if (nDim == nDimI) {
+    AT_DISPATCH_ALL_TYPES(
+        values.scalar_type(), "add_dense_sparse_scalar", [&] {
+          add_dense_sparse_worker_scalar_cpu<scalar_t>(r, value, sparse, indices, values);
+        });
+  } else if ((r.storage().data() != nullptr) && r.is_contiguous() && (values.storage().data() != nullptr)) {
+    values = values.contiguous();
     AT_DISPATCH_ALL_TYPES(
         values.scalar_type(), "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(r, value, sparse, indices, values);
         });
+  } else {
+    auto indices_accessor = indices.accessor<int64_t, 2>();
+    at::parallel_for(0, sparse._nnz(), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        Tensor dstBuffer = r;
+        for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
+          dstBuffer = dstBuffer.select(0, indices_accessor[d][k]);
+        }
+        Tensor srcBuffer = values.select(0, k);
+        dstBuffer.add_(srcBuffer, value);
+      }
+    });
   }
+
   return r;
 }
 

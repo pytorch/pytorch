@@ -221,8 +221,12 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
+  bool src_is_contiguous = src->is_contiguous();
+  if (!src_is_contiguous) {
+    src = THTensor_(newContiguous)(src);
+  }
 
-  if (dim == 0 && THTensor_(isContiguous)(src) && THTensor_(isContiguous)(tensor))
+  if (dim == 0 && THTensor_(isContiguous)(tensor))
   {
     tensor_data = tensor->data<scalar_t>();
     src_data = src->data<scalar_t>();
@@ -282,6 +286,9 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
     }
   }
 
+  if (!src_is_contiguous) {
+    c10::raw::intrusive_ptr::decref(src);
+  }
   THLongTensor_free(index);
 }
 
