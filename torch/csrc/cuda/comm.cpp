@@ -80,7 +80,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 // When splitting, the view operations will make all Variables broadcast
 // together to share a single version counter, because they are all views of the
 // large Variable. However, that large Variable is immediately discarded and all
-// these Varaibles do not share storage at all.
+// these Variables do not share storage at all.
 //
 // For example, when two buffers are broadcast together in `DataParallel` and
 // one of them is modified in-place during `forward` but the other is needed in
@@ -152,6 +152,8 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
         for (auto & t : utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
+          // We specifically want to use `variable_data()` instead of `detach()` here,
+          // because we want the returned tensor to have a new version counter.
           Variable var = as_variable_ref(t).variable_data();
           var.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
           device_outputs.push_back(var);
@@ -166,6 +168,8 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
         for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
+          // We specifically want to use `variable_data()` instead of `detach()` here,
+          // because we want the returned tensor to have a new version counter.
           Variable var = as_variable_ref(t).variable_data();
           var.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
           device_outputs.push_back(var);
