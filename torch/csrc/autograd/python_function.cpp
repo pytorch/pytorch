@@ -631,7 +631,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
     std::vector<c10::IValue>(),
     autograd::Function::peek_at_next_sequence_nr());
 
-  TORCH_WARN("Legacy autograd function with non-static forward method is deprecated. ",
+  TORCH_WARN("Legacy autograd function with non-static forward method is deprecated and will be removed in 1.3. ",
              "Please use new-style autograd function with static forward method. ",
              "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)");
 
