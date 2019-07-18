@@ -160,6 +160,7 @@ THCTensor *THCTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t siz
 
 THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
 {
+  // already available in Aten as at::clone()
   THCTensor *tensor = THCTensor_(new)(state);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
@@ -251,6 +252,7 @@ void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntArrayRef size, 
 
 void THCTensor_(resizeAs)(THCState *state, THCTensor *self, THCTensor *src)
 {
+  // already available in Aten as at::resize_as_()
   THCTensor_resizeAs(state, self, src);
 }
 
