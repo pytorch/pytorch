@@ -41,20 +41,20 @@ class Linear(NNLinear):
     def forward(self, input):
         return self.observer(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
-    @staticmethod
-    def from_float(mod, qconfig=None):
+    @classmethod
+    def from_float(cls, mod, qconfig=None):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == NNLinear, 'qat.Linear.from_float only works for nn.Linear'
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+            assert mod.qconfig, 'Input float module must has valid qconfig'
             qconfig = mod.qconfig
-        qat_linear = Linear(mod.in_features, mod.out_features,
-                            activation_fake_quant=qconfig.activation(),
-                            weight_fake_quant=qconfig.weight())
+        qat_linear = cls(mod.in_features, mod.out_features,
+                         activation_fake_quant=qconfig.activation(),
+                         weight_fake_quant=qconfig.weight())
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias
         return qat_linear
