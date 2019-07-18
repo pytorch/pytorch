@@ -167,7 +167,6 @@ class TestAutograd(TestCase):
         MyFunction()(y).sum().backward()
         self.assertEqual(v.grad.data, torch.zeros(shape))
 
-    @unittest.skipIf(not PY3, "catch_warnings doesn't work in this case in Python 2.7")
     def test_legacy_function_deprecation_warning(self):
         with warnings.catch_warnings(record=True) as w:
             # Ensure warnings are being shown
@@ -180,6 +179,8 @@ class TestAutograd(TestCase):
 
                 def backward(self, grad_output):
                     return grad_output
+
+            MyFunction()(torch.randn(3, 4))
 
             # Check warning occurs
             self.assertIn(
