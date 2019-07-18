@@ -86,9 +86,27 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
     }
   }
 
+  // Blocks can refer to values in outer scopes
+  // NB: This does not copy ivalues
+  for (auto block : toMerge->blocks()) {
+    for (auto node : block->nodes()) {
+      for (auto input : node->inputs()) {
+        if (input->node()->owningBlock() != block) {
+          subgraphNode->addInput(input);
+          auto inputToGraph = subgraph->addInput();
+          inputToGraph->setType(input->type());
+          inputsMap[input] = inputToGraph;
+        }
+      }
+    }
+  }
+
   // Merge the node into the graph
-  auto mergedNode = subgraph->insertNode(
-      subgraph->createClone(toMerge, [&](Value* v) { return inputsMap[v]; }));
+  auto mergedNode =
+      subgraph->insertNode(subgraph->createClone(toMerge, [&](Value* v) {
+        AT_ASSERT(inputsMap.count(v));
+        return inputsMap[v];
+      }));
 
   // If n's outputs were inputs to `group`, remove them since we just merged
   // n in.
