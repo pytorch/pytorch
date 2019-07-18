@@ -15,13 +15,9 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
+from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
 
-
-RNN_BATCH_SIZE = 7
-RNN_SEQUENCE_LENGTH = 11
-RNN_INPUT_SIZE = 5
-RNN_HIDDEN_SIZE = 3
 
 def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -614,11 +610,6 @@ class TestONNXRuntime(unittest.TestCase):
         input = make_input(RNN_BATCH_SIZE)
         self.run_test(model, input, batch_size=RNN_BATCH_SIZE, atol=1e-7)
 
-        # test that the model still runs with a different batch size
-        # onnxir, _ = do_export(model, input)
-        # other_input = make_input(RNN_BATCH_SIZE + 1)
-        # _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
-
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
         batch_first = True if packed_sequence == 2 else False
@@ -654,8 +645,6 @@ class TestONNXRuntime(unittest.TestCase):
         input = make_input(RNN_BATCH_SIZE)
         self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
-        # test that the model still runs with a different batch size
-
     def _gru_test(self, layers, bidirectional, initial_state,
                   packed_sequence, dropout):
         batch_first = True if packed_sequence == 2 else False
@@ -688,8 +677,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = make_input(RNN_BATCH_SIZE)
         self.run_test(model, input, batch_size=RNN_BATCH_SIZE,)
-
-        # test that the model still runs with a different batch size
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
