@@ -11,7 +11,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _requantize
 
 
