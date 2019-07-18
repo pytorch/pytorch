@@ -4426,7 +4426,10 @@ add_docstr(torch.sign,
            r"""
 sign(input, out=None) -> Tensor
 
-Returns a new tensor with the sign of the elements of :attr:`input`.
+Returns a new tensor with the signs of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \operatorname{sgn}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor

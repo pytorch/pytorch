@@ -15,21 +15,6 @@ namespace c10d {
 
 namespace {
 
-struct AutoNcclGroup {
-  AutoNcclGroup() {
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupStart());
-#endif
-  }
-  ~AutoNcclGroup() {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupEnd());
-#endif
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
-  }
-};
-
 // NCCL op mapping
 std::map<ReduceOp, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
@@ -404,7 +389,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
+  std::unique_lock<std::mutex> cudaFreeMutexLock(
+      *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+
   pre(ncclStreams_[key]);
+
+  C10D_NCCL_CHECK(ncclGroupStart());
 
   for (size_t i = 0; i < inputs.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
@@ -420,17 +410,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     // See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
         inputs[i].storage().data(), ncclStream);
+
+    C10D_NCCL_CHECK(
+        fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
   }
 
-  {
-    AutoNcclGroup nccl_group_guard;
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      gpuGuard.set_index(devices[i].index());
-      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-      C10D_NCCL_CHECK(
-          fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
-    }
-  }
+  C10D_NCCL_CHECK(ncclGroupEnd());
 
   post(ncclStreams_[key]);
 
