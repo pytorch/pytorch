@@ -320,11 +320,14 @@ class ChunkDataset final
       ChunkReader chunk_reader,
       ChunkSampler chunk_sampler,
       ExampleSampler example_sampler,
-      ChunkDatasetOptions options)
+      ChunkDatasetOptions options,
+      std::function<void(UnwrappedBatchType&)> sorting_policy =
+          std::function<void(UnwrappedBatchType&)>())
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
         options_(std::move(options)),
+        sorting_policy_(sorting_policy),
         quit_worker_(false),
         running_preloaders_(0),
         load_checkpoint_(false) {}
@@ -436,6 +439,9 @@ class ChunkDataset final
           std::move(
               chunk_data.begin(), chunk_data.end(), std::back_inserter(data));
         }
+        if (sorting_policy_){
+          sorting_policy_(data);
+        }
         if (!data.empty()) { // skip empty chunks.
           batch_buffer_->add_chunk_data(std::move(data));
         }
@@ -482,6 +488,8 @@ class ChunkDataset final
 
   /// The options the Dataset was configured with.
   const ChunkDatasetOptions options_;
+
+  std::function<void(UnwrappedBatchType&)> sorting_policy_;
 
   // indicate whether the worker thread can be teared down
   std::atomic<bool> quit_worker_;
