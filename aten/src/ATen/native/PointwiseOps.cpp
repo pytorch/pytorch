@@ -37,7 +37,7 @@ Tensor& addcmul_cpu_out(
     const Tensor& tensor2,
     Scalar value) {
   assert_no_internal_overlap(result, "addcmul_cpu");
-  checkBackend("bitwise_not", result, self.type().backend());
+  checkBackend("addcmul_cpu", result, self.type().backend());
   auto builder = at::TensorIterator::Builder();
   builder.add_output(result);
   builder.add_input(self);
