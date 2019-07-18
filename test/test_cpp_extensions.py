@@ -716,8 +716,8 @@ class TestCppExtension(common.TestCase):
             Step 6: Instantiate a `ChunkDatasetOptions`
             Step 7: Instantiate a `ChunkDataset`
             Step 8: Instantiate a `ChunkDatasetWrapper`
-            Step 8.1: [optional] If BatchType doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement `transform_fn`
             Step 9: Instantiate a `DataLoader`
+            Step 9.1: [optional] If BatchType doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement `collate_fn`
             Step 10: Iterate on `DataLoader`
 
         The API is almost identical to the C++ version. The difference is the need for the
@@ -726,7 +726,7 @@ class TestCppExtension(common.TestCase):
         parallelism as opposed to multi-threading
         """
 
-        def transform_fn(batch):
+        def collate_fn(batch):
             if batch is not None:
                 # Output is a dictionary
                 dict = {}
@@ -799,12 +799,13 @@ class TestCppExtension(common.TestCase):
                                                          example_sampler=example_sampler_wrapper,
                                                          options=opt)
 
-        trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset, transform_fn)
+        trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset)
         trainset.reset()
         trainloader = DataLoader(dataset=trainset,
                                  num_workers=num_workers,
                                  batch_size=None,
                                  pin_memory=True,
+                                 collate_fn=collate_fn,
                                  worker_init_fn=worker_init_fn)
         for i, actual in enumerate(trainloader, 0):
             expected = {'feature': torch.tensor([j for j in list(range(batch_size * i, batch_size * i + batch_size))]),

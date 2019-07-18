@@ -9,19 +9,15 @@ class ChunkDatasetWrapper(IterableDataset):
     r"""
     Wrapper class for the C++ ChunkDataset class.
 
-    Additional to the role of wrapping its C++ counterpart dataset class,
-    it also allows conversion or transformation through ``transform_fn``.
-    ``ChunkDatasetWrapper`` extends ``IterableDataset`` because the size of the dataset is
-    unknown.
+    ``ChunkDatasetWrapper`` extends ``IterableDataset`` because the 
+    size of the ChunkDataset doesn't know the size of the dataset.
 
     Arguments:
         dataset (Dataset): The whole Dataset
-        transform_fn (optional, callable): Collates, converts or transform batches
     """
-    def __init__(self, dataset, transform_fn=None):
+    def __init__(self, dataset):
         super(ChunkDatasetWrapper, self).__init__()
         self.dataset = dataset
-        self.transform_fn = transform_fn
 
     def __iter__(self):
         return self
@@ -33,8 +29,6 @@ class ChunkDatasetWrapper(IterableDataset):
         batch = self.dataset.get_batch()
         if batch is None:
             raise StopIteration
-        if self.transform_fn is not None:
-            return self.transform_fn(batch)
         return batch
 
     def reset(self):

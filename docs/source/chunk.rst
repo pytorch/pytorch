@@ -5,7 +5,7 @@ torch.utils.data.chunk
 
 This module provides a Python `IterableDataset` class called
 :py:class:`torch.utils.data.chunk.ChunkDatasetWrapper` which wraps
-the C++ counterpart as described in the
+the C++ ChunkDataset as described in the
 `PyTorch C++ API documentation <https://pytorch.org/cppdocs/api/library_root.html>`_
 
 .. autoclass:: ChunkDatasetWrapper
@@ -224,8 +224,8 @@ The main steps for a `ChunkDataset` implementation with custom type `Example` ar
   f) Instantiate a `ChunkDatasetOptions`
   g) Instantiate a specific `ChunkDataset` implementation
   h) Instantiate a `ChunkDatasetWrapper`
-  i) [optional] If `ChunkDataset::BatchType` doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement a transformation function and set :attr:`transform_fn` on :py:class:`ChunkDatasetWrapper` constructor
-  j) Instantiate a `DataLoader`
+  i) Instantiate a `DataLoader`
+  j) [optional] If `ChunkDataset::BatchType` doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement a collate function and set :attr:`collate_fn` on :py:class:`DataLoader` constructor
   k) [optional] Set `DataLoader`'s :attr:`batch_size=None` to disable `auto collation`
   l) [optional] Set `DataLoader`'s :attr:`pin_memory=True` to pin memory
   m) [optional] If DataLoader's :attr:`num_workers` > 1, implement a worker initialization function and set :attr:`worker_init_fn` on :py:class:`DataLoader` constructor
@@ -369,7 +369,7 @@ Python snippet:
 
 .. code-block:: python
 
-  def transform_fn(batch):
+  def collate_fn(batch):
       if batch is not None:
           # Output is a dictionary
           dict = {}
@@ -440,10 +440,11 @@ Python snippet:
                                                    example_sampler=example_sampler_wrapper,
                                                    options=opt)
 
-  trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset, transform_fn)
+  trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset)
   trainset.reset()
   trainloader = DataLoader(dataset=trainset,
                            num_workers=num_workers,
+                           collate_fn=collate_fn,
                            worker_init_fn=worker_init_fn)
   for i, batch in enumerate(trainloader, 0):
     print('Batch {}: {}'.format(i, batch))
