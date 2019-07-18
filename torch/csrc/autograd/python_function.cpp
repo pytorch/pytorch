@@ -85,7 +85,13 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
         msg += "')'";
         throw std::runtime_error(msg);
       }
-      variable_results[i] = ((THPVariable*)obj)->cdata.detach();
+      // We use `variable_data()` here, because we want to preserve the original semantics
+      // that the returned variable has a new autograd history and a new version counter.
+      variable_results[i] = ((THPVariable*)obj)->cdata.variable_data();
+      // We set `allow_tensor_metadata_change` to true here, because we want to preserve
+      // the original semantics that the returned variable's tensor metadata can be changed
+      // (e.g. via resizing / restriding).
+      variable_results[i].unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
     }
   }
 
