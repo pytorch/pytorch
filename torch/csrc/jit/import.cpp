@@ -81,6 +81,7 @@ class ScriptModuleDeserializer final {
 
   std::unordered_set<std::string> imported_libs_;
 
+  std::shared_ptr<script::CompilationUnit> compilation_unit_;
   script::Module main_module_;
 };
 
@@ -269,7 +270,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      *main_module_.class_compilation_unit(),
+      main_module_.class_compilation_unit(),
       qualifier,
       src,
       tensor_table_,
@@ -358,7 +359,6 @@ void ScriptModuleDeserializer::convertModule(
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
-        *main_module_.class_compilation_unit(),
         module,
         src,
         tensor_table_,
@@ -438,13 +438,17 @@ script::Module load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
-  script::Module module("__main__");
+  auto cu = std::make_shared<script::CompilationUnit>();
+  const auto basename = c10::QualifiedName("__main__");
+  script::Module module(basename, cu);
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
     script::Module curr = module;
+    auto qualname = basename;
     for (const auto& name : qualified_name) {
+      qualname = c10::QualifiedName(qualname, name);
       if (!curr.find_module(name)) {
-        curr.register_module(name, script::Module("__main__"));
+        curr.register_module(name, script::Module(qualname, cu));
       }
       curr = curr.get_module(name);
     }

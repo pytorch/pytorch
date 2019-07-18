@@ -28,23 +28,23 @@ def _find_cuda_home():
     cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
     if cuda_home is None:
         # Guess #2
-        if IS_WINDOWS:
-            cuda_homes = glob.glob(
-                'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
-            if len(cuda_homes) == 0:
-                cuda_home = ''
-            else:
-                cuda_home = cuda_homes[0]
-        else:
-            cuda_home = '/usr/local/cuda'
-        if not os.path.exists(cuda_home):
+        try:
+            which = 'where' if IS_WINDOWS else 'which'
+            nvcc = subprocess.check_output(
+                [which, 'nvcc']).decode().rstrip('\r\n')
+            cuda_home = os.path.dirname(os.path.dirname(nvcc))
+        except Exception:
             # Guess #3
-            try:
-                which = 'where' if IS_WINDOWS else 'which'
-                nvcc = subprocess.check_output(
-                    [which, 'nvcc']).decode().rstrip('\r\n')
-                cuda_home = os.path.dirname(os.path.dirname(nvcc))
-            except Exception:
+            if IS_WINDOWS:
+                cuda_homes = glob.glob(
+                    'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
+                if len(cuda_homes) == 0:
+                    cuda_home = ''
+                else:
+                    cuda_home = cuda_homes[0]
+            else:
+                cuda_home = '/usr/local/cuda'
+            if not os.path.exists(cuda_home):
                 cuda_home = None
     if cuda_home and not torch.cuda.is_available():
         print("No CUDA runtime is found, using CUDA_HOME='{}'".format(cuda_home))
@@ -324,7 +324,7 @@ class BuildExtension(build_ext, object):
                             cflags = ['-Xcompiler', flag] + cflags
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
-                        cflags = COMMON_MSVC_FLAGS + self.cflags['cxx'] 
+                        cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
                         cmd += cflags
                     elif isinstance(self.cflags, list):
                         cflags = COMMON_MSVC_FLAGS + self.cflags

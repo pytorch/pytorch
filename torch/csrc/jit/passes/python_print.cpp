@@ -650,7 +650,7 @@ struct PythonPrintPass {
       throw script::ErrorReport(stmt.node()->sourceRange())
           << "loop cannot be printed as python "
           << "because it has gone through an optimization "
-          << "that combined while and for loops. File a bug.";
+          << "that combined while and for loops. File a bug";
     }
 
     bool emit_as_for_loop = loop_type == LoopView::For;
@@ -786,7 +786,7 @@ struct PythonPrintPass {
         if (enforce_importable_ && node->inputs().size() != 1) {
           throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
-              << "Normal use of ScriptMethods should enforce this.";
+              << "Normal use of ScriptMethods should enforce this";
         }
         if (node->inputs().size() > 0) {
           indent();
@@ -1222,9 +1222,9 @@ struct PythonPrintPass {
     }
   }
 
-  void printCompilationUnit(const script::CompilationUnit& cu) {
-    for (auto& func : cu.get_functions()) {
-      printFunction(*func);
+  void printModuleMethods(const script::Module& module) {
+    for (const auto method : module.type()->methods()) {
+      printFunction(*method);
     }
   }
 
@@ -1282,13 +1282,13 @@ void PythonPrint(
 void PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
-    const script::CompilationUnit& cu,
-    bool is_method,
+    const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  pp.printCompilationUnit(cu);
+  PythonPrintPass pp(
+      tensor_table, class_table, enforce_importable, /*isMethod=*/true);
+  pp.printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }
 
