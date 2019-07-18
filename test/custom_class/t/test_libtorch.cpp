@@ -22,11 +22,11 @@ struct Foo : c10::intrusive_ptr_target {
   int64_t add(int64_t z) {
     return (x+y)*z;
   }
-  Foo* combine(c10::intrusive_ptr<Foo> x) {
-    this->x += x->x;
-    this->y += x->y;
-    return this;
-  }
+  // c10::intrusive_ptr<Foo> combine(c10::intrusive_ptr<Foo> x) {
+  //   this->x += x->x;
+  //   this->y += x->y;
+  //   return this;
+  // }
   ~Foo() {
     std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
   }
@@ -38,5 +38,5 @@ static auto test = torch::jit::class_<Foo>("Foo")
                     .def(torch::jit::init<int64_t, int64_t>())
                     // .def(torch::jit::init<>())
                     .def("display", &Foo::display)
-                    .def("add", &Foo::add)
-                    .def("combine", &Foo::combine);
+                    .def("add", &Foo::add);
+                    // .def("combine", &Foo::combine);

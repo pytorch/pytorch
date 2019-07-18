@@ -3,6 +3,7 @@
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Tensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -574,7 +575,7 @@ struct StrongTypePtr {
   std::shared_ptr<ClassType> type_;
 };
 
-std::unordered_map<std::string, c10::StrongTypePtr>& getTypeMap();
+TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getTypeMap();
 }
 
 #include <ATen/core/ivalue_inl.h>
