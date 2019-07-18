@@ -510,6 +510,7 @@ class AvgPool2d(_AvgPoolNd):
         padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
+        divisor_override: if specified, it will be used as divisor, otherwise attr:`kernel_size` will be used
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
@@ -532,18 +533,21 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
+    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
+
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
+                 count_include_pad=True, divisor_override=None):
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
+        self.divisor_override = divisor_override
 
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
-                            self.padding, self.ceil_mode, self.count_include_pad)
+                            self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
 
 
 class AvgPool3d(_AvgPoolNd):
@@ -577,6 +581,7 @@ class AvgPool3d(_AvgPoolNd):
         padding: implicit zero padding to be added on all three sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
+        divisor_override: if specified, it will be used as divisor, otherwise attr:`kernel_size` will be used
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
@@ -603,18 +608,21 @@ class AvgPool3d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50,44, 31)
         >>> output = m(input)
     """
+    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
+
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
+                 count_include_pad=True, divisor_override=None):
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
+        self.divisor_override = divisor_override
 
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride,
-                            self.padding, self.ceil_mode, self.count_include_pad)
+                            self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
 
     def __setstate__(self, d):
         super(AvgPool3d, self).__setstate__(d)
