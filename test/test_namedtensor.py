@@ -106,7 +106,21 @@ class TestNamedTensor(TestCase):
         tensor.ndim
         tensor.item()
 
-    def test_unary_fns(self):
+    def test_split_fns_propagates_names(self):
+        fns = [
+            lambda x: x.split(1, 0),
+            lambda x: x.split([1, 1], 1),
+            lambda x: x.chunk(2, 0),
+        ]
+
+        for device in torch.testing.get_all_device_types():
+            orig_tensor = torch.empty(2, 2, names=('N', 'D'), device=device)
+            for fn in fns:
+                splits = fn(orig_tensor)
+                for split in splits:
+                    self.assertEqual(split.names, orig_tensor.names)
+
+    def test_unary_propagate_names_fns(self):
         TestCase = namedtuple('TestCase', ['name', 'lambd'])
 
         def _test(testcase, names=('N', 'D'), device='cpu'):
@@ -139,7 +153,9 @@ class TestNamedTensor(TestCase):
         def flatten(lst):
             return [item for sublist in lst for item in sublist]
 
+        # All of these operate on 2x2 tensors.
         tests = [
+            # unary pointwise
             fn_method_and_inplace('abs'),
             fn_method_and_inplace('acos'),
             fn_method_and_inplace('asin'),
@@ -179,6 +195,9 @@ class TestNamedTensor(TestCase):
             method('zero_'),
             method('fill_', 1),
             method('fill_', torch.tensor(3.14)),
+
+            # views
+            method('narrow', 0, 0, 1),
         ]
         tests = flatten(tests)
 
