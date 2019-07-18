@@ -43,6 +43,7 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
   int64_t device = THPUtils_unpackLong(arg);
 
+  torch::utils::cuda_lazy_init();
   THCPModule_setDevice(device);
 
   Py_RETURN_NONE;
