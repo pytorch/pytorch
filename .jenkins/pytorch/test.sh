@@ -11,14 +11,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-# this needs to happen first
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # non-interactive bashs do not expand aliases by default
-  shopt -s expand_aliases
-  export PYTORCH_TEST_WITH_ROCM=1
-  alias python="$PYTHON"
-fi
-
 if [ -n "${IN_CIRCLECI}" ]; then
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker
@@ -102,6 +94,10 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export PYTORCH_TEST_WITH_ROCM=1
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
