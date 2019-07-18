@@ -3323,6 +3323,7 @@
   dispatch:
     CPU: legacy::cpu::_th_sign_
     CUDA: legacy::cuda::_th_sign_
+  named_guard: False
 
 - func: fmod_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -3382,54 +3383,63 @@
   dispatch:
     CPU: legacy::cpu::_th_random_
     CUDA: clamped_random_cuda_
+  named_guard: False
 
 - func: random_(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_random_
     CUDA: capped_random_cuda_
+  named_guard: False
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_random_
     CUDA: random_cuda_
+  named_guard: False
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_uniform_
     CUDA: uniform_cuda_
+  named_guard: False
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_normal_
     CUDA: normal_cuda_
+  named_guard: False
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_cauchy_
     CUDA: cauchy_cuda_
+  named_guard: False
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_log_normal_
     CUDA: log_normal_cuda_
+  named_guard: False
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_exponential_
     CUDA: exponential_cuda_
+  named_guard: False
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_geometric_
     CUDA: geometric_cuda_
+  named_guard: False
 
 # wrappers for TH functions
 
@@ -3989,12 +3999,14 @@
   dispatch:
     CPU: legacy::cpu::_th_sign_out
     CUDA: legacy::cuda::_th_sign_out
+  named_guard: False
 
 - func: sign(Tensor self) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_sign
     CUDA: legacy::cuda::_th_sign
+  named_guard: False
 
 - func: fmod(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
