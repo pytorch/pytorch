@@ -1700,37 +1700,39 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
-    TORCH_CHECK(eigenvectors,
-             "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
-             "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
+  // This gradient is symmetric, and not triangular.
+  // symeig operates only on symmetric inputs, which is a subspace of
+  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
+  // elements. We resolve this by taking the gradient of the functionally independent
+  // elements of the matrix (i.e., the lower triangular portion of the input) and then
+  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
+  // the symeig operation. The motivation behind this choice is that symmetric gradient
+  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
+  // were updated by a gradient based algorithm.
+  TORCH_CHECK(eigenvectors,
+           "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
+           "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
 
-    auto glambda = grads[0];
-    auto gv = grads[1];
+  auto glambda = grads[0];
+  auto gv = grads[1];
 
-    auto vt = v.transpose(-2, -1);
+  auto vt = v.transpose(-2, -1);
 
-    Tensor result;
-    if (gv.defined()) {
-        Tensor F = lambda.unsqueeze(-2).expand_as(self).clone();
-        F.sub_(at::unsqueeze(lambda, -1));
-        F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-        F.pow_(-1);
+  Tensor result;
+  if (gv.defined()) {
+      Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
+      F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
+      F.pow_(-1);
+      F.mul_(at::matmul(vt, gv));
+      result = at::matmul(v, at::matmul(F, vt));
+  } else {
+      result = at::zeros_like(self);
+  }
 
-        F.mul_(at::matmul(vt, gv));
-        result = at::matmul(v, at::matmul(F, vt));
-    } else {
-        result = at::zeros_like(self);
-    }
-
-    if (glambda.defined()) {
-        result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
-    }
-    if (upper) {
-        result = at::triu(result) + at::triu(result.transpose(-2, -1), 1);
-    } else {
-        result = at::tril(result) + at::tril(result.transpose(-2, -1), -1);
-    }
-    return result;
+  if (glambda.defined()) {
+      result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
+  }
+  return result.add(result.transpose(-2, -1)).mul_(0.5);
 }
 
 // We refer Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
