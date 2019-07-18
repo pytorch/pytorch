@@ -55,6 +55,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
   HANDLE_TH_ERRORS
   int device;
   THCudaCheck(cudaGetDevice(&device));
+  torch::utils::cuda_lazy_init();
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
 }
@@ -62,6 +63,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
+  torch::utils::cuda_lazy_init();
   return PyLong_FromLong(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
@@ -70,6 +72,7 @@ PyObject * THCPModule_set_run_yet_variable_to_false_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
   torch::utils::set_run_yet_variable_to_false();
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
