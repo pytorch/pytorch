@@ -31,7 +31,7 @@ void testClassParser() {
   ASSERT_EQ(Def(classDef.body()[1]).name().name(), "get_x");
   ASSERT_EQ(Var(Assign(classDef.body()[2]).lhs()).name().name(), "an_attribute");
   ASSERT_FALSE(Assign(classDef.body()[2]).rhs().present());
-  ASSERT_FALSE(Assign(classDef.body()[2]).rhs().present());
+  ASSERT_TRUE(Assign(classDef.body()[2]).type().present());
 }
 } // namespace script
 } // namespace jit
