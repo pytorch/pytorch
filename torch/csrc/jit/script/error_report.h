@@ -26,7 +26,6 @@ struct CAFFE2_API ErrorReport : public std::exception {
     static void update_pending_range(const SourceRange& range);
     static void push_function(const std::string& name);
     static void pop_function();
-    static void clear();
   };
 
  private:
