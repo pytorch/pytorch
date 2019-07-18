@@ -15,7 +15,7 @@ class TestTypePromotion(TestCase):
         self.device = 'cpu'
 
     # In-place operations don't promote.
-    # int+float==float but int.add_(float)==int.
+    # `int+float -> float` but `int.add_(float)` is rejected as an error.
     # Promoting inplace would require re-allocating and copying the memory of the
     # tensor data, since element size could change.
     def test_inplace(self):
@@ -33,10 +33,10 @@ class TestTypePromotion(TestCase):
         self.assertEqual(int_tensor, three)
         self.assertEqual(int_tensor.dtype, torch.int32)
 
-        byte_tensor = torch.tensor([1, 1, 1], dtype=torch.uint8)
+        uint8_tensor = torch.tensor([1, 1, 1], dtype=torch.uint8)
         half_tensor = torch.tensor([1, 1, 1], dtype=torch.half)
-        # byte is unsigned, half is signed.
-        self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: byte_tensor.add_(half_tensor))
+        # uint8 is unsigned, half is signed.
+        self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: uint8_tensor.add_(half_tensor))
 
     # some basic examples
 
@@ -117,7 +117,8 @@ class TestTypePromotion(TestCase):
         s.backward()
         self.assertEqual(f.grad, tens)
 
-        # If we handle the gradient wrong we get an error like:
+        # If we don't conbvert the returned grad_input to the actual input type
+        # we get an error like:
         # RuntimeError: Function SubBackward0 returned an invalid gradient at index 0 - expected type \
         # torch.FloatTensor but got torch.DoubleTensor
         for f in ['add', 'sub', 'rsub', 'mul', 'div']:

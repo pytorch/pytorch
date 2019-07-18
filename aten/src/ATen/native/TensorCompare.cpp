@@ -56,7 +56,10 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   auto actual_error = (self - other).abs();
   auto max_error = atol + rtol * other.abs();
 
-  // if self and other aren't floating types, max_error will be a float.
+  // `max_error` could be a float or double depending on the type of the input
+  // tensors.
+  // Specifically, if other is an int tensor, multiplying by rtol results in
+  // float tensor.
   if (!isFloatingType(actual_error.scalar_type())) {
     actual_error = actual_error.to(max_error.scalar_type());
   }

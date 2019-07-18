@@ -34,6 +34,37 @@ Boolean                    ``torch.bool``                                ``torch
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
 can be used, which returns ``True`` if the data type is a floating point data type.
 
+We allow casting a tensor to an output tensor of another dtype, except:
+  * An integral output tensor cannot accept a floating point tensor.
+  * An unsigned output tensor cannot accept a signed tensor.
+
+Unlike numpy's same_kind, we do not restrict conversion of unsigned integral types to boolean.
+
+Examples::
+
+    # allowed:
+    >>> float_tensor = torch.ones(1, dtype=torch.float)
+    >>> double_tensor = torch.ones(1, dtype=torch.double)
+    >>> int_tensor = torch.ones(1, dtype=torch.int)
+    >>> long_tensor = torch.ones(1, dtype=torch.long)
+    >>> uint_tensor = torch.ones(1, dtype=torch.uint8)
+    >>> double_tensor = torch.ones(1, dtype=torch.double)
+    >>> bool_tensor = torch.ones(1, dtype=torch.bool)
+    >>>
+    >>> float_tensor *= double_tensor
+    >>> float_tensor *= int_tensor
+    >>> float_tensor *= uint_tensor
+    >>> float_tensor *= bool_tensor
+    >>> float_tensor *= double_tensor
+    >>> int_tensor *= long_tensor
+    >>> bool_tensor *= uint_tensor
+
+    # disallowed (RuntimeError: result type can't be cast to the desired output type):
+    >>> int_tensor *= float_tensor
+    >>> bool_tensor *= int_tensor
+    >>> uint_tensor *= int_tensor
+
+
 .. _device-doc:
 
 torch.device

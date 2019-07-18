@@ -555,11 +555,11 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul(Tensor self, Tensor other) -> Tensor
-  self: (grad * other)
-  other: (grad * self)
+  self: grad * other
+  other: grad * self
 
 - name: mul(Tensor self, Scalar other) -> Tensor
-  self: (grad * other)
+  self: grad * other
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec)
