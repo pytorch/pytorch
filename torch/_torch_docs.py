@@ -857,30 +857,30 @@ add_docstr(torch.cholesky, r"""
 cholesky(input, upper=False, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`input` or for batches of symmetric positive-definite matrices.
+matrix :math:`A` or for batches of symmetric positive-definite matrices.
 
 If :attr:`upper` is ``True``, the returned matrix ``U`` is upper-triangular, and
 the decomposition has the form:
 
 .. math::
 
-  input = U^TU
+  A = U^TU
 
 If :attr:`upper` is ``False``, the returned matrix ``L`` is lower-triangular, and
 the decomposition has the form:
 
 .. math::
 
-    input = LL^T
+    A = LL^T
 
-If :attr:`upper` is ``True``, and :attr:`input` is a batch of symmetric positive-definite
+If :attr:`upper` is ``True``, and :math:`A` is a batch of symmetric positive-definite
 matrices, then the returned tensor will be composed of upper-triangular Cholesky factors
 of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
 
 Args:
-    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
     upper (bool, optional): flag that indicates whether to return a
                             upper or lower triangular matrix. Default: ``False``
@@ -915,33 +915,33 @@ add_docstr(torch.cholesky_solve, r"""
 cholesky_solve(input, input2, upper=False, out=None) -> Tensor
 
 Solves a linear system of equations with a positive semidefinite
-matrix to be inverted given its Cholesky factor matrix :attr:`input2`.
+matrix to be inverted given its Cholesky factor matrix :math:`u`.
 
-If :attr:`upper` is ``False``, :attr:`input2` is and lower triangular and `c` is
+If :attr:`upper` is ``False``, :math:`u` is and lower triangular and `c` is
 returned such that:
 
 .. math::
-    c = (input2 input2^T)^{-1} input
+    c = (u u^T)^{-1} b
 
-If :attr:`upper` is ``True`` or not provided, :attr:`input2` is upper triangular
+If :attr:`upper` is ``True`` or not provided, :math:`u` is upper triangular
 and `c` is returned such that:
 
 .. math::
-    c = (input2^T input2)^{-1} input
+    c = (u^T u)^{-1} b
 
-`torch.cholesky_solve(input, input2)` can take in 2D inputs `input, input2` or inputs that are
+`torch.cholesky_solve(b, u)` can take in 2D inputs `b, u` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `c`
 
 .. note::
 
     The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `input, input2` must be 2D matrices.
+    `b, u` must be 2D matrices.
 
 Args:
-    input (Tensor): input matrix of size :math:`(*, m, k)`,
+    input (Tensor): input matrix :math:`b` of size :math:`(*, m, k)`,
                 where :math:`*` is zero or more batch dimensions
-    input2 (Tensor): input matrix of size :math:`(*, m, m)`,
+    input2 (Tensor): input matrix :math:`u` of size :math:`(*, m, m)`,
                 where :math:`*` is zero of more batch dimensions composed of
                 upper or lower triangular Cholesky factor
     upper (bool, optional): whether to consider the Cholesky factor as a
@@ -976,23 +976,23 @@ add_docstr(torch.cholesky_inverse, r"""
 cholesky_inverse(input, upper=False, out=None) -> Tensor
 
 Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
-Cholesky factor :attr:`input`: returns matrix ``inv``. The inverse is computed using
+Cholesky factor :math:`u`: returns matrix ``inv``. The inverse is computed using
 LAPACK routines ``dpotri`` and ``spotri`` (and the corresponding MAGMA routines).
 
-If :attr:`upper` is ``False``, :attr:`input` is lower triangular
+If :attr:`upper` is ``False``, :math:`u` is lower triangular
 such that the returned tensor is
 
 .. math::
-    inv = (input input^{T})^{-1}
+    inv = (u u^{T})^{-1}
 
-If :attr:`upper` is ``True`` or not provided, :attr:`input` is upper
+If :attr:`upper` is ``True`` or not provided, :math:`u` is upper
 triangular such that the returned tensor is
 
 .. math::
-    inv = (input^T input)^{-1}
+    inv = (u^T u)^{-1}
 
 Args:
-    input (Tensor): the input 2-D tensor, a upper or lower triangular
+    input (Tensor): the input 2-D tensor :math:`u`, a upper or lower triangular
            Cholesky factor
     upper (bool, optional): whether to return a lower (default) or upper triangular matrix
     out (Tensor, optional): the output tensor for `inv`
@@ -1961,7 +1961,7 @@ add_docstr(torch.gels,
 gels(input, A, out=None) -> Tensor
 
 Computes the solution to the least squares and least norm problems for a full
-rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`input` of
+rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
 size :math:`(m \times k)`.
 
 If :math:`m \geq n`, :func:`gels` solves the least-squares problem:
@@ -1969,7 +1969,7 @@ If :math:`m \geq n`, :func:`gels` solves the least-squares problem:
 .. math::
 
    \begin{array}{ll}
-   \min_X & \|AX-input\|_2.
+   \min_X & \|AX-B\|_2.
    \end{array}
 
 If :math:`m < n`, :func:`gels` solves the least-norm problem:
@@ -1977,7 +1977,7 @@ If :math:`m < n`, :func:`gels` solves the least-norm problem:
 .. math::
 
    \begin{array}{ll}
-   \min_X & \|X\|_2 & \text{subject to} & AX = input.
+   \min_X & \|X\|_2 & \text{subject to} & AX = B.
    \end{array}
 
 Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
@@ -1986,7 +1986,7 @@ for the solution in each column is given by the sum of squares of elements in th
 remaining :math:`m - n` rows of that column.
 
 Args:
-    input (Tensor): the matrix :math:`input`
+    input (Tensor): the matrix :math:`B`
     A (Tensor): the :math:`m` by :math:`n` matrix :math:`A`
     out (tuple, optional): the optional destination tensor
 
@@ -2080,12 +2080,12 @@ add_docstr(torch.solve,
 torch.solve(input, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
-equations represented by :math:`AX = input` and the LU factorization of
+equations represented by :math:`AX = B` and the LU factorization of
 A, in order as a namedtuple `solution, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
-`torch.solve(input, A)` can take in 2D inputs `input, A` or inputs that are
+`torch.solve(B, A)` can take in 2D inputs `B, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
 
@@ -2093,11 +2093,11 @@ batched outputs `solution, LU`.
 
     Irrespective of the original strides, the returned matrices
     `solution` and `LU` will be transposed, i.e. with strides like
-    `input.contiguous().transpose(-1, -2).stride()` and
+    `B.contiguous().transpose(-1, -2).stride()` and
     `A.contiguous().transpose(-1, -2).stride()` respectively.
 
 Args:
-    input (Tensor): input matrix of size :math:`(*, m, k)` , where :math:`*`
+    input (Tensor): input matrix :math:`B` of size :math:`(*, m, k)` , where :math:`*`
                 is zero or more batch dimensions.
     A (Tensor): input square matrix of size :math:`(*, m, m)`, where
                 :math:`*` is zero or more batch dimensions.
@@ -2384,15 +2384,15 @@ add_docstr(torch.lerp,
            r"""
 lerp(input, end, weight, out=None)
 
-Does a linear interpolation of two tensors :attr:`input` and :attr:`end` based
+Does a linear interpolation of two tensors :attr:`start` (given by :attr:`input`) and :attr:`end` based
 on a scalar or tensor :attr:`weight` and returns the resulting :attr:`out` tensor.
 
 .. math::
-    \text{out}_i = \text{input}_i + \text{weight}_i \times (\text{end}_i - \text{input}_i)
+    \text{out}_i = \text{start}_i + \text{weight}_i \times (\text{end}_i - \text{start}_i)
 
-The shapes of :attr:`input` and :attr:`end` must be
+The shapes of :attr:`start` and :attr:`end` must be
 :ref:`broadcastable <broadcasting-semantics>`. If :attr:`weight` is a tensor, then
-the shapes of :attr:`input`, :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
+the shapes of :attr:`start`, :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     input (Tensor): the tensor with the starting points
@@ -2639,11 +2639,11 @@ lu_solve(input, LU_data, LU_pivots, out=None) -> Tensor
 
 Batch LU solve.
 
-Returns the LU solve of the linear system :math:`Ax = input` using the partially pivoted
+Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
 
 Arguments:
-    input (Tensor): the RHS tensor
+    input (Tensor): the RHS tensor :math:`b`
     LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
     LU_pivots (IntTensor): the pivots of the LU factorization
     out (Tensor, optional): the optional output tensor
@@ -5274,25 +5274,25 @@ add_docstr(torch.triangular_solve,
 triangular_solve(input, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
-and multiple right-hand sides :attr:`input`.
+and multiple right-hand sides :math:`b`.
 
-In particular, solves :math:`AX = input` and assumes :math:`A` is upper-triangular
+In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
 with the default keyword arguments.
 
-`torch.triangular_solve(input, A)` can take in 2D inputs `input, A` or inputs that are
+`torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
 
 .. note::
 
     The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `input, A` must be 2D matrices.
+    `b, A` must be 2D matrices.
 
 Args:
+    input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions (:math:`b`)
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
-    input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
-                :math:`*` is zero of more batch dimensions
     upper (bool, optional): whether to solve the upper-triangular system
         of equations (default) or the lower-triangular system of equations. Default: ``True``.
     transpose (bool, optional): whether :math:`A` should be transposed before
@@ -5303,7 +5303,7 @@ Args:
 
 Returns:
     A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
-    is a clone of :math:`A` and `solution` is the solution :math:`X` to :math:`AX = input`
+    is a clone of :math:`A` and `solution` is the solution :math:`X` to :math:`AX = b`
     (or whatever variant of the system of equations, depending on the keyword arguments.)
 
 Examples::
