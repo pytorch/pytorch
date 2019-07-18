@@ -496,6 +496,80 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def extra_args(self):
         return self._get_arg('extra_args', False)
 
+class TestAvgPool(TestCase):
+    def _sum_pool2d(self, x, kernel_size):
+        windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
+        return torch.sum(windows, dim=1)
+
+    def _sum_pool3d(self, x, kernel_size):
+        # Because unfold does not support 3D sliding window we will split tensor to multiple tensors and calculate sum
+        h = kernel_size[0]
+        splited_x = [t.sum(0) for t in x.split(h) if t.size(0) == h]
+        # sum_pool2d assumes tensor in (1, 1, n, m) view, so unsqueeze two times
+        splited_x = [self._sum_pool2d(t.unsqueeze(0).unsqueeze(0), kernel_size[1:]) for t in splited_x]
+        joined_x = torch.cat(splited_x)
+        return joined_x.view(1, joined_x.numel())
+
+    def _avg_pool2d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool2d(x, kernel_size) / size
+
+    def _avg_pool3d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool3d(x, kernel_size) / size
+
+    def test_doubletensor_avg_pool2d(self):
+        n, m = 5, 8
+        input = torch.rand(1, 1, n, m)
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                actual = torch.nn.functional.avg_pool2d(input[0], (i, j))
+                actual = actual.view(1, actual.numel())
+                expected = self._avg_pool2d(input, (i, j))
+                self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool2d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+                               lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
+
+    def test_doubletensor_avg_pool2d_with_divisor(self):
+        n, m = 3, 3
+        input = torch.rand(1, 1, n, m)
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                for divisor in [1, 7, i * j]:
+                    actual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
+                    actual = actual.view(1, actual.numel())
+                    expected = self._sum_pool2d(input, (i, j)) / divisor
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_doubletensor_avg_pool3d(self):
+        h, w, d = 5, 6, 7
+        input = torch.rand(h, w, d)
+        for i in range(1, h + 1):
+            for j in range(1, w + 1):
+                for k in range(1, d + 1):
+                    actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
+                    actual = actual.view(1, actual.numel())
+                    expected = self._avg_pool3d(input, (i, j, k))
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_doubletensor_avg_pool3d_with_divisor(self):
+        h, w, d = 6, 5, 7
+        input = torch.rand(h, w, d)
+        for i in range(1, h + 1):
+            for j in range(1, w + 1):
+                for k in range(1, d + 1):
+                    for divisor in [1, 7, i * j]:
+                        actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
+                        actual = actual.view(1, actual.numel())
+                        expected = self._sum_pool3d(input, (i, j, k)) / divisor
+                        self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool3d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+                               lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = False
