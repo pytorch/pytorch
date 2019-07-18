@@ -40,12 +40,12 @@ class _MapDatasetFetcher(_BaseDatasetFetcher):
         super(_MapDatasetFetcher, self).__init__(dataset, auto_collation, collate_fn, drop_last)
 
     def fetch(self, possibly_batched_index):
-        # The batch indices may be wrapped again in a list
-        # when using the customized batch sampler.
-        if len(possibly_batched_index) == 1 and isinstance(possibly_batched_index[0], list):
-            possibly_batched_index = possibly_batched_index[0]
-
         if self.auto_collation:
+            # The batch indices may be wrapped again in a list
+            # when using the customized batch sampler.
+            if len(possibly_batched_index) == 1 and isinstance(possibly_batched_index[0], list):
+                possibly_batched_index = possibly_batched_index[0]
+
             data = [self.dataset[idx] for idx in possibly_batched_index]
         else:
             data = self.dataset[possibly_batched_index]
