@@ -3,12 +3,19 @@
 
 namespace torch { namespace autograd {
 
-std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &inputs,
+variable_list _wrap_outputs(const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const at::ArrayRef<Variable> raw_outputs,
   const std::shared_ptr<Function> &cdata) {
   // Sets the grad_fn and output_nr of an output Variable.
+
+  std::unordered_set<at::TensorImpl*> inputs;
+  inputs.reserve(input_vars.size());
+  for (auto& var : input_vars) {
+    inputs.emplace(var.unsafeGetTensorImpl());
+  }
+
   auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {
     if (!is_differentiable) {
@@ -78,7 +85,42 @@ std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &i
   return outputs;
 }
 
+template<class T>
+void CFunction<T>::apply(variable_list&& input_vars) {
+  bool is_executable =  GradMode::is_enabled() && any_variable_requires_grad(input_vars);
+  auto next_edges = collect_next_edges(input_vars);
 
+  std::shared_ptr<CustomFunc<T>> grad_fn = std::make_shared<CustomFunc<T>>();
+  grad_fn->ctx.set_next_edges(std::move(next_edges));
+  grad_fn->ctx.clear_input_metadata();
 
+  variable_list outputs;
+  {
+    AutoGradMode grad_mode(false);
+    outputs = T::forward(&grad_fn->ctx, input_vars);
+  }
+
+  _wrap_outputs(input_vars, grad_fn.ctx->non_differentiable, grad_fn.ctx->dirty_inputs, outputs, is_executable ? grad_fn : nullptr);
+}
+
+template<class T>
+variable_list CustomFunc<T>::apply(variable_list&& inputs) {
+  auto outputs = T::backward(&ctx, inputs);
+
+  if (outputs.size() != inputs.size()) {
+    std::string msg("function ");
+    msg += name() + " returned an incorrect number of gradients (expected ";
+    msg += std::to_string(inputs.size()) + ", got " ;
+    msg += std::to_string(outputs.size()) + ")";
+    throw std::runtime_error(msg);
+  }
+
+  return outputs;
+}
+
+template<class T>
+void CustomFunc<T>::release_variables() {
+  ctx.saved_variables.clear();
+}
 
 }} // namespace torch::autograd
