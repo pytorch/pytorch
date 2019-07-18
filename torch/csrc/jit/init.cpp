@@ -428,29 +428,29 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_get_operation",
-      [](const std::string& qualified_name) {
+      [](const std::string& op_name) {
         try {
-          auto symbol = Symbol::fromQualString(qualified_name);
+          auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!operations.empty(), "No such operator ", qualified_name);
+          TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
           TORCH_CHECK(
               operations.size() == 1,
               "Found ",
               operations.size(),
               " overloads for operator ",
-              qualified_name,
+              op_name,
               "! Overloads are not supported from Python.");
           std::shared_ptr<Operator> op = operations[0];
           AT_ASSERT(op != nullptr);
           std::ostringstream docstring;
-          docstring << "Automatically bound operator '" << qualified_name
+          docstring << "Automatically bound operator '" << op_name
                     << "' with schema: " << op->schema();
           return py::cpp_function(
               [op](py::args args, py::kwargs kwargs) {
                 return invokeOperatorFromPython(
                     *op, std::move(args), std::move(kwargs));
               },
-              py::name(qualified_name.c_str()),
+              py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
         } catch (const c10::Error& error) {
           throw std::runtime_error(error.what_without_backtrace());

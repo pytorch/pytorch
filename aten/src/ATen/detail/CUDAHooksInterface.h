@@ -13,6 +13,11 @@
 // Forward-declares THCState
 struct THCState;
 
+// Forward-declares at::cuda::NVRTC
+namespace at { namespace cuda {
+struct NVRTC;
+}} // at::cuda
+
 namespace at {
 class Context;
 }
@@ -55,15 +60,15 @@ struct CAFFE2_API CUDAHooksInterface {
 
   // Initialize THCState and, transitively, the CUDA state
   virtual std::unique_ptr<THCState, void (*)(THCState*)> initCUDA() const {
-    AT_ERROR("Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
-    AT_ERROR("Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual Device getDeviceFromPtr(void* data) const {
-    AT_ERROR("Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool hasCUDA() const {
@@ -78,12 +83,20 @@ struct CAFFE2_API CUDAHooksInterface {
     return false;
   }
 
+  virtual const at::cuda::NVRTC& nvrtc() const {
+    TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
+  }
+
   virtual int64_t current_device() const {
     return -1;
   }
 
+  virtual bool hasPrimaryContext(int64_t device_index) const {
+    TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual Allocator* getPinnedMemoryAllocator() const {
-    AT_ERROR("Pinned memory requires CUDA. ", CUDA_HELP);
+    TORCH_CHECK(false, "Pinned memory requires CUDA. ", CUDA_HELP);
   }
 
   virtual bool compiledWithCuDNN() const {
@@ -103,32 +116,32 @@ struct CAFFE2_API CUDAHooksInterface {
   }
 
   virtual long versionCuDNN() const {
-    AT_ERROR("Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual std::string showConfig() const {
-    AT_ERROR("Cannot query detailed CUDA version without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot query detailed CUDA version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual double batchnormMinEpsilonCuDNN() const {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
-    AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
-    AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int64_t cuFFTGetPlanCacheSize(int64_t device_index) const {
-    AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual void cuFFTClearPlanCache(int64_t device_index) const {
-    AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int getNumGPUs() const {
