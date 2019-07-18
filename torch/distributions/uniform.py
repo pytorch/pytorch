@@ -70,10 +70,8 @@ class Uniform(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        if not isinstance(value, torch.Tensor) and isinstance(value, float):
-            value = torch.tensor(value)
-        lb = value.ge(self.low).type_as(self.low)
-        ub = value.lt(self.high).type_as(self.low)
+        lb = self.low.le(value).type_as(self.low)
+        ub = self.high.gt(value).type_as(self.low)
         return torch.log(lb.mul(ub)) - torch.log(self.high - self.low)
 
     def cdf(self, value):
