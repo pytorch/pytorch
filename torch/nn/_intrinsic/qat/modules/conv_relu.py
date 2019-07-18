@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn.qat import Conv2d as QATConv2d
-from torch.nn.modules.conv import conv2d_forwad
+from torch.nn.modules.conv import conv2d_forward
 from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
@@ -35,7 +35,7 @@ class ConvReLU2d(QATConv2d):
         self.weight_fake_quant = weight_fake_quant
 
     def forward(self, input):
-        return self.observer(F.relu(conv2d_forwad(input, self.padding_mode,
+        return self.observer(F.relu(conv2d_forward(input, self.padding_mode,
                              self.padding, self.weight_fake_quant(self.weight),
                              self.bias, self.stride, self.dilation, self.groups),
                              True))
