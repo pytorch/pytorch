@@ -983,7 +983,7 @@ If :attr:`upper` is ``False``, :math:`u` is lower triangular
 such that the returned tensor is
 
 .. math::
-    inv = (u u^{T})^{-1}
+    inv = (uu^{T})^{-1}
 
 If :attr:`upper` is ``True`` or not provided, :math:`u` is upper
 triangular such that the returned tensor is
@@ -3709,8 +3709,8 @@ add_docstr(torch.ormqr,
            r"""
 ormqr(input, input2, input3, left=True, transpose=False) -> Tensor
 
-Multiplies `input3` by the orthogonal `Q` matrix of the QR factorization
-formed by :func:`torch.geqrf` that is represented by `(input, input2)`.
+Multiplies `mat` (given by :attr:`input3`) by the orthogonal `Q` matrix of the QR factorization
+formed by :func:`torch.geqrf` that is represented by `(a, tau)` (given by (:attr:`input`, :attr:`input2`)).
 
 This directly calls the underlying LAPACK function `?ormqr`.
 See `LAPACK documentation for ormqr`_ for further details.
