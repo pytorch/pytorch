@@ -439,7 +439,8 @@ struct ParserImpl {
     auto rhs = parseExpOrExpTuple();
     L.expect(TK_NEWLINE);
     if (op->kind() == '=') {
-      return Assign::create(lhs.range(), lhs, Expr(rhs), type);
+      return Assign::create(
+          lhs.range(), lhs, Maybe<Expr>::create(rhs.range(), rhs), type);
     } else {
       // this is an augmented assignment
       if (lhs.kind() == TK_TUPLE_LITERAL) {
