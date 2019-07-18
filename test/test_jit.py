@@ -3201,9 +3201,11 @@ def foo(x):
         def fn():
             a : List[int] = []
             b : torch.Tensor = torch.ones(2, 2)
+            c : Optional[torch.Tensor] = None
             for _ in range(10):
                 a.append(4)
-            return a, b
+                c = torch.ones(2, 2)
+            return a, b, c
         """)
 
         with tempfile.TemporaryDirectory() as tmp_dir:

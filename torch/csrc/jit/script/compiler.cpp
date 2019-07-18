@@ -307,20 +307,21 @@ struct Environment {
       }
       if (!as_simple_value->type()->isSubtypeOf(
               unshapedType(simple_parent->type()))) {
-        std::stringstream errMsg;
-        errMsg << "variable '" << name << "' previously has type "
+        auto error = ErrorReport(loc);
+        error << "Variable '" << name << "' previously has type "
                << simple_parent->type()->python_str()
                << " but is now being assigned to a value of type "
                << as_simple_value->type()->python_str();
+
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
-          errMsg << "\n. (Note: empty lists are constructed as Tensor[]; "
+          error << "\n. (Note: empty lists are constructed as Tensor[]; "
                  << "if you want an empty list of a different type, "
                  << "use `torch.jit.annotate(List[T], [])`, "
                  << "where `T` is the type of elements in the list)";
         }
-        throw ErrorReport(loc) << errMsg.str();
+        throw error;
       }
     }
     if (as_simple_value) {
@@ -2455,7 +2456,12 @@ struct to_ir {
         return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
-        return graph->insertConstant(IValue(), nullptr, tree->range());
+        auto constant = graph->insertConstant(IValue(), nullptr, tree->range());
+        if (type_hint) {
+          AT_ASSERT(type_hint->kind() == TypeKind::OptionalType);
+          constant->setType(type_hint);
+        }
+        return constant;
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2542,7 +2548,6 @@ struct to_ir {
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
-        break;
     }
   }
 
