@@ -3392,11 +3392,6 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
-
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.clone())
-                    continue
-
                 x_clone = x.clone()
                 y = copy(x)
                 y.fill_(1)
@@ -3418,9 +3413,6 @@ class _TestTorchMixin(object):
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.resize_as_(y))
-                    continue
                 x.resize_as_(y)
                 self.assertEqual(y.shape, x.shape)
 
@@ -3449,10 +3441,6 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.clone())
-                    continue
-
                 y = x.clone()
                 self.assertEqual(x, y)
 
@@ -4947,7 +4935,7 @@ class _TestTorchMixin(object):
                   (3, 0), (0, 3, 3), (3, 3, 0, 0),  # no numel matrices
                   (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
                   (1, 3), (5, 1, 3), (7, 5, 1, 3),  # very thin matrices
-                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions 
+                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions
         for s, d in product(shapes, diagonals):
             run_test(s, cast, d)
 
