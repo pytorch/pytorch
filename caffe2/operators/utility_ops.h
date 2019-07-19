@@ -791,9 +791,17 @@ class ScatterOp : public Operator<CPUContext> {
     const IndexType* idxs = indices.template data<IndexType>();
     const char* src_base = static_cast<const char*>(updates.raw_data());
 
-    const int64_t outer_dims_product = updates.size_to_dim(axis_);
-    const int64_t block_size = updates.size_from_dim(axis_ + 1);
-    const int64_t block_bytesize = block_size * item_bytesize;
+    const int64_t outer_dims_product = indices.size_to_dim(axis_);
+
+    const int64_t dst_indexing_axis_dim = data.size(axis_);
+
+    const int64_t idxs_block_size = indices.size_from_dim(axis_ + 1);
+    const int64_t src_block_size = updates.size_from_dim(axis_ + 1);
+    const int64_t dst_block_size = data.size_from_dim(axis_ + 1);
+
+    const int64_t idxs_batch_size = indices.size_from_dim(axis_);
+    const int64_t src_batch_size = updates.size_from_dim(axis_);
+    const int64_t dst_batch_size = data.size_from_dim(axis_);
 
     const int64_t src_indexing_axis_dim = updates.size(axis_);
     const int64_t src_batch_bytesize = updates.size_from_dim(axis_) * item_bytesize;
@@ -801,17 +809,19 @@ class ScatterOp : public Operator<CPUContext> {
 
     const int64_t N = indices.size(axis_);
 
-    check_indexarray_range<IndexType>(idxs, N, src_indexing_axis_dim);
+    check_indexarray_range<IndexType>(idxs, N, dst_indexing_axis_dim);
 
-    int64_t i = 0;
-    for (int64_t batch = 0; batch < outer_dims_product; ++batch) {
-      int64_t i_max = i + N;
-      for (; i < i_max && i < indices.numel(); ++i) {
-        auto idx = idxs[i];
+    for (int64_t outer_batch = 0; outer_batch < outer_dims_product; ++outer_batch) {
+      for (int64_t i = 0; i < N; ++i) {
+        for (int64_t inner_batch = 0; inner_batch < idxs_block_size; ++inner_batch) {
+          auto idxs_elem_idx = outer_batch * idxs_batch_size + i * idxs_block_size + inner_batch;
+          auto src_elem_idx = outer_batch * src_batch_size + i * src_block_size + inner_batch;
+          auto dst_elem_idx = outer_batch * dst_batch_size + idxs[src_elem_idx] * dst_block_size + inner_batch;
 
-        auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
-        auto dst = out + batch * dst_batch_size + (i - i_max + N) * block_bytesize;
-        context_.CopyItemsSameDevice(dataType, block_size, src, dst);
+          auto src = src_base + src_elem_idx * item_bytesize;
+          auto dst = out + dst_elem_idx * item_bytesize;
+          context_.CopyItemsSameDevice(dataType, 1, src, dst);
+        }
       }
     }
     return true;
