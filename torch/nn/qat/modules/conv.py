@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn import Conv2d as NNConv2d
-from torch.nn.modules.conv import conv2d_forward
 from torch.quantization.QConfig import default_qat_qconfig
 
 class Conv2d(NNConv2d):
@@ -35,9 +34,8 @@ class Conv2d(NNConv2d):
         self.weight_fake_quant = weight_fake_quant()
 
     def forward(self, input):
-        return self.observer(conv2d_forward(input, self.padding_mode, self.padding,
-                             self.weight_fake_quant(self.weight), self.bias,
-                             self.stride, self.dilation, self.groups))
+        return self.observer(
+            self.conv2d_forward(input, self.weight_fake_quant(self.weight)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
