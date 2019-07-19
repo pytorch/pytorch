@@ -4947,7 +4947,7 @@ class _TestTorchMixin(object):
                   (3, 0), (0, 3, 3), (3, 3, 0, 0),  # no numel matrices
                   (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
                   (1, 3), (5, 1, 3), (7, 5, 1, 3),  # very thin matrices
-                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions 
+                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions
         for s, d in product(shapes, diagonals):
             run_test(s, cast, d)
 
@@ -5244,6 +5244,11 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.CharTensor(5).is_signed(), True)
         self.assertEqual(torch.FloatTensor(5).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).is_signed(), True)
+        W = torch.rand(2).float()
+        Wq = torch.quantize_linear(W, 0.1, 4, torch.qint8)
+        self.assertEqual(Wq.is_signed(), True)
+        Wq = torch.quantize_linear(W, 0.1, 4, torch.quint8)
+        self.assertEqual(Wq.is_signed(), False)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_is_signed_cuda(self):
@@ -5252,6 +5257,11 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.cuda.CharTensor(5).is_signed(), True)
         self.assertEqual(torch.cuda.FloatTensor(5).is_signed(), True)
         self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
+        W = torch.rand(2).float()
+        Wq = torch.quantize_linear(W, 0.1, 4, torch.qint8)
+        self.assertEqual(Wq.is_signed(), True)
+        Wq = torch.quantize_linear(W, 0.1, 4, torch.quint8)
+        self.assertEqual(Wq.is_signed(), False)
 
     @staticmethod
     def _test_solve(self, cast):

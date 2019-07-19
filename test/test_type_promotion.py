@@ -117,16 +117,21 @@ class TestTypePromotion(TestCase):
         s.backward()
         self.assertEqual(f.grad, tens)
 
-        # If we don't conbvert the returned grad_input to the actual input type
+        # If we don't convert the returned grad_input to the actual input type
         # we get an error like:
         # RuntimeError: Function SubBackward0 returned an invalid gradient at index 0 - expected type \
         # torch.FloatTensor but got torch.DoubleTensor
+        f_dtypes = [torch.float, torch.double]
+        f_dtypes = f_dtypes if self.device != 'cuda' else f_dtypes + [torch.half]
+        i_dtypes = [torch.int, torch.long]
         for f in ['add', 'sub', 'rsub', 'mul', 'div']:
-            x = torch.randn(10, requires_grad=True, dtype=torch.float)
-            y = torch.randn(10, dtype=torch.double)
+            for dtype1 in f_dtypes:
+                for dtype2 in (f_dtypes + i_dtypes):
+                    x = torch.ones(10, requires_grad=True, dtype=dtype1, device=self.device)
+                    y = torch.ones(10, dtype=dtype2, device=self.device)
 
-            func = getattr(torch, f)
-            func(x, y).sum().backward()
+                    func = getattr(torch, f)
+                    func(x, y).sum().backward()
 
     # verifies that a.add(b) is the same as a.to(b.dtype).add(b) in cases
     # where that should hold.

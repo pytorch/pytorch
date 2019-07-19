@@ -208,22 +208,6 @@ static inline bool isIntegralType(ScalarType t) {
       t == ScalarType::Long || t == ScalarType::Short);
 }
 
-static inline bool isSignedType(ScalarType t) {
-  if (t == ScalarType::Half) {
-    return true;
-  }
-  #define CASE_SIGNED(ctype, name, _2) \
-    case ScalarType::name:                       \
-      return std::is_signed<ctype>();
-
-    switch (t) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CASE_SIGNED)
-      default:
-        AT_ERROR("Unknown ScalarType");
-    }
-  #undef CASE_SIGNED
-}
-
 static inline bool isFloatingType(ScalarType t) {
   return (
       t == ScalarType::Double || t == ScalarType::Float ||
@@ -265,6 +249,22 @@ static inline ScalarType toUnderlying(ScalarType t) {
     default:
       return t;
   }
+}
+
+static inline bool isSignedType(ScalarType t) {
+  if (t == ScalarType::Half) {
+    return true;
+  }
+  #define CASE_SIGNED(ctype, name, _2) \
+    case ScalarType::name:                       \
+      return std::is_signed<ctype>();
+
+    switch (toUnderlying(t)) {
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CASE_SIGNED)
+      default:
+        AT_ERROR("Unknown ScalarType");
+    }
+  #undef CASE_SIGNED
 }
 
 static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
