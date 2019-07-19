@@ -2086,5 +2086,7 @@ torch._C.ScriptMethod.graph_for = _graph_for
 torch._C.Function.graph_for = _graph_for
 Function = torch._C.Function
 
+print("hello")
+
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
