@@ -103,8 +103,8 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(const Tensor
     });
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const Tensor& self, const Tensor& input, const Tensor& mean,
-                                                                           const Tensor& invstd, bool input_g, bool weight_g, bool bias_g) {
+std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const Tensor& self, const Tensor& input, const Tensor& mean, const Tensor& invstd,
+                                                                           const Tensor& weight, bool input_g, bool weight_g, bool bias_g) {
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward_reduce", [&] {
       auto mean_st = mean.dtype();
       auto invstd_st = invstd.dtype();
@@ -112,15 +112,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const
       bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
         if (is_half_float) {
-          return batch_norm_backward_reduce_cuda_template<at::Half, float, int32_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+          return batch_norm_backward_reduce_cuda_template<at::Half, float, int32_t>(self, input, mean, invstd, weight, input_g, weight_g, bias_g);
         } else {
-          return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+          return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, weight, input_g, weight_g, bias_g);
         }
       } else {
         if (is_half_float) {
-          return batch_norm_backward_reduce_cuda_template<at::Half, float, int64_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+          return batch_norm_backward_reduce_cuda_template<at::Half, float, int64_t>(self, input, mean, invstd, weight, input_g, weight_g, bias_g);
         } else {
-          return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, input_g, weight_g, bias_g);
+          return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, weight, input_g, weight_g, bias_g);
         }
       }
     });

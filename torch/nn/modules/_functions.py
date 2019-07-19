@@ -64,6 +64,7 @@ class SyncBatchNorm(Function):
             saved_input,
             mean,
             invstd,
+            weight,
             self.needs_input_grad[0],
             self.needs_input_grad[1],
             self.needs_input_grad[2]

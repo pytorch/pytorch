@@ -361,7 +361,7 @@ __global__ void batch_norm_backward_kernel(
       for (int x = threadIdx.x; x < grad_output.size(2); x += blockDim.x) {
         input_scalar_t go = grad_output[batch][plane][x];
         if (train) {
-          input_scalar_t inp = input[batch][plane][x];
+          stat_accscalar_t inp = input[batch][plane][x];
           stat_accscalar_t proj = (inp - mean) * proj_scale;
           grad_input[batch][plane][x] = static_cast<input_scalar_t>((go - proj - grad_mean) * grad_scale);
         } else {
@@ -488,7 +488,7 @@ __global__ void batch_norm_backward_elemt_kernel(
   stat_accscalar_t m_c = mean[plane];
   stat_accscalar_t m_dy_c = mean_dy[plane];
   stat_accscalar_t factor_1_c = invstd[plane];
-  stat_accscalar_t factor_2_c = weight.size(0) > 0 ? static_cast<stat_accscalar_t>(weight[plane]) : static_cast<stat_accscalar_t>(1);
+  stat_accscalar_t factor_2_c = weight.size(0) > 0 ? static_cast<stat_accscalar_t>(weight[plane]) : stat_accscalar_t(1);
   factor_2_c *= factor_1_c;
   factor_1_c = factor_1_c * factor_1_c * mean_dy_xmu[plane];
 
@@ -749,7 +749,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
 std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_template(const Tensor& grad_out_, const Tensor& input_,
-                                                                                    const Tensor& mean_, const Tensor& invstd_,
+                                                                                    const Tensor& mean_, const Tensor& invstd_, const Tensor& weight_,
                                                                                     const bool input_g, const bool weight_g, const bool bias_g) {
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
@@ -765,12 +765,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
     mean_dy_ = at::empty_like(mean_);
     mean_dy_xmu_ = at::empty_like(mean_);
   }
-  auto grad_options = mean_.options();
   if (weight_g) {
-    grad_weight_ = at::empty({n_input}, grad_options);
+    grad_weight_ = at::empty({n_input}, weight_.options());
   }
   if (bias_g) {
-    grad_bias_ = at::empty({n_input}, grad_options);
+    grad_bias_ = at::empty({n_input}, weight_.options());
   }
 
   auto input = input_reshaped.packed_accessor<input_scalar_t, 3, DefaultPtrTraits, index_t>();
