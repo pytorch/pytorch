@@ -57,6 +57,7 @@ def _observer_forward_hook(self, input, output):
 def _fake_quant_forward_hook(self, input, output):
     return self.observer(output)
 
+
 # TODO(jerryzh): remove_observer?
 def add_observer(module):
     r"""Add observer for the leaf child of the module.
@@ -231,13 +232,11 @@ DEFAULT_MODULE_MAPPING = {
     DeQuantStub: nnq.DeQuantize,
     # QAT modules:
     qat.Linear: nnq.Linear,
-    qat.Conv2d: nnq.Conv2d,
 }
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
     torch.nn.Linear: qat.Linear,
-    torch.nn.Conv2d: qat.Conv2d,
 }
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
