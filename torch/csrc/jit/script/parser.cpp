@@ -649,19 +649,21 @@ struct ParserImpl {
   TreeRef parseClassLike() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
+    Maybe<Ident> superclass = Maybe<Ident>::create(name.range());
     if (L.nextIf('(')) {
       // Only support inheriting from NamedTuple right now.
-      if (L.cur().kind == TK_IDENT && L.cur().text() == "NamedTuple") {
-        L.next();
+      auto id = L.expect(TK_IDENT);
+      if (id.text() == "NamedTuple") {
         return parseNamedTuple(name);
       } else {
-        L.reportError("Inheritance is not supported for TorchScript classes");
+        superclass = Maybe<Ident>::create(id.range, Ident::create(id.range, id.text()));
       }
     }
     L.expect(':');
     const auto statements =
         parseStatements(/*expect_indent=*/true, /*in_class=*/true);
-    return ClassDef::create(name.range(), name, List<Stmt>(statements));
+    return ClassDef::create(
+        name.range(), name, superclass, List<Stmt>(statements));
   }
 
   TreeRef parseFunction(bool is_method) {

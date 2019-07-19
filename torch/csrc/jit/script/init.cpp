@@ -736,6 +736,9 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
+        TORCH_CHECK(
+            !classDef.superclass().present(),
+            "Torchscript does not support class inheritance.");
         auto cu = get_python_cu();
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);

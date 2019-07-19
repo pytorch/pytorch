@@ -190,6 +190,9 @@ struct SourceImporter {
       auto parsed_treeref = p_.parseClassLike();
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
+        TORCH_CHECK(
+            !class_def.superclass().present(),
+            "Torchscript does not support class inheritance.");
         const auto qualified_classname = QualifiedName(
             QualifiedName(class_qualifier), class_def.name().name());
 
