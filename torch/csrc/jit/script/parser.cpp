@@ -645,7 +645,8 @@ struct ParserImpl {
       }
     }
     L.expect(':');
-    const auto statements = parseStatements(/*expect_indent=*/true, /*in_class=*/true);
+    const auto statements =
+        parseStatements(/*expect_indent=*/true, /*in_class=*/true);
     return ClassDef::create(name.range(), name, List<Stmt>(statements));
   }
 

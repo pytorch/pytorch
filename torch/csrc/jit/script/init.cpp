@@ -749,7 +749,7 @@ void initJitScriptBindings(PyObject* module) {
                    "definitions. File an issue on Github if you want "
                    "something else!";
           }
-          methodDefs.push_back(Def(def));
+          methodDefs.emplace_back(Def(def));
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
