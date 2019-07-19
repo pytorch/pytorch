@@ -339,8 +339,8 @@ class Conv2d(_ConvNd):
             False, _pair(0), groups, bias, padding_mode)
 
     def forward(self, input):
-        conv2d_forward(input, self.padding_mode, self.padding, self.weight,
-                       self.bias, self.stride, self.dilation, self.groups)
+        return conv2d_forward(input, self.padding_mode, self.padding, self.weight,
+                              self.bias, self.stride, self.dilation, self.groups)
 
 class Conv3d(_ConvNd):
     r"""Applies a 3D convolution over an input signal composed of several input
