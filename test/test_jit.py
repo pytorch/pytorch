@@ -7989,6 +7989,32 @@ a")
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
 
+    def test_import_constants_not_specialized(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat(2 * [x], dim=0)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self, mod):
+                super(ScriptMod, self).__init__()
+                x = torch.zeros(1, 3)
+                mod_fn = lambda : mod(x)  # noqa: E731
+                self.mod = torch.jit.trace(mod_fn, tuple())
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.mod()
+
+        cm = ScriptMod(Mod())
+        # specialized tensor in graph
+        FileCheck().check("Double(1, 3)").run(cm.forward.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(cm, buffer)
+        buffer.seek(0)
+        # when tensor is loaded as constant it isnt specialized
+        cm_load = torch.jit.load(buffer)
+        FileCheck().check_not("Double(1, 3)").run(cm_load.forward.graph)
+
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
         def float_fn(x, y):
