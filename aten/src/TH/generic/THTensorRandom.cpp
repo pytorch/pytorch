@@ -149,7 +149,6 @@ void THTensor_(cauchy)(THTensor *self, at::Generator *_generator, double median,
 
   at::cauchy_distribution<double> cauchy(median, sigma);
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)cauchy(gen););
-
 }
 
 void THTensor_(logNormal)(THTensor *self, at::Generator *_generator, double mean, double stdv)
