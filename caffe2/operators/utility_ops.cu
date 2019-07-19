@@ -263,7 +263,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   else {
     // when only one input exists to update data buffer,
     // avoid copying pointers to device array to prevent
-    // copy overhead	  
+    // copy overhead      
     auto& X1 = Input(3);
     auto& weight1 = Input(4);
     AxpySliceKernel2<<<
@@ -279,7 +279,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
         indices.template data<Index>(),
         data,
         M);
-  }	  
+  }   
   return true;
 }
 
