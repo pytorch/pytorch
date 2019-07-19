@@ -347,7 +347,7 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module>(m, "ScriptModule")
-      .def(py::init<std::string>())
+      .def(py::init<std::string, std::shared_ptr<CompilationUnit>>())
       .def(
           "save",
           [](Module& m,

@@ -7,6 +7,13 @@
 namespace torch {
 namespace jit {
 
+// Conservatively compare two optionals. If both are undefined, assume
+// they aren't equal
+template <typename T>
+static bool mustBeEqual(const c10::optional<T>& a, const c10::optional<T>& b) {
+  return a == b && a.has_value();
+}
+
 // The intent for this optimization pass is to catch all of the small, easy to
 // catch peephole optimizations you might be interested in doing.
 //
@@ -54,11 +61,10 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // x.type_as(y) == x iff x.type() == y.type()
-      auto self_type = node->input(0)->type()->cast<DimensionedTensorType>();
-      auto other_type = node->input(1)->type()->cast<DimensionedTensorType>();
-      if (self_type && other_type &&
-          self_type->scalarType() == other_type->scalarType() &&
-          self_type->device() == other_type->device()) {
+      auto self_type = ProfiledTensorType::create(node->input(0)->type());
+      auto other_type = ProfiledTensorType::create(node->input(1)->type());
+      if (mustBeEqual(self_type->scalarType(), other_type->scalarType()) &&
+          mustBeEqual(self_type->device(), other_type->device())) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if (
@@ -88,9 +94,11 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           // type_as conditional on the tensor shape being a scalar, but that
           // might add overhead, and make analysis harder.
           auto add_mat_type =
-              node->input(1 - mm_side)->type()->cast<DimensionedTensorType>();
-          if (!add_mat_type)
+              ProfiledTensorType::create(node->input(1 - mm_side)->type());
+          // if we don't have the rank, we can't tell if the bias is a scalar
+          if (!add_mat_type->sizes().size()) {
             continue;
+          }
 
           if (node->input(mm_side)->node()->matches(
                   "aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
@@ -101,17 +109,26 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             SymbolicVariable mat1(mm_node->input(0));
             SymbolicVariable mat2(mm_node->input(1));
 
-            auto mat_type = mat1.value()->type()->cast<DimensionedTensorType>();
-            if (!mat_type) {
-              mat_type = mat2.value()->type()->cast<DimensionedTensorType>();
+            auto mat1_type = ProfiledTensorType::create(mat1.value()->type());
+            auto mat_scalar_type = mat1_type->scalarType();
+            if (!mat_scalar_type) {
+              auto mat2_type = ProfiledTensorType::create(mat2.value()->type());
+              mat_scalar_type = mat2_type->scalarType();
             }
+
+            // we can't use type_as if we don't know the target type (mm), the
+            // bias needs to be coerced to
+            if (!mat_scalar_type) {
+              continue;
+            }
+
             // We insert the type_as if we're sure that the added element is a
             // scalar, and we either don't know what is the type of the
-            // multiplied matrices, or know the type, and know that it's
+            // scalar, or know the type, and know that it's
             // mismatched.
-            if (add_mat_type->dim() == 0 &&
-                (!mat_type ||
-                 add_mat_type->scalarType() != mat_type->scalarType())) {
+            if (add_mat_type->sizes().size() &&
+                *add_mat_type->sizes().size() == 0 &&
+                !mustBeEqual(add_mat_type->scalarType(), mat_scalar_type)) {
               add_mat = add_mat.type_as(mat1);
             }
 
@@ -214,33 +231,34 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->output()->replaceAllUsesWith(node->input());
       }
     } else if (node->matches("prim::dtype(Tensor a) -> int")) {
-      if (auto dim_tensor =
-              node->input()->type()->cast<DimensionedTensorType>()) {
+      auto ptt = ProfiledTensorType::create(node->input()->type());
+      if (ptt->scalarType()) {
         WithInsertPoint guard(node);
         auto output = node->owningGraph()->insertConstant(
-            static_cast<int64_t>(dim_tensor->scalarType()));
+            static_cast<int64_t>(*ptt->scalarType()));
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("prim::device(Tensor a) -> Device")) {
-      if (auto dim_tensor =
-              node->input()->type()->cast<DimensionedTensorType>()) {
+      auto ptt = ProfiledTensorType::create(node->input()->type());
+      if (ptt->device()) {
         WithInsertPoint guard(node);
-        auto output = node->owningGraph()->insertConstant(dim_tensor->device());
+        auto output = node->owningGraph()->insertConstant(*ptt->device());
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("aten::dim(Tensor self) -> int")) {
-      if (auto dim_tensor =
-              node->input()->type()->cast<DimensionedTensorType>()) {
+      auto ptt = ProfiledTensorType::create(node->input()->type());
+      if (auto dim = ptt->sizes().size()) {
         WithInsertPoint guard(node);
-        auto output = node->owningGraph()->insertConstant(dim_tensor->dim());
+        auto output =
+            node->owningGraph()->insertConstant(static_cast<int64_t>(*dim));
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
-      if (auto dim_tensor =
-              node->input()->type()->cast<DimensionedTensorType>()) {
+      auto ptt = ProfiledTensorType::create(node->input()->type());
+      if (ptt->device()) {
         WithInsertPoint guard(node);
         auto output =
-            node->owningGraph()->insertConstant(dim_tensor->device().is_cuda());
+            node->owningGraph()->insertConstant((*ptt->device()).is_cuda());
         node->output()->replaceAllUsesWith(output);
       }
     }

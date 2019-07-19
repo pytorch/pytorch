@@ -2,6 +2,22 @@ import torch
 from functools import wraps
 from collections import namedtuple
 
+# This entire file is half hack, half useful information.
+#
+# The function classifications (unary, binary, comparison)
+# are useful to generate generic code based on certaion assumptions
+# such as arity. For example, someone might implement a single function
+# to efficiently implement a pointwise unary function such as cos
+# and then generalize it using the list of unary functions.
+#
+# The hacky part of this file overwrites a module function via set_function
+# and adds a dispatch mechanism via isinstance. The user can specify
+# a function to be called if the overwritten function is called
+# with a new object of type cls (based on the first argument).
+# This dispatch mechanism is inherently inefficient and should be replaced.
+# In fact, no release should include this mechanism and it is solely
+# to support incremental development.
+
 # Stores the relationship between a torch module function
 # and a torch.Tensor method. For example torch.add
 # maps to torch.Tensor.add and torch.Tensor.add can either
@@ -16,49 +32,34 @@ def get_unary_functions():
         'acos',
         'asin',
         'atan',
-        # 'byte',
         'ceil',
-        # 'char',
         # 'clamp', # TODO: Requires extra kwargs
-        # 'clone',
-        # 'contiguous',
         'cos',
         'cosh',
-        # 'cpu',
-        # 'cuda',
         'digamma',
-        # 'div',
-        # 'double',
-        # 'dtype',
         'erf',
         'erfc',
         'erfinv',
         'exp',
         'expm1',
-        # 'exponential_',
-        # 'float',
+        # 'exponential_', # TODO: Method only
         'floor',
         # 'fmod',
         'frac',
-        # 'half',
-        # 'hardshrink', #TODO: Not part of aten
-        # 'int',
+        # 'hardshrink', # TODO: Not part of aten
         'lgamma',
         'log',
         'log10',
         'log1p',
         'log2',
-        # 'long',
         # 'mvlgamma',
         'neg',
         # 'nonzero', #TODO: Special case because it modifies dtype
         # 'polygamma',
-        # 'pow',
-        # 'prelu', # TODO: no prelu_out
+        # 'prelu', # TODO: no prelu_out in aten
         'reciprocal',
-        # 'relu', # TODO: no relu_out
-        # 'remainder',
-        # 'renorm',
+        # 'relu', # TODO: no relu_out in aten
+        # 'renorm', # TODO: Requires extra kwargs
         'round',
         'rsqrt',
         'sigmoid',
@@ -66,12 +67,14 @@ def get_unary_functions():
         'sin',
         'sinh',
         'sqrt',
-        # 'sub',
         'tan',
         'tanh',
         'trunc']
 
 
+# These functions take exactly two Tensor arguments.
+# It might be that they support scalar arguments as well,
+# but we assume that the user will not use it in that way.
 def get_binary_functions():
     return [
         'add',
@@ -80,6 +83,7 @@ def get_binary_functions():
         'div',
         'pow',
         'atan2',
+        'remainder',
     ]
 
 
@@ -99,6 +103,9 @@ def get_comparison_functions():
 # and overwriting it with a function that dispatches
 # to func(tfunc, reference_to_tfunc, *args, **kwargs)
 # if the first argument is of instance cls.
+# NOTE: This function is a hack. This dispatch mechanism
+# is slow and should not be used in release code, but for
+# development only.
 def set_function(module, cls, tfunc, func):
     def _gen_func(tfunc):
         orig_tfunc = getattr(torch, tfunc)
@@ -114,7 +121,7 @@ def set_function(module, cls, tfunc, func):
 
 
 def _check_meaningful_overwrite(cls, method_name):
-    class DefaultClass:
+    class DefaultClass(object):
         pass
 
     if getattr(cls, method_name, False) and not getattr(DefaultClass, method_name, False):

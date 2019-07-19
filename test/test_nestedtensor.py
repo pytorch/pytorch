@@ -1,16 +1,6 @@
 import torch
 import unittest
-from common_utils import TEST_WITH_NESTEDTENSORS
-import torch.tensortypes.nestedtensor.codegen as codegen
-
-if TEST_WITH_NESTEDTENSORS:
-    import torch.tensortypes.nestedtensor as nestedtensor
-    from common_utils import TestCase
-    NestedTensor = nestedtensor.NestedTensor
-else:
-    print('NestedTensors not available, skipping tests')
-    TestCase = object
-
+from common_utils import TestCase
 
 def _shape_prod(shape_):
     shape = tuple(shape_)
@@ -60,19 +50,19 @@ class TestNestedTensor(TestCase):
         tensors = []
         num_tensors = 16
         for i in range(num_tensors):
-            tensors.append(self.gen_float_tensor(i, (16, 128, 128)))
+            tensors.append(self.gen_float_tensor(i, (i + 1, 128, 128)))
         nested_tensor = torch.nestedtensor(tensors)
         for i in range(num_tensors):
             tensors[i].mul_(i + 2)
         for i in range(num_tensors):
-            assert (tensors[i] != nested_tensor.tensors[i]).all()
+            self.assertTrue((tensors[i] != nested_tensor._tensors[i]).all())
         self.assertRaises(ValueError, lambda: torch.nestedtensor([]))
         self.assertRaises(ValueError, lambda: torch.nestedtensor(torch.tensor([3.0])))
 
     def test_nested_size(self):
         a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
         na = (torch.Size([1, 2]), torch.Size([2, 3]), torch.Size([4, 5]))
-        assert a.nested_size() == na
+        self.assertEqual(a.nested_size(), na)
 
 
     def test_len(self):
@@ -80,25 +70,12 @@ class TestNestedTensor(TestCase):
                                 torch.tensor([3, 4]), 
                                 torch.tensor([5, 6]), 
                                 torch.tensor([7, 8])])
-        assert(len(a) == 4)
+        self.assertEqual(len(a), 4)
         a = torch.nestedtensor([torch.tensor([1, 2]), 
                                 torch.tensor([7, 8])])
-
-        assert(len(a) == 2)
+        self.assertEqual(len(a), 2)
         a = torch.nestedtensor([torch.tensor([1, 2])])
-        assert(len(a) == 1)
-
-
-    def test_unbind(self):
-        data = [self.gen_float_tensor(1, (2, 2)),
-                self.gen_float_tensor(2, (2, 2)),
-                self.gen_float_tensor(3, (2, 2))]
-        a = torch.nestedtensor(data)
-        b = a.unbind()
-        c = torch.nestedtensor([data_i + 1 for data_i in data])
-        for t in b:
-            t.add_(1)
-        assert (a == c).all()
+        self.assertEqual(len(a), 1)
 
 
     def test_equal(self):
@@ -109,28 +86,28 @@ class TestNestedTensor(TestCase):
         a3 = torch.nestedtensor([torch.tensor([3, 4]), 
                                  torch.tensor([5, 6])])
         # Just exercising them until we have __bool__, all() etc.
-        assert (a1 == a2).all()
-        assert (a1 != a3).all()
-        assert not (a1 != a2).any()
-        assert not (a1 == a3).any()
+        self.assertTrue((a1 == a2).all())
+        self.assertTrue((a1 != a3).all())
+        self.assertTrue(not (a1 != a2).any())
+        self.assertTrue(not (a1 == a3).any())
 
 
     def test_unary(self):
-        for func in codegen.extension.get_unary_functions():
+        for func in torch.nested.codegen.extension.get_unary_functions():
             data = [self.gen_float_tensor(1, (2, 3)) - 0.5,
                     self.gen_float_tensor(2, (2, 3)) - 0.5]
             if func in ['log', 'log10', 'log2', 'rsqrt', 'sqrt']:
                 data = list(map(lambda x: x.abs(), data))
             a1 = torch.nestedtensor(data)
             a2 = torch.nestedtensor(list(map(lambda x: getattr(torch, func)(x), data)))
-            assert (getattr(torch, func)(a1) == a2).all()
-            assert (getattr(a1, func)() == a2).all()
-            assert (getattr(a1, func + "_")() == a2).all()
-            assert (a1 == a2).all()
+            self.assertTrue((getattr(torch, func)(a1) == a2).all())
+            self.assertTrue((getattr(a1, func)() == a2).all())
+            self.assertTrue((getattr(a1, func + "_")() == a2).all())
+            self.assertTrue((a1 == a2).all())
 
 
     def test_binary(self):
-        for func in codegen.extension.get_binary_functions():
+        for func in torch.nested.codegen.extension.get_binary_functions():
             a = self.gen_float_tensor(1, (2, 3))
             b = self.gen_float_tensor(2, (2, 3))
             c = self.gen_float_tensor(3, (2, 3))
@@ -139,14 +116,10 @@ class TestNestedTensor(TestCase):
             a2 = torch.nestedtensor([b, c])
             a3 = torch.nestedtensor([getattr(torch, func)(a, b),
                                      getattr(torch, func)(b, c)])
-            assert (a3 == getattr(torch, func)(a1, a2)).all()
-            assert not (a3 == a1).any()
-            assert not (a3 == a2).any()
-            assert (a3 == getattr(a1, func)(a2)).all()
-            assert not (a3 == a1).any()
-            assert not (a3 == a2).any()
-            assert (a3 == getattr(a1, func + "_")(a2)).all()
-            assert (a3 == a1).all()
+            self.assertTrue((a3 == getattr(torch, func)(a1, a2)).all())
+            self.assertTrue((a3 == getattr(a1, func)(a2)).all())
+            self.assertTrue((a3 == getattr(a1, func + "_")(a2)).all())
+            self.assertTrue((a3 == a1).all())
 
     def test_detach(self):
         data = [self.gen_float_tensor(1, (10, 10)),
@@ -181,7 +154,7 @@ class TestNestedTensor(TestCase):
         print(x.requires_grad)
         y = y.detach()
         self.assertFalse(y.requires_grad)
-        self.assertIsNone(y.grad_fn)
+        self.assertRaises(NotImplementedError, lambda: y.grad_fn)
         z = x + y
         print('3 x.requires_grad')
         print(x.requires_grad)
@@ -214,7 +187,6 @@ class TestNestedTensor(TestCase):
         # self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
     def test_detach_base(self):
-        "detaching base does not detach view"
         x = torch.nestedtensor([torch.randn(10, 10)], requires_grad=True)
         x.detach_()
         self.assertFalse(x.requires_grad)
