@@ -9,7 +9,7 @@ def default_eval_fn(model, calib_data):
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
-    for data in calib_data:
+    for data, target in calib_data:
         model(data)
 
 _all__ = [
@@ -25,5 +25,7 @@ _all__ = [
     'Observer', 'WeightObserver', 'observer', 'default_observer',
     'default_weight_observer',
     # QConfig
-    'QConfig', 'default_qconfig'
+    'QConfig', 'default_qconfig',
+    # QAT utilities
+    'default_qat_qconfig', 'prepare_qat', 'quantize_qat'
 ]
