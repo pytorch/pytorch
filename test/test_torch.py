@@ -8147,10 +8147,6 @@ class _TestTorchMixin(object):
             dst = dst.masked_scatter(mask, src)
             self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
-            dst2 = torch.empty_like(dst)
-            torch.masked_scatter(src, mask, out=dst2)
-            self.assertEqual(dst, dst2)
-
     def test_masked_select(self):
         for device in torch.testing.get_all_device_types():
             for dtype in [torch.uint8, torch.bool]:
@@ -8158,15 +8154,10 @@ class _TestTorchMixin(object):
                 src = torch.randn(num_src, device=device)
                 mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(dtype)
                 dst = src.masked_select(mask)
-                print(src.device)
-                print(mask.device)
-                print(dst.device)
-                print("\n\n")
                 dst2 = []
                 for i in range(num_src):
                     if mask[i]:
                         dst2 += [src[i]]
-                print(dst2)
                 self.assertEqual(dst, torch.tensor(dst2), 0)
 
                 dst3 = torch.empty_like(src, device=device)
