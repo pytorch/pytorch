@@ -49,7 +49,7 @@ class TestNestedTensor(TestCase):
     def test_constructor(self):
         tensors = []
         for i in range(16):
-            tensors.append(self.gen_float_tensor(i, (16, 128, 128)))
+            tensors.append(self.gen_float_tensor(i, (i + 1, 128, 128)))
         nested_tensor = torch.nestedtensor(tensors)
         for i in range(16):
             tensors[i].mul_(i + 2)
@@ -174,7 +174,6 @@ class TestNestedTensor(TestCase):
         # self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
     def test_detach_base(self):
-        "detaching base does not detach view"
         x = torch.nestedtensor([torch.randn(10, 10)], requires_grad=True)
         x.detach_()
         self.assertFalse(x.requires_grad)
