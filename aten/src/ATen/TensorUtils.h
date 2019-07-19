@@ -146,8 +146,8 @@ namespace detail {
 CAFFE2_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
 CAFFE2_API int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides);
 CAFFE2_API c10::optional<std::vector<int64_t>> computeStride(
-    at::IntArrayRef oldshape,
-    at::IntArrayRef oldstride,
-    at::IntArrayRef newshape);
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    IntArrayRef newshape);
 } // namespace detail
 } // namespace at
