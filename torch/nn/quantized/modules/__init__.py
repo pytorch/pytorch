@@ -1,3 +1,4 @@
+# @lint-ignore-every PYTHON3COMPATIMPORTS​
 
 from .activation import ReLU
 from .conv import Conv2d
