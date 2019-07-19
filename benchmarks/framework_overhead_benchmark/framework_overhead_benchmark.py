@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from utils import ms_to_us, benchmark_module, BenchmarkConfig, ModuleConfig
 import argparse
+from C2Module import C2SimpleNet
 
 from SimpleAddModule import SimpleAddModule, add_tensors_loop
 from pt_wrapper_module import WrapperModule
@@ -13,10 +14,14 @@ Supports both graph mode and eager mode. In graph mode the module is traced via 
 Debug option prints the traced graph is graph_mode is enabled.
 Graph can be saved via save option. Saved in the directory where benchmark is run.
 Example build/run:
+To run PT benchmark:
 buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_benchmark --
  --add_op --graph_mode --eager_mode (Runs both graph mode and eager mode)
 buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_benchmark --
  --add_op --graph_mode (Runs only graph mode)
+To run C2 benchmark:
+buck run @mode/opt <path-to-framework_overhead_benchmark>:framework_overhead_benchmark --
+ --add_op --benchmark_c2_net
 """
 
 SUPPORTED_OPS = {"add_op"}
@@ -41,17 +46,26 @@ def benchmark_simple_fn(args, config, module_config, module_type, result):
         module_type:    Type of the module to be wrapped. e.g. SimpleAddModule for add op.
         result:         dictionary instance to be populated with the benchmark result (latency per iter).
     """
+    benchmark_c2_net = args.benchmark_c2_net
     print("Benchmarking {}".format(module_type.__name__))
-    f_name = module_config.pt_fn.__name__ + ":Num Operands=" + str(module_config.num_params)
-    graph_mode_str = "Graph mode" + ":" + str(module_config.graph_mode)
-    result_key = ','.join((f_name, graph_mode_str))
-    module = WrapperModule(module_type, module_config, args.debug, args.save)
-    latency_per_iter_ms = benchmark_module(config, module)
-    result[result_key] = latency_per_iter_ms
+    if benchmark_c2_net:
+        op_name = module_config.c2_op
+        num_inputs = module_config.num_params
+        module = C2SimpleNet(op_name, num_inputs=num_inputs, debug=args.debug)
+        latency_per_iter_ms = benchmark_module(config, module)
+        result[op_name] = latency_per_iter_ms
+    else:
+        f_name = module_config.pt_fn.__name__ + ":Num Operands=" + str(module_config.num_params)
+        graph_mode_str = "Graph mode" + ":" + str(module_config.graph_mode)
+        result_key = ','.join((f_name, graph_mode_str))
+        module = WrapperModule(module_type, module_config, args.debug, args.save)
+        latency_per_iter_ms = benchmark_module(config, module)
+        result[result_key] = latency_per_iter_ms
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--op", default="add_op", dest="op", type=str)
+    parser.add_argument("--benchmark_c2_net", default=False, dest="benchmark_c2_net", action="store_true")
     parser.add_argument("--debug", default=False, dest="debug", action="store_true")
     parser.add_argument("--save", default=False, dest="save", action="store_true")
     parser.add_argument("--eager_mode", default=False, dest="eager_mode", action="store_true")
@@ -72,7 +86,10 @@ def main():
     result = {}
     if args.op == "add_op":
         num_params = 2
-        module_config = ModuleConfig(add_tensors_loop, num_params, graph_mode)
+        if args.benchmark_c2_net:
+            module_config = ModuleConfig(None, 'Sum', num_params, None)
+        else:
+            module_config = ModuleConfig(add_tensors_loop, None, num_params, graph_mode)
         benchmark_simple_fn(args, config, module_config, SimpleAddModule, result)
     print_results(result)
 

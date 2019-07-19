@@ -2,9 +2,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import time
 from collections import namedtuple
 
-NUM_PT_LOOP_ITERS = 1000
+NUM_LOOP_ITERS = 1000
 BenchmarkConfig = namedtuple('BenchmarkConfig', 'num_warmup_iters num_iters')
-ModuleConfig = namedtuple('ModuleConfig', 'pt_fn num_params graph_mode')
+ModuleConfig = namedtuple('ModuleConfig', 'pt_fn c2_op num_params graph_mode')
 
 def ms_to_us(time_ms):
     return (time_ms * 1e3)
@@ -22,4 +22,4 @@ def benchmark_module(config, module):
     module.forward(config.num_iters)
     end = time.time()
     time_elapsed_s = (end - start)
-    return (secs_to_ms(time_elapsed_s) / config.num_iters / NUM_PT_LOOP_ITERS)
+    return (secs_to_ms(time_elapsed_s) / config.num_iters / NUM_LOOP_ITERS)
