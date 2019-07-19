@@ -19,9 +19,20 @@ class Conv2d(NNConv2d):
         observer: fake quant module for output activation, it's called observer
             to align with post training flow
         weight_fake_quant: fake quant module for weight
-    TODO: example, will update before land
 
+    Examples::
+
+        >>> # With square kernels and equal stride
+        >>> m = nn.qat.Conv2d(16, 33, 3, stride=2)
+        >>> # non-square kernels and unequal stride and with padding
+        >>> m = nn.qat.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
+        >>> # non-square kernels and unequal stride and with padding and dilation
+        >>> m = nn.qat.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+        >>> input = torch.randn(20, 16, 50, 100)
+        >>> output = m(input)
     """
+
+    __FLOAT_MODULE__
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
