@@ -38,5 +38,6 @@ IMPLEMENT_THStorage_COPY(Float)
 IMPLEMENT_THStorage_COPY(Double)
 IMPLEMENT_THStorage_COPY(Half)
 IMPLEMENT_THStorage_COPY(Bool)
+IMPLEMENT_THStorage_COPY(BFloat16)
 
 #endif

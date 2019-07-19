@@ -36,6 +36,26 @@
 namespace at {
 namespace native {
 
+Tensor bitwise_not(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::bitwise_not_out(result, self);
+}
+
+Tensor& bitwise_not_(Tensor& self) {
+  return at::bitwise_not_out(self, self);
+}
+
+Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
+  checkBackend("bitwise_not", result, self.type().backend());
+  assert_no_internal_overlap(result, "bitwise_not");
+  auto iter = TensorIterator::unary_op(result, self);
+  bitwise_not_stub(iter->device_type(), *iter);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
+}
+
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
@@ -97,21 +117,6 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   at::namedinference::propagate_names(result, self);
 #endif
   return result;
-}
-
-Tensor& fill_out(Tensor& self, const Scalar value) {
-  auto iter = TensorIterator::nullary_op(self);
-  fill_stub(iter->device_type(), *iter, value);
-  return self;
-}
-
-Tensor& fill_(Tensor& self, Scalar value) {
-  return fill_out(self, value);
-}
-
-Tensor& fill_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  return fill_out(self, value.item());
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
@@ -196,6 +201,7 @@ DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
+DEFINE_DISPATCH(bitwise_not_stub);
 DEFINE_DISPATCH(ceil_stub);
 DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
@@ -220,6 +226,5 @@ DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
-DEFINE_DISPATCH(fill_stub);
 }
 } // namespace at

@@ -7,20 +7,27 @@ namespace c10 {
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
 
-std::shared_ptr<Function> ClassType::getMethod(const std::string& name) const {
-  return compilation_unit_->find_function(name);
+Function* ClassType::getMethod(const std::string& name) const {
+  const auto qualname = QualifiedName(*qualified_name_obj(), name);
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu->find_function(qualname);
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
-  return compilation_unit_;
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
 std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
-  return compilation_unit_;
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
 
 ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
-    std::shared_ptr<CompilationUnit> cu,
+    std::weak_ptr<CompilationUnit> cu,
     bool is_module) {
   return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
 }
@@ -62,17 +69,13 @@ size_t ClassType::addAttribute(
   return slot;
 }
 
-std::vector<Function*> ClassType::methods() const {
-  std::vector<Function*> ret;
-  for (const auto& pr : compilation_unit()->get_functions()) {
-    ret.push_back(pr.get());
-  }
-  return ret;
+const std::vector<Function*>& ClassType::methods() const {
+  return methods_;
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
-    std::shared_ptr<CompilationUnit> cu,
+    std::weak_ptr<CompilationUnit> cu,
     bool is_module)
     : NamedType(TypeKind::ClassType, name), compilation_unit_(std::move(cu)) {
   if (is_module) {

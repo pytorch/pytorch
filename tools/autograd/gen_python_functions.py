@@ -27,7 +27,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
-    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*',
+    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
@@ -769,9 +769,9 @@ def group_declarations(declarations):
                 v['signature'] = signature
 
     result = []
-    for _, dictionary in sorted(grouped.items()):
+    for x, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
-            raise RuntimeError("'base' not in dictionary", dictionary)
+            raise RuntimeError("'base' not in dictionary for " + str(x), dictionary)
         result.append(dictionary)
     return sort_declarations(result)
 
@@ -874,7 +874,7 @@ def get_python_signature(declaration, include_out):
         default = None
         if arg.get('default') is not None:
             default = arg['default']
-            if default == 'nullptr' or default == 'nullopt' or default == '{}':
+            if default == 'nullptr' or default == 'c10::nullopt' or default == '{}':
                 default = 'None'
         if default is not None:
             param += '=' + str(default)

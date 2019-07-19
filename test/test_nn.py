@@ -36,6 +36,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_reduction, \
     get_weight, smoothl1loss_reference, kldivloss_reference, \
     ctcloss_reference, new_module_tests
+from common_utils import TEST_WITH_UBSAN
 
 from torch.nn import MultiheadAttention
 
@@ -495,6 +496,80 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def extra_args(self):
         return self._get_arg('extra_args', False)
 
+class TestAvgPool(TestCase):
+    def _sum_pool2d(self, x, kernel_size):
+        windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
+        return torch.sum(windows, dim=1)
+
+    def _sum_pool3d(self, x, kernel_size):
+        # Because unfold does not support 3D sliding window we will split tensor to multiple tensors and calculate sum
+        h = kernel_size[0]
+        splited_x = [t.sum(0) for t in x.split(h) if t.size(0) == h]
+        # sum_pool2d assumes tensor in (1, 1, n, m) view, so unsqueeze two times
+        splited_x = [self._sum_pool2d(t.unsqueeze(0).unsqueeze(0), kernel_size[1:]) for t in splited_x]
+        joined_x = torch.cat(splited_x)
+        return joined_x.view(1, joined_x.numel())
+
+    def _avg_pool2d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool2d(x, kernel_size) / size
+
+    def _avg_pool3d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool3d(x, kernel_size) / size
+
+    def test_doubletensor_avg_pool2d(self):
+        n, m = 5, 8
+        input = torch.rand(1, 1, n, m)
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                actual = torch.nn.functional.avg_pool2d(input[0], (i, j))
+                actual = actual.view(1, actual.numel())
+                expected = self._avg_pool2d(input, (i, j))
+                self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool2d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+                               lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
+
+    def test_doubletensor_avg_pool2d_with_divisor(self):
+        n, m = 3, 3
+        input = torch.rand(1, 1, n, m)
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                for divisor in [1, 7, i * j]:
+                    actual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
+                    actual = actual.view(1, actual.numel())
+                    expected = self._sum_pool2d(input, (i, j)) / divisor
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_doubletensor_avg_pool3d(self):
+        h, w, d = 5, 6, 7
+        input = torch.rand(h, w, d)
+        for i in range(1, h + 1):
+            for j in range(1, w + 1):
+                for k in range(1, d + 1):
+                    actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
+                    actual = actual.view(1, actual.numel())
+                    expected = self._avg_pool3d(input, (i, j, k))
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_doubletensor_avg_pool3d_with_divisor(self):
+        h, w, d = 6, 5, 7
+        input = torch.rand(h, w, d)
+        for i in range(1, h + 1):
+            for j in range(1, w + 1):
+                for k in range(1, d + 1):
+                    for divisor in [1, 7, i * j]:
+                        actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
+                        actual = actual.view(1, actual.numel())
+                        expected = self._sum_pool3d(input, (i, j, k)) / divisor
+                        self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool3d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+                               lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = False
@@ -569,6 +644,19 @@ class TestNN(NNTestCase):
         s = nn.Sequential(n, n)
 
         return l, n, s
+
+    def test_requires_grad_(self):
+        m = self._create_basic_net()[-1]
+        assert len(list(m.buffers())) > 0, 'invalid test'
+        assert all(not b.requires_grad for b in m.buffers()) > 0, 'invalid test'
+        assert len(list(m.parameters())) > 0, 'invalid test'
+        assert all(p.requires_grad for p in m.parameters()) > 0, 'invalid test'
+        for requires_grad in (False, True):
+            self.assertIs(m.requires_grad_(requires_grad), m)
+            for p in m.parameters():
+                self.assertEqual(p.requires_grad, requires_grad)
+            for b in m.buffers():
+                self.assertFalse(b.requires_grad)
 
     def test_module_backcompat(self):
         from torch.serialization import SourceChangeWarning
@@ -2141,47 +2229,91 @@ class TestNN(NNTestCase):
             for _ in range(activate_times):
                 snm(inp)
 
+            version_latest_ref_state_dict = deepcopy(snm.state_dict())
+            self.assertEqual({'weight_orig', 'bias', 'weight_u', 'weight_v'}, set(version_latest_ref_state_dict.keys()))
+
+            # test that non-strict loading works
+            non_strict_state_dict = deepcopy(version_latest_ref_state_dict)
+            non_strict_state_dict['nonsense'] = 'nonsense'
+            with self.assertRaisesRegex(RuntimeError, r'Unexpected key\(s\) in state_dict: "nonsense"'):
+                snm.load_state_dict(non_strict_state_dict, strict=True)
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['weight_orig']
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['weight_u']
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['weight_v']
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            non_strict_state_dict['weight'] = snm.weight.detach().clone()  # set W as a buffer
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict._metadata['']['spectral_norm']       # remove metadata info
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['weight']                            # remove W buffer
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+            del non_strict_state_dict['bias']
+            snm.load_state_dict(non_strict_state_dict, strict=False)
+
             # craft a version None state_dict
-            version_none_state_dict = deepcopy(snm.state_dict())
-            self.assertEqual({'weight_orig', 'bias', 'weight_u', 'weight_v'}, set(version_none_state_dict.keys()))
+            version_none_state_dict = deepcopy(version_latest_ref_state_dict)
             self.assertIn('spectral_norm', version_none_state_dict._metadata[''])
             del version_none_state_dict._metadata['']['spectral_norm']       # remove metadata info
             del version_none_state_dict['weight_v']                          # remove v vector
             version_none_state_dict['weight'] = snm.weight.detach().clone()  # set W as a buffer
 
             # normal state_dict
-            version_latest_state_dict = deepcopy(snm.state_dict())
+            for version_latest_with_metadata in [True, False]:
+                version_latest_state_dict = deepcopy(version_latest_ref_state_dict)
 
-            snm.eval()
-            out0_eval = snm(inp)
-            snm.train()
-            out1_train = snm(inp)
-            out2_train = snm(inp)
-            snm.eval()
-            out3_eval = snm(inp)
+                if not version_latest_with_metadata:
+                    # We want to still load a user-crafted state_dict, one without metadata
+                    del version_latest_state_dict._metadata['']['spectral_norm']
 
-            snm.load_state_dict(version_none_state_dict)
-            if activate_times > 0:
-                # since in loading version None state dict, we assume that the
-                # values in the state dict have gone through at lease one
-                # forward, we only test for equivalence when activate_times > 0.
-                snm.eval()
-                self.assertEqual(out0_eval, snm(inp))
-                snm.train()
-                self.assertEqual(out1_train, snm(inp))
-                self.assertEqual(out2_train, snm(inp))
-                snm.eval()
-                self.assertEqual(out3_eval, snm(inp))
+                # test that re-wrapping does not matter
+                m = torch.nn.utils.remove_spectral_norm(snm)
+                snm = torch.nn.utils.spectral_norm(m)
 
-            # Test normal loading
-            snm.load_state_dict(version_latest_state_dict)
-            snm.eval()
-            self.assertEqual(out0_eval, snm(inp))
-            snm.train()
-            self.assertEqual(out1_train, snm(inp))
-            self.assertEqual(out2_train, snm(inp))
-            snm.eval()
-            self.assertEqual(out3_eval, snm(inp))
+                snm.load_state_dict(version_latest_ref_state_dict)
+                with torch.no_grad():
+                    snm.eval()
+                    out0_eval = snm(inp)
+                    snm.train()
+                    out1_train = snm(inp)
+                    out2_train = snm(inp)
+                    snm.eval()
+                    out3_eval = snm(inp)
+
+                # test that re-wrapping does not matter
+                m = torch.nn.utils.remove_spectral_norm(snm)
+                snm = torch.nn.utils.spectral_norm(m)
+
+                snm.load_state_dict(version_none_state_dict)
+                if activate_times > 0:
+                    # since in loading version None state dict, we assume that the
+                    # values in the state dict have gone through at lease one
+                    # forward, we only test for equivalence when activate_times > 0.
+                    with torch.no_grad():
+                        snm.eval()
+                        self.assertEqual(out0_eval, snm(inp))
+                        snm.train()
+                        self.assertEqual(out1_train, snm(inp))
+                        self.assertEqual(out2_train, snm(inp))
+                        snm.eval()
+                        self.assertEqual(out3_eval, snm(inp))
+
+                # test that re-wrapping does not matter
+                m = torch.nn.utils.remove_spectral_norm(snm)
+                snm = torch.nn.utils.spectral_norm(m)
+
+                # Test normal loading
+                snm.load_state_dict(version_latest_state_dict)
+                with torch.no_grad():
+                    snm.eval()
+                    self.assertEqual(out0_eval, snm(inp))
+                    snm.train()
+                    self.assertEqual(out1_train, snm(inp))
+                    self.assertEqual(out2_train, snm(inp))
+                    snm.eval()
+                    self.assertEqual(out3_eval, snm(inp))
 
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
@@ -2443,8 +2575,7 @@ class TestNN(NNTestCase):
             dtypes = [torch.float, torch.half]
         else:
             dtypes = [torch.float]
-        # FIXME: add (10, 0) after https://github.com/pytorch/pytorch/issues/17262 is fixed
-        sizes = [(0, 10), (32, 20)]
+        sizes = [(0, 10), (32, 20), (10, 0)]
         for fn in [F.softmax, F.log_softmax]:
             for dtype in dtypes:
                 for size in sizes:
@@ -2459,6 +2590,26 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_softmax_backward_cuda(self):
         self._test_softmax_backward(torch.device('cuda'))
+
+    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+                     'Linear_FP16_weight requires FBGEMM. FBGEMM does not play'
+                     ' well with UBSAN at the moment, so we skip the test if'
+                     ' we are in a UBSAN environment.')
+    def test_fb_fc_packed(self):
+        X = np.random.rand(16, 16).astype(np.float32) - 0.5
+        W = np.random.rand(16, 16).astype(np.float32) - 0.5
+        b = np.random.rand(16).astype(np.float32) - 0.5
+
+        def fc_op(X, W, b):
+            return np.dot(X, W.T) + b
+
+        x_tensor = torch.tensor(X)
+        w_tensor = torch.tensor(W)
+        b_tensor = torch.tensor(b)
+        packed_w_tensor = torch.fbgemm_pack_gemm_matrix_fp16(w_tensor)
+        actual_output = torch.fbgemm_linear_fp16_weight(x_tensor, packed_w_tensor, b_tensor)
+        expected_output = fc_op(X, W, b)
+        torch.testing.assert_allclose(expected_output, actual_output.cpu(), atol=1e-3, rtol=1e-3)
 
     def _test_gumbel_softmax_st_shapes(self, cuda, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float)
@@ -3602,7 +3753,7 @@ class TestNN(NNTestCase):
                         multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                         multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
                         multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
-                        static_k=saved_k_tensor, static_v=saved_v_tensor) 
+                        static_k=saved_k_tensor, static_v=saved_v_tensor)
                 else:
                     result, result_weight = torch.nn.functional.multi_head_attention_forward(
                         _Q, _K, _V,
@@ -3612,9 +3763,9 @@ class TestNN(NNTestCase):
                         multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                         multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
                         multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
-                        True, multihead_attn_module.q_proj_weight, 
+                        True, multihead_attn_module.q_proj_weight,
                         multihead_attn_module.k_proj_weight, multihead_attn_module.v_proj_weight,
-                        static_k=saved_k_tensor, static_v=saved_v_tensor) 
+                        static_k=saved_k_tensor, static_v=saved_v_tensor)
 
                 result = result.squeeze(0).detach().numpy()
 
@@ -3644,12 +3795,12 @@ class TestNN(NNTestCase):
 
                 if saved_k is not None:
                     K_split = np.reshape(saved_k, [dims[0], nheads, dims[1], d_head])
-                else: 
+                else:
                     K_split = _split_heads_ref(K_fc, dims, nheads, d_head)
 
                 if saved_k is not None:
                     V_split = np.reshape(saved_v, [dims[0], nheads, dims[1], d_head])
-                else: 
+                else:
                     V_split = _split_heads_ref(V_fc, dims, nheads, d_head)
 
                 if add_zero_attn:
@@ -3668,7 +3819,7 @@ class TestNN(NNTestCase):
                     V=V_split,
                     dims=Q_split.shape,
                     unseen_mask=attn_mask,
-                    key_padding_mask=key_padding_mask 
+                    key_padding_mask=key_padding_mask
                 )
                 combined_attn_heads = _combine_heads_ref(
                     X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
@@ -3713,7 +3864,7 @@ class TestNN(NNTestCase):
                                         add_zero_attn=True, saved_kv=True)
 
         def test_multihead_attn_all_arguments3():
-            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True, 
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
                                         saved_kv=True, same_embed_dim=True)
 
         test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
@@ -3950,6 +4101,31 @@ class TestNN(NNTestCase):
 
     def test_pool_large_size(self, dtype=torch.float):
         self._test_pool_large_size(self, device="cpu")
+
+    @staticmethod
+    def _test_pool_invalid_size(self, device, dtype=torch.float):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                # use a configuration that gives zero outputs only
+                # when doing a correct floor division by the stride
+                x = torch.ones([1, 1] + num_dim * [4],
+                               device=device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, r"too small|smaller than"):
+                    try:
+                        res = fn(x, 3, stride=2, padding=0, dilation=2)
+                    except TypeError:
+                        # some implementations do not support dilation
+                        res = fn(x, 6, stride=2, padding=0)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_pool_invalid_size_cuda(self, dtype=torch.float):
+        self._test_pool_invalid_size(self, device="cuda", dtype=dtype)
+
+    def test_pool_invalid_size(self, dtype=torch.float):
+        self._test_pool_invalid_size(self, device="cpu")
 
     def _test_scatter(self, tensor):
         x = tensor.detach().requires_grad_()
@@ -5757,8 +5933,17 @@ class TestNN(NNTestCase):
         tgt = torch.randn(tgt_length, bsz, d_model)
         tgt_mask = transformer.generate_square_subsequent_mask(tgt_length).double()
         memory_mask = torch.randn(tgt_length, seq_length).double()
+        src_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
+        tgt_key_padding_mask = torch.rand(bsz, tgt_length) >= 0.5
+        memory_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
 
-        output = transformer(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask, memory_mask=memory_mask)
+        output = transformer(src, tgt,
+                             src_mask=src_mask,
+                             tgt_mask=tgt_mask,
+                             memory_mask=memory_mask,
+                             src_key_padding_mask=src_key_padding_mask,
+                             tgt_key_padding_mask=tgt_key_padding_mask,
+                             memory_key_padding_mask=memory_key_padding_mask)
         output.sum().backward()
 
     def test_transformerencoderlayer(self):
@@ -5787,6 +5972,18 @@ class TestNN(NNTestCase):
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        # 0 values are NOT masked. This shouldn't mask anything.
+        mask = torch.Tensor([[0]]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        result = result.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        # 1 values are masked. Since there is only 1 input embedding this
+        # will result in nan.
+        mask = torch.Tensor([[1]]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        result = result.detach().numpy()
+        self.assertTrue(np.isnan(result).all())
 
         # deterministic input
         encoder_input = torch.Tensor([[[1, 2, 3, 4]],
@@ -5794,6 +5991,20 @@ class TestNN(NNTestCase):
         result = model(encoder_input)
         ref_output = torch.Tensor([[[2.272644, 0.119035, -0.691669, 0.153486]],
                                    [[2.272644, 0.119035, -0.691669, 0.153486]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        # all 0 which is no masking
+        mask = torch.Tensor([[0, 0]]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        result = result.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        mask = torch.Tensor([[1, 0]]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor([[[2.301516, 0.092249, -0.679101, 0.103088]],
+                                   [[2.301516, 0.092249, -0.679101, 0.103088]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5821,6 +6032,30 @@ class TestNN(NNTestCase):
                                     [2.433556, 0.021891, -0.598509, -0.086832]],
                                    [[2.416246, 0.017512, -0.610712, -0.082961],
                                     [2.422901, 0.024187, -0.606178, -0.074929]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        # all 0
+        mask = torch.zeros([2, 5]) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        result = result.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        mask[0, 1] = 1
+        mask[1, 3] = 1
+        mask[1, 4] = 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
+                                    [2.428811, 0.021445, -0.601912, -0.084252]],
+                                   [[2.425009, 0.019155, -0.604566, -0.085899],
+                                    [2.415408, 0.02249 , -0.611415, -0.073]],
+                                   [[2.434199, 0.021682, -0.598039, -0.087699],
+                                    [2.42598, 0.019941, -0.603896, -0.085091]],
+                                   [[2.436457, 0.022736, -0.59643 , -0.08736],
+                                    [2.434021, 0.022093, -0.598179, -0.08679]],
+                                   [[2.416531, 0.017498, -0.610513, -0.083181],
+                                    [2.4242, 0.024653, -0.605266, -0.074959]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5905,6 +6140,66 @@ class TestNN(NNTestCase):
                                     [2.431970, 0.029387, -0.599789, -0.071621]],
                                    [[2.431934, 0.028196, -0.599802, -0.073809],
                                     [2.432306, 0.028858, -0.599542, -0.072846]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # key_padding_mask
+        key_padding_mask = torch.zeros(2, 3) == 1
+        result = model(decoder_input, memory_input, tgt_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # key_padding_mask
+        key_padding_mask[0, 2] = 1
+        key_padding_mask[1, 1] = 1
+        key_padding_mask[1, 2] = 1
+        result = model(decoder_input, memory_input, tgt_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430025, 0.027643, -0.601164, -0.073476],
+                                    [2.4323, 0.029375, -0.599553, -0.071881]],
+                                   [[2.428523, 0.026838, -0.602226, -0.07391],
+                                    [2.432634, 0.029842, -0.599318, -0.071253]],
+                                   [[2.432278, 0.028152, -0.599555, -0.074139],
+                                    [2.432659, 0.029244, -0.599294, -0.072382]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # memory_key_padding_mask
+        key_padding_mask = torch.zeros(2, 5) == 1
+        result = model(decoder_input, memory_input, memory_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # memory_key_padding_mask
+        key_padding_mask[0, 4] = 1
+        key_padding_mask[1, 3] = 1
+        key_padding_mask[1, 4] = 1
+        result = model(decoder_input, memory_input, memory_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.429757, 0.027358, -0.601351, -0.073816],
+                                    [2.432692, 0.028583, -0.599263, -0.073634]],
+                                   [[2.428247, 0.02662, -0.602419, -0.074123],
+                                    [2.432657, 0.029055, -0.599293, -0.072732]],
+                                   [[2.431515, 0.027687, -0.600096, -0.074459],
+                                    [2.433075, 0.028543, -0.598987, -0.073985]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -6085,7 +6380,9 @@ class TestNN(NNTestCase):
         wrong_nhead = 5
 
         def test(encoder_input_shape, decoder_input_shape,
-                 src_mask_len=None, tgt_mask_len=None, memory_mask_size=None):
+                 src_mask_len=None, tgt_mask_len=None, memory_mask_size=None,
+                 src_key_padding_mask_size=None, tgt_key_padding_mask_size=None,
+                 memory_key_padding_mask_size=None):
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
@@ -6106,9 +6403,30 @@ class TestNN(NNTestCase):
             else:
                 memory_task = None
 
+            if src_key_padding_mask_size is not None:
+                src_key_padding_mask = torch.rand(src_key_padding_mask_size) >= 0.5
+            else:
+                src_key_padding_mask = None
+
+            if tgt_key_padding_mask_size is not None:
+                tgt_key_padding_mask = torch.rand(tgt_key_padding_mask_size) >= 0.5
+            else:
+                tgt_key_padding_mask = None
+
+            if memory_key_padding_mask_size is not None:
+                memory_key_padding_mask = torch.rand(memory_key_padding_mask_size) >= 0.5
+            else:
+                memory_key_padding_mask = None
+
             with self.assertRaises(RuntimeError):
                 model(encoder_input, decoder_input,
-                      src_mask=src_mask, tgt_mask=tgt_mask, memory_mask=memory_task)
+                      src_mask=src_mask,
+                      tgt_mask=tgt_mask,
+                      memory_mask=memory_task,
+                      src_key_padding_mask=src_key_padding_mask,
+                      tgt_key_padding_mask=tgt_key_padding_mask,
+                      memory_key_padding_mask=memory_key_padding_mask)
+
 
         correct_encoder_input_shape = (seq_len, bsz, d_model)
         correct_decoder_input_shape = (tgt_len, bsz, d_model)
@@ -6157,13 +6475,34 @@ class TestNN(NNTestCase):
         wrong_tgt_mask_size = tgt_len + 1
         test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size)
 
-        # Incorrect tgt_mask
+        # Incorrect memory_mask
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
         test(encoder_input_shape, decoder_input_shape,
-             tgt_mask_len=wrong_tgt_mask_size,
              memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size))
+
+        # Incorrect src_key_padding_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        with self.assertRaises(AssertionError):
+            test(encoder_input_shape, decoder_input_shape,
+                 src_key_padding_mask_size=(wrong_bsz, wrong_src_mask_size))
+
+        # Incorrect tgt_key_padding_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        with self.assertRaises(AssertionError):
+            test(encoder_input_shape, decoder_input_shape,
+                 tgt_key_padding_mask_size=(wrong_bsz, wrong_tgt_mask_size))
+
+        # Incorrect memory_key_padding_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        with self.assertRaises(AssertionError):
+            test(encoder_input_shape, decoder_input_shape,
+                 memory_key_padding_mask_size=(wrong_bsz, wrong_src_mask_size))
+
 
     def test_rnn_args_check(self):
         input_size = 3
