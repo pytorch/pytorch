@@ -2028,7 +2028,7 @@ RegisterOperators reg2({
           listAppend<value_type>, aliasAnalysisFromSchema()),                       \
       Operator(                                                                     \
           "aten::reverse( " decl_type "[](a!) self) -> ()",                         \
-          listReverse<value_type>, aliasAnalysisFromSchema()                        \
+          listReverse<value_type>, aliasAnalysisFromSchema()),                      \
       Operator(                                                                     \
           "aten::extend(" decl_type "[](a!) self, " decl_type                       \
           " [] other) -> ()",                                                       \
