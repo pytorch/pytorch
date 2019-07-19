@@ -766,6 +766,7 @@ _(attr, dimension) \
 _(attr, dims) \
 _(attr, dims_other) \
 _(attr, dims_self) \
+_(attr, divisor_override) \
 _(attr, dropout) \
 _(attr, dropout_seed) \
 _(attr, dropout_state) \

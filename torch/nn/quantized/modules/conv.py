@@ -62,7 +62,6 @@ class Conv2d(_ConvNd):
 
     @property
     def weight(self):
-        # TODO: upack
         return self._packed_weight
 
     @weight.setter
@@ -81,7 +80,7 @@ class Conv2d(_ConvNd):
                          scale=self.scale,
                          zero_point=self.zero_point,
                          dtype=torch.quint8,
-                         prepacked=True)
+                         prepacked=True).permute([0, 3, 1, 2]).contiguous()
 
 
     @staticmethod

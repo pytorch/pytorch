@@ -88,10 +88,15 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     return result.copy_(result_cpu);
   }
 
+#if 0
+  // This if condition should never be true because if n >= 30000 and the tensor has a Half type,
+  // check_supported_max_int_with_precision should have reported an error. This snippet is commented out but left here
+  // for the sake of clarity, because Half in thrust is spotty, and we do not want future change unaware of this.
   if (result.scalar_type() == at::ScalarType::Half) {  // Half in thrust is spotty. Avoid.
     auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
     return result.copy_(randperm_out_cuda(result_float, n, generator));
   }
+#endif
 
   // Generate random values for the keys array
   AT_DISPATCH_ALL_TYPES(
