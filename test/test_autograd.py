@@ -1718,7 +1718,7 @@ class TestAutograd(TestCase):
         y = f(x1)
         with warnings.catch_warnings(record=True) as w:
             z = f(x2)
-        self.assertIn('extending-torch-autograd', str(w[0].message))
+        self.assertIn('extending-torch-autograd', str(w[1].message))
         # I don't really care about the functional correctness of this
         # part of the test: if you make a change that causes this test
         # to fail, it's probably OK to just fix this test case to follow
