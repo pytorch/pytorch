@@ -388,7 +388,8 @@ RegisterOperators reg(
            pop(stack, d);
            push(stack, (int64_t)d);
            return 0;
-         }),
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::Int(Scalar a) -> int",
          [](Stack& stack) {
@@ -409,7 +410,8 @@ RegisterOperators reg(
            pop(stack, a);
            push(stack, a.item<double>());
            return 0;
-         }),
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::Float(Scalar a) -> float",
          [](Stack& stack) {
@@ -421,7 +423,8 @@ RegisterOperators reg(
              push(stack, static_cast<double>(scalar.toInt()));
            }
            return 0;
-         }),
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::Float(int a) -> float",
          [](Stack& stack) {
@@ -429,7 +432,8 @@ RegisterOperators reg(
            pop(stack, i);
            push(stack, (float)i);
            return 0;
-         }),
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::Float(bool a) -> float",
          [](Stack& stack) {
@@ -437,7 +441,8 @@ RegisterOperators reg(
            pop(stack, b);
            push(stack, (float)b);
            return 0;
-         }),
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::Float(str a) -> float",
          [](Stack& stack) {
@@ -569,8 +574,8 @@ RegisterOperators reg(
            pop(stack, a);
            push(stack, a.is_cuda());
            return 0;
-      },
-      aliasAnalysisFromSchema()),
+        },
+        aliasAnalysisFromSchema()),
      Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack& stack) {
