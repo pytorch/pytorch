@@ -1239,7 +1239,7 @@ def unsqueeze(g, self, dim):
 
     return g.op("Unsqueeze", self, axes_i=[dim])
 
-@parse_args('v', 'i', 'i')
+@parse_args('v', 'i', 'i', 'none')
 def sort(g, self, dim, decending, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported for sort")
@@ -1248,7 +1248,7 @@ def sort(g, self, dim, decending, out=None):
 
     return g.op("TopK", self, k_i=self.type().sizes()[dim], axis_i=dim, outputs=2)
 
-@parse_args('v', 'i', 'i', 'i', 'i')
+@parse_args('v', 'i', 'i', 'i', 'i', 'none')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
         _unimplemented("TopK", "Out parameter is not supported for topk")

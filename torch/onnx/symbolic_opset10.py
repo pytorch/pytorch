@@ -18,7 +18,7 @@ import torch.onnx.symbolic_opset9
 # release on 04/24/19
 
 
-@parse_args('v', 'i', 'i')
+@parse_args('v', 'i', 'i', 'none')
 def sort(g, self, dim, decending, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported for sort")
@@ -35,7 +35,7 @@ def sort(g, self, dim, decending, out=None):
     return g.op("TopK", self, slice_, axis_i=dim, outputs=2)
 
 
-@parse_args('v', 'v', 'i', 'i', 'i')
+@parse_args('v', 'v', 'i', 'i', 'i', 'none')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
         _unimplemented("TopK", "Out parameter is not supported for topk")
