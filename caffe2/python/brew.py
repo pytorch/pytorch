@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 import sys
 import copy
 import inspect
+import warnings
 from past.builtins import basestring
 from caffe2.python.model_helper import ModelHelper
 
@@ -94,7 +95,9 @@ class HelperWrapper(object):
                 "Or you can provide it in kwargs as model=<your_model>.")
                 new_kwargs = copy.deepcopy(model.arg_scope)
             func = self._registry[helper_name]
-            var_names, _, varkw, _= inspect.getargspec(func)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
+                var_names, _, varkw, _= inspect.getargspec(func)
             if varkw is None:
                 # this helper function does not take in random **kwargs
                 new_kwargs = {
