@@ -9,10 +9,9 @@
 namespace at { namespace native {
 namespace {
 
-bool is_valid_quantization_type(Tensor t) {
+bool is_valid_quantization_scheme(Tensor t) {
   const auto qtype = t.qscheme();
-  return (qtype == kPerTensorAffine) ||
-         (qtype == kPerTensorSymmetric);
+  return (qtype == kPerTensorAffine) || (qtype == kPerTensorSymmetric);
 }
 
 template <bool ReLUFused = false>
@@ -21,23 +20,19 @@ class QCat final : public torch::OperatorKernel {
   Tensor operator()(const std::vector<Tensor>& qxs, int64_t axis,
                     c10::optional<double> scale,
                     c10::optional<int64_t> zero_point) {
-    TORCH_CHECK(is_valid_quantization_type(qxs[0]),
-                "Only per-tensor quantization is supported in 'cat'!")
     const auto x_dtype = qxs[0].scalar_type();
-    const auto x_scale = qxs[0].q_scale();
-    const auto x_zero_point = qxs[0].q_zero_point();
+    TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+                "Only per-tensor quantization is supported in 'cat'!")
+    const auto x_qscheme = qxs[0].qscheme();
     double _scale = scale ? *scale : qxs[0].q_scale();
     int64_t _zero_point = zero_point ? *zero_point : qxs[0].q_zero_point();
 
     std::vector<Tensor> xs;
     xs.reserve(qxs.size());
     for (const auto& qx: qxs) {
-      TORCH_CHECK(is_valid_quantization_type(qx),
-                  "Only per-tensor quantization is supported in 'cat'!")
       TORCH_CHECK(x_dtype == qx.scalar_type(), "All dtypes must be the same.");
-      TORCH_CHECK(x_scale == qx.q_scale(), "All scales must be the same.");
-      TORCH_CHECK(x_zero_point == qx.q_zero_point(),
-                  "All zero_points must be the same.");
+      TORCH_CHECK(x_qscheme == qx.qscheme(),
+                  "Quantization schemes must be the same.");
       xs.push_back(qx.dequantize());
     }
     const Tensor y = at::cat(xs, axis);
