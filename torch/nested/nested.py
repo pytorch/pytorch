@@ -4,6 +4,7 @@ import torch
 DEBUG = False
 
 # This implementation is based on NestedTensor 0.0.1
+# NOTE: This is experimental code! Don't use this in production!
 # RFC: https://github.com/pytorch/pytorch/issues/22169
 
 def is_nested_tensor(obj):
