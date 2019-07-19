@@ -54,13 +54,6 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
     v->cdata.set_pyobj(obj);
-    if (auto fn = dynamic_cast<PyFunction*>(v->cdata.grad_fn_unsafe())) {
-      // Create a new reference to the THPFunction. This ensures that ref count
-      // of the THPFunction is at least the number of referring THPVariables.
-      const auto output_nr = v->cdata.output_nr();
-      auto grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
-      v->cdata.set_gradient_edge({std::move(grad_fn), output_nr});
-    }
   }
   return obj;
 }

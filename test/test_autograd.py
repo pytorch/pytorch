@@ -1704,8 +1704,11 @@ class TestAutograd(TestCase):
         with warnings.catch_warnings(record=True) as w:
             z = f(x2)
         self.assertIn('extending-torch-autograd', str(w[0].message))
+        # I don't really care about the functional correctness of this
+        # part of the test: if you make a change that causes this test
+        # to fail, it's probably OK to just fix this test case to follow
+        # it.  I'm mostly making sure we don't segfault here.
         y.backward()
-        # Yeah, uh, this is totally nuts
         self.assertEqual(x2.grad, x2)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")

@@ -40,7 +40,6 @@ struct PyFunction : public Function {
 
   void release_variables() override;
   std::string name() const override;
-  std::shared_ptr<Function> get_shared_ptr() override;
   bool is_traceable() override;
 
   // THPFunction this Function is wrapping.  Owning!
@@ -101,15 +100,19 @@ struct THPFunction {
     // saved for.  This field may be NULL (because a user can construct
     // a THPFunction directly from Python), but when this field is non-NULL,
     // it is guaranteed that cdata.lock()->obj == this
+    //
+    // In most ordinary use, this field should always be non-NULL; e.g.,
+    // when we allocate a THPFunction because we are running Function.apply,
+    // after constructing a THPFunction, we immediately allocate a PyFunction
+    // for it.  We can't enforce this directly in the constructor of
+    // THPFunction though, because there's no way to keep it live long enough
+    // to save an owning reference to PyFunction into the grad_fn of a Variable.
     std::weak_ptr<torch::autograd::PyFunction> cdata;
 };
 
 bool THPFunction_initModule(PyObject *module);
 extern PyTypeObject THPFunctionType;
 extern PyObject *THPFunctionClass;
-
-// XXX: this function requires the GIL (it can have side effects).
-std::shared_ptr<torch::autograd::PyFunction> THPFunction_asFunction(THPFunction* self);
 
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);
