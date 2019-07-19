@@ -5855,7 +5855,7 @@ add_docstr(torch.det,
            r"""
 det(A) -> Tensor
 
-Calculates determinant of a 2D square tensor.
+Calculates determinant of a square matrix or batches of square matrices.
 
 .. note::
     Backward through :meth:`det` internally uses SVD results when :attr:`A` is
@@ -5864,13 +5864,27 @@ Calculates determinant of a 2D square tensor.
     :meth:`~torch.svd` for details.
 
 Arguments:
-    A (Tensor): The input 2D square tensor
+    A (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                batch dimensions.
 
 Example::
 
     >>> A = torch.randn(3, 3)
     >>> torch.det(A)
     tensor(3.7641)
+
+    >>> A = torch.randn(3, 2, 2)
+    >>> A
+    tensor([[[ 0.9254, -0.6213],
+             [-0.5787,  1.6843]],
+
+            [[ 0.3242, -0.9665],
+             [ 0.4539, -0.0887]],
+
+            [[ 1.1336, -0.4025],
+             [-0.7089,  0.9032]]])
+    >>> A.det()
+    tensor([1.1990, 0.4099, 0.7386])    
 """)
 
 add_docstr(torch.where,
@@ -5924,7 +5938,7 @@ add_docstr(torch.logdet,
            r"""
 logdet(A) -> Tensor
 
-Calculates log determinant of a 2D square tensor.
+Calculates log determinant of a square matrix or batches of square matrices.
 
 .. note::
     Result is ``-inf`` if :attr:`A` has zero log determinant, and is ``nan`` if
@@ -5937,7 +5951,8 @@ Calculates log determinant of a 2D square tensor.
     :meth:`~torch.svd` for details.
 
 Arguments:
-    A (Tensor): The input 2D square tensor
+    A (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                batch dimensions.
 
 Example::
 
@@ -5946,13 +5961,26 @@ Example::
     tensor(0.2611)
     >>> torch.logdet(A)
     tensor(-1.3430)
+    >>> A
+    tensor([[[ 0.9254, -0.6213],
+             [-0.5787,  1.6843]],
+
+            [[ 0.3242, -0.9665],
+             [ 0.4539, -0.0887]],
+
+            [[ 1.1336, -0.4025],
+             [-0.7089,  0.9032]]])
+    >>> A.det()
+    tensor([1.1990, 0.4099, 0.7386])
+    >>> A.det().log()
+    tensor([ 0.1815, -0.8917, -0.3031])
 """)
 
 add_docstr(torch.slogdet,
            r"""
 slogdet(A) -> (Tensor, Tensor)
 
-Calculates the sign and log value of a 2D square tensor's determinant.
+Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
 
 .. note::
     If ``A`` has zero determinant, this returns ``(0, -inf)``.
@@ -5964,7 +5992,8 @@ Calculates the sign and log value of a 2D square tensor's determinant.
     See :meth:`~torch.svd` for details.
 
 Arguments:
-    A (Tensor): The input 2D square tensor
+    A (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                batch dimensions.
 
 Returns:
     A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
