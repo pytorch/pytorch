@@ -166,6 +166,10 @@ void fractional_max_pool2d_out_cpu_template(
   TORCH_CHECK(outputW + poolSizeW - 1 <= inputW,
     "fractional_max_pool2d(): pool width ", poolSizeW,
     " too large relative to input width ", inputW);
+  TORCH_CHECK(outputW > 1,
+    "fractional_max_pool2d(): output width has to be longer than 1");
+  TORCH_CHECK(outputW > 1,
+    "fractional_max_pool2d(): output width has to be longer than 1");
 
   if (ndims == 3) {
     /* resize output */
