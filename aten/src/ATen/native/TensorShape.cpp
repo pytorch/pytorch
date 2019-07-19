@@ -515,7 +515,11 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   auto len = end - start;
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
-  return self.as_strided(sizes, strides, storage_offset);
+  auto result = self.as_strided(sizes, strides, storage_offset);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
