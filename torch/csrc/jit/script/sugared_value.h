@@ -470,7 +470,7 @@ struct TORCH_API IterableValue : SugaredValue {
   Symbol symbol_;
 };
 
-// Specialized Tree structure to matched against for special handling 
+// Specialized Tree structure to matched against for special handling
 // of builtin functions iterables expressions like zip(), enumerate(), etc.
 // zip and enumerate can be modeled as a tree of SimpleValue/RangeValue:
 //    zip(x, y) ->  (x, y) with tuple assignment to each loop target

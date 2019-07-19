@@ -545,12 +545,14 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> classes;
+            std::vector<IValue> pickled_values;
             SourceRangeRecords source_ranges;
             PythonPrint(
                 ss,
                 source_ranges,
                 self,
                 tensors,
+                pickled_values,
                 classes,
                 false);
             return ss.str();
@@ -826,6 +828,7 @@ void initJitScriptBindings(PyObject* module) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
     std::vector<c10::NamedTypePtr> classes;
+    std::vector<IValue> pickled_values;
     SourceRangeRecords source_ranges;
     if (auto self = as_module(obj)) {
       PythonPrint(
@@ -833,6 +836,7 @@ void initJitScriptBindings(PyObject* module) {
           source_ranges,
           *self,
           constants,
+          pickled_values,
           classes,
           true);
     } else if (auto self = as_function(obj)) {

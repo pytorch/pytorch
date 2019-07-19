@@ -17,7 +17,7 @@ namespace script {
 TORCH_API void import_methods(
     const script::Module& mod,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
+    const std::vector<at::Tensor>& tensor_table,
     // Callback to import any dependencies of this source before compiling
     const std::function<void(const std::string&)>& import_callback);
 
@@ -29,7 +29,7 @@ TORCH_API void import_libs(
     // like "foo.bar.baz"
     const std::string& class_qualifier,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
+    const std::vector<at::Tensor>& tensor_table,
     // Callback to import any dependencies of this source before compiling
     const std::function<void(const std::string&)>& import_callback);
 
@@ -43,8 +43,16 @@ TORCH_API void import_functions(
     // CompilationoUnit to define the functions in.
     std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
+    const std::vector<at::Tensor>& tensor_table,
     const Self* self = nullptr,
+    const std::function<void(const std::string&)>& import_callback = nullptr);
+
+TORCH_API void import_module(
+    // An empty module to import into
+    Module& module,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::Tensor>& tensor_table,
+    const std::vector<IValue>& pickled_objects,
     const std::function<void(const std::string&)>& import_callback = nullptr);
 
 } // namespace script

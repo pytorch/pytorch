@@ -109,14 +109,14 @@ struct SourceResolver : public Resolver {
   explicit SourceResolver(
       std::shared_ptr<CompilationUnit> cu,
       size_t version,
-      const std::vector<at::Tensor>& constant_table)
+      const std::vector<at::Tensor>& tensor_table)
       : cu_(cu) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
         // Constants present in the model. Used to resolve "CONSTANTS.n" to the
         // actual value
-        {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
+        {"CONSTANTS", std::make_shared<ConstantTableValue>(tensor_table)},
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
         {"uninitialized", std::make_shared<UninitializedValue>()},
@@ -159,28 +159,31 @@ struct SourceImporter {
   SourceImporter(
       const std::shared_ptr<CompilationUnit> cu,
       const std::shared_ptr<Source>& src,
-      const std::vector<at::Tensor>& constant_table,
+      const std::vector<at::Tensor>& tensor_table,
       const std::function<void(const std::string&)>& import_callback)
       : p_(src),
         cu_(cu),
         import_callback_(import_callback),
-        constant_table_(constant_table) {
+        tensor_table_(tensor_table) {
     version_ = parseVersionNumber();
     resolver_ =
-        std::make_shared<SourceResolver>(cu_, version_, constant_table_);
+        std::make_shared<SourceResolver>(cu_, version_, tensor_table_);
   }
 
   void checkVersionNumber() {
     // note: this cannot be called in the constructor because it may throw
     if (version_ > CURRENT_OP_VERSION_SET) {
       throw ErrorReport(p_.lexer().cur().range)
-          << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
+          << "Attempting to load a script generated from a newer version of "
+          << "PyTorch. Maximum supported TorchScript version is "
           << CURRENT_OP_VERSION_SET
           << " but the script being loaded is version " << version_;
     }
   }
 
-  void importLibs(std::shared_ptr<CompilationUnit> owner, const std::string& class_qualifier) {
+  void importLibs(
+      std::shared_ptr<CompilationUnit> owner,
+      const std::string& class_qualifier) {
     checkVersionNumber();
     auto& L = p_.lexer();
 
@@ -239,6 +242,71 @@ struct SourceImporter {
             "Got an unrecognized type from "
             "parseClassLike");
       }
+    }
+  }
+
+  void importModule(Module& module) {
+    checkVersionNumber();
+    auto& L = p_.lexer();
+
+    while (L.cur().kind != TK_EOF) {
+      parseImportsAndDoCallback();
+
+      auto parsed_treeref = p_.parseClassLike();
+      TORCH_INTERNAL_ASSERT(parsed_treeref->kind() == TK_CLASS_DEF);
+      auto class_def = ClassDef(parsed_treeref);
+      std::vector<Assign> attributes;
+      std::vector<Def> methods;
+      std::vector<ResolverPtr> resolvers;
+      std::unordered_set<std::string> parameter_names;
+      // Process statements, splitting things into attribute and method
+      // definitions.
+      for (const auto& statement : class_def.body()) {
+        switch (statement.kind()) {
+          case TK_ASSIGN: {
+            const auto assign = Assign(statement);
+            const auto name = Var(assign.lhs()).name().name();
+            if (name == "__parameters__") {
+              // Populate the parameter list. This is a field that looks like:
+              //   __parameters__ = [foo, bar, baz]
+              // which tells us which attributes are module parameters.
+              // TODO these should be string literals, not raw idents
+              const auto param_list = ListLiteral(assign.rhs().get()).inputs();
+              LOG(ERROR) << "params:";
+              for (const auto& param : param_list) {
+                LOG(ERROR) << "\t" << Var(param).name().name();
+                parameter_names.insert(Var(param).name().name());
+              }
+            } else {
+              attributes.push_back(assign);
+            }
+          } break;
+          case TK_DEF: {
+            methods.push_back(Def(statement));
+            resolvers.push_back(resolver_);
+          } break;
+          default: {
+            TORCH_INTERNAL_ASSERT(
+                false,
+                "Unexpected statement kind in Module body: ",
+                kindToString(statement.kind()));
+          }
+        }
+      }
+
+      // Populate module attributes
+      ScriptTypeParser type_parser(resolver_);
+      for (const auto& assign : attributes) {
+        const auto name = Var(assign.lhs()).name().name();
+        TORCH_INTERNAL_ASSERT(name != "__parameters__");
+        const auto type = type_parser.parseTypeFromExpr(assign.type().get());
+        const bool is_parameter = parameter_names.count(name);
+        LOG(ERROR) << name << ": " << is_parameter;
+        module.type()->addAttribute(name, type, is_parameter);
+      }
+
+      const auto self = SimpleSelf(module.type());
+      module.class_compilation_unit()->define(module.name(), methods, resolvers, &self);
     }
   }
 
@@ -303,7 +371,7 @@ struct SourceImporter {
   size_t version_;
   std::shared_ptr<CompilationUnit> cu_;
   const std::function<void(const std::string&)>& import_callback_;
-  const std::vector<at::Tensor>& constant_table_;
+  const std::vector<at::Tensor>& tensor_table_;
   std::shared_ptr<SourceResolver> resolver_;
 };
 
@@ -311,24 +379,23 @@ void import_functions(
     const c10::optional<c10::QualifiedName>& prefix,
     std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
+    const std::vector<at::Tensor>& tensor_table,
     const Self* self,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(cu, src, constant_table, import_callback);
+  SourceImporter importer(cu, src, tensor_table, import_callback);
   importer.importFunctions(prefix, self);
 }
-
 void import_methods(
     const Module& mod,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
+    const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback) {
   auto self = SimpleSelf(mod.type());
   import_functions(
       mod.name(),
       mod.class_compilation_unit(),
       src,
-      constant_table,
+      tensor_table,
       &self,
       import_callback);
 }
@@ -337,10 +404,23 @@ void import_libs(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& class_qualifier,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
+    const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(cu, src, constant_table, import_callback);
+  SourceImporter importer(cu, src, tensor_table, import_callback);
   importer.importLibs(cu, class_qualifier);
+}
+
+void import_module(
+    // An empty module to import into
+    Module& module,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::Tensor>& tensor_table,
+    const std::vector<IValue>& pickled_objects,
+    const std::function<void(const std::string&)>& import_callback) {
+      LOG(ERROR) << src->text();
+  SourceImporter importer(
+      module.class_compilation_unit(), src, tensor_table, import_callback);
+  importer.importModule(module);
 }
 
 } // namespace script

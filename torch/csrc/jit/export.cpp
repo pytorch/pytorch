@@ -917,6 +917,7 @@ void ScriptModuleSerializer::convertModule(
         source_ranges,
         module,
         tensor_table_,
+        pickled_ivalues_,
         class_table_,
         /*enforce_importable=*/true);
     torch::RecordRef* record = module_def->mutable_torchscript_arena();

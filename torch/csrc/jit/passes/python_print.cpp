@@ -122,6 +122,7 @@ const static std::unordered_set<std::string> reserved_names = {
     "aten",
     "attribute",
     "CONSTANTS",
+    "PICKLES",
     "fork",
     "getattr",
     "inf",
@@ -274,6 +275,7 @@ struct PythonPrintPass {
   // dependencies.
   std::vector<c10::NamedTypePtr>& class_table_;
   std::vector<c10::NamedTypePtr> class_deps_;
+  std::vector<IValue>* pickled_ivalues_ = nullptr;
   // Helper to avoid duplicating class types
   void addToClassTable(const c10::NamedTypePtr& type) {
     // we serialize module classes separately.
@@ -1203,11 +1205,13 @@ struct PythonPrintPass {
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& class_table,
+      std::vector<IValue>* pickled_ivalues,
       bool enforce_importable,
       bool is_method)
       : body_(&source_range_stack_),
         tensor_table_(tensor_table),
         class_table_(class_table),
+        pickled_ivalues_(pickled_ivalues),
         enforce_importable_(enforce_importable),
         is_method_(is_method) {}
 
@@ -1220,6 +1224,63 @@ struct PythonPrintPass {
       return TupleType::create(
           fmap(graph.outputs(), [&](const Value* v) { return v->type(); }));
     }
+  }
+
+  void printFakeInit(const script::Module& module) {
+    std::vector<std::string> params;
+    size_t numAttrs = module.type()->numAttributes();
+    // Populate the __parameters__ field. This tells the importer which
+    // attributes are parameters.
+    for (size_t i = 0; i < numAttrs; i++) {
+      // TODO: Note that we have to query parameters on the type itself, NOT
+      // through Module::get_parameters(). Check that there is no difference
+      // once we properly unpickle the state.
+      if (module.type()->is_parameter(i)) {
+        params.push_back(module.type()->getAttributeName(i));
+      }
+    }
+    indent();
+    body_ << "__parameters__ = [";
+    // TODO this should be a string literal, not a raw ident
+    for (const auto& param : params) {
+      body_ << param << ", ";
+    }
+    body_ << "]\n";
+
+    for (size_t i = 0; i < numAttrs; i++) {
+      const auto& name = module.type()->getAttributeName(i);
+      const auto& type = module.type()->getAttribute(name)->python_str();
+      indent();
+      body_ << name << " : " << type << "\n";
+    }
+
+      // TODO modules require that we can pickle objects
+
+      // for (const auto& module : module.get_modules()) {
+      //   TORCH_INTERNAL_ASSERT(pickled_ivalues_);
+      //   indent();
+      //   pickled_ivalues_->emplace_back(module.module_object());
+      //   body_ << "self." << module.name().name() << " : "
+      //         << module.name().qualifiedName() << " = "
+      //         << "PICKLES.c" << pickled_ivalues_->size() - 1 << "\n";
+      // }
+  }
+
+  void printModule(const script::Module& module) {
+    // TODO what to import as
+    body_ << "class " << module.type()->basename()
+          // TODO add support for limited inheritance to the parser
+          // << "(torch.jit.ScriptModule):\n";
+          << ":\n";
+    {
+      const auto guard = WithIndented();
+      printFakeInit(module);
+      // TODO fields
+      for (auto& method : module.type()->methods()) {
+        printFunction(*method);
+      }
+    }
+    LOG(ERROR) << body_.str();
   }
 
   void printModuleMethods(const script::Module& module) {
@@ -1274,7 +1335,8 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
+  PythonPrintPass pp(
+      tensor_table, class_table, nullptr, enforce_importable, is_method);
   pp.printFunction(func);
   pp.print(out, source_ranges_out);
 }
@@ -1284,11 +1346,16 @@ void PythonPrint(
     SourceRangeRecords& source_ranges_out,
     const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
+    std::vector<IValue>& pickled_ivalues_,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(
-      tensor_table, class_table, enforce_importable, /*isMethod=*/true);
-  pp.printModuleMethods(module);
+      tensor_table,
+      class_table,
+      &pickled_ivalues_,
+      enforce_importable,
+      /*isMethod=*/true);
+  pp.printModule(module);
   pp.print(out, source_ranges_out);
 }
 
@@ -1299,7 +1366,8 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
+  PythonPrintPass pp(
+      tensor_table, class_table, nullptr, enforce_importable, true);
   pp.printClass(classType);
   pp.print(out, source_ranges_out);
 }

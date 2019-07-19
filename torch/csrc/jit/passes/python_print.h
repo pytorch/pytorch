@@ -26,6 +26,7 @@ TORCH_API void PythonPrint(
     SourceRangeRecords& source_ranges_out,
     const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
+    std::vector<IValue>& pickled_ivalues_,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable);
 

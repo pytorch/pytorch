@@ -1473,7 +1473,10 @@ struct CAFFE2_API ClassType : public NamedType {
   }
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(is_module(), "asking for parameterSlots of non-Module");
-    return parameterSlots_->at(slot);
+    LOG(ERROR) << "Is slot " << slot << " a parameter?";
+    auto ret= parameterSlots_->at(slot);
+    LOG(ERROR) << ret;
+    return ret;
   }
   static const TypeKind Kind = TypeKind::ClassType;
 
