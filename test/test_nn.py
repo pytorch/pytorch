@@ -496,6 +496,80 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def extra_args(self):
         return self._get_arg('extra_args', False)
 
+class TestAvgPool(TestCase):
+    def _sum_pool2d(self, x, kernel_size):
+        windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
+        return torch.sum(windows, dim=1)
+
+    def _sum_pool3d(self, x, kernel_size):
+        # Because unfold does not support 3D sliding window we will split tensor to multiple tensors and calculate sum
+        h = kernel_size[0]
+        splited_x = [t.sum(0) for t in x.split(h) if t.size(0) == h]
+        # sum_pool2d assumes tensor in (1, 1, n, m) view, so unsqueeze two times
+        splited_x = [self._sum_pool2d(t.unsqueeze(0).unsqueeze(0), kernel_size[1:]) for t in splited_x]
+        joined_x = torch.cat(splited_x)
+        return joined_x.view(1, joined_x.numel())
+
+    def _avg_pool2d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool2d(x, kernel_size) / size
+
+    def _avg_pool3d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool3d(x, kernel_size) / size
+
+    def test_doubletensor_avg_pool2d(self):
+        n, m = 5, 8
+        input = torch.rand(1, 1, n, m)
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                actual = torch.nn.functional.avg_pool2d(input[0], (i, j))
+                actual = actual.view(1, actual.numel())
+                expected = self._avg_pool2d(input, (i, j))
+                self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool2d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+                               lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
+
+    def test_doubletensor_avg_pool2d_with_divisor(self):
+        n, m = 3, 3
+        input = torch.rand(1, 1, n, m)
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                for divisor in [1, 7, i * j]:
+                    actual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
+                    actual = actual.view(1, actual.numel())
+                    expected = self._sum_pool2d(input, (i, j)) / divisor
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_doubletensor_avg_pool3d(self):
+        h, w, d = 5, 6, 7
+        input = torch.rand(h, w, d)
+        for i in range(1, h + 1):
+            for j in range(1, w + 1):
+                for k in range(1, d + 1):
+                    actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
+                    actual = actual.view(1, actual.numel())
+                    expected = self._avg_pool3d(input, (i, j, k))
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_doubletensor_avg_pool3d_with_divisor(self):
+        h, w, d = 6, 5, 7
+        input = torch.rand(h, w, d)
+        for i in range(1, h + 1):
+            for j in range(1, w + 1):
+                for k in range(1, d + 1):
+                    for divisor in [1, 7, i * j]:
+                        actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
+                        actual = actual.view(1, actual.numel())
+                        expected = self._sum_pool3d(input, (i, j, k)) / divisor
+                        self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool3d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+                               lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = False
@@ -5418,7 +5492,7 @@ class TestNN(NNTestCase):
 
         self.assertEqual(l, expected)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 7000), "needs cudnn >= 7.0")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 7000), "needs cudnn >= 7.0")
     def test_CTCLoss_cudnn(self):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
@@ -6737,13 +6811,13 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
@@ -6786,7 +6860,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         import sys
         if sys.version_info[0] == 2:
@@ -6829,7 +6903,7 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
