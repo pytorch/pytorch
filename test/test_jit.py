@@ -7739,7 +7739,34 @@ a")
 
     def test_script_pack_padded_sequence(self):
         from torch.nn.utils.rnn import pack_padded_sequence
+
+        T, B, C = 3, 5, 7
+        x = torch.ones((T, B, C))
+        seq_lens = torch.tensor([3, 3, 2, 2, 1])
+        # set padding value so we can test equivalence
+        for b in range(B):
+            if seq_lens[b] < T:
+                x[seq_lens[b]:, b, :] = 0
+
+        # self.checkScript(pack_padded_sequence, (x, seq_lens))
+        eager_seq = pack_padded_sequence(x, seq_lens)
         scripted_pack_padded_seq = torch.jit.script(pack_padded_sequence)
+        print(scripted_pack_padded_seq.graph)
+        script_seq = scripted_pack_padded_seq(x, seq_lens)
+        print(eager_seq)
+        print(script_seq)
+        # self.assertEqual(eager_seq, script_seq)
+
+    def test_script_get_tracing_state(self):
+        def test_if_tracing(x):
+            if torch._C._get_tracing_state():
+                return x + 1
+            else:
+                return x - 1
+
+        inp = torch.randn(3, 3)
+
+        self.checkScript(test_if_tracing, (inp))
 
     def test_script_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
@@ -10787,7 +10814,7 @@ a")
 
     def test_unsupported_builtin_error(self):
         with self.assertRaisesRegex(RuntimeError,
-                                    "calling a python builtin_function_or_method which is currently not supported"):
+                                    "Python builtin <built-in function hypot> is currently"):
             @torch.jit.script
             def test_unsupported(a):
                 return math.hypot(a, 2.0)

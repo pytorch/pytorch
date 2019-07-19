@@ -8242,6 +8242,28 @@ class _TestTorchMixin(object):
             # test non-contiguous case
             self.assertEqual(torch.tensor([1, 0, 0.5, 0.6]).view(2, 2), data.t().hardshrink(0.3))
 
+    def test_hardshrink_edge_cases(self):
+        def h(t, values, l_expected):
+            for l, expected in l_expected.items():
+                values_tensor = torch.tensor([float(v) for v in values]).type(t)
+                expected_tensor = torch.tensor([float(v) for v in expected]).type(t)
+                self.assertEqual(expected_tensor == values_tensor.hardshrink(l),
+                                 torch.ones_like(values_tensor))
+
+        def test_helper(t, min, max):
+            h(t, [0.0, min, -min, 0.1, -0.1, 1.0, -1.0, max, -max, inf, -inf],
+              {0.0: [0.0, min, -min, 0.1, -0.1, 1.0, -1.0, max, -max, inf, -inf],
+               min: [0.0, 0.0, 0.0, 0.1, -0.1, 1.0, -1.0, max, -max, inf, -inf],
+               0.1: [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, -1.0, max, -max, inf, -inf],
+               1.0: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, max, -max, inf, -inf],
+               max: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inf, -inf],
+               inf: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]})
+
+        test_helper(torch.DoubleTensor,
+                    torch.finfo(torch.double).tiny, torch.finfo(torch.double).max)
+        test_helper(torch.FloatTensor,
+                    torch.finfo(torch.float).tiny, torch.finfo(torch.float).max)
+
     def test_unbiased(self):
         tensor = torch.randn(100)
         self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
