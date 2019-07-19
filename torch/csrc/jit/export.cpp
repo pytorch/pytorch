@@ -1192,5 +1192,24 @@ void ExportModule(
   serializer.serialize(module, extra_files);
 }
 
+std::pair<char*, uint64_t> SerializeIValue(IValue* ivalue) {
+  const char* data = nullptr;
+  uint64_t sz = 0;
+  Pickler p;
+
+  p.pushMetadata();
+  p.start();
+  p.addIValue(*ivalue);
+  p.finish();
+
+  data = p.stack().data();
+  sz = p.stack().size();
+
+  char *res = (char *)malloc(sz);
+  std::memcpy(res, data, sz);
+
+  return {res, sz};
+}
+
 } // namespace jit
 } // namespace torch

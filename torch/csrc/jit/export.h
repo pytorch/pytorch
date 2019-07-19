@@ -51,6 +51,8 @@ TORCH_API void ExportModule(
     const std::string& filename,
     const script::ExtraFilesMap& metadata = script::ExtraFilesMap());
 
+TORCH_API std::pair<char*, uint64_t> SerializeIValue(IValue* ivalue);
+
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.
 using ExportModuleExtraFilesHook =
