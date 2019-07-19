@@ -216,11 +216,11 @@ class NestedTensor(object):
         current_offset = 0
         for i in range(len(self.tensors)):
             new_tensor = torch.empty_like(self.tensors[i], dtype=self.dtype, layout=self.layout, device=self.device)
-            new_tensor.set_(self.buffer_.storage(),
-                            storage_offset=current_offset,
-                            size=self.tensors[i].size(),
-                            stride=self.tensors[i].stride())
-            new_tensor.copy_(self.tensors[i])
+            with torch.no_grad():
+                new_tensor.set_(self.buffer_.storage(),
+                                storage_offset=current_offset,
+                                size=self.tensors[i].size(),
+                                stride=self.tensors[i].stride())
             new_tensor.requires_grad_(self.requires_grad)
             self.tensors[i] = new_tensor
             current_offset += self.tensors[i].numel()
