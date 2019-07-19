@@ -34,10 +34,15 @@ struct Resolver {
   virtual std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const = 0;
+      const SourceRange& loc) const {
+    return nullptr;
+  }
 
   // Resolve `name` to a TypePtr.
-  virtual TypePtr resolveType(const std::string& name, const SourceRange& loc) const = 0;
+  virtual TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      const {
+    return nullptr;
+  }
 };
 
 // A resolver that only understands "torch.foo()" lookups.

@@ -48,8 +48,6 @@ class QuantizationTestCase(TestCase):
     def setUp(self):
         self.calib_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
         self.train_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
-        self.img_data = [(torch.rand(20, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long))
-                         for _ in range(20)]
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -178,11 +176,11 @@ class ManualQuantModel(torch.nn.Module):
         x = self.fc(x)
         return self.dequant(x)
 
-class ManualLinearQATModel(torch.nn.Module):
+class ManualQATModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
     """
     def __init__(self):
-        super(ManualLinearQATModel, self).__init__()
+        super(ManualQATModel, self).__init__()
         self.qconfig = default_qconfig
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -193,29 +191,4 @@ class ManualLinearQATModel(torch.nn.Module):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.fc2(x)
-        return self.dequant(x)
-
-class ManualConvLinearQATModel(torch.nn.Module):
-    r"""A module with manually inserted `QuantStub` and `DeQuantStub`
-    and contains both linear and conv modules
-    """
-    def __init__(self):
-        super(ManualConvLinearQATModel, self).__init__()
-        self.qconfig = default_qconfig
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
-        self.conv = torch.nn.Conv2d(3, 5, kernel_size=3).to(dtype=torch.float)
-        self.fc1 = torch.nn.Linear(320, 10).to(dtype=torch.float)
-        self.fc2 = torch.nn.Linear(10, 10).to(dtype=torch.float)
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.conv(x)
-        # TODO: we can remove these after view is supported
-        x = self.dequant(x)
-        x = x.view(-1, 320).contiguous()
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.fc2(x)
-        # print('after net:', x.shape)
         return self.dequant(x)
