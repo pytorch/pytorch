@@ -273,21 +273,19 @@ void ScriptModuleDeserializer::convertModule(
   script::Module module = moduleLookup_(moduleStack_);
   module.set_optimized(module_def.optimize());
 
-  std::function<void(const std::string&)> import_callback =
-      [this](const std::string& qualifier) { importCallback(qualifier); };
-
   // If present, load in the table of source ranges from the original
   // generating code.
   std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr;
-  if (module_def.has_torchscript_debug_arena()) {
-    at::DataPtr data;
-    size_t size;
-    std::tie(data, size) =
-        reader_->getRecord(module_def.torchscript_debug_arena().key());
+  // if (module_def.has_torchscript_debug_arena()) {
+  //   at::DataPtr data;
+  //   size_t size;
+  //   std::tie(data, size) =
+  //       reader_->getRecord(module_def.torchscript_debug_arena().key());
 
-    gen_ranges =
-        std::make_shared<ConcreteSourceRangeUnpickler>(std::move(data), size);
-  }
+  //   gen_ranges =
+  //       std::make_shared<ConcreteSourceRangeUnpickler>(std::move(data), size);
+  // }
+  // import the module_def.
 
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
@@ -305,8 +303,8 @@ void ScriptModuleDeserializer::convertModule(
         [&, this](const std::string& qualifier) {
           importCallback(module.class_compilation_unit(), qualifier);
         };
-    script::import_module(
-        module, src, tensor_table_, pickled_ivalues_, import_callback);
+        LOG(ERROR) << "am I calling this tho?";
+    script::import_module(module, src, tensor_table_, import_callback);
   }
 
   // script::Module module = moduleLookup_(moduleStack_);

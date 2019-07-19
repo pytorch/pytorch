@@ -193,6 +193,9 @@ struct SourceImporter {
       auto parsed_treeref = p_.parseClassLike();
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
+        TORCH_CHECK(
+            !class_def.superclass().present(),
+            "Torchscript does not support class inheritance.");
         const auto qualified_classname = QualifiedName(
             QualifiedName(class_qualifier), class_def.name().name());
 
@@ -385,20 +388,6 @@ void import_functions(
   SourceImporter importer(cu, src, tensor_table, import_callback);
   importer.importFunctions(prefix, self);
 }
-void import_methods(
-    const Module& mod,
-    const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table,
-    const std::function<void(const std::string&)>& import_callback) {
-  auto self = SimpleSelf(mod.type());
-  import_functions(
-      mod.name(),
-      mod.class_compilation_unit(),
-      src,
-      tensor_table,
-      &self,
-      import_callback);
-}
 
 void import_libs(
     std::shared_ptr<CompilationUnit> cu,
@@ -415,7 +404,6 @@ void import_module(
     Module& module,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table,
-    const std::vector<IValue>& pickled_objects,
     const std::function<void(const std::string&)>& import_callback) {
       LOG(ERROR) << src->text();
   SourceImporter importer(

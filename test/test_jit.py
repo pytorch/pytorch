@@ -3145,6 +3145,7 @@ def foo(x):
 
         with torch.jit._disable_emit_hooks():
             class Foo(torch.jit.ScriptModule):
+            r
                 def __init__(self):
                     super(Foo, self).__init__()
 
@@ -13182,6 +13183,29 @@ class TestRecursiveScript(JitTestCase):
                 return z + 20 + y
 
         self.checkModule(M(), (torch.randn(2, 2),))
+
+    def test_class_compile(self):
+        def other_fn(a, b):
+            # type: (int, Tensor) -> Tensor
+            return a * b
+
+        class B(object):
+            def __init__(self, x):
+                self.x = 2
+
+            def helper(self, a):
+                return self.x + a + other_fn(self.x, a)
+
+
+        class N(torch.nn.Module):
+            def __init__(self):
+                super(N, self).__init__()
+
+            def forward(self, x):
+                b = B(x)
+                return b.helper(x)
+
+        self.checkModule(N(), (torch.randn(2, 2),))
 
     def test_error_stack(self):
         def d(x):

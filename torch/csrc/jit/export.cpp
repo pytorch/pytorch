@@ -543,8 +543,6 @@ class ScriptModuleSerializer final {
 
   void convertModule(
       const script::Module& module,
-      const std::string& prefix,
-      const std::string& name,
       torch::ModuleDef* module_def);
 
   IValue moduleGetState(const script::Module& module);
@@ -696,9 +694,7 @@ void ScriptModuleSerializer::convertModel(
                                           // using appropriate function call
   model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
 
-  convertModule(
-      module, "", writer_.archiveName(), model_def->mutable_main_module());
-
+  convertModule(module, model_def->mutable_main_module());
 
   writePickleArchive("attributes.pkl", pickled_ivalues_);
 
@@ -855,98 +851,95 @@ void ScriptModuleSerializer::writePickleArchive(
 
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,
-    const std::string& prefix,
-    const std::string& name,
     torch::ModuleDef* module_def) {
-  module_def->set_name(name);
+  module_def->set_name(module.name().name());
   module_def->set_optimize(module.is_optimized());
 
   // If __getstate__ and __setstate__ methods are provided, use those for
   // serializing instead of serializing the attributes directly
-  bool user_provided_serialization = moduleHasValidGetSetState(module);
-  if (user_provided_serialization) {
-    // Run the '__getstate__' method on the module and store the result
-    pickled_ivalues_.emplace_back(moduleGetState(module));
-    module_def->set_get_state_attribute_id(pickled_ivalues_.size() - 1);
-  }
+  // bool user_provided_serialization = moduleHasValidGetSetState(module);
+  // if (user_provided_serialization) {
+  //   // Run the '__getstate__' method on the module and store the result
+  //   pickled_ivalues_.emplace_back(moduleGetState(module));
+  //   module_def->set_get_state_attribute_id(pickled_ivalues_.size() - 1);
+  // }
 
-  // Add all the parameters
-  for (const auto& param : module.get_parameters()) {
-    torch::ParameterDef* param_def = module_def->add_parameters();
-    param_def->set_name(param.name());
-    param_def->set_is_buffer(false);
-    if (user_provided_serialization) {
-      // If a __getstate__ was used, don't write the actual tensor
-      param_def->set_tensor_id(-1);
-    } else {
-      param_def->set_tensor_id(addTensor(param.value().toTensor()));
-    }
-  }
+  // // Add all the parameters
+  // for (const auto& param : module.get_parameters()) {
+  //   torch::ParameterDef* param_def = module_def->add_parameters();
+  //   param_def->set_name(param.name());
+  //   param_def->set_is_buffer(false);
+  //   if (user_provided_serialization) {
+  //     // If a __getstate__ was used, don't write the actual tensor
+  //     param_def->set_tensor_id(-1);
+  //   } else {
+  //     param_def->set_tensor_id(addTensor(param.value().toTensor()));
+  //   }
+  // }
 
-  // Add all the attributes
-  for (const auto& attribute : module.get_attributes()) {
-    // Add attribute to ModuleDef
-    torch::AttributeDef* attribute_def = module_def->add_attributes();
-    attribute_def->set_name(attribute.name());
-    attribute_def->set_type(attribute.type()->python_str());
+  // // Add all the attributes
+  // for (const auto& attribute : module.get_attributes()) {
+  //   // Add attribute to ModuleDef
+  //   torch::AttributeDef* attribute_def = module_def->add_attributes();
+  //   attribute_def->set_name(attribute.name());
+  //   attribute_def->set_type(attribute.type()->python_str());
 
-    if (!user_provided_serialization) {
-      // Write the attribute's index if it's actually saved, -1 if it needs to
-      // come from __getstate__
-      pickled_ivalues_.push_back(attribute.value());
-      attribute_def->set_id(pickled_ivalues_.size() - 1);
-    } else {
-      // The module had a __setstate__, so write the attribute name/type so
-      // it can be correctly imported, but it has no entry in the
-      // pickled_ivalues_ table
-      attribute_def->set_id(-1);
-    }
-  }
+  //   if (!user_provided_serialization) {
+  //     // Write the attribute's index if it's actually saved, -1 if it needs to
+  //     // come from __getstate__
+  //     pickled_ivalues_.push_back(attribute.value());
+  //     attribute_def->set_id(pickled_ivalues_.size() - 1);
+  //   } else {
+  //     // The module had a __setstate__, so write the attribute name/type so
+  //     // it can be correctly imported, but it has no entry in the
+  //     // pickled_ivalues_ table
+  //     attribute_def->set_id(-1);
+  //   }
+  // }
 
-  std::stringstream module_name;
-  if (prefix != "")
-    module_name << prefix << "_";
-  module_name << name;
+  convertClass(module.type());
 
-  if (module.type()->methods().size() > 0) {
-    std::ostringstream methods;
-    SourceRangeRecords source_ranges;
-    methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
-    PythonPrint(
-        methods,
-        source_ranges,
-        module,
-        tensor_table_,
-        pickled_ivalues_,
-        class_table_,
-        /*enforce_importable=*/true);
-    torch::RecordRef* record = module_def->mutable_torchscript_arena();
+  // std::stringstream module_name;
+  // if (module.type()->methods().size() > 0) {
+  //   std::ostringstream methods;
+  //   SourceRangeRecords source_ranges;
+  //   methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
+  //   PythonPrint(
+  //       methods,
+  //       source_ranges,
+  //       module.type(),
+  //       tensor_table_,
+  //       class_table_,
+  //       /*enforce_importable=*/true);
+  //   torch::RecordRef* record = module_def->mutable_torchscript_arena();
 
-    std::stringstream filename;
-    filename << "code/" << module_name.str() << ".py";
-    std::string methods_str = methods.str();
-    writer_.writeRecord(
-        filename.str(), methods_str.c_str(), methods_str.size());
-    record->set_key(filename.str());
+  //   std::stringstream filename;
+  //   // const std::string filename =
+  //   //     ImportExportHelpers::qualifierToPath(module.type()->qualifier());
+  //   filename << "code/" << module_name.str() << ".py";
+  //   std::string methods_str = methods.str();
+  //   writer_.writeRecord(
+  //       filename.str(), methods_str.c_str(), methods_str.size());
+  //   record->set_key(filename.str());
 
-    // Write out debug records
-    torch::RecordRef* debug_record =
-        module_def->mutable_torchscript_debug_arena();
+  //   // Write out debug records
+  //   torch::RecordRef* debug_record =
+  //       module_def->mutable_torchscript_debug_arena();
 
-    SourceRangePickler source_range_pickler;
-    source_range_pickler.pickle(source_ranges);
-    const auto& range_data = source_range_pickler.get_data();
-    std::stringstream debug_filename;
-    debug_filename << "debug/" << module_name.str() << ".pkl";
-    writer_.writeRecord(
-        debug_filename.str(), range_data.data(), range_data.size());
-    debug_record->set_key(debug_filename.str());
-  }
+  //   SourceRangePickler source_range_pickler;
+  //   source_range_pickler.pickle(source_ranges);
+  //   const auto& range_data = source_range_pickler.get_data();
+  //   std::stringstream debug_filename;
+  //   debug_filename << "debug/" << module_name.str() << ".pkl";
+  //   writer_.writeRecord(
+  //       debug_filename.str(), range_data.data(), range_data.size());
+  //   debug_record->set_key(debug_filename.str());
+  // }
 
-  for (script::Slot s : module.get_module_slots()) {
-    torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(s.to_module(), module_name.str(), s.name(), sub_def);
-  }
+  // for (script::Slot s : module.get_module_slots()) {
+  //   torch::ModuleDef* sub_def = module_def->add_submodules();
+  //   convertModule(s.to_module(), sub_def);
+  // }
 }
 
 // Pretty printing for ONNX

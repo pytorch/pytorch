@@ -545,14 +545,12 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> classes;
-            std::vector<IValue> pickled_values;
             SourceRangeRecords source_ranges;
             PythonPrint(
                 ss,
                 source_ranges,
-                self,
+                self.type(),
                 tensors,
-                pickled_values,
                 classes,
                 false);
             return ss.str();
@@ -738,6 +736,9 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
+        TORCH_CHECK(
+            !classDef.superclass().present(),
+            "Torchscript does not support class inheritance.");
         auto cu = get_python_cu();
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
@@ -828,15 +829,13 @@ void initJitScriptBindings(PyObject* module) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
     std::vector<c10::NamedTypePtr> classes;
-    std::vector<IValue> pickled_values;
     SourceRangeRecords source_ranges;
     if (auto self = as_module(obj)) {
       PythonPrint(
           ss,
           source_ranges,
-          *self,
+          self->type(),
           constants,
-          pickled_values,
           classes,
           true);
     } else if (auto self = as_function(obj)) {
