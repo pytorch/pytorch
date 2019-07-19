@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/jit/pybind_utils.h>
@@ -28,10 +27,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     SourceRange loc,
     bool is_constant = false);
 
-std::shared_ptr<Function> as_function(const py::object& obj);
+c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
-  PythonValue(py::object self) : self(std::move(self)) {}
+  PythonValue(py::object the_self) : self(std::move(the_self)) {}
 
   FunctionSchema getSchema(const size_t n_args, const size_t n_binders);
 
@@ -191,8 +190,6 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
  private:
   py::dict dispatched_fn_;
 };
-
-TORCH_API bool& getRecursiveScriptMode();
 
 } // namespace script
 } // namespace jit

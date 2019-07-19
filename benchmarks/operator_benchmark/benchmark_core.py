@@ -22,7 +22,7 @@ An example input is:
 TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
     tag='long', run_backward=False)
 """
-TestConfig = namedtuple("TestConfig", "test_name input_config tag use_jit run_backward")
+TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
 
 
 BENCHMARK_TESTER = {}
@@ -65,6 +65,8 @@ class BenchmarkRunner(object):
         self.multiplier = 2
         self.predefined_minimum_secs = 4
         self.max_iters = 1e6
+        self.use_jit = args.use_jit
+        self.num_runs = args.num_runs
         if self.args.iterations:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
@@ -97,26 +99,34 @@ class BenchmarkRunner(object):
         if self.args.ai_pep_format:
             # Output for AI-PEP
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
-            print("Caffe2Observer " + json.dumps(
-                {
-                    "type": test_name,
-                    "metric": "latency",
-                    "unit": "us",
-                    "value": str(reported_run_time_us),
-                }
-            ))
+            for run in range(self.num_runs): 
+                print("Caffe2Observer " + json.dumps(
+                    {
+                        "type": test_name,
+                        "metric": "latency",
+                        "unit": "us",
+                        "value": str(reported_run_time_us[run]),
+                    }
+                ))
         else:
-            # FIXME: change the print format here 
-            output = "# Name: {}\n" \
-                     "# Input: {}\n" \
-                     "{} Execution Time (us) : {:.3f}\n"
             if test_case.framework == "PyTorch":
-                output = "# Mode: {}\n". \
-                    format("JIT" if test_case.test_config.use_jit else "Eager") + output
-            print(output.format(
-                test_case.test_config.test_name,
-                test_case.test_config.input_config,
-                "Backward" if test_case.test_config.run_backward else "Forward", reported_run_time_us))
+                print("# Mode: {}".format("JIT" if self.use_jit else "Eager"))
+
+            print("# Name: {}\n"
+                  "# Input: {}".format(
+                      test_case.test_config.test_name,
+                      test_case.test_config.input_config))
+
+            mode = "Backward" if test_case.test_config.run_backward else "Forward"
+            if self.num_runs > 1: 
+                for run in range(self.num_runs): 
+                    print("Run: {}, {} Execution Time (us) : {:.3f}".format(
+                        run,
+                        mode, reported_run_time_us[run]))
+                print()
+            else: 
+                print("{} Execution Time (us) : {:.3f}\n".format(
+                    mode, reported_run_time_us[0]))
 
     def _predict_num_iter_needed(self, i):
         return (i * self.multiplier)
@@ -136,9 +146,9 @@ class BenchmarkRunner(object):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
         func = test_case.run_forward
-        if test_case.test_config.use_jit:
+        if self.use_jit:
             func = test_case.run_jit_forward
-        forward_time = timeit.timeit(functools.partial(test_case.run_forward, iters), number=1)
+        forward_time = timeit.timeit(functools.partial(func, iters), number=1)
         return forward_time
 
     def _launch_backward(self, test_case, iters):
@@ -226,14 +236,14 @@ class BenchmarkRunner(object):
                 test_case.op_bench.module_name()))
 
             if op_test_config.run_backward:
-                # Warmup
-                self._launch_backward(test_case, self.args.warmup_iterations)
-                # Actual Execution
-                reported_time = self._measure_time(self._launch_backward, test_case, self.iters)
+                launch_func = self._launch_backward
             else: 
-                # Warmup
-                self._launch_forward(test_case, self.args.warmup_iterations)
-                # Actual Execution
-                reported_time = self._measure_time(self._launch_forward, test_case, self.iters)
+                launch_func = self._launch_forward
+
+            # Warmup
+            launch_func(test_case, self.args.warmup_iterations)
+            # Actual Execution
+            reported_time = [self._measure_time(launch_func, test_case, self.iters) 
+                             for _ in range(self.num_runs)]
 
             self._print_perf_result(reported_time, test_case)

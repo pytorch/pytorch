@@ -13,7 +13,7 @@ struct ReturnInfo {
 
 void checkNoReturn(const TreeRef& ref) {
   if (ref->kind() == TK_RETURN) {
-    throw ErrorReport(ref) << "return is not allowed from a loop.";
+    throw ErrorReport(ref) << "return is not allowed from a loop";
   }
   // do not search into first-class functions
   if (ref->kind() == TK_DEF) {
@@ -56,7 +56,7 @@ ReturnInfo makeReturnsFinal(
           if (!rest_final.returns_) {
             throw ErrorReport(if_stmt)
                 << "This if statement performs an early return, but the block of code that follows it does not return."
-                << " Early returns are only allowed when the block following them also returns.";
+                << " Early returns are only allowed when the block following them also returns";
           }
           changed.emplace_back(
               if_stmt.withNewBranches(true_final.stmts_, rest_final.stmts_));
@@ -77,7 +77,7 @@ ReturnInfo makeReturnsFinal(
         }
         throw ErrorReport(if_stmt)
             << "This if statement contains some paths that return and some paths that do not. "
-            << "If statements must either entirely return or never return.";
+            << "If statements must either entirely return or never return";
       } break;
       case TK_WHILE:
       case TK_FOR:

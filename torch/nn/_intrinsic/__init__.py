@@ -1,4 +1,3 @@
-from torch._ops import ops
-
-fq_per_tensor_affine_forward = ops.quantized.fake_quantize_per_tensor_affine_forward
-fq_per_tensor_affine_backward = ops.quantized.fake_quantize_per_tensor_affine_backward
+from .modules import *  # noqa: F401
+from .quantized import *  # noqa: F401
+from .qat import *  # noqa: F401

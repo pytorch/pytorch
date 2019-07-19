@@ -60,7 +60,7 @@ using module_list = slot_list_impl<Module>;
 using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(ModulePtr owner, std::shared_ptr<Function> function);
+  Method(ModulePtr owner, Function* function);
 
   // the module that contains this method.
   Module owner() const;
@@ -104,19 +104,20 @@ struct TORCH_API Method {
   // Underlying unbound function
   // This is the _lowered_ function and is different than the
   // first-class function in class_compilation_unit()
-  std::shared_ptr<Function> function_;
+  Function* function_;
 };
-static void clearMethods(c10::ivalue::Object* self) {
-  self->type()->compilation_unit()->drop_all_functions();
-}
 
 struct TORCH_API Module {
-  Module(std::string class_name)
-      : module_value_(create_module_object(std::move(class_name))) {}
+  explicit Module(c10::QualifiedName class_name);
+  Module(c10::QualifiedName, std::shared_ptr<CompilationUnit> cu);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
+
+  const c10::QualifiedName& name() const {
+    return *module_object()->type()->qualified_name_obj();
+  }
 
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
@@ -201,7 +202,7 @@ struct TORCH_API Module {
   const std::vector<Method> get_methods() const {
     return fmap(
         class_compilation_unit()->get_functions(),
-        [&](const std::shared_ptr<Function>& func) {
+        [&](Function* func) {
           return Method(module_object(), func);
         });
   }
@@ -225,9 +226,9 @@ struct TORCH_API Module {
     }
     return c10::nullopt;
   }
-  c10::optional<Method> find_method(const std::string& name) const {
-    if (const std::shared_ptr<Function>& fn =
-            class_compilation_unit()->find_function(name)) {
+  c10::optional<Method> find_method(const std::string& basename) const {
+    if (const auto fn = class_compilation_unit()->find_function(
+            getNameForMethod(basename))) {
       return Method(module_object(), fn);
     }
     return c10::nullopt;
@@ -307,15 +308,10 @@ struct TORCH_API Module {
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       std::vector<std::string> names = {}) const;
 
-  void clone_method(
-      const Module& orig,
-      const std::string& name,
-      const std::unordered_map<TypePtr, TypePtr>& type_remap);
-
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    if (auto fn = class_compilation_unit()->find_function(name)) {
+    if (class_compilation_unit()->find_function(getNameForMethod(name))) {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
@@ -324,22 +320,13 @@ struct TORCH_API Module {
     return c10::nullopt;
   }
 
-  ModulePtr module_object() const {
-    if (!module_value_) {
-      // User has created a Model without assigning it to something already
-      // loaded. This is done in tests, and when using the .define method.
-      module_value_ = create_module_object("__main__");
-    }
-    return module_value_;
-  }
+  ModulePtr module_object() const;
+
   ClassTypePtr type() const {
     return module_object()->type();
   }
-  std::shared_ptr<CompilationUnit> class_compilation_unit() {
-    return module_object()->type()->compilation_unit();
-  }
-  std::shared_ptr<const CompilationUnit> class_compilation_unit() const {
-    return module_object()->type()->compilation_unit();
+  std::shared_ptr<CompilationUnit> class_compilation_unit() const {
+    return module_object()->compilation_unit();
   }
 
   // so that C++ users can easily add methods
@@ -363,6 +350,14 @@ struct TORCH_API Module {
   }
 
  private:
+  void clone_method(
+      const Module& orig,
+      const QualifiedName& orig_method_name,
+      const std::unordered_map<TypePtr, TypePtr>& type_remap);
+
+  c10::QualifiedName getNameForMethod(std::string basename) const {
+    return QualifiedName(name(), basename);
+  }
   static const char* toString(EntityType t) {
     switch (t) {
       case EntityType::MODULE:
@@ -429,15 +424,6 @@ struct TORCH_API Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
-  static ModulePtr create_module_object(std::string class_name) {
-    return c10::ivalue::Object::create(
-        ClassType::create(
-            QualifiedName(std::move(class_name)),
-            std::make_shared<CompilationUnit>(),
-            /*is_module=*/true),
-        0,
-        clearMethods);
-  }
   // mutable be we lazily initialize in module_object.
   mutable ModulePtr module_value_;
 };

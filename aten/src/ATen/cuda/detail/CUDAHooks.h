@@ -16,11 +16,14 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
+  const at::cuda::NVRTC& nvrtc() const override;
   int64_t current_device() const override;
+  bool hasPrimaryContext(int64_t device_index) const override;
   Allocator* getPinnedMemoryAllocator() const override;
   bool compiledWithCuDNN() const override;
   bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
+  bool supportsDepthwiseConvolutionWithCuDNN() const override;
   long versionCuDNN() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
