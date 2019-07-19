@@ -96,12 +96,12 @@ class NestedTensor(object):
     #     requires_grad
     #     is_pinned
     def __init__(self, tensors):
-        self.tensors = tensors
-        _verify_tensors(self.tensors)
+        self._tensors = tensors
+        _verify_tensors(self._tensors)
 
     @property
     def grad(self):
-        grads = [t.grad for t in self.tensors]
+        grads = [t.grad for t in self._tensors]
         if any(grad is None for grad in grads):
             assert all(grad is None for grad in grads)
             return None
@@ -110,13 +110,13 @@ class NestedTensor(object):
 
     @property
     def data(self):
-        return NestedTensor([t.data for t in self.tensors])
+        return NestedTensor([t.data for t in self._tensors])
 
     @property
     def dim(self):
         if DEBUG:
-            _verify_tensors(self.tensors)
-        return self.tensors[0].dim
+            _verify_tensors(self._tensors)
+        return self._tensors[0].dim
 
     @property
     def shape(self):
@@ -125,8 +125,8 @@ class NestedTensor(object):
     @property
     def requires_grad(self):
         if DEBUG:
-            _verify_tensors(self.tensors)
-        return self.tensors[0].requires_grad
+            _verify_tensors(self._tensors)
+        return self._tensors[0].requires_grad
 
     @property
     def grad_fn(self):
@@ -134,7 +134,7 @@ class NestedTensor(object):
             "We don't support grad_fn as a user-facing construct.")
 
     def __len__(self):
-        return len(self.tensors)
+        return len(self._tensors)
 
     def __bool__(self):
         raise NotImplementedError(
@@ -142,40 +142,40 @@ class NestedTensor(object):
 
     def __str__(self):
         result = "nestedtensor([\n"
-        for tensor in self.tensors:
+        for tensor in self._tensors:
             result += "  " + tensor.__str__() + ",\n"
         result += "])"
         return result
 
     def __repr__(self):
         result = "nestedtensor([\n"
-        for tensor in self.tensors:
+        for tensor in self._tensors:
             result += "  " + tensor.__repr__() + ",\n"
         result += "])"
         return result
 
     def is_empty(self):
         # This condition can never be true, since we disallow an empty list for now.
-        raise ValueError("self.tensors cannot be empty under current constraints.")
+        raise ValueError("self._tensors cannot be empty under current constraints.")
 
     def __apply(self, fn):
-        return [fn(tensor) for tensor in self.tensors]
+        return [fn(tensor) for tensor in self._tensors]
 
     def nested_size(self):
-        return tuple(t.size() for t in self.tensors)
+        return tuple(t.size() for t in self._tensors)
 
     # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
     def all(self):
-        return all(t.all() for t in self.tensors)
+        return all(t.all() for t in self._tensors)
 
     # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
     def any(self):
-        return any(t.any() for t in self.tensors)
+        return any(t.any() for t in self._tensors)
 
     # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
     def sum(self):
-        # We currently assume len(self.tensors) is always non-zero
-        return torch.stack(tuple(t.sum() for t in self.tensors)).sum()
+        # We currently assume len(self._tensors) is always non-zero
+        return torch.stack(tuple(t.sum() for t in self._tensors)).sum()
 
     # Tensor ops
     def detach(self):

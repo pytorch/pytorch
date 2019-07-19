@@ -54,7 +54,7 @@ class TestNestedTensor(TestCase):
         for i in range(16):
             tensors[i].mul_(i + 2)
         for i in range(16):
-            self.assertTrue((tensors[i] != nested_tensor.tensors[i]).all())
+            self.assertTrue((tensors[i] != nested_tensor._tensors[i]).all())
         self.assertRaises(ValueError, lambda: torch.nestedtensor([]))
         self.assertRaises(ValueError, lambda: torch.nestedtensor(torch.tensor([3.0])))
 
