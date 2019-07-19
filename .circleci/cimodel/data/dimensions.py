@@ -15,3 +15,9 @@ STANDARD_PYTHON_VERSIONS = [
     "3.6",
     "3.7",
 ]
+
+CONDA_PYTHON_VERSIONS = [
+    "2.7",
+    "3.6",
+    "3.7",
+]

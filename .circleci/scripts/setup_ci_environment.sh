@@ -1,51 +1,17 @@
 #!/usr/bin/env bash
-set -ex
-
-# Check if we should actually run
-echo "BUILD_ENVIRONMENT: ${BUILD_ENVIRONMENT}"
-echo "CIRCLE_PULL_REQUEST: ${CIRCLE_PULL_REQUEST}"
-if [[ "${BUILD_ENVIRONMENT}" == *-slow-* ]]; then
-  if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
-    # It's a PR; test for [slow ci] tag on the TOPMOST commit
-    topmost_commit=$(git log --format='%B' -n 1 HEAD)
-    if !(echo $topmost_commit | grep -q -e '\[slow ci\]' -e '\[ci slow\]' -e '\[test slow\]' -e '\[slow test\]'); then
-      circleci step halt
-      exit
-    fi
-  fi
-fi
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
-    # It's a PR; test for [xla ci] tag on the TOPMOST commit
-    topmost_commit=$(git log --format='%B' -n 1 HEAD)
-    if !(echo $topmost_commit | grep -q -e '\[xla ci\]' -e '\[ci xla\]' -e '\[test xla\]' -e '\[xla test\]'); then
-      # NB: This doesn't halt everything, just this job.  So
-      # the rest of the workflow will keep going and you need
-      # to make sure you halt there too.  Blegh.
-      circleci step halt
-      exit
-    fi
-  fi
-fi
-if [[ "${BUILD_ENVIRONMENT}" == *namedtensor* ]]; then
-  if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
-    # It's a PR; test for [namedtensor] tag on the TOPMOST commit
-    topmost_commit=$(git log --format='%B' -n 1 HEAD)
-    if !(echo $topmost_commit | grep -q -e '\[namedtensor\]' -e '\[ci namedtensor\]' -e '\[namedtensor ci\]'); then
-      # NB: This doesn't halt everything, just this job.  So
-      # the rest of the workflow will keep going and you need
-      # to make sure you halt there too.  Blegh.
-      circleci step halt
-      exit
-    fi
-  fi
-fi
+set -ex -o pipefail
 
 # Set up NVIDIA docker repo
 curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
 echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+
+# Remove unnecessary sources
+sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+sudo rm -f /etc/apt/heroku.list
+sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
+sudo rm -f /etc/apt/partner.list
 
 sudo apt-get -y update
 sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
@@ -72,9 +38,13 @@ sudo apt-get -y install \
 
 sudo pkill -SIGHUP dockerd
 
-sudo pip -q install awscli==1.16.35
+retry () {
+    $*  || $* || $* || $* || $*
+}
 
-if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+retry sudo pip -q install awscli==1.16.35
+
+if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
   DRIVER_FN="NVIDIA-Linux-x86_64-410.104.run"
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
@@ -83,10 +53,10 @@ fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
   echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
-  echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH}" >> /home/circleci/project/env
-  echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
+  echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH:-}" >> /home/circleci/project/env
+  echo "declare -x PYTHON_VERSION=${PYTHON_VERSION:-}" >> /home/circleci/project/env
   echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
-  if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+  if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
     echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env
   fi
   export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
@@ -97,21 +67,21 @@ if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     # This IAM user allows write access to S3 bucket for sccache & bazels3cache
     set +x
-    echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2}" >> /home/circleci/project/env
-    echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2}" >> /home/circleci/project/env
+    echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}" >> /home/circleci/project/env
+    echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}" >> /home/circleci/project/env
     set -x
   else
     # This IAM user allows write access to S3 bucket for sccache
     set +x
-    echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> /home/circleci/project/env
-    echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> /home/circleci/project/env
+    echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}" >> /home/circleci/project/env
+    echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}" >> /home/circleci/project/env
     set -x
   fi
 fi
 
 # This IAM user only allows read-write access to ECR
 set +x
-export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
-export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
+export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4:-}
+export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4:-}
 eval $(aws ecr get-login --region us-east-1 --no-include-email)
 set -x

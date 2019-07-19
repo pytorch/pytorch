@@ -295,41 +295,41 @@ typename OrderedDict<Key, Value>::ConstIterator OrderedDict<Key, Value>::end()
 
 template <typename Key, typename Value>
 typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::front() {
-  AT_CHECK(!items_.empty(), "Called front() on an empty OrderedDict");
+  TORCH_CHECK(!items_.empty(), "Called front() on an empty OrderedDict");
   return items_.front();
 }
 
 template <typename Key, typename Value>
 const typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::front()
     const {
-  AT_CHECK(!items_.empty(), "Called front() on an empty OrderedDict");
+  TORCH_CHECK(!items_.empty(), "Called front() on an empty OrderedDict");
   return items_.front();
 }
 
 template <typename Key, typename Value>
 typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::back() {
-  AT_CHECK(!items_.empty(), "Called back() on an empty OrderedDict");
+  TORCH_CHECK(!items_.empty(), "Called back() on an empty OrderedDict");
   return items_.back();
 }
 
 template <typename Key, typename Value>
 const typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::back()
     const {
-  AT_CHECK(!items_.empty(), "Called back() on an empty OrderedDict");
+  TORCH_CHECK(!items_.empty(), "Called back() on an empty OrderedDict");
   return items_.back();
 }
 
 template <typename Key, typename Value>
 typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::operator[](
     size_t index) {
-  AT_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
+  TORCH_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
   return items_[index];
 }
 
 template <typename Key, typename Value>
 const typename OrderedDict<Key, Value>::
     Item& OrderedDict<Key, Value>::operator[](size_t index) const {
-  AT_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
+  TORCH_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
   return items_[index];
 }
 
@@ -352,7 +352,7 @@ const Value& OrderedDict<Key, Value>::operator[](const Key& key) const {
 template <typename Key, typename Value>
 template <typename K, typename V>
 Value& OrderedDict<Key, Value>::insert(K&& key, V&& value) {
-  AT_CHECK(
+  TORCH_CHECK(
       index_.count(key) == 0, key_description_, " '", key, "' already defined");
   // Copy `key` here and move it into the index.
   items_.emplace_back(key, std::forward<V>(value));

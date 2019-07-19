@@ -2,55 +2,61 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
-#include <ATen/core/ivalue_base.h>
+#include <c10/util/TypeList.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
+struct IValue;
 template<class Key, class Value> class Dict;
-namespace impl {
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 
-inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isNone()) {
-    return rhs.isNone();
-  } else if (lhs.isInt()) {
-    return rhs.isInt() && lhs.toInt() == rhs.toInt();
-  } else if (lhs.isString()) {
-    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
-  } else if (lhs.isDouble()) {
-    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isBool()) {
-    return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else {
-    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
-  }
-}
+namespace impl {
+bool shallowEquals(const IValue& lhs, const IValue& rhs);
+
+using valid_dict_key_types = guts::typelist::typelist<
+  int64_t,
+  std::string,
+  double,
+  bool
+>;
 }
 
 namespace detail {
 
-struct DictHash {
-  size_t operator()(const IValue& ivalue) const {
-    if (ivalue.isInt()) {
-      return std::hash<int>()(ivalue.toInt());
-    } else if (ivalue.isString()) {
-      return std::hash<std::string>()(ivalue.toStringRef());
-    } else if (ivalue.isDouble()) {
-      return std::hash<double>()(ivalue.toDouble());
-    } else if (ivalue.isBool()) {
-      return std::hash<bool>()(ivalue.toBool());
-    } else {
-      throw std::runtime_error("Can't hash IValues with this tag");
-    }
-  }
+struct DictKeyHash {
+  size_t operator()(const IValue& ivalue) const;
 };
 
-struct DictEqualTo {
+struct DictKeyEqualTo {
   bool operator()(const IValue& lhs, const IValue& rhs) const {
     return impl::shallowEquals(lhs, rhs);
   }
 };
 
-using dict_map_type = ska::flat_hash_map<IValue, IValue, DictHash, DictEqualTo>;
+struct DictImpl final : public c10::intrusive_ptr_target {
+  using dict_map_type = ska::flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
+  struct DictElementTypes final {
+    TypePtr keyType;
+    TypePtr valueType;
+  };
+
+  explicit DictImpl(dict_map_type dict_, optional<DictElementTypes> elementTypes_)
+  : dict(std::move(dict_))
+  , elementTypes(std::move(elementTypes_)) {
+    TORCH_INTERNAL_ASSERT(!elementTypes.has_value() || (nullptr != elementTypes->keyType.get() && nullptr != elementTypes->valueType.get()), "Key and value type must not be nullptr");
+  }
+
+  dict_map_type dict;
+
+  // TODO Right now, this is optional, but we want to make it mandatory for all dicts to know their types
+  optional<DictElementTypes> elementTypes;
+
+  intrusive_ptr<DictImpl> copy() const;
+};
+
 }
 
 namespace impl {
@@ -127,7 +133,7 @@ public:
 
   // the template automatically disables the operator when we are already a
   // const_iterator, because that would cause a lot of compiler warnings otherwise.
-  template<class const_iterator_ = typename detail::dict_map_type::const_iterator, class = guts::enable_if_t<!std::is_same<const_iterator_, Iterator>::value>>
+  template<class const_iterator_ = typename detail::DictImpl::dict_map_type::const_iterator, class = guts::enable_if_t<!std::is_same<const_iterator_, Iterator>::value>>
   /* implicit */ operator DictIterator<Key, Value, const_iterator_>() const
   {
       return DictIterator<Key, Value, const_iterator_> { const_iterator_ { entryRef_.iterator_ } };
@@ -138,9 +144,11 @@ private:
 
   DictEntryRef<Key, Value, Iterator> entryRef_;
 
-  friend class DictIterator<Key, Value, typename detail::dict_map_type::iterator>;
+  friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
   friend class Dict<Key, Value>;
   friend bool operator==<Key, Value, Iterator>(const DictIterator& lhs, const DictIterator& rhs);
+
+  // TODO We also need comparison operators <, >, <=, >=, see ListIterator.
 };
 
 template<class Key, class Value, class Iterator>
@@ -153,126 +161,139 @@ inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const Dict
   return !(lhs == rhs);
 }
 
-template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue>&& dict);
-template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value>&& dict);
+template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue> dict);
+template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value> dict);
+struct deprecatedUntypedDict final {};
 }
 
 /**
  * An object of this class stores a map from Key to Value.
  *
- * We use this class in the PyTorch kernel API instead of
- * std::unordered_map<Key, Value>, because that allows us
- * to do optimizations and switch out the underlying map
- * implementation without breaking backwards compatibility
- * for the kernel API.
+ * This is a pointer type. After a copy, both Dicts
+ * will share the same storage:
  *
- * The API of this class is borrowed from std::unordered_map,
- * but with slight differences and it intentionally does not
- * support the full std::unordered_map API, because a more
- * narrow abstraction gives us more freedom to change the internals.
+ * > Dict<int, string> a;
+ * > Dict<int, string> b = a;
+ * > b.insert(3, "three");
+ * > ASSERT("three" == a.at(3));
+ *
+ * We use this class in the PyTorch kernel API because that
+ * allows us to do optimizations and switch out the underlying
+ * map implementation without breaking backwards compatibility
+ * for the kernel API.
  */
 template<class Key, class Value>
 class Dict final {
 private:
-  // map_ stores the underlying map as a ska::flat_hash_map.
+  static_assert((std::is_same<IValue, Key>::value && std::is_same<IValue, Value>::value) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
+
+  // impl_ stores the underlying map as a ska::flat_hash_map.
   // We intentionally don't offer conversion from/to
   // ska::flat_hash_map, return references to it or something like that,
   // because such operations would get expensive if we switch out
   // the actual map implementation.
-  detail::dict_map_type map_;
+  // This is an intrusive_ptr because Dict is a pointer type.
+  // Invariant: This will never be a nullptr, there will always be a valid
+  // DictImpl.
+  c10::intrusive_ptr<detail::DictImpl> impl_;
 
-  explicit Dict(detail::dict_map_type&& map): map_(std::move(map)) {}
-  template<class K, class V> friend Dict<K, V> impl::toTypedDict(Dict<IValue, IValue>&&);
-  template<class K, class V> friend Dict<IValue, IValue> impl::toGenericDict(Dict<K, V>&&);
+  explicit Dict(c10::intrusive_ptr<detail::DictImpl>&& impl);
+  friend struct IValue;
+  template<class K, class V> friend Dict<K, V> impl::toTypedDict(Dict<IValue, IValue>);
+  template<class K, class V> friend Dict<IValue, IValue> impl::toGenericDict(Dict<K, V>);
 
 public:
   using key_type = Key;
   using mapped_type = Value;
-  using size_type = typename detail::dict_map_type::size_type;
-  using iterator = impl::DictIterator<Key, Value, typename detail::dict_map_type::iterator>;
-  using const_iterator = impl::DictIterator<Key, Value, typename detail::dict_map_type::const_iterator>;
+  using size_type = typename detail::DictImpl::dict_map_type::size_type;
+  using iterator = impl::DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
+  using const_iterator = impl::DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::const_iterator>;
 
   /**
    * Creates an empty dict.
    */
-  explicit Dict() = default;
+  explicit Dict();
+
+  /**
+   * Create a generic dict with runtime type information.
+   * This only works for c10::impl::GenericDict and is not part of the public API
+   * but only supposed to be used internally by PyTorch.
+   */
+  explicit Dict(TypePtr keyType, TypePtr valueType);
+
+  /**
+   * Creates an untyped dict, i.e. a Dict that doesn't know its types and
+   * doesn't do type checking.
+   * Please don't use this if you can avoid it. We want to get rid of untyped
+   * dicts.
+   */
+  explicit Dict(impl::deprecatedUntypedDict);
 
   ~Dict() = default;
 
   Dict(const Dict&) = default;
-  Dict(Dict&&) noexcept = default;
   Dict& operator=(const Dict&) = default;
-  Dict& operator=(Dict&&) noexcept = default;
+  Dict(Dict&&) noexcept;
+  Dict& operator=(Dict&&) noexcept;
+
+  /**
+   * Create a new Dict pointing to a deep copy of the same data.
+   * The Dict returned is a new dict with separate storage.
+   * Changes in it are not reflected in the original dict or vice versa.
+   */
+  Dict copy() const;
 
   /**
    * Returns an iterator to the first element of the container.
    * If the container is empty, the returned iterator will be equal to end().
    */
-  iterator begin() {
-    return iterator{map_.begin()};
-  }
+  iterator begin();
 
   /**
    * Returns an iterator to the first element of the container.
    * If the container is empty, the returned iterator will be equal to end().
    */
-  const_iterator begin() const {
-    return const_iterator{map_.begin()};
-  }
+  const_iterator begin() const;
 
   /**
    * Returns an iterator to the first element of the container.
    * If the container is empty, the returned iterator will be equal to end().
    */
-  const_iterator cbegin() const {
-    return const_iterator{map_.cbegin()};
-  }
+  const_iterator cbegin() const;
 
   /**
    * Returns an iterator to the element following the last element of the container.
    * This element acts as a placeholder; attempting to access it results in undefined behavior.
    */
-  iterator end() {
-    return iterator{map_.end()};
-  }
+  iterator end();
 
   /**
    * Returns an iterator to the element following the last element of the container.
    * This element acts as a placeholder; attempting to access it results in undefined behavior.
    */
-  const_iterator end() const {
-    return const_iterator{map_.end()};
-  }
+  const_iterator end() const;
 
   /**
    * Returns an iterator to the element following the last element of the container.
    * This element acts as a placeholder; attempting to access it results in undefined behavior.
    */
-  const_iterator cend() const {
-    return const_iterator{map_.cend()};
-  }
+  const_iterator cend() const;
 
   /**
    * Checks if the container has no elements.
    */
-  bool empty() const {
-    return map_.empty();
-  }
+  bool empty() const;
 
   /**
    * Returns the number of elements in the container.
    */
-  size_type size() const {
-    return map_.size();
-  }
+  size_type size() const;
 
   /**
    * Erases all elements from the container. After this call, size() returns zero.
    * Invalidates any references, pointers, or iterators referring to contained elements. May also invalidate past-the-end iterators.
    */
-  void clear() {
-    map_.clear();
-  }
+  void clear();
 
   /**
    * Inserts element(s) into the container, if the container doesn't already contain an element with an equivalent key.
@@ -281,14 +302,7 @@ public:
    * @return A pair consisting of an iterator to the inserted element (or to the element that prevented the insertion) and a bool denoting whether the insertion took place.
    */
   template<class Key_, class Value_>
-  std::pair<iterator, bool> insert(Key_&& key, Value_&& value) {
-    static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert");
-    static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert");
-    auto inserted = map_.insert({
-      Key(std::forward<Key_>(key)),
-      Value(std::forward<Value_>(value))});
-    return {iterator{inserted.first}, inserted.second};
-  }
+  std::pair<iterator, bool> insert(Key_&& key, Value_&& value);
 
   /**
    * If an element with the given key already exists, it is overwritten with the given value.
@@ -298,23 +312,14 @@ public:
    * @return The bool component is true if the insertion took place and false if the assignment took place. The iterator component is pointing at the element that was inserted or updated.
    */
   template<class Key_, class Value_>
-  std::pair<iterator, bool> insert_or_assign(Key_&& key, Value_&& value) {
-    static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert_or_assign");
-    static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert_or_assign");
-    auto inserted = map_.insert_or_assign(
-      Key(std::forward<Key_>(key)),
-      Value(std::forward<Value_>(value)));
-    return {iterator{inserted.first}, inserted.second};
-  }
+  std::pair<iterator, bool> insert_or_assign(Key_&& key, Value_&& value);
 
   /**
    * Removes the element pointed to by iter.
    * May invalidate any references, pointers, or iterators referring to contained elements.
    * The iterator iter must be valid and dereferenceable. Thus the end() iterator (which is valid, but is not dereferenceable) cannot be used as a value for iter.
    */
-  void erase(const_iterator iter) {
-    map_.erase(iter.entryRef_.iterator_);
-  }
+  void erase(const_iterator iter);
 
   /**
    * Removes the element with the given key, if it exists.
@@ -322,17 +327,13 @@ public:
    *
    * @return The number of elements removed. This is either '1' if an element with the key existed, or '0' if it didn't.
    */
-  C10_NODISCARD size_t erase(const Key& key) {
-    return map_.erase(key);
-  }
+  C10_NODISCARD size_t erase(const Key& key);
 
   /**
    * Returns the mapped value of the element with key equivalent to key.
    * If no such element exists, an exception of type std::out_of_range is thrown.
    */
-  Value at(const Key& key) {
-    return map_.at(key).template to<Value>();
-  }
+  Value at(const Key& key) const;
 
   /**
    * Finds an element with key equivalent to key.
@@ -340,9 +341,7 @@ public:
    * @return Iterator to an element with key equivalent to key.
    *         If no such element is found, past-the-end (see end()) iterator is returned.
    */
-  iterator find(const Key& key) {
-    return iterator{map_.find(key)};
-  }
+  iterator find(const Key& key);
 
   /**
    * Finds an element with key equivalent to key.
@@ -350,26 +349,20 @@ public:
    * @return Iterator to an element with key equivalent to key.
    *         If no such element is found, past-the-end (see end()) iterator is returned.
    */
-  const_iterator find(const Key& key) const {
-    return const_iterator{map_.find(key)};
-  }
+  const_iterator find(const Key& key) const;
 
   /**
    * Checks if there is an element with key equivalent to key in the container.
    *
    * @return true if there is such an element, otherwise false.
    */
-  bool contains(const Key& key) const {
-    return end() != find(key);
-  }
+  bool contains(const Key& key) const;
 
   /**
    * Increase the capacity so that at least count elements can be stored without
    * having to reallocate or rehash.
    */
-  void reserve(size_type count) {
-    map_.reserve(count);
-  }
+  void reserve(size_type count);
 };
 
 namespace impl {
@@ -378,17 +371,11 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericDict = Dict<IValue, IValue>;
 
-template<class Key, class Value>
-Dict<Key, Value> toTypedDict(GenericDict&& dict) {
-  return Dict<Key, Value>(std::move(dict.map_));
-}
-
-template<class Key, class Value>
-GenericDict toGenericDict(Dict<Key, Value>&& dict) {
-  return GenericDict(std::move(dict.map_));
 }
 }
 
+namespace torch {
+  template<class Key, class Value> using Dict = c10::Dict<Key, Value>;
 }
 
-#include <ATen/core/ivalue.h>
+#include <ATen/core/Dict_inl.h>

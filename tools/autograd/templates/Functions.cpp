@@ -398,7 +398,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
-Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, ScalarType dtype) {
+Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, optional<ScalarType> dtype) {
   return cumprod_backward(grad.to(input.scalar_type()), input, dim);
 }
 
@@ -423,10 +423,6 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
-}
-
-Tensor cumsum_backward(const Tensor &x, int64_t dim, ScalarType input_dtype) {
-  return cumsum_backward(x.to(input_dtype), dim);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
@@ -545,7 +541,7 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
   AT_ASSERT(sparse_.is_sparse());
   auto sparse = sparse_.coalesce();
   Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
-  return grad_sparse.sparse_mask(at::SparseTensorRef(sparse));
+  return grad_sparse.sparse_mask(sparse);
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
@@ -674,6 +670,46 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
     grad = unsqueeze_multiple(grad, dim, self.sizes().size());
   }
   return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
+}
+
+Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
+  return var_backward(grad / (result * 2), self, unbiased);
+}
+
+Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  return var_backward(grad / (result * 2), self, dim, unbiased, keepdim);
+}
+
+Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
+  return sum_backward(grad, sizes, dim, keepdim) / _safe_size(sizes, dim);
+}
+
+Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int numel) {
+  return grad.expand(sizes) / numel;
+}
+
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
+  Tensor grad;
+  if (grads[0].defined()) {
+    grad = is_std ? std_backward(r1, grads[0], self, dim, unbiased, keepdim) : var_backward(grads[0], self, dim, unbiased, keepdim);
+  }
+  if (grads[1].defined()) {
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), dim, keepdim);
+    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
+  }
+  return grad;
+}
+
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, bool unbiased, bool is_std) {
+  Tensor grad;
+  if (grads[0].defined()) {
+    grad = is_std ? std_backward(r1, grads[0], self, unbiased) : var_backward(grads[0], self, unbiased);
+  }
+  if (grads[1].defined()) {
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel());
+    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
+  }
+  return grad;
 }
 
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArrayRef sizes) {
@@ -1581,7 +1617,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 // This makes no assumption on the signs of sigma.
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
-  AT_CHECK(compute_uv,
+  TORCH_CHECK(compute_uv,
            "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
            "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
 
@@ -1664,37 +1700,101 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
-    AT_CHECK(eigenvectors,
+    TORCH_CHECK(eigenvectors,
              "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
              "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
 
     auto glambda = grads[0];
     auto gv = grads[1];
 
-    auto vt = v.t();
+    auto vt = v.transpose(-2, -1);
 
     Tensor result;
     if (gv.defined()) {
-        Tensor F = lambda.unsqueeze(0).expand_as(self).clone();
-        F.sub_(at::unsqueeze(lambda, 1));
-        F.diagonal().fill_(INFINITY);
+        Tensor F = lambda.unsqueeze(-2).expand_as(self).clone();
+        F.sub_(at::unsqueeze(lambda, -1));
+        F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
         F.pow_(-1);
 
-        F.mul_(vt.mm(gv));
-        result = v.mm(F.mm(vt));
+        F.mul_(at::matmul(vt, gv));
+        result = at::matmul(v, at::matmul(F, vt));
     } else {
         result = at::zeros_like(self);
     }
 
     if (glambda.defined()) {
-        result.add_((v * glambda).mm(vt));
+        result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
     }
     if (upper) {
-        result = at::triu(result) + at::triu(result.t(), 1);
+        result = at::triu(result) + at::triu(result.transpose(-2, -1), 1);
     } else {
-        result = at::tril(result) + at::tril(result.t(), -1);
+        result = at::tril(result) + at::tril(result.transpose(-2, -1), -1);
     }
     return result;
+}
+
+// We refer Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
+// Algebra Functions with Application in Optimum Experimental Design (Extended Version)
+// The derivative for the QR decomposition is adapted from Eq. 42 of the
+// above reference.
+Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                   bool some, const Tensor& Q, const Tensor& R) {
+  auto grad_Q = grads[0];
+  auto grad_R = grads[1];
+  TORCH_CHECK(R.size(-2) == R.size(-1),
+              "The derivative when R is non-square is not implemented. ");
+
+  // Compute R (R')^{T}
+  Tensor R_term;
+  if (grad_R.defined()) {
+    R_term = at::matmul(R, grad_R.transpose(-2, -1));
+  } else {
+    // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
+    R_term = at::zeros_like(R);
+  }
+
+  // Compute Q^{T} Q'
+  Tensor Q_term;
+  if (grad_Q.defined()) {
+    Q_term = at::matmul(Q.transpose(-2, -1), grad_Q);
+  } else {
+    // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
+    Q_term = at::zeros_like(R);
+  }
+
+  // We want to compute: (rhs_solve_1 . R^{-T})
+  // Note that (rhs_solve_1 . R^{-T}) = (R^{-1} . rhs_solve_1^{T})^{T}
+  // Since R is upper triangular, we can do this using
+  // triangular_solve(rhs_solve_1^{T}, R)^{T}
+  auto rhs_solve_1 = R_term - R_term.transpose(-2, -1) + Q_term - Q_term.transpose(-2, -1);
+  rhs_solve_1 = at::tril(rhs_solve_1, /*k=*/-1);
+  Tensor solve_soln_1;
+  std::tie(solve_soln_1, std::ignore) = at::triangular_solve(rhs_solve_1.transpose(-2, -1), R,
+                                                             /*upper=*/true, /*transpose=*/false,
+                                                             /*unitriangular=*/false);
+  Tensor grad_A;
+  if (grad_R.defined()) {
+    grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1) + grad_R);
+  } else {
+    grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1));
+  }
+
+  // Successive computations involve computation of QQ^{T} which is identity when A is square
+  if (self.size(-1) != self.size(-2)) {
+    Tensor rhs_solve_2;
+    // We use the same trick from above for this computation
+    if (grad_Q.defined()) {
+      rhs_solve_2 = grad_Q - at::matmul(Q, Q_term);
+    } else {
+      rhs_solve_2 = -at::matmul(Q, Q_term);
+    }
+    Tensor solve_soln_2;
+    std::tie(solve_soln_2, std::ignore) = at::triangular_solve(rhs_solve_2.transpose(-2, -1), R,
+                                                               /*upper=*/true, /*transpose=*/false,
+                                                               /*unitriangular=*/false);
+    grad_A.add_(solve_soln_2.transpose(-2, -1));
+  }
+  return grad_A;
 }
 
 // Invertible case is derived from Jacobi's formula, and also can be found at:
@@ -2093,6 +2193,12 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
 
   return gg_weight.view(size);
 }
+
+Tensor index_backward(const Tensor & self, TensorList indices, const Tensor& grad) {
+   auto zeros = at::zeros_like(self);
+   return at::_index_put_impl_(zeros, indices, grad, true, true);
+}
+
 
 } // anonymous namespace
 

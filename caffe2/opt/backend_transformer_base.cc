@@ -5,10 +5,22 @@
 namespace caffe2 {
 
 namespace {
+// Populate 'net_pos' argument for any ops that don't already have it. 'net_pos'
+// we populate here starts after the max 'net_pos' value we encountered.
 void annotateOpIndex(NetDef* net) {
-  int i = 0;
+  // find the max net_pos that we have so far.
+  int i = -1;
+  for (const auto& op : net->op()) {
+    ArgumentHelper helper(op);
+    int old_index = helper.GetSingleArgument(op, kNetPos, -1);
+    i = std::max(i, old_index);
+  }
+
+  // populate net_pos for any op that doesn't already have it.
   for (auto& op : *(net->mutable_op())) {
-    AddArgument(kNetPos, i++, &op);
+    if (!ArgumentHelper::HasArgument(op, kNetPos)) {
+      AddArgument(kNetPos, ++i, &op);
+    }
   }
 }
 } // namespace
@@ -54,8 +66,16 @@ QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
       "Only quantized shapeinfo can be extracted into QTensor!");
   t.set_name(name);
   t.set_data_type(shape_info.shape.data_type());
-  t.set_scale(shape_info.q_info.scale);
-  t.set_bias(shape_info.q_info.offset);
+  t.set_axis(shape_info.q_info.axis);
+  t.set_is_multiparam(true);
+  for (const auto i : shape_info.q_info.scale) {
+    t.add_scales(i);
+  }
+  t.set_scale(1.0);
+  for (const auto i : shape_info.q_info.offset) {
+    t.add_biases(i);
+  }
+  t.set_bias(0.0);
   // precision and is_signed is not used in onnxifi workflow, but it is required
   // field
   t.set_precision(0);
@@ -119,9 +139,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
       shape_map.emplace(s, shape_info);
     }
   }
-  BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(*pred_net, shape_map);
-  const auto& out_map = eng.shape_info();
+  auto eng = BoundShapeInferencerRegistry()->Create("C10", spec);
+  eng->InferBoundShapeAndType(*pred_net, shape_map, ws);
+  const auto& out_map = eng->shape_info();
   shape_map.clear();
   for (const auto& kv : out_map) {
     shape_map.emplace(
@@ -136,11 +156,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
   return shape_map;
 }
 
-void BackendTransformerBase::dumpNet(
-    const NetDef& pred_net,
-    const ShapeInfoMap& shape_hints,
-    const std::string& fname) const {
-  NetDef shape_net(pred_net);
+void BackendTransformerBase::addShapeToNet(
+    NetDef& shape_net,
+    const ShapeInfoMap& shape_hints) const {
   auto* shape_arg = shape_net.add_arg();
   auto* qshape_arg = shape_net.add_arg();
   shape_arg->set_name("shape_info");
@@ -156,6 +174,14 @@ void BackendTransformerBase::dumpNet(
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }
+}
+
+void BackendTransformerBase::dumpNet(
+    const NetDef& pred_net,
+    const ShapeInfoMap& shape_hints,
+    const std::string& fname) const {
+  NetDef shape_net(pred_net);
+  addShapeToNet(shape_net, shape_hints);
   WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2

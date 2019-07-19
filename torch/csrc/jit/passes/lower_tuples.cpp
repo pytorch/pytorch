@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 
 namespace torch {
 namespace jit {
@@ -44,11 +44,20 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
     auto maybe_int = constant_as<int64_t>(idx);
     if (!maybe_int) {
       if (must_remove_tuples) {
-        AT_ERROR(n->getSourceLocation(), "tuple index with non-constant index");
+        AT_ERROR(n->sourceRange(), "tuple index with non-constant index");
       }
       return;
     }
-    n->output()->replaceAllUsesWith(construct->inputs().at(*maybe_int));
+    auto int_idx = *maybe_int;
+    auto len = construct->output()->type()->containedTypes().size();
+    if (int_idx < 0) {
+      int_idx += len;
+    }
+    // currently, we allow non-constant tuple index if the tuple is of one type.
+    // so we need to check bounds here
+    if (int_idx >= 0 && static_cast<size_t>(int_idx) < len) {
+      n->output()->replaceAllUsesWith(construct->inputs().at(int_idx));
+    }
   } else if (n->kind() == prim::TupleSlice) {
     std::vector<Value*> values;
     int64_t beg = n->i(attr::beg);
@@ -90,10 +99,10 @@ static void VisitNode(Node* n, Node* insert_point) {
   for (size_t i = 0; i < n->inputs().size();) {
     auto input = n->inputs()[i];
     if (TupleTypePtr tt = input->type()->cast<TupleType>()) {
-      AT_CHECK(
+      TORCH_CHECK(
           white_list.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples");
-      AT_CHECK(
+      TORCH_CHECK(
           input->node()->kind() == prim::TupleConstruct,
           "tuple use not matched to tuple construct");
       for (size_t j = 0; j < tt->elements().size(); ++j) {
@@ -119,7 +128,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     //    tup = (t0, t1)
     // is placed at the current insertion point
     if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
-      AT_CHECK(
+      TORCH_CHECK(
           white_list.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples");
       for (size_t j = 0; j < tt->elements().size(); j++) {
@@ -157,7 +166,7 @@ static void LowerAllTuples(Block* block) {
 
 static void EnsureNoTuples(ArrayRef<Value*> values) {
   for (Value* v : values) {
-    AT_CHECK(
+    TORCH_CHECK(
         v->type()->kind() != TypeKind::TupleType, "Couldn't lower all tuples.");
   }
 }

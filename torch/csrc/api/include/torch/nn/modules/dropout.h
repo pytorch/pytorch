@@ -40,7 +40,7 @@ class DropoutImplBase : public torch::nn::Cloneable<Derived> {
 /// about the exact semantics of this module.
 class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
  public:
-  using detail::DropoutImplBase<DropoutImpl>::DropoutImplBase;
+  explicit DropoutImpl(DropoutOptions options_ = DropoutOptions());
 
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
@@ -62,7 +62,7 @@ class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
 class TORCH_API FeatureDropoutImpl
     : public detail::DropoutImplBase<FeatureDropoutImpl> {
  public:
-  using detail::DropoutImplBase<FeatureDropoutImpl>::DropoutImplBase;
+  explicit FeatureDropoutImpl(DropoutOptions options_ = DropoutOptions());
 
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -eux -o pipefail
 
 # Set up CircleCI GPG keys for apt, if needed
 curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
@@ -29,6 +29,10 @@ done
 # See if we actually were successful
 systemctl list-units --all | cat
 
+# For good luck, try even harder to kill apt-get
+sudo pkill apt-get || true
+
+# For even better luck, purge unattended-upgrades
 sudo apt-get purge -y unattended-upgrades
 
 cat /etc/apt/sources.list

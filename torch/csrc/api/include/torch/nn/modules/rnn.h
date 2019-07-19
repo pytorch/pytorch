@@ -53,7 +53,7 @@ struct TORCH_API RNNOptionsBase {
 
 /// Base class for all RNN implementations (intended for code sharing).
 template <typename Derived>
-class RNNImplBase : public torch::nn::Cloneable<Derived> {
+class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
  public:
   /// These must line up with the CUDNN mode codes:
   /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t

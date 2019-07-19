@@ -19,6 +19,8 @@ class TestMathOps(serial.SerializedTestCase):
            exponent=st.floats(min_value=2.0, max_value=3.0),
            **hu.gcs)
     def test_elementwise_power(self, X, exponent, gc, dc):
+        # negative integer raised with non-integer exponent is domain error
+        X = np.abs(X)
         def powf(X):
             return (X ** exponent,)
 

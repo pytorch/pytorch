@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import json
 import logging
 import numpy as np
 import os
@@ -256,7 +257,7 @@ def draw_boxes(disp_image, boxes):
 
 
 def make_image(tensor, rescale=1, rois=None):
-    """Convert an numpy representation image to Image protobuf"""
+    """Convert a numpy representation of an image to Image protobuf"""
     from PIL import Image
     height, width, channel = tensor.shape
     scaled_height = int(height * rescale)
@@ -337,16 +338,16 @@ def audio(tag, tensor, sample_rate=44100):
     import wave
     import struct
     fio = io.BytesIO()
-    Wave_write = wave.open(fio, 'wb')
-    Wave_write.setnchannels(1)
-    Wave_write.setsampwidth(2)
-    Wave_write.setframerate(sample_rate)
+    wave_write = wave.open(fio, 'wb')
+    wave_write.setnchannels(1)
+    wave_write.setsampwidth(2)
+    wave_write.setframerate(sample_rate)
     tensor_enc = b''
     for v in tensor_list:
         tensor_enc += struct.pack('<h', v)
 
-    Wave_write.writeframes(tensor_enc)
-    Wave_write.close()
+    wave_write.writeframes(tensor_enc)
+    wave_write.close()
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(sample_rate=sample_rate,
@@ -358,9 +359,7 @@ def audio(tag, tensor, sample_rate=44100):
 
 
 def custom_scalars(layout):
-    categoriesnames = layout.keys()
     categories = []
-    layouts = []
     for k, v in layout.items():
         charts = []
         for chart_name, chart_meatadata in v.items():
@@ -378,8 +377,8 @@ def custom_scalars(layout):
         categories.append(layout_pb2.Category(title=k, chart=charts))
 
     layout = layout_pb2.Layout(category=categories)
-    PluginData = [SummaryMetadata.PluginData(plugin_name='custom_scalars')]
-    smd = SummaryMetadata(plugin_data=PluginData)
+    plugin_data = SummaryMetadata.PluginData(plugin_name='custom_scalars')
+    smd = SummaryMetadata(plugin_data=plugin_data)
     tensor = TensorProto(dtype='DT_STRING',
                          string_val=[layout.SerializeToString()],
                          tensor_shape=TensorShapeProto())
@@ -387,9 +386,9 @@ def custom_scalars(layout):
 
 
 def text(tag, text):
-    PluginData = SummaryMetadata.PluginData(
+    plugin_data = SummaryMetadata.PluginData(
         plugin_name='text', content=TextPluginData(version=0).SerializeToString())
-    smd = SummaryMetadata(plugin_data=PluginData)
+    smd = SummaryMetadata(plugin_data=plugin_data)
     tensor = TensorProto(dtype='DT_STRING',
                          string_val=[text.encode(encoding='utf_8')],
                          tensor_shape=TensorShapeProto(dim=[TensorShapeProto.Dim(size=1)]))
@@ -402,9 +401,9 @@ def pr_curve_raw(tag, tp, fp, tn, fn, precision, recall, num_thresholds=127, wei
     data = np.stack((tp, fp, tn, fn, precision, recall))
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds).SerializeToString()
-    PluginData = SummaryMetadata.PluginData(
+    plugin_data = SummaryMetadata.PluginData(
         plugin_name='pr_curves', content=pr_curve_plugin_data)
-    smd = SummaryMetadata(plugin_data=PluginData)
+    smd = SummaryMetadata(plugin_data=plugin_data)
     tensor = TensorProto(dtype='DT_FLOAT',
                          float_val=data.reshape(-1).tolist(),
                          tensor_shape=TensorShapeProto(
@@ -419,9 +418,9 @@ def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
                          num_thresholds=num_thresholds, weights=weights)
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds).SerializeToString()
-    PluginData = SummaryMetadata.PluginData(
+    plugin_data = SummaryMetadata.PluginData(
         plugin_name='pr_curves', content=pr_curve_plugin_data)
-    smd = SummaryMetadata(plugin_data=PluginData)
+    smd = SummaryMetadata(plugin_data=plugin_data)
     tensor = TensorProto(dtype='DT_FLOAT',
                          float_val=data.reshape(-1).tolist(),
                          tensor_shape=TensorShapeProto(
@@ -459,3 +458,101 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
     precision = tp / np.maximum(_MINIMUM_COUNT, tp + fp)
     recall = tp / np.maximum(_MINIMUM_COUNT, tp + fn)
     return np.stack((tp, fp, tn, fn, precision, recall))
+
+
+def _get_tensor_summary(name, display_name, description, tensor, content_type, json_config):
+    """Creates a tensor summary with summary metadata.
+
+    Args:
+      name: Uniquely identifiable name of the summary op. Could be replaced by
+        combination of name and type to make it unique even outside of this
+        summary.
+      display_name: Will be used as the display name in TensorBoard.
+        Defaults to `name`.
+      description: A longform readable description of the summary data. Markdown
+        is supported.
+      tensor: Tensor to display in summary.
+      content_type: Type of content inside the Tensor.
+      json_config: A string, JSON-serialized dictionary of ThreeJS classes
+        configuration.
+
+    Returns:
+      Tensor summary with metadata.
+    """
+    import torch
+    from tensorboard.plugins.mesh import metadata
+
+    tensor = torch.as_tensor(tensor)
+
+    tensor_metadata = metadata.create_summary_metadata(
+        name,
+        display_name,
+        content_type,
+        tensor.shape,
+        description,
+        json_config=json_config)
+
+    tensor = TensorProto(dtype='DT_FLOAT',
+                         float_val=tensor.reshape(-1).tolist(),
+                         tensor_shape=TensorShapeProto(dim=[
+                             TensorShapeProto.Dim(size=tensor.shape[0]),
+                             TensorShapeProto.Dim(size=tensor.shape[1]),
+                             TensorShapeProto.Dim(size=tensor.shape[2]),
+                         ]))
+
+    tensor_summary = Summary.Value(
+        tag=metadata.get_instance_name(name, content_type),
+        tensor=tensor,
+        metadata=tensor_metadata,
+    )
+
+    return tensor_summary
+
+
+def _get_json_config(config_dict):
+    """Parses and returns JSON string from python dictionary."""
+    json_config = '{}'
+    if config_dict is not None:
+        json_config = json.dumps(config_dict, sort_keys=True)
+    return json_config
+
+
+# https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/mesh/summary.py
+def mesh(tag, vertices, colors, faces, config_dict, display_name=None, description=None):
+    """Outputs a merged `Summary` protocol buffer with a mesh/point cloud.
+
+      Args:
+        tag: A name for this summary operation.
+        vertices: Tensor of shape `[dim_1, ..., dim_n, 3]` representing the 3D
+          coordinates of vertices.
+        faces: Tensor of shape `[dim_1, ..., dim_n, 3]` containing indices of
+          vertices within each triangle.
+        colors: Tensor of shape `[dim_1, ..., dim_n, 3]` containing colors for each
+          vertex.
+        display_name: If set, will be used as the display name in TensorBoard.
+          Defaults to `name`.
+        description: A longform readable description of the summary data. Markdown
+          is supported.
+        config_dict: Dictionary with ThreeJS classes names and configuration.
+
+      Returns:
+        Merged summary for mesh/point cloud representation.
+      """
+    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
+
+    json_config = _get_json_config(config_dict)
+
+    summaries = []
+    tensors = [
+        (vertices, MeshPluginData.VERTEX),
+        (faces, MeshPluginData.FACE),
+        (colors, MeshPluginData.COLOR)
+    ]
+
+    for tensor, content_type in tensors:
+        if tensor is None:
+            continue
+        summaries.append(
+            _get_tensor_summary(tag, display_name, description, tensor, content_type, json_config))
+
+    return Summary(value=summaries)

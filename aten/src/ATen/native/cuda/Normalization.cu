@@ -48,13 +48,21 @@ Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Ten
 // accepting input(self) here to determine template data types, since running_mean/running_var are optional
 std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
                                                         const Tensor& running_var, double momentum, double epsilon, int64_t count) {
+  std::vector<int64_t> counts(mean.size(0), count);
+  return batch_norm_gather_stats_with_counts_cuda(self, mean, invstd, running_mean, running_var, momentum, epsilon, counts);
+}
+
+
+std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
+                                                        const Tensor& running_var, double momentum, double epsilon, IntArrayRef counts) {
+  Tensor counts_ = at::from_blob((void*)counts.data(), {(int64_t)counts.size()}, self.options().dtype(at::kLong).device(at::kCPU));
+  counts_ = counts_.to(self.device()).to(self.dtype());
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_update_stats_cuda", [&] {
-      int world_size = mean.size(1);
       using accscalar_t = at::acc_type<scalar_t, true>;
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, static_cast<int32_t>(count));
+        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts_);
       } else {
-        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int64_t>(mean, invstd, running_mean, running_var, momentum, epsilon, count);
+        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int64_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts_);
       }
     });
 }
@@ -86,7 +94,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward", [&] {
       auto mean_st = running_mean.dtype();
       auto var_st = running_var.dtype();
-      AT_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
+      TORCH_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
       // <sigh> Some workloads depend on passing in half input and float stats, which is
       // usually handled by cuDNN. However, the JIT sometimes replaces cuDNN calls with this
       // one so it needs to support the same case, or people start to complain.

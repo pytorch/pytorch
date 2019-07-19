@@ -17,9 +17,9 @@ namespace jit {
  * (match-map values). We keep such maps for both nodes and values.
  */
 struct Match {
-  const Node* anchor;
-  std::unordered_map<const Node*, const Node*> nodes_map;
-  std::unordered_map<const Value*, const Value*> values_map;
+  Node* anchor;
+  std::unordered_map<const Node*, Node*> nodes_map;
+  std::unordered_map<const Value*, Value*> values_map;
 };
 
 /**
@@ -42,9 +42,12 @@ struct Match {
  *  - Aliasing nodes in the graph can not consitute a match (i.e. in all found
  * matches no nodes in the subgraph alias with each other). TODO: the check not
  * implemented yet.
+ *  - The matcher will not mutate either the pattern graph or the matched graph,
+ * but the latter is taken as non-const so that Match may contain non-const
+ * pointers.  This enables clients of this API to use Match to drive mutations.
  */
 std::vector<Match> TORCH_API
-findPatternMatches(const Graph& pattern, const Graph& graph);
+findPatternMatches(const Graph& pattern, Graph& graph);
 
 } // namespace jit
 } // namespace torch

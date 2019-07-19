@@ -9,7 +9,7 @@ namespace at { namespace native {
 
 
 Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  AT_CHECK(steps >= 0, "number of steps must be non-negative");
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -42,7 +42,7 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
 }
 
 Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps, double base) {
-  AT_CHECK(steps >= 0, "number of steps must be non-negative");
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -82,11 +82,11 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    AT_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-    AT_CHECK(std::isfinite(static_cast<double>(xstart)) &&
+    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
+    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
              std::isfinite(static_cast<double>(xend)),
              "unsupported range: ", xstart, " -> ", xend);
-    AT_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
+    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
              "upper bound and larger bound inconsistent with step sign");
     int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
     if (result.numel() != size) {
@@ -132,14 +132,14 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
                          / step.to<double>());
     }
 
-    AT_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-    AT_CHECK(std::isfinite(static_cast<double>(xstart)) &&
+    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
+    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
              std::isfinite(static_cast<double>(xend)),
              "unsupported range: ", xstart, " -> ", xend);
-    AT_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
+    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
              "upper bound and larger bound inconsistent with step sign");
 
-    AT_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
+    TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
              "invalid size, possible overflow?");
     int64_t size = static_cast<int64_t>(size_d);
 

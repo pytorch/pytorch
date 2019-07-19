@@ -155,6 +155,9 @@ def checkpoint(function, *args, **kwargs):
     return CheckpointFunction.apply(function, preserve, *args)
 
 
+# TODO(sublee): When releasing PyTorch 1.3,
+# fix the function signature to not accept variadic arguments.
+# See also: https://github.com/pytorch/pytorch/issues/19260
 def checkpoint_sequential(functions, segments, *inputs, **kwargs):
     r"""A helper function for checkpointing sequential models.
 
@@ -195,6 +198,18 @@ def checkpoint_sequential(functions, segments, *inputs, **kwargs):
     preserve = kwargs.pop('preserve_rng_state', True)
     if kwargs:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
+
+    # To accept variadic arguments is not consistent with nn.Sequential.
+    # This interface will be changed at PyTorch 1.3.
+    # See also: https://github.com/pytorch/pytorch/issues/19260
+    if not inputs:
+        warnings.warn('Giving no input to checkpoint_sequential has been deprecated, '
+                      'a TypeError will be raised after PyTorch 1.3',
+                      DeprecationWarning)
+    elif len(inputs) > 1:
+        warnings.warn('multiple inputs to checkpoint_sequential has been deprecated, '
+                      'a TypeError will be raised after PyTorch 1.3',
+                      DeprecationWarning)
 
     def run_function(start, end, functions):
         def forward(*inputs):

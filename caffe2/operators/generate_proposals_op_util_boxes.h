@@ -39,7 +39,8 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_upright(
     const Eigen::ArrayBase<Derived2>& deltas,
     const std::vector<typename Derived2::Scalar>& weights =
         std::vector<typename Derived2::Scalar>{1.0, 1.0, 1.0, 1.0},
-    const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT) {
+    const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT,
+    const bool legacy_plus_one = false) {
   using T = typename Derived1::Scalar;
   using EArrXX = EArrXXt<T>;
   using EArrX = EArrXt<T>;
@@ -52,8 +53,8 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_upright(
   CAFFE_ENFORCE_EQ(boxes.cols(), 4);
   CAFFE_ENFORCE_EQ(deltas.cols(), 4);
 
-  EArrX widths = boxes.col(2) - boxes.col(0) + T(1.0);
-  EArrX heights = boxes.col(3) - boxes.col(1) + T(1.0);
+  EArrX widths = boxes.col(2) - boxes.col(0) + T(int(legacy_plus_one));
+  EArrX heights = boxes.col(3) - boxes.col(1) + T(int(legacy_plus_one));
   auto ctr_x = boxes.col(0) + T(0.5) * widths;
   auto ctr_y = boxes.col(1) + T(0.5) * heights;
 
@@ -75,9 +76,9 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_upright(
   // y1
   pred_boxes.col(1) = pred_ctr_y - T(0.5) * pred_h;
   // x2
-  pred_boxes.col(2) = pred_ctr_x + T(0.5) * pred_w - T(1.0);
+  pred_boxes.col(2) = pred_ctr_x + T(0.5) * pred_w - T(int(legacy_plus_one));
   // y2
-  pred_boxes.col(3) = pred_ctr_y + T(0.5) * pred_h - T(1.0);
+  pred_boxes.col(3) = pred_ctr_y + T(0.5) * pred_h - T(int(legacy_plus_one));
 
   return pred_boxes;
 }
@@ -166,13 +167,15 @@ EArrXXt<typename Derived1::Scalar> bbox_transform(
     const std::vector<typename Derived2::Scalar>& weights =
         std::vector<typename Derived2::Scalar>{1.0, 1.0, 1.0, 1.0},
     const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT,
+    const bool legacy_plus_one = false,
     const bool angle_bound_on = true,
     const int angle_bound_lo = -90,
     const int angle_bound_hi = 90) {
   CAFFE_ENFORCE(boxes.cols() == 4 || boxes.cols() == 5);
   if (boxes.cols() == 4) {
     // Upright boxes
-    return bbox_transform_upright(boxes, deltas, weights, bbox_xform_clip);
+    return bbox_transform_upright(
+        boxes, deltas, weights, bbox_xform_clip, legacy_plus_one);
   } else {
     // Rotated boxes with angle info
     return bbox_transform_rotated(
@@ -188,7 +191,8 @@ EArrXXt<typename Derived1::Scalar> bbox_transform(
 
 template <class Derived>
 EArrXXt<typename Derived::Scalar> bbox_xyxy_to_ctrwh(
-    const Eigen::ArrayBase<Derived>& boxes) {
+    const Eigen::ArrayBase<Derived>& boxes,
+    bool legacy_plus_one = false) {
   CAFFE_ENFORCE_EQ(boxes.cols(), 4);
 
   const auto& x1 = boxes.col(0);
@@ -199,14 +203,15 @@ EArrXXt<typename Derived::Scalar> bbox_xyxy_to_ctrwh(
   EArrXXt<typename Derived::Scalar> ret(boxes.rows(), 4);
   ret.col(0) = (x1 + x2) / 2.0; // x_ctr
   ret.col(1) = (y1 + y2) / 2.0; // y_ctr
-  ret.col(2) = x2 - x1 + 1.0; // w
-  ret.col(3) = y2 - y1 + 1.0; // h
+  ret.col(2) = x2 - x1 + int(legacy_plus_one); // w
+  ret.col(3) = y2 - y1 + int(legacy_plus_one); // h
   return ret;
 }
 
 template <class Derived>
 EArrXXt<typename Derived::Scalar> bbox_ctrwh_to_xyxy(
-    const Eigen::ArrayBase<Derived>& boxes) {
+    const Eigen::ArrayBase<Derived>& boxes,
+    const bool legacy_plus_one = false) {
   CAFFE_ENFORCE_EQ(boxes.cols(), 4);
 
   const auto& x_ctr = boxes.col(0);
@@ -215,10 +220,10 @@ EArrXXt<typename Derived::Scalar> bbox_ctrwh_to_xyxy(
   const auto& h = boxes.col(3);
 
   EArrXXt<typename Derived::Scalar> ret(boxes.rows(), 4);
-  ret.col(0) = x_ctr - (w - 1) / 2.0; // x1
-  ret.col(1) = y_ctr - (h - 1) / 2.0; // y1
-  ret.col(2) = x_ctr + (w - 1) / 2.0; // x2
-  ret.col(3) = y_ctr + (h - 1) / 2.0; // y2
+  ret.col(0) = x_ctr - (w - int(legacy_plus_one)) / 2.0; // x1
+  ret.col(1) = y_ctr - (h - int(legacy_plus_one)) / 2.0; // y1
+  ret.col(2) = x_ctr + (w - int(legacy_plus_one)) / 2.0; // x2
+  ret.col(3) = y_ctr + (h - int(legacy_plus_one)) / 2.0; // y2
   return ret;
 }
 
@@ -228,19 +233,20 @@ template <class Derived>
 EArrXXt<typename Derived::Scalar> clip_boxes_upright(
     const Eigen::ArrayBase<Derived>& boxes,
     int height,
-    int width) {
+    int width,
+    bool legacy_plus_one = false) {
   CAFFE_ENFORCE(boxes.cols() == 4);
 
   EArrXXt<typename Derived::Scalar> ret(boxes.rows(), boxes.cols());
 
   // x1 >= 0 && x1 < width
-  ret.col(0) = boxes.col(0).cwiseMin(width - 1).cwiseMax(0);
+  ret.col(0) = boxes.col(0).cwiseMin(width - int(legacy_plus_one)).cwiseMax(0);
   // y1 >= 0 && y1 < height
-  ret.col(1) = boxes.col(1).cwiseMin(height - 1).cwiseMax(0);
+  ret.col(1) = boxes.col(1).cwiseMin(height - int(legacy_plus_one)).cwiseMax(0);
   // x2 >= 0 && x2 < width
-  ret.col(2) = boxes.col(2).cwiseMin(width - 1).cwiseMax(0);
+  ret.col(2) = boxes.col(2).cwiseMin(width - int(legacy_plus_one)).cwiseMax(0);
   // y2 >= 0 && y2 < height
-  ret.col(3) = boxes.col(3).cwiseMin(height - 1).cwiseMax(0);
+  ret.col(3) = boxes.col(3).cwiseMin(height - int(legacy_plus_one)).cwiseMax(0);
 
   return ret;
 }
@@ -263,7 +269,8 @@ EArrXXt<typename Derived::Scalar> clip_boxes_rotated(
     const Eigen::ArrayBase<Derived>& boxes,
     int height,
     int width,
-    float angle_thresh = 1.0) {
+    float angle_thresh = 1.0,
+    bool legacy_plus_one = false) {
   CAFFE_ENFORCE(boxes.cols() == 5);
 
   const auto& angles = boxes.col(4);
@@ -275,13 +282,13 @@ EArrXXt<typename Derived::Scalar> clip_boxes_rotated(
 
   // Convert to [x1, y1, x2, y2] format and clip them
   const auto& upright_boxes_xyxy =
-      bbox_ctrwh_to_xyxy(upright_boxes.leftCols(4));
+      bbox_ctrwh_to_xyxy(upright_boxes.leftCols(4), legacy_plus_one);
   const auto& clipped_upright_boxes_xyxy =
-      clip_boxes_upright(upright_boxes_xyxy, height, width);
+      clip_boxes_upright(upright_boxes_xyxy, height, width, legacy_plus_one);
 
   // Convert back to [x_ctr, y_ctr, w, h, angle] and update upright boxes
   upright_boxes.block(0, 0, upright_boxes.rows(), 4) =
-      bbox_xyxy_to_ctrwh(clipped_upright_boxes_xyxy);
+      bbox_xyxy_to_ctrwh(clipped_upright_boxes_xyxy, legacy_plus_one);
 
   EArrXXt<typename Derived::Scalar> ret(boxes.rows(), boxes.cols());
   ret = boxes;
@@ -297,14 +304,16 @@ EArrXXt<typename Derived::Scalar> clip_boxes(
     const Eigen::ArrayBase<Derived>& boxes,
     int height,
     int width,
-    float angle_thresh = 1.0) {
+    float angle_thresh = 1.0,
+    bool legacy_plus_one = false) {
   CAFFE_ENFORCE(boxes.cols() == 4 || boxes.cols() == 5);
   if (boxes.cols() == 4) {
     // Upright boxes
-    return clip_boxes_upright(boxes, height, width);
+    return clip_boxes_upright(boxes, height, width, legacy_plus_one);
   } else {
     // Rotated boxes with angle info
-    return clip_boxes_rotated(boxes, height, width, angle_thresh);
+    return clip_boxes_rotated(
+        boxes, height, width, angle_thresh, legacy_plus_one);
   }
 }
 
@@ -316,7 +325,8 @@ template <class Derived>
 std::vector<int> filter_boxes_upright(
     const Eigen::ArrayBase<Derived>& boxes,
     double min_size,
-    const Eigen::Array3f& im_info) {
+    const Eigen::Array3f& im_info,
+    const bool legacy_plus_one = false) {
   CAFFE_ENFORCE_EQ(boxes.cols(), 4);
 
   // Scale min_size to match image scale
@@ -325,8 +335,8 @@ std::vector<int> filter_boxes_upright(
   using T = typename Derived::Scalar;
   using EArrX = EArrXt<T>;
 
-  EArrX ws = boxes.col(2) - boxes.col(0) + T(1);
-  EArrX hs = boxes.col(3) - boxes.col(1) + T(1);
+  EArrX ws = boxes.col(2) - boxes.col(0) + T(int(legacy_plus_one));
+  EArrX hs = boxes.col(3) - boxes.col(1) + T(int(legacy_plus_one));
   EArrX x_ctr = boxes.col(0) + ws / T(2);
   EArrX y_ctr = boxes.col(1) + hs / T(2);
 
@@ -368,11 +378,12 @@ template <class Derived>
 std::vector<int> filter_boxes(
     const Eigen::ArrayBase<Derived>& boxes,
     double min_size,
-    const Eigen::Array3f& im_info) {
+    const Eigen::Array3f& im_info,
+    const bool legacy_plus_one = false) {
   CAFFE_ENFORCE(boxes.cols() == 4 || boxes.cols() == 5);
   if (boxes.cols() == 4) {
     // Upright boxes
-    return filter_boxes_upright(boxes, min_size, im_info);
+    return filter_boxes_upright(boxes, min_size, im_info, legacy_plus_one);
   } else {
     // Rotated boxes with angle info
     return filter_boxes_rotated(boxes, min_size, im_info);

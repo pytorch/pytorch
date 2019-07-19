@@ -21,11 +21,13 @@ namespace script {
 // - Maybe<T> is really a Tree with kind TK_OPTION that has 0 or 1 subtree of type T
 // - Builtin types are: Ident (TK_IDENT), String (TK_STRING)
 //
-// Param = Param(Expr type, Ident name)                                 TK_PARAM
+// Param = Param(Maybe<Expr> type, Ident name)                          TK_PARAM
 //
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
 // ClassDef = ClassDef(Ident name, List<Def> body)                      TK_CLASS_DEF
+// NamedTupleDef = NamedTupleDef(Ident name, List<Ident> fields,
+//                               List<Maybe<Expr>> types)
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
@@ -33,7 +35,7 @@ namespace script {
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       -- NB: the only type of Expr's allowed on lhs are Var
 //          Or a tuple containing Var with an optional terminating Starred
-//       | Assign(Expr lhs, Expr rhs)                                   TK_ASSIGN
+//       | Assign(Expr lhs, Expr rhs, Maybe<Expr> type)                 TK_ASSIGN
 //       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
@@ -246,6 +248,8 @@ struct Stmt : public TreeView {
       case TK_RAISE:
       case TK_ASSERT:
       case TK_PASS:
+      case TK_BREAK:
+      case TK_CONTINUE:
       case TK_DEF:
         return;
       default:
@@ -299,6 +303,7 @@ struct Expr : public TreeView {
       case '|':
       case TK_LIST_COMP:
       case TK_DOTS:
+      case TK_IN:
         return;
       default:
         throw ErrorReport(tree)
@@ -336,7 +341,7 @@ struct Param : public TreeView {
   static Param create(
       const SourceRange& range,
       const Ident& ident,
-      const Expr& type,
+      const Maybe<Expr>& type,
       const Maybe<Expr>& def,
       bool kwarg_only) {
     TreeRef kwarg_only_tree =
@@ -347,8 +352,8 @@ struct Param : public TreeView {
   Ident ident() const {
     return Ident(subtree(0));
   }
-  Expr type() const {
-    return Expr(subtree(1));
+  Maybe<Expr> type() const {
+    return Maybe<Expr>(subtree(1));
   }
   Maybe<Expr> defaultValue() const {
     return Maybe<Expr>(subtree(2));
@@ -356,7 +361,7 @@ struct Param : public TreeView {
   bool kwarg_only() const {
     return TK_TRUE == subtree(3)->kind();
   }
-  Param withType(const Expr& typ) const {
+  Param withType(const Maybe<Expr>& typ) const {
     return Param::create(range(), ident(), typ, defaultValue(), kwarg_only());
   }
 };
@@ -428,6 +433,29 @@ struct ClassDef : public TreeView {
       const Ident& name,
       const List<Def>& defs) {
     return ClassDef(Compound::create(TK_CLASS_DEF, range, {name, defs}));
+  }
+};
+
+struct NamedTupleDef : public TreeView {
+  explicit NamedTupleDef(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_NAMED_TUPLE_DEF);
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  List<Ident> fields() const {
+    return List<Ident>(subtree(1));
+  }
+  List<Maybe<Expr>> type_exprs() const {
+    return List<Maybe<Expr>>(subtree(2));
+  }
+  static NamedTupleDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const List<Ident>& fields,
+      const List<Maybe<Expr>>& type_exprs) {
+    return NamedTupleDef(Compound::create(
+        TK_NAMED_TUPLE_DEF, range, {name, fields, type_exprs}));
   }
 };
 
@@ -584,14 +612,21 @@ struct Assign : public Stmt {
   static Assign create(
       const SourceRange& range,
       const Expr& lhs,
-      const Expr& rhs) {
-    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
+      const Expr& rhs,
+      const Maybe<Expr>& type) {
+    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
   }
+
   Expr lhs() const {
     return Expr(subtree(0));
   }
+
   Expr rhs() const {
     return Expr(subtree(1));
+  }
+
+  Maybe<Expr> type() const {
+    return Maybe<Expr>(subtree(2));
   }
 };
 
@@ -655,6 +690,24 @@ struct Dots : public Expr {
   }
 };
 
+struct Break : public Stmt {
+  explicit Break(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_BREAK);
+  }
+  static Break create(const SourceRange& range) {
+    return Break(Compound::create(TK_BREAK, range, {}));
+  }
+};
+
+struct Continue : public Stmt {
+  explicit Continue(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_CONTINUE);
+  }
+  static Continue create(const SourceRange& range) {
+    return Continue(Compound::create(TK_CONTINUE, range, {}));
+  }
+};
+
 struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_EXPR_STMT);
@@ -695,6 +748,7 @@ struct BinOp : public Expr {
       case '^':
       case '|':
       case TK_FLOOR_DIV:
+      case TK_IN:
         if (tree->trees().size() != 2)
           throw ErrorReport(tree)
               << "BinOp expected 2 subtrees, found " << tree->trees().size();
@@ -830,6 +884,9 @@ struct SliceExpr : public Expr {
   Maybe<Expr> end() const {
     return Maybe<Expr>(subtree(1));
   }
+  Maybe<Expr> step() const {
+    return Maybe<Expr>(subtree(2));
+  }
   Expr startOr(int alternative) const {
     const auto startOption = start();
     return startOption.present() ? startOption.get() : createInt(alternative);
@@ -838,11 +895,16 @@ struct SliceExpr : public Expr {
     const auto endOption = end();
     return endOption.present() ? endOption.get() : createInt(alternative);
   }
+  Expr stepOr(int alternative) const {
+    const auto stepOption = step();
+    return stepOption.present() ? stepOption.get() : createInt(alternative);
+  }
   static SliceExpr create(
       const SourceRange& range,
       const Maybe<Expr>& start,
-      const Maybe<Expr>& end) {
-    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end}));
+      const Maybe<Expr>& end,
+      const Maybe<Expr>& step) {
+    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end, step}));
   }
 
  private:

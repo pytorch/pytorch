@@ -112,9 +112,8 @@ struct EarlyReturns {
     auto out_type = unifyTypes(
         getReturnVal(true_block)->type(), getReturnVal(false_block)->type());
     AT_ASSERT(out_type);
-    auto out = node->addOutput()->setType(*out_type)->setUniqueName("_return");
-    auto sent =
-        node->addOutput()->setType(BoolType::get())->setUniqueName("__did_ret");
+    auto out = node->addOutput()->setType(*out_type);
+    auto sent = node->addOutput()->setType(BoolType::get());
 
     block_return_vals_[node->owningBlock()] = out;
     if (true_status == WILL_RETURN && false_status == WILL_RETURN) {
@@ -154,9 +153,7 @@ struct EarlyReturns {
     for (size_t i = 0; i < block->outputs().size(); ++i) {
       return_block->registerOutput(bottom_val);
       guard_block->registerOutput(block->outputs().at(i));
-      new_if->addOutput()
-          ->setType(block->outputs().at(i)->type())
-          ->setUniqueName(block->outputs().at(i)->uniqueNameBase());
+      new_if->addOutput()->setType(block->outputs().at(i)->type());
     }
     while (block->outputs().size() > 0) {
       block->eraseOutput(0);
@@ -186,7 +183,7 @@ struct EarlyReturns {
   void checkNoLoopReturn(Block* block) {
     for (Node* n : block->nodes()) {
       if (n->kind() == prim::ReturnStmt) {
-        throw ErrorReport(n->getSourceLocation())
+        throw ErrorReport(n->sourceRange())
             << "Return statements within loops are not yet supported\n";
       }
       for (Block* b : n->blocks()) {

@@ -93,7 +93,7 @@ includes = [
 for new_dir in args.extra_include_dir:
     abs_new_dir = os.path.join(proj_dir, new_dir)
     if os.path.exists(abs_new_dir):
-        new_dir = os.path.join(new_dir, '*')
+        new_dir = os.path.join(new_dir, '**/*')
         includes.append(new_dir)
 
 ignores = [
@@ -107,8 +107,6 @@ ignores = [
     "torch/lib/tmp_install/*",
     "torch/include/*",
 ]
-
-json_settings = os.path.join(amd_build_dir, "disabled_features.json")
 
 if not args.out_of_place_only:
     # Apply patch files in place (PyTorch only)
@@ -149,5 +147,4 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_settings,
     hip_clang_launch=args.hip_clang_launch)

@@ -1,6 +1,5 @@
 from .module import Module
 from .. import functional as F
-from ..._jit_internal import weak_module, weak_script_method
 
 
 class _DropoutNd(Module):
@@ -15,11 +14,9 @@ class _DropoutNd(Module):
         self.inplace = inplace
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
-        return 'p={}{}'.format(self.p, inplace_str)
+        return 'p={}, inplace={}'.format(self.p, self.inplace)
 
 
-@weak_module
 class Dropout(_DropoutNd):
     r"""During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
@@ -53,12 +50,10 @@ class Dropout(_DropoutNd):
         detectors: https://arxiv.org/abs/1207.0580
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.dropout(input, self.p, self.training, self.inplace)
 
 
-@weak_module
 class Dropout2d(_DropoutNd):
     r"""Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -97,12 +92,10 @@ class Dropout2d(_DropoutNd):
        http://arxiv.org/abs/1411.4280
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.dropout2d(input, self.p, self.training, self.inplace)
 
 
-@weak_module
 class Dropout3d(_DropoutNd):
     r"""Randomly zero out entire channels (a channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -141,12 +134,10 @@ class Dropout3d(_DropoutNd):
        http://arxiv.org/abs/1411.4280
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
 
-@weak_module
 class AlphaDropout(_DropoutNd):
     r"""Applies Alpha Dropout over the input.
 
@@ -185,14 +176,11 @@ class AlphaDropout(_DropoutNd):
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
 
-    @weak_script_method
     def forward(self, input):
         return F.alpha_dropout(input, self.p, self.training)
 
 
-@weak_module
 class FeatureAlphaDropout(_DropoutNd):
 
-    @weak_script_method
     def forward(self, input):
         return F.feature_alpha_dropout(input, self.p, self.training)

@@ -38,6 +38,7 @@ if (USE_CUDA)
     ${CUDA_NVRTC_LIB}
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
+
   target_compile_definitions(test_api PRIVATE "USE_CUDA")
 endif()
 
@@ -54,5 +55,13 @@ if (NOT MSVC)
       -Wno-maybe-uninitialized
       # gcc gives nonsensical warnings about variadic.h
       -Wno-unused-but-set-parameter)
+  endif()
+endif()
+
+if (INSTALL_TEST)
+  install(TARGETS test_api DESTINATION bin)
+  # Install PDB files for MSVC builds
+  if (MSVC AND BUILD_SHARED_LIBS)
+    install(FILES $<TARGET_PDB_FILE:test_api> DESTINATION bin OPTIONAL)
   endif()
 endif()

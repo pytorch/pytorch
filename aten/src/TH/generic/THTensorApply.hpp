@@ -61,11 +61,20 @@ if (std::isnan(val)) break;
 #define th_isnan_break(val)
 #endif
 
-#ifdef _WIN32
-// MSVC doesn't support loop pragmas, but does support others. Create a new macro to account for those differences.
-#define PRAGMA_LOOP(P)    // Noop
+#ifdef _MSC_VER
+#define PRAGMA(P)         __pragma(P)
+# if _MSC_VER < 1920
+// MSVC < 2019 doesn't support loop pragmas.
+#  define PRAGMA_IVDEP    // Noop
+#  define PRAGMA_SIMD     // Noop
+# else
+#  define PRAGMA_IVDEP    PRAGMA(loop(ivdep))
+#  define PRAGMA_SIMD     PRAGMA(omp simd)
+# endif
 #else
-#define PRAGMA_LOOP(P)    _Pragma(#P)
+#define PRAGMA(P)         _Pragma(#P)
+#define PRAGMA_IVDEP      PRAGMA(ivdep)
+#define PRAGMA_SIMD       PRAGMA(simd)
 #endif
 
 #define TH_TENSOR_APPLY2_PARALLEL(SIZE, CONTIG1, CONTIG2, TYPE1, TENSOR1, TYPE2, TENSOR2, CODE, THRESHOLD) \
@@ -76,7 +85,7 @@ if (std::isnan(val)) break;
     TYPE2 *tp = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+TENSOR2->storage_offset(); \
     if (tp != (TYPE2*)rp) { \
       at::parallel_for(0, SIZE, (THRESHOLD * 10), [&](int64_t begin, int64_t end) { \
-        PRAGMA_LOOP(ivdep) \
+        PRAGMA_IVDEP \
         for (auto iter = begin; iter < end; iter++) { \
           TYPE2 *TENSOR2##_data = tp+iter; \
           TYPE1 *TENSOR1##_data = rp+iter; \
@@ -85,7 +94,7 @@ if (std::isnan(val)) break;
       }); \
     } else { \
       at::parallel_for(0, SIZE, (THRESHOLD * 10), [&](int64_t begin, int64_t end) { \
-        PRAGMA_LOOP(simd) \
+        PRAGMA_SIMD \
         for (auto iter = begin; iter < end; iter++) { \
           TYPE2* TENSOR2##_data = tp+iter; \
           TYPE1* TENSOR1##_data = rp+iter; \
@@ -165,7 +174,7 @@ if (std::isnan(val)) break;
     TYPE3 *srcp = THTensor_getStoragePtr(TENSOR3)->data<TYPE3>()+TENSOR3->storage_offset(); \
     if (tp != (TYPE2*)rp) { \
       at::parallel_for(0, SIZE, (THRESHOLD * 10), [&](int64_t begin, int64_t end) { \
-        PRAGMA_LOOP(ivdep) \
+        PRAGMA_IVDEP \
         for (auto iter = begin; iter < end; iter++) { \
           TYPE1 *TENSOR1##_data = rp+iter; \
           TYPE2 *TENSOR2##_data = tp+iter; \
@@ -175,7 +184,7 @@ if (std::isnan(val)) break;
       }); \
     } else { \
       at::parallel_for(0, SIZE, (THRESHOLD * 10), [&](int64_t begin, int64_t end) { \
-        PRAGMA_LOOP(simd) \
+        PRAGMA_SIMD \
         for (auto iter = begin; iter < end; iter++) { \
           TYPE1 *TENSOR1##_data = rp+iter; \
           TYPE2 *TENSOR2##_data = tp+iter; \
