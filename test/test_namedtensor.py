@@ -238,33 +238,37 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
 
-    def test_sum(self):
-        for device in torch.testing.get_all_device_types():
+    def test_reduction_fns(self):
+        def test(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
 
-            self.assertEqual(t.sum().names, [])
+            self.assertEqual(op(t).names, [])
 
-            self.assertEqual(t.sum(1).names, ['N', 'L'])
-            self.assertEqual(t.sum('C').names, ['N', 'L'])
+            self.assertEqual(op(t, 1).names, ['N', 'L'])
+            self.assertEqual(op(t, 'C').names, ['N', 'L'])
 
-            self.assertEqual(t.sum([1, 2]).names, ['N'])
-            self.assertEqual(t.sum(['C', 'L']).names, ['N'])
+            self.assertEqual(op(t, [1, 2]).names, ['N'])
+            self.assertEqual(op(t, ['C', 'L']).names, ['N'])
 
             # Test keepdim
-            self.assertEqual(t.sum('C', keepdim=True).names, ['N', 'C', 'L'])
-            self.assertEqual(t.sum(['C', 'L'], keepdim=True).names, ['N', 'C', 'L'])
+            self.assertEqual(op(t, 'C', keepdim=True).names, ['N', 'C', 'L'])
+            self.assertEqual(op(t, ['C', 'L'], keepdim=True).names, ['N', 'C', 'L'])
 
             # Test out=
             out = t.new_empty([0])
-            torch.sum(t, 'C', out=out)
+            getattr(torch, op_name)(t, 'C', out=out)
             self.assertEqual(out.names, ['N', 'L'])
 
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
-                t.sum(None)
+                op(t, None)
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
-                t.sum([None, 'C'])
+                op(t, [None, 'C'])
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
-                t.sum('H')
+                op(t, 'H')
+
+        for device in torch.testing.get_all_device_types():
+            test('sum', device)
 
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():
