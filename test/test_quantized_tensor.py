@@ -210,7 +210,10 @@ class TestQuantizedTensor(TestCase):
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = a.view(1, 3, 2, 4)  # does not change tensor layout
         self.assertEqual(b.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
         self.assertNotEqual(b.int_repr(), c.int_repr())
+
 
         # a case can't view non-contiguos Tensor
         a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
