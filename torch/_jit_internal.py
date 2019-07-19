@@ -60,29 +60,58 @@ def createResolutionCallback(frames_up=0):
     return env
 
 
+def get_closure(fn):
+    """
+    Get a dictionary of closed over variables from a function
+    """
+    captures = {}
+    captures.update(fn.__globals__)
+
+    for index, captured_name in enumerate(fn.__code__.co_freevars):
+        captures[captured_name] = fn.__closure__[index].cell_contents
+
+    return captures
+
+
 def createResolutionCallbackFromClosure(fn):
     """
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
     """
-    var_names = fn.__code__.co_freevars
-
-    # map of captured name -> value
-    free_vars = {}
-
-    for index, name in enumerate(var_names):
-        free_vars[name] = fn.__closure__[index].cell_contents
-    f_globals = fn.__globals__
+    closure = get_closure(fn)
 
     def env(key):
-        if key in free_vars:
-            return free_vars[key]
+        if key in closure:
+            return closure[key]
         elif hasattr(builtins, key):
             return getattr(builtins, key)
-        else:
-            return f_globals.get(key)
+        return None
 
     return env
+
+
+def can_compile_class(cls):
+    # If any of the functions on a type don't have a code object, this type can't
+    # be compiled and is probably a builtin / bound from C
+    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    has_code = [hasattr(fn, '__code__') for fn in fns]
+    return all(has_code)
+
+
+def createResolutionCallbackForClassMethods(cls):
+    """
+    This looks at all the methods defined in a class and pulls their closed-over
+    variables into a dictionary and uses that to resolve variables.
+    """
+    # cls is a type here, so `ismethod` is false since the methods on the type
+    # aren't bound to anything, so Python treats them as regular functions
+    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    captures = {}
+
+    for fn in fns:
+        captures.update(get_closure(fn))
+
+    return lambda key: captures.get(key, None)
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):

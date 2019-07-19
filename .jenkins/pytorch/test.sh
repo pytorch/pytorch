@@ -142,7 +142,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@487c9bf4b7750e779fac31c35d930381baa60a4a
+  pip_install --user git+https://github.com/pytorch/vision.git@2b73a4846773a670632b29fb2fc2ac57df7bce5d
 }
 
 test_libtorch() {

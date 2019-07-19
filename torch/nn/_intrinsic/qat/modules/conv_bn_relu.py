@@ -2,14 +2,15 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from torch.nn import Conv2d as NNConv2d
 from torch.nn._intrinsic import ConvBn2d as NNConvBn2d
 from torch.nn._intrinsic import ConvBnReLU2d as NNConvBnReLU2d
-from torch.nn.modules.conv import conv2d_forwad
+from torch.nn.modules.conv import conv2d_forward
 from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
 class ConvBn2d(NNConv2d):
     r"""
-    A ConvBn2d module attached with FakeQuantize modules for both output
-    activation and weight, used for quantization aware training.
+    A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
+    attached with FakeQuantize modules for both output activation and weight,
+    used in quantization aware training.
 
     We combined the interface of `torch.nn.Conv2d` and `torch.nn.BatchNorm2d`,
     please refer to
@@ -30,6 +31,7 @@ class ConvBn2d(NNConv2d):
 
     """
     __constants__ = ['momentum', 'eps', 'running_mean', 'running_var', 'num_batches_tracked']
+    __FLOAT_MODULE__ = NNConvBn2d
 
     def __init__(self,
                  # conv2d args
@@ -90,9 +92,9 @@ class ConvBn2d(NNConv2d):
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
         scaled_weight = self.gamma * self.weight / torch.sqrt(self.running_var)
-        conv = conv2d_forwad(input, self.padding_mode, self.padding,
-                             self.weight_fake_quant(scaled_weight), self.bias,
-                             self.stride, self.dilation, self.groups)
+        conv = conv2d_forward(input, self.padding_mode, self.padding,
+                              self.weight_fake_quant(scaled_weight), self.bias,
+                              self.stride, self.dilation, self.groups)
         batch_mean = torch.mean(conv, dim=[0, 2, 3])
         n = input.numel() / self.num_features
         batch_var = torch.var(conv, dim=[0, 2, 3]) * (n / (n - 1))
@@ -117,7 +119,8 @@ class ConvBn2d(NNConv2d):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == NNConvBn2d, 'qat.ConvBn2d.from_float only works for nn.ConvBn2d'
+        assert type(mod) == cls.__FLOAT_MODULE__, ' qat.' + cls.__name__ + '.from_float only works for ' + \
+            cls.__FLOAT_MODULE__.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
@@ -142,8 +145,9 @@ class ConvBn2d(NNConv2d):
 
 class ConvBnReLU2d(ConvBn2d):
         r"""
-        A ConvBnReLU2d module attached with FakeQuantize modules for both output
-        activation and weight, used for quantization aware training.
+        A ConvBn2d module is a module fused from Conv2d, BatchNorm2d and ReLU,
+        attached with FakeQuantize modules for both output activation and weight,
+        used in quantization aware training.
 
         We combined the interface of `torch.nn.Conv2d` and `torch.nn.BatchNorm2d` and
         `torch.nn.ReLU`, please refer to
@@ -166,6 +170,7 @@ class ConvBnReLU2d(ConvBn2d):
 
         """
         __constants__ = ['momentum', 'eps', 'running_mean', 'running_var', 'num_batches_tracked']
+        __FLOAT_MODULE__ = NNConvBnReLU2d
 
         def __init__(self,
                      # conv2d args

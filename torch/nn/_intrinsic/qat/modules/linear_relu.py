@@ -1,13 +1,14 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from torch.nn._intrisic import LinearReLU as NNLinearReLU
 from torch.nn.qat import Linear as QATLinear
+from torch.nn._intrinsic import LinearReLU2d as NNLinearReLU2d
 from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
 class LinearReLU(QATLinear):
     r"""
-    A linear module attached with FakeQuantize modules for both output
-    activation and weight, used for quantization aware training.
+    A LinearReLU module fused from Linear and ReLU modules, attached with
+    FakeQuantize modules for output activation and weight, used in
+    quantization aware training.
 
     We adopt the same interface as `torch.nn.Linear`, please see https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
     for documentation.
@@ -29,6 +30,7 @@ class LinearReLU(QATLinear):
         torch.Size([128, 30])
     """
     __constants__ = ['bias', 'in_features', 'out_features']
+    __FLOAT_MODULE__ = NNLinearReLU2d
 
     def __init__(self, in_features, out_features, bias=True,
                  activation_fake_quant=default_qat_qconfig.activation(),
