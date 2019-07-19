@@ -382,7 +382,7 @@
   self: not_implemented("histc")
 
 - name: index(Tensor self, Tensor?[] indices) -> Tensor
-  self: index_backward(self, indices, grad)
+  self: zeros_like(self).index_put_(indices, grad, true)
   indices: TensorList()
 
 - name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
@@ -405,11 +405,7 @@
   index: non_differentiable
 
 - name: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
-  self: "accumulate ? grad : grad.clone().index_put_(indices, zeros_like(values), false)"
-  values: grad.index(indices)
-
-- name: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
-  self: "accumulate ? grad : grad.clone().index_put_(indices, zeros_like(values), false)"
+  self: grad.clone().index_put_(indices, zeros_like(values), accumulate)
   values: grad.index(indices)
 
 - name: index_select(Tensor self, int dim, Tensor index) -> Tensor
