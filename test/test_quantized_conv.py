@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import numpy as np
 import torch
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules.conv import _conv_output_shape
@@ -94,7 +93,7 @@ class FunctionalAPITest(TestCase):
                                 groups, scale, zero_point)
         except RuntimeError as e:
             e_msg = str(e).split("\n")[0].split("(")[0].strip()
-            np.testing.assert_raises_regex(
+            self.asserrRaisesRegex(
                 type(e), e_msg, qF.conv2d,
                 q_inputs, q_filters_ref, bias=q_bias,
                 scale=scale, zero_point=zero_point,
@@ -110,8 +109,7 @@ class FunctionalAPITest(TestCase):
                                  dilation=dilation, groups=groups,
                                  prepacked=prepacked, dtype=torch_type)
 
-            np.testing.assert_equal(ref_result.int_repr().numpy(),
-                                    q_result.int_repr().numpy())
+            self.assertEqual(ref_result, q_result)
 
 if __name__ == "__main__":
     run_tests()

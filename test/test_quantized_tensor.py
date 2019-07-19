@@ -1,11 +1,13 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
-
+from collections import Iterable
+import copy
 import torch
 
 from common_utils import TestCase, run_tests
+from common_utils import _clip, _round
 import tempfile
+
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
@@ -60,7 +62,7 @@ class TestQuantizedTensor(TestCase):
         zero_point = 2
         qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        self.assertAlmostEqual(r.numpy(), rqr.numpy(), delta=2 / scale)
 
     def test_qtensor_creation(self):
         scale = 0.5
@@ -95,13 +97,13 @@ class TestQuantizedTensor(TestCase):
         zero_point = 2
         qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
         rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        self.assertAlmostEqual(r.numpy(), rqr.numpy(), delta=2 / scale)
         qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        self.assertAlmostEqual(r.numpy(), rqr.numpy(), delta=2 / scale)
         qr = torch.quantize_linear(r, scale, zero_point, torch.qint32)
         rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        self.assertAlmostEqual(r.numpy(), rqr.numpy(), delta=2 / scale)
 
     def test_qtensor_dequantize_linear(self):
         t = torch.arange(-10, 10, dtype=torch.int8)
@@ -122,12 +124,12 @@ class TestQuantizedTensor(TestCase):
             quant_min, quant_max = 0, 255
             for i in range(3):
                 for j in range(2):
-                    res[i][j] = np.clip(np.round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
+                    res[i][j] = _clip(_round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
             return res
         qr = torch.quantize_linear_per_channel(r, scales, zero_points, axis, torch.quint8)
         rqr = qr.dequantize()
-        self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
+        self.assertAlmostEqual(qr.int_repr(), quantize_c(r, scales, zero_points))
+        self.assertAlmostEqual(r.numpy(), rqr.numpy(), delta=2 / scales.numpy().min())
 
     def test_qtensor_permute(self):
         r = torch.rand(100, 30, dtype=torch.float) * 2 - 4
@@ -137,21 +139,17 @@ class TestQuantizedTensor(TestCase):
         qr = qr.transpose(0, 1)
         rqr = qr.dequantize()
         # compare transpose + dequantized result with orignal transposed result
-        self.assertTrue(np.allclose(r.numpy().T, rqr.numpy(), atol=2 / scale))
+        self.assertAlmostEqual(r.numpy().T, rqr.numpy(), delta=2 / scale)
 
         qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
         qr1 = qr.permute([1, 0])
         qr2 = qr.transpose(0, 1)
-        # compare int representation after transformations
-        self.assertTrue(torch.equal(qr1.int_repr(), qr2.int_repr()))
-        self.assertTrue(qr1.q_scale() == qr2.q_scale())
-        self.assertTrue(qr1.q_zero_point() == qr2.q_zero_point())
         # compare dequantized result
-        self.assertTrue(np.array_equal(qr1.dequantize().numpy(), qr2.dequantize().numpy()))
+        self.assertEqual(qr1, qr2)
         # compare permuted + dequantized result with original transposed result
-        self.assertTrue(np.allclose(qr2.dequantize().numpy(), r.numpy().T, atol=2 / scale))
+        self.assertAlmostEqual(qr2.dequantize().numpy(), r.numpy().T, delta=2 / scale)
         # make permuted result contiguous
-        self.assertTrue(torch.equal(qr2.contiguous().int_repr(), qr2.int_repr()))
+        self.assertTrue(torch.equal(qr2.contiguous(), qr2))
 
     def test_qtensor_load_save(self):
         scale = 2.0
@@ -164,9 +162,7 @@ class TestQuantizedTensor(TestCase):
                 torch.save(qr, f)
                 f.seek(0)
                 qr2 = torch.load(f)
-                self.assertEqual(qr.int_repr(), qr2.int_repr())
-                self.assertEqual(qr.q_scale(), qr2.q_scale())
-                self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
+                self.assertEqual(qr, qr2)
 
     def test_qtensor_copy(self):
         scale = 0.5
@@ -177,9 +173,7 @@ class TestQuantizedTensor(TestCase):
         q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
         q2 = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
         q.copy_(q2)
-        self.assertEqual(q.int_repr(), q2.int_repr())
-        self.assertEqual(q.q_scale(), q2.q_scale())
-        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
+        self.assertEqual(q, q2)
         # copying from different scale and zero_point
         scale = 3.2
         zero_point = 5
@@ -189,9 +183,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(q.q_zero_point(), zero_point)
         q.copy_(q2)
         # check scale and zero_points has been copied
-        self.assertEqual(q.int_repr(), q2.int_repr())
-        self.assertEqual(q.q_scale(), q2.q_scale())
-        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
+        self.assertEqual(q, q2)
 
     def test_qtensor_clone(self):
         numel = 10

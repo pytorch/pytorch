@@ -4,7 +4,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import numpy as np
+import math
 
 import torch
 from torch.nn.modules.utils import _pair
@@ -15,8 +15,7 @@ from torch.nn.modules.conv import _ConvNd
 """Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
-    return np.floor((input_size + 2 * padding - kernel_size - (kernel_size - 1)
-                     * (dilation - 1)) / stride) + 2 * output_padding + 1
+    return math.floor((input_size + 2 * padding - kernel_size - (kernel_size - 1) * (dilation - 1)) / stride) + 2 * output_padding + 1
 
 
 class Conv2d(_ConvNd):

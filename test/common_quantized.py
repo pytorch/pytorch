@@ -3,6 +3,26 @@ tensors and modules.
 """
 import numpy as np
 
+def _clip(a, a_min, a_max):
+    """Clips the values to min, max."""
+    a = copy.deepcopy(a)
+    if isinstance(a, Iterable):
+        for idx in len(a):
+            a[idx] = _clip(a[idx], a_min, a_max)
+        return a
+    else:
+        return min(a_max, max(a_min, a))
+
+def _round(a, ndigits=None):
+    """Rounds the values to some (optional) number of digits."""
+    a = copy.deepcopy(a)
+    if isinstance(a, Iterable):
+        for idx in len(a):
+            a[idx] = _round(a[idx], ndigits)
+        return a
+    else:
+        return round(a, ndigits)
+
 # Quantization references
 def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
     """Quantizes a numpy array."""
