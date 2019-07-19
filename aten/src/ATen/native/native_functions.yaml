@@ -1699,6 +1699,7 @@
     CPU: relu
     CUDA: relu
     MkldnnCPU: mkldnn_relu
+    QuantizedCPU: quantized_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
@@ -2131,7 +2132,7 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
-- func: _has_same_tensorimpl_type(Tensor self, Tensor other) -> bool
+- func: _has_compatible_shallow_copy_type(Tensor self, Tensor from) -> bool
   variants: function
 
 - func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
@@ -2787,6 +2788,18 @@
   variants: method
   dispatch:
     QuantizedCPU: qscheme_quant
+
+- func: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
+  variants: function
+  dispatch:
+    CPU: fake_quantize_per_tensor_affine_cpu
+    CUDA: fake_quantize_per_tensor_affine_cuda
+
+- func: fake_quantize_per_tensor_affine_backward(Tensor grad, Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
+  variants: function
+  dispatch:
+    CPU: fake_quantize_per_tensor_affine_backward_cpu
+    CUDA: fake_quantize_per_tensor_affine_backward_cuda
 
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
@@ -3722,15 +3735,15 @@
     CUDA: legacy::cuda::_th_eig
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
-  dispatch:
-    CPU: legacy::cpu::_th_svd_out
-    CUDA: legacy::cuda::_th_svd_out
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
+
+- func: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor, Tensor, Tensor)
+  variants: function
   dispatch:
-    CPU: legacy::cpu::_th_svd
-    CUDA: legacy::cuda::_th_svd
+    CPU: _svd_helper_cpu
+    CUDA: _svd_helper_cuda
 
 - func: cholesky(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -4845,51 +4858,51 @@
     CPU: adaptive_max_pool3d_backward_cpu
     CUDA: adaptive_max_pool3d_backward_cuda
 
-- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
+- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: avg_pool2d_out_cpu
     CUDA: avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_avg_pool2d_out
 
-- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
+- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: avg_pool2d_cpu
     CUDA: avg_pool2d_cuda
     MkldnnCPU: mkldnn_avg_pool2d
 
-- func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: avg_pool2d_backward_out_cpu
     CUDA: avg_pool2d_backward_out_cuda
 
-- func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
+- func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
   dispatch:
     CPU: avg_pool2d_backward_cpu
     CUDA: avg_pool2d_backward_cuda
 
-- func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
+- func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: avg_pool3d_out_cpu
     CUDA: avg_pool3d_out_cuda
 
-- func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
+- func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: avg_pool3d_cpu
     CUDA: avg_pool3d_cuda
 
-- func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: avg_pool3d_backward_out_cpu
     CUDA: avg_pool3d_backward_out_cuda
 
-- func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
+- func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
   dispatch:
     CPU: avg_pool3d_backward_cpu
