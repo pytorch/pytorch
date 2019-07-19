@@ -11,7 +11,7 @@ using namespace ::c10::prim;
 
 static void replace(
     Node* to_replace,
-    const std::shared_ptr<Function>& fn,
+    const Function* fn,
     at::ArrayRef<Value*> inputs) {
   WithInsertPoint guard(to_replace);
   auto new_output =

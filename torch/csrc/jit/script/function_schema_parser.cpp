@@ -194,7 +194,7 @@ struct SchemaParser {
         return c10::impl::toList(fmap(vs, [](IValue v) { return v.toBool(); }));
       default:
         throw ErrorReport(range)
-            << "lists are only supported for float or int types.";
+            << "lists are only supported for float or int types";
     }
   }
   IValue parseConstantList(TypeKind kind) {

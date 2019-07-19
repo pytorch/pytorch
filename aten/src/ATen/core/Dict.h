@@ -5,10 +5,13 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 struct IValue;
 template<class Key, class Value> class Dict;
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 
 namespace impl {
 bool shallowEquals(const IValue& lhs, const IValue& rhs);
@@ -35,7 +38,21 @@ struct DictKeyEqualTo {
 
 struct DictImpl final : public c10::intrusive_ptr_target {
   using dict_map_type = ska::flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
+  struct DictElementTypes final {
+    TypePtr keyType;
+    TypePtr valueType;
+  };
+
+  explicit DictImpl(dict_map_type dict_, optional<DictElementTypes> elementTypes_)
+  : dict(std::move(dict_))
+  , elementTypes(std::move(elementTypes_)) {
+    TORCH_INTERNAL_ASSERT(!elementTypes.has_value() || (nullptr != elementTypes->keyType.get() && nullptr != elementTypes->valueType.get()), "Key and value type must not be nullptr");
+  }
+
   dict_map_type dict;
+
+  // TODO Right now, this is optional, but we want to make it mandatory for all dicts to know their types
+  optional<DictElementTypes> elementTypes;
 
   intrusive_ptr<DictImpl> copy() const;
 };
@@ -146,6 +163,7 @@ inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const Dict
 
 template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue> dict);
 template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value> dict);
+struct deprecatedUntypedDict final {};
 }
 
 /**
@@ -194,7 +212,22 @@ public:
   /**
    * Creates an empty dict.
    */
-  Dict();
+  explicit Dict();
+
+  /**
+   * Create a generic dict with runtime type information.
+   * This only works for c10::impl::GenericDict and is not part of the public API
+   * but only supposed to be used internally by PyTorch.
+   */
+  explicit Dict(TypePtr keyType, TypePtr valueType);
+
+  /**
+   * Creates an untyped dict, i.e. a Dict that doesn't know its types and
+   * doesn't do type checking.
+   * Please don't use this if you can avoid it. We want to get rid of untyped
+   * dicts.
+   */
+  explicit Dict(impl::deprecatedUntypedDict);
 
   ~Dict() = default;
 
@@ -337,16 +370,6 @@ namespace impl {
 // public API. Kernels should use Dicts with concrete Key, Value types instead
 // (maybe except for some internal prim ops).
 using GenericDict = Dict<IValue, IValue>;
-
-template<class Key, class Value>
-Dict<Key, Value> toTypedDict(GenericDict dict) {
-  return Dict<Key, Value>(std::move(dict.impl_));
-}
-
-template<class Key, class Value>
-GenericDict toGenericDict(Dict<Key, Value> dict) {
-  return GenericDict(std::move(dict.impl_));
-}
 
 }
 }
