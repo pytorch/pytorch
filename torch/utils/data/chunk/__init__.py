@@ -1,9 +1,9 @@
-from ..dataset import IterableDataset
-from torch._C.data.chunk import ChunkDatasetOptions, SamplerWrapper
-from torch._C.data.chunk import Sampler, RandomSampler, SequentialSampler
-from torch._C.data.chunk import DistributedSampler, DistributedRandomSampler, DistributedSequentialSampler
-from torch._C.data.chunk import ChunkDataReaderUint8T, ChunkDataReaderInt8T, ChunkDataReaderInt16T, ChunkDataReaderInt32T
-from torch._C.data.chunk import ChunkDataReaderInt64T, ChunkDataReaderFloat, ChunkDataReaderDouble
+from ..dataset import IterableDataset  # noqa: F401
+from torch._C.data.chunk import ChunkDatasetOptions, SamplerWrapper  # noqa: F401
+from torch._C.data.chunk import Sampler, RandomSampler, SequentialSampler  # noqa: F401
+from torch._C.data.chunk import DistributedSampler, DistributedRandomSampler, DistributedSequentialSampler  # noqa: F401
+from torch._C.data.chunk import ChunkDataReaderUint8T, ChunkDataReaderInt8T, ChunkDataReaderInt16T, ChunkDataReaderInt32T  # noqa: F401
+from torch._C.data.chunk import ChunkDataReaderInt64T, ChunkDataReaderFloat, ChunkDataReaderDouble  # noqa: F401
 
 class ChunkDatasetWrapper(IterableDataset):
     r"""
