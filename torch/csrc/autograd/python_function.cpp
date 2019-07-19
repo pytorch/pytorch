@@ -222,7 +222,8 @@ auto PyFunction::name() const -> std::string {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
-  THPObjectPtr _legacy(PyObject_GetAttrString(const_cast<PyObject*>(obj), "_is_legacy"));
+  // Python API functions are not const-correct
+  THPObjectPtr _legacy(PyObject_GetAttrString(const_cast<PyObject*>(obj), "_is_legacy")); // NOLINT
   if (_legacy == Py_True) {
     name += "LegacyBackward";
   }
