@@ -63,7 +63,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
-  torch::utils::cuda_lazy_init();
+  //torch::utils::cuda_lazy_init();
   return PyLong_FromLong(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
