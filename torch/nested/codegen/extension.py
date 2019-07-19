@@ -16,49 +16,34 @@ def get_unary_functions():
         'acos',
         'asin',
         'atan',
-        # 'byte',
         'ceil',
-        # 'char',
         # 'clamp', # TODO: Requires extra kwargs
-        # 'clone',
-        # 'contiguous',
         'cos',
         'cosh',
-        # 'cpu',
-        # 'cuda',
         'digamma',
-        # 'div',
-        # 'double',
-        # 'dtype',
         'erf',
         'erfc',
         'erfinv',
         'exp',
         'expm1',
-        # 'exponential_',
-        # 'float',
+        # 'exponential_', # TODO: Method only
         'floor',
         # 'fmod',
         'frac',
-        # 'half',
-        # 'hardshrink', #TODO: Not part of aten
-        # 'int',
+        # 'hardshrink', # TODO: Not part of aten
         'lgamma',
         'log',
         'log10',
         'log1p',
         'log2',
-        # 'long',
         # 'mvlgamma',
         'neg',
         # 'nonzero', #TODO: Special case because it modifies dtype
         # 'polygamma',
-        # 'pow',
-        # 'prelu', # TODO: no prelu_out
+        # 'prelu', # TODO: no prelu_out in aten
         'reciprocal',
-        # 'relu', # TODO: no relu_out
-        # 'remainder',
-        # 'renorm',
+        # 'relu', # TODO: no relu_out in aten
+        # 'renorm', # TODO: Requires extra kwargs
         'round',
         'rsqrt',
         'sigmoid',
@@ -66,7 +51,6 @@ def get_unary_functions():
         'sin',
         'sinh',
         'sqrt',
-        # 'sub',
         'tan',
         'tanh',
         'tril',
@@ -74,6 +58,9 @@ def get_unary_functions():
         'trunc']
 
 
+# These functions take exactly two Tensor arguments.
+# It might be that they support scalar arguments as well,
+# but we assume that the user will not use it in that way.
 def get_binary_functions():
     return [
         'add',
@@ -82,6 +69,7 @@ def get_binary_functions():
         'div',
         'pow',
         'atan2',
+        'remainder',
     ]
 
 
