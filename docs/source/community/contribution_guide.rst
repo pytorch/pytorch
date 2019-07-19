@@ -8,7 +8,7 @@ The PyTorch Contribution Process
 --------------------------------
 
 The PyTorch organization is governed by `PyTorch
-Governance </docs/stable/community/governance.html>`__.
+Governance </docs/source/community/governance.rst>`__.
 
 The PyTorch development process involves a healthy amount of open
 discussions between the core development team and the community.
