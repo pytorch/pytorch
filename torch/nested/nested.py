@@ -82,11 +82,11 @@ def _verify_tensors(tensors):
 
 class NestedTensor(object):
     # The attributes must match across all constiuents
-    # and default to the empty Tensor's if the given list
-    # is empty.
     #
     # The NestedTensor's attributes then become that of its
     # constiuents.
+    #
+    # The passed lists of tensors must be non-empty for now.
     #
     # Attributes:
     #     dim
