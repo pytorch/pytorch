@@ -82,9 +82,6 @@ def add_observer(module):
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_fake_quant_forward_hook if module.training else _observer_forward_hook)
 
-    return module
-
-
 class QuantWrapper(nn.Module):
     r"""A wrapper class that wraps the input module, adds QuantStub and
     DeQuantStub and surround the call to module with call to quant and dequant

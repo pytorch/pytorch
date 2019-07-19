@@ -48,7 +48,8 @@ class QuantizationTestCase(TestCase):
     def setUp(self):
         self.calib_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
         self.train_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
-        self.img_data = [(torch.rand(20, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
+        self.img_data = [(torch.rand(20, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long))
+                         for _ in range(20)]
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -208,15 +209,10 @@ class ManualConvLinearQATModel(torch.nn.Module):
         self.fc2 = torch.nn.Linear(10, 10).to(dtype=torch.float)
 
     def forward(self, x):
-        print('input:', x.shape)
-        print('conv features', self.conv.in_channels, self.conv.out_channels, self.conv.kernel_size)
-        print('conv weight:', self.conv.weight.shape)
         x = self.quant(x)
-        print('after quant:', x.shape)
         x = self.conv(x)
-        print('after conv:', x.shape)
+        # TODO: we can remove these after view is supported
         x = self.dequant(x)
-        print('before view:', x.shape)
         x = x.view(-1, 320).contiguous()
         x = self.quant(x)
         x = self.fc1(x)

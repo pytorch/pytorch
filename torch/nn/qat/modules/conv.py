@@ -17,7 +17,7 @@ class Conv2d(NNConv2d):
 
     Attributes:
         observer: fake quant module for output activation, it's called observer
-            to align with post training flow, TODO: rename?
+            to align with post training flow
         weight_fake_quant: fake quant module for weight
     TODO: example, will update before land
 
@@ -31,7 +31,6 @@ class Conv2d(NNConv2d):
         super(Conv2d, self).__init__(in_channels, out_channels, kernel_size,
                                      stride=stride, padding=padding, dilation=dilation,
                                      groups=groups, bias=bias, padding_mode=padding_mode)
-        # fake quant module for output activation
         self.observer = activation_fake_quant
         self.weight_fake_quant = weight_fake_quant
 
@@ -47,6 +46,8 @@ class Conv2d(NNConv2d):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
+        assert type(mod) == cls.__FLOAT_MODULE__, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+            cls.__FLOAT_MODULE__.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert mod.qconfig, 'Input float module must have a valid qconfig'
