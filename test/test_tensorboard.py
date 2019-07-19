@@ -24,7 +24,8 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CAFFE2 = True
 try:
-    from caffe2.python import brew, cnn, core, model_helper, workspace
+    from caffe2.python import brew, cnn, core, workspace
+    from caffe2.python.model_helper import ModelHelper
 except ImportError:
     TEST_CAFFE2 = False
 skipIfNoCaffe2 = unittest.skipIf(not TEST_CAFFE2, "no caffe2")
@@ -40,7 +41,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, TEST_WITH_ASAN
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -546,8 +547,9 @@ if TEST_TENSORBOARD:
                 res = make_np({'pytorch': 1.0})
 
         @skipIfNoCaffe2
+        @unittest.skipIf(TEST_WITH_ASAN, "Caffe2 failure with ASAN")
         def test_caffe2_simple_model(self):
-            model = model_helper.ModelHelper(name="mnist")
+            model = ModelHelper(name="mnist")
             # how come those inputs don't break the forward pass =.=a
             workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
             workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
