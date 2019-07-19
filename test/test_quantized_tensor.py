@@ -221,6 +221,8 @@ class TestQuantizedTensor(TestCase):
         err_str = "view size is not compatible with input tensor's size and stride*"
         with self.assertRaisesRegex(RuntimeError, err_str):
             b.view(1, 4, 2, 3)
+        # view on contiguous tensor is fine
+        b.contiguous().view(1, 4, 2, 3)
 
 
     def test_qtensor_reshape(self):
@@ -236,6 +238,8 @@ class TestQuantizedTensor(TestCase):
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = a.reshape(1, 3, 2, 4)  # does not change tensor layout
         self.assertEqual(b.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
         self.assertNotEqual(b.int_repr(), c.int_repr())
 
         # we can use reshape for non-contiguous Tensor
