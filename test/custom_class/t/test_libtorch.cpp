@@ -12,6 +12,7 @@ using namespace std;
 
 namespace py = pybind11;
 void warp_perspective(torch::Tensor image) { cout<<"HEY"<<endl; }
+
 struct Foo : c10::intrusive_ptr_target {
   int x, y;
   Foo(): x(2), y(5){}
@@ -22,7 +23,12 @@ struct Foo : c10::intrusive_ptr_target {
   int64_t add(int64_t z) {
     return (x+y)*z;
   }
-  // c10::intrusive_ptr<Foo> combine(c10::intrusive_ptr<Foo> x) {
+  // Foo* increment() {
+  //   this->x++;
+  //   this->y++;
+  //   return this;
+  // }
+  // <Foo> combine(c10::intrusive_ptr<Foo> x) {
   //   this->x += x->x;
   //   this->y += x->y;
   //   return this;

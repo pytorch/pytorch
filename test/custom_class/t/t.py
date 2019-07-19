@@ -16,20 +16,17 @@ class Bar:
     def display(self):
         print(self.x, self.y)
 
-val = torch.classes.Foo(5, 3)
-print("24", val.__module__)
 @torch.jit.script
-def f(x):
+def f():
     val = torch.classes.Foo(5, 3)
     val.display()
     # val2 = Bar(100, 0)
     val2 = torch.classes.Foo(100, 0)
-    print("Initialization done")
     val.display()
     val2.display()
     # val3 = val.combine(val2)
     # val3.display()
-    print(val, val2)
+    return val
 
 # print(f.graph)
-f(torch.randn(32, 32))
+print(f())

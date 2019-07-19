@@ -6,6 +6,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/tracer.h>
@@ -505,6 +506,8 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
         py::repr(object)));
   }
 }
+TORCH_API std::unordered_map<std::string, std::function<py::object(void*)>>&
+getClassConverter();
 
 inline py::object toPyObject(IValue&& ivalue) {
   if (ivalue.isNone()) {
@@ -569,6 +572,11 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
     auto pyCu = get_python_cu();
+    if (obj->name().find("__torch__.torch.classes") == 0) {
+      auto objPtr = (void*)obj->getAttr("capsule").toCapsule().release();
+      auto classConverter = getClassConverter()[obj->name()];
+      return classConverter(objPtr);
+    }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =

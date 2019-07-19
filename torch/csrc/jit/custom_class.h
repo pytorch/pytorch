@@ -66,17 +66,20 @@ class class_ {
     auto newClass =
         py::module::import("torch.jit")
             .attr("_add_script_class")(*pyClass, qualifiedName.c_str());
+    auto castToPython = [](void* objPtr) -> py::object {
+      CurClass x = *static_cast<CurClass*>(objPtr);
+      return py::cast(x);
+    };
+    getClassConverter()[qualifiedName] = castToPython;
 
     pyClass->attr("qualified_name") = py::str(qualifiedName);
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute.
     classCu = std::make_shared<script::CompilationUnit>();
-    auto runtimeClassName = typeid(c10::intrusive_ptr<CurClass>).name();
-    std::cout << "76: " << runtimeClassName << std::endl;
     classTypePtr =
         ClassType::create(c10::QualifiedName(qualifiedName), classCu);
-    c10::getTypeMap().insert(
-        {runtimeClassName, StrongTypePtr(classCu, classTypePtr)});
+    c10::getTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
+                              StrongTypePtr(classCu, classTypePtr)});
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
     torch::jit::get_python_cu()->register_class(classTypePtr);
