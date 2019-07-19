@@ -390,10 +390,7 @@ def split_with_sizes(g, self, split_sizes, dim):
 
 
 @parse_args('v', 'i', 'v')
-def select(g, self, dim, index=None):
-    if index is None:
-        index = g.op("Constant", value_t=torch.LongTensor([0]))
-
+def select(g, self, dim, index):
     if dim > 1:
         # TODO: this is a temporary hack because of the implementation details
         # of Gather in caffe2. We need to change this as soon as possible.
