@@ -54,6 +54,10 @@ def _observer_forward_hook(self, input, output):
     """
     self.observer(output)
 
+def _fake_quant_forward_hook(self, input, output):
+    return self.observer(output)
+
+
 # TODO(jerryzh): remove_observer?
 def add_observer(module):
     r"""Add observer for the leaf child of the module.
@@ -77,7 +81,7 @@ def add_observer(module):
     if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
-        module.register_forward_hook(_observer_forward_hook)
+        module.register_forward_hook(_fake_quant_forward_hook if module.training else _observer_forward_hook)
 
 class QuantWrapper(nn.Module):
     r"""A wrapper class that wraps the input module, adds QuantStub and
