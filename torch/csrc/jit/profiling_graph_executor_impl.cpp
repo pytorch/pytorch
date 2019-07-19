@@ -61,7 +61,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   }
 
   if (!pr_->ready()) {
-    std::cout << "running profiling graph\n";
     return *profiling_plan_;
   }
 
