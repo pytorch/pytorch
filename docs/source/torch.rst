@@ -36,6 +36,7 @@ Creation Ops
 .. autofunction:: tensor
 .. autofunction:: sparse_coo_tensor
 .. autofunction:: as_tensor
+.. autofunction:: as_strided
 .. autofunction:: from_numpy
 .. autofunction:: zeros
 .. autofunction:: zeros_like
