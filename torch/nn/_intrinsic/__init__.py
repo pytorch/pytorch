@@ -1,21 +1,13 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+# @lint-ignore-every PYTHON3COMPATIMPORTS
 
-from .modules.conv_relu import ConvReLU2d
-from .modules.linear_relu import LinearReLU
+from torch.nn._intrinsic.modules.fused import ConvBn2d
+from torch.nn._intrinsic.modules.fused import ConvBnReLU2d
+from torch.nn._intrinsic.modules.fused import ConvReLU2d
+from torch.nn._intrinsic.modules.fused import LinearReLU
 
-from torch._ops import ops
-
-fq_per_tensor_affine_forward = ops.quantized.fake_quantize_per_tensor_affine_forward
-fq_per_tensor_affine_backward = ops.quantized.fake_quantize_per_tensor_affine_backward
-
-# Modules
 __all__ = [
+    'ConvBn2d',
+    'ConvBnReLU2d',
     'ConvReLU2d',
     'LinearReLU',
-]
-
-# Other stuff
-__all__ += [
-    'fq_per_tensor_affine_forward',
-    'fq_per_tensor_affine_backward'
 ]

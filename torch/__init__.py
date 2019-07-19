@@ -1,7 +1,4 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+# @lint-ignore-every PYTHON3COMPATIMPORTS​
 
 r"""
 The torch package contains data structures for multi-dimensional

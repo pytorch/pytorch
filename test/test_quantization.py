@@ -3,17 +3,14 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
-    default_qconfig, default_qat_qconfig, default_observer, quantize, prepare, \
-    convert, prepare_qat, quantize_qat, fuse_modules
+    default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
+    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
     ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
 
-calib_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
-train_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
-img_data = [(torch.rand(20, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
 
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
@@ -30,19 +27,19 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkHasPrepModules(model.fc1)
         self.checkObservers(model)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
             self.checkHasPrepModules(model.fc1)
             self.checkQuantizedLinear(model.fc1)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(SingleLayerLinearModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(SingleLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -60,7 +57,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkNoPrepModules(model.fc1)
         self.checkHasPrepModules(model.fc2)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -69,12 +66,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkHasPrepModules(model.fc2)
             self.assertEqual(type(model.fc1), torch.nn.Linear)
             self.checkQuantizedLinear(model.fc2)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(TwoLayerLinearModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(TwoLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
     def test_nested1(self):
@@ -101,7 +98,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         model = prepare(model, qconfig_dict)
         checkPrepModules(model, True)
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -110,12 +107,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantizedLinear(model.fc3)
             self.checkQuantizedLinear(model.sub2.fc1)
             self.checkLinear(model.sub2.fc2)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(NestedModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
 
@@ -147,7 +144,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkPrepModules(model, True)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -157,12 +154,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantizedLinear(model.sub2.fc1)
             self.checkQuantizedLinear(model.sub2.fc2)
             self.checkQuantizedLinear(model.fc3)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(NestedModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
     def test_nested3(self):
@@ -174,7 +171,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_qconfig = QConfig(weight=default_observer(),
+        custom_qconfig = QConfig(weight=default_weight_observer(),
                                  activation=default_observer(**custum_options))
         qconfig_dict = {
             'fc3': default_qconfig,
@@ -197,7 +194,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkPrepModules(model, True)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -205,12 +202,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantizedLinear(model.sub2.fc1)
             self.checkQuantizedLinear(model.sub2.fc2)
             self.checkQuantizedLinear(model.fc3)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(NestedModel().eval(), test_only_eval_fn, calib_data, qconfig_dict)
+        model = quantize(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
     def test_quant_wrapper(self):
@@ -224,7 +221,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         prepare(model)
         self.checkObservers(model)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
@@ -233,12 +230,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.assertEqual(type(model.sub.module.fc1), nnq.Linear)
             self.assertEqual(type(model.sub.module.fc2), nnq.Linear)
             self.assertEqual(type(model.sub.module.relu), nnq.ReLU)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(WrappedModel().eval(), test_only_eval_fn, calib_data, {})
+        model = quantize(WrappedModel().eval(), test_only_eval_fn, self.calib_data, {})
         checkQuantized(model)
 
 
@@ -252,17 +249,17 @@ class PostTrainingQuantTest(QuantizationTestCase):
         prepare(model)
         self.checkObservers(model)
 
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
         convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc), nnq.Linear)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(ManualQuantModel().eval(), test_only_eval_fn, calib_data)
+        model = quantize(ManualQuantModel().eval(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
 class QuantizationAwareTrainingTest(QuantizationTestCase):
@@ -273,17 +270,17 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = prepare_qat(model)
         self.checkObservers(model)
 
-        test_only_train_fn(model, train_data)
+        test_only_train_fn(model, self.train_data)
         convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), nnq.Linear)
             self.assertEqual(type(model.fc2), nnq.Linear)
-            test_only_eval_fn(model, calib_data)
+            test_only_eval_fn(model, self.calib_data)
 
         model = ManualLinearQATModel()
         model.qconfig = default_qat_qconfig
-        model = quantize_qat(model, test_only_train_fn, train_data)
+        model = quantize_qat(model, test_only_train_fn, self.train_data)
         checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
@@ -298,7 +295,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         self.checkObservers(model)
 
         model.eval()
-        test_only_eval_fn(model, calib_data)
+        test_only_eval_fn(model, self.calib_data)
 
     def test_conv_linear(self):
         model = ManualConvLinearQATModel()
@@ -307,52 +304,71 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = prepare_qat(model)
         self.checkObservers(model)
 
-        test_only_train_fn(model, img_data)
+        test_only_train_fn(model, self.img_data)
         convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv), nnq.Conv2d)
             self.assertEqual(type(model.fc1), nnq.Linear)
             self.assertEqual(type(model.fc2), nnq.Linear)
-            test_only_eval_fn(model, img_data)
+            test_only_eval_fn(model, self.img_data)
 
         checkQuantized(model)
 
         model = ManualConvLinearQATModel()
         model.qconfig = default_qat_qconfig
-        model = quantize_qat(model, test_only_train_fn, img_data)
+        model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 
 
 class FusionTest(QuantizationTestCase):
-    def test_fuse_module1(self):
+    def test_fuse_module_train(self):
+        import torch.nn._intrinsic.modules.fused as torch_fused
         testMod = ModForFusion()
-        fuse_modules(testMod, [['conv1', 'bn1', 'relu1'] , ['sub1.conv', 'sub1.bn']])
-        self.assertEqual(type(testMod.conv1), torch.nn._intrinsic.Conv2dReLU)
-        self.assertEqual(type(testMod.bn1), torch.nn.Identity)
-        self.assertEqual(type(testMod.relu1), torch.nn.Identity)
+        testMod.train()
+        fuse_modules(testMod, [['conv1', 'bn1', 'relu1'],
+                               ['sub1.conv', 'sub1.bn']])
+        self.assertEqual(type(testMod.conv1), torch_fused.ConvBnReLU2d,
+                         "Fused Conv + BN + Relu first layer")
+        self.assertEqual(type(testMod.bn1), torch.nn.Identity,
+                         "Fused Conv + BN + Relu (skipped BN)")
+        self.assertEqual(type(testMod.relu1), torch.nn.Identity,
+                         "Fused Conv + BN + Relu (skipped Relu)")
 
-        self.assertEqual(type(testMod.sub1.conv), torch.nn.Conv2d)
-        self.assertEqual(type(testMod.sub1.bn), torch.nn.Identity)
-        self.assertEqual(type(testMod.sub2.conv), torch.nn.Conv2d)
-        self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d)
+        self.assertEqual(type(testMod.sub1.conv), torch_fused.ConvBn2d,
+                         "Fused submodule Conv + BN")
+        self.assertEqual(type(testMod.sub1.bn), torch.nn.Identity,
+                         "Fused submodule Conv + BN (skipped BN)")
+        self.assertEqual(type(testMod.sub2.conv), torch.nn.Conv2d,
+                         "Non-fused submodule Conv")
+        self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d,
+                         "Non-fused submodule BN")
 
-    def test_fuse_module2(self):
+    def test_fuse_module_eval(self):
+        import torch.nn._intrinsic.modules.fused as torch_fused
         testMod = ModForFusion()
+        testMod.eval()
         fuse_modules(testMod, [['conv1', 'bn1', 'relu1'] ,
-                               ['sub1.conv', 'sub1.bn']], eval=False)
-        self.assertEqual(type(testMod.conv1), torch.nn.Sequential)
-        self.assertEqual(type(testMod.conv1.conv), torch.nn.Conv2d)
-        self.assertEqual(type(testMod.conv1.bn), torch.nn.BatchNorm2d)
-        self.assertEqual(type(testMod.bn1), torch.nn.Identity)
-        self.assertEqual(type(testMod.relu1), torch.nn.Identity)
+                               ['sub1.conv', 'sub1.bn']])
+        self.assertEqual(type(testMod.conv1), torch_fused.ConvReLU2d,
+                         "Fused Conv + BN + Relu first layer (BN is folded)")
+        self.assertEqual(type(testMod.conv1[0]), torch.nn.Conv2d,
+                         "Fused Conv + BN + Relu (Conv + folded BN only)")
+        self.assertEqual(type(testMod.conv1[1]), torch.nn.ReLU,
+                         "Fused Conv + BN + Relu second layer (Relu only)")
+        self.assertEqual(type(testMod.bn1), torch.nn.Identity,
+                         "Fused Conv + BN + Relu second layer (Skipped BN)")
+        self.assertEqual(type(testMod.relu1), torch.nn.Identity,
+                         "Fused Conv + BN + Relu second layer (Skipped Relu)")
 
-        self.assertEqual(type(testMod.sub1.conv), torch.nn.Sequential)
-        self.assertEqual(type(testMod.sub1.conv.conv), torch.nn.Conv2d)
-        self.assertEqual(type(testMod.sub1.conv.bn), torch.nn.BatchNorm2d)
-        self.assertEqual(type(testMod.sub1.bn), torch.nn.Identity)
-        self.assertEqual(type(testMod.sub2.conv), torch.nn.Conv2d)
-        self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d)
+        self.assertEqual(type(testMod.sub1.conv), torch.nn.Conv2d,
+                         "Fused submodule Conv + folded BN")
+        self.assertEqual(type(testMod.sub1.bn), torch.nn.Identity,
+                         "Fused submodule (skipped BN)")
+        self.assertEqual(type(testMod.sub2.conv), torch.nn.Conv2d,
+                         "Non-fused submodule Conv")
+        self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d,
+                         "Non-fused submodule BN")
 
 if __name__ == '__main__':
     run_tests()
