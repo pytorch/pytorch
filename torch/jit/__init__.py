@@ -1103,6 +1103,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         if _rcb is None:
             closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
             stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+
             def _rcb(name):
                 # since type comments aren't captured in the function's closures,
                 # we still need to try to the rcb based on stack frames if the
