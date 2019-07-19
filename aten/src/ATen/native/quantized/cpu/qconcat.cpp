@@ -9,10 +9,9 @@
 namespace at { namespace native {
 namespace {
 
-bool is_valid_quantization_type(Tensor t) {
+bool is_valid_quantization_scheme(Tensor t) {
   const auto qtype = t.qscheme();
-  return (qtype == kPerTensorAffine) ||
-         (qtype == kPerTensorSymmetric);
+  return (qtype == kPerTensorAffine) || (qtype == kPerTensorSymmetric);
 }
 
 /* Quantized concatenation.
@@ -23,12 +22,13 @@ template <bool ReLUFused>
 Tensor quantized_cat(const std::vector<Tensor>& qxs, int64_t axis,
                      double scale, int64_t zero_point) {
   const auto x_dtype = qxs[0].scalar_type();
+  TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+              "Only per-tensor quantization is supported in 'cat'!")
+  const auto x_qscheme = qxs[0].qscheme();
   std::vector<Tensor> xs;
   xs.reserve(qxs.size());
   for (const auto& qx: qxs) {
     TORCH_CHECK(x_dtype == qx.scalar_type(), "All dtypes must be the same.");
-    TORCH_CHECK(is_valid_quantization_type(qx),
-                "Only per-tensor quantization is supported in 'cat'!")
     xs.push_back(qx.dequantize());
   }
   const Tensor y = at::cat(xs, axis);
@@ -57,7 +57,6 @@ class QCat final : public torch::OperatorKernel {
     return quantized_cat<ReLUFused>(qxs, axis, _scale, _zero_point);
   }
 };
-
 
 template <bool ReLUFused = false>
 class QCatOut final : public torch::OperatorKernel {

@@ -72,7 +72,7 @@ class TestQuantizedOps(TestCase):
                            dilation, ceiling_mode=False):
         output_size = (
             (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
-             + (stride - 1 if ceiling_mode else 0)) / stride + 1)
+             + (stride - 1 if ceiling_mode else 0)) // stride + 1)
         if (padding > 0 and
                 ((output_size - 1) * stride >= input_size + padding)):
             output_size += 1
@@ -83,19 +83,24 @@ class TestQuantizedOps(TestCase):
                        qparams=hu.qparams()))
     def test_qrelu(self, X):
         X, (scale, zero_point, torch_type) = X
-        relu = torch.ops.quantized.relu
 
         Y = X.copy()
+        Y[Y < 0] = 0
+        qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale,
+                                   zero_point=zero_point, dtype=torch_type)
         X = torch.from_numpy(X)
-
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
-        qY_hat = relu(qX)
 
-        Y[Y < 0] = 0
-        qY_ref = torch.quantize_linear(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
-        self.assertEqual(qY_ref, qY_hat)
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.relu,
+            'native': torch.relu,
+            'nn.functional': torch.nn.functional.relu
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX)
+            self.assertEqual(qY, qY_hat, "{} relu failed".format(name))
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):

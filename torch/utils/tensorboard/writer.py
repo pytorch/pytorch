@@ -499,8 +499,6 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
-            dataformats (string): Image data format specification of the form
-              NCHW, NHWC, CHW, HWC, HW, WH, etc.
         Shape:
             img_tensor: Default is :math:`(N, 3, H, W)`. If ``dataformats`` is specified, other shape will be
             accepted. e.g. NCHW or NHWC.
@@ -531,7 +529,7 @@ class SummaryWriter(object):
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
 
     def add_image_with_boxes(self, tag, img_tensor, box_tensor, global_step=None,
-                             walltime=None, rescale=1, dataformats='CHW'):
+                             walltime=None, dataformats='CHW', **kwargs):
         """Add image and draw bounding boxes on the image.
 
         Args:
@@ -541,9 +539,6 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
-            rescale (float): Optional scale override
-            dataformats (string): Image data format specification of the form
-              NCHW, NHWC, CHW, HWC, HW, WH, etc.
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformat`` agrument.
             e.g. CHW or HWC
@@ -556,7 +551,7 @@ class SummaryWriter(object):
         if self._check_caffe2_blob(box_tensor):
             box_tensor = workspace.FetchBlob(box_tensor)
         self._get_file_writer().add_summary(image_boxes(
-            tag, img_tensor, box_tensor, rescale=rescale, dataformats=dataformats), global_step, walltime)
+            tag, img_tensor, box_tensor, dataformats=dataformats, **kwargs), global_step, walltime)
 
     def add_figure(self, tag, figure, global_step=None, close=True, walltime=None):
         """Render matplotlib figure into an image and add it to summary.
@@ -632,7 +627,7 @@ class SummaryWriter(object):
     def add_onnx_graph(self, prototxt):
         self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
 
-    def add_graph(self, model, input_to_model=None, verbose=False):
+    def add_graph(self, model, input_to_model=None, verbose=False, **kwargs):
         # prohibit second call?
         # no, let tensorboard handle it and show its warning message.
         """Add graph data to summary.
@@ -642,10 +637,25 @@ class SummaryWriter(object):
             input_to_model (torch.Tensor or list of torch.Tensor): A variable or a tuple of
                 variables to be fed.
             verbose (bool): Whether to print graph structure in console.
+            omit_useless_nodes (bool): Default to ``true``, which eliminates unused nodes.
+            operator_export_type (string): One of: ``"ONNX"``, ``"RAW"``. This determines
+                the optimization level of the graph. If error happens during exporting
+                the graph, using ``"RAW"`` might help.
+
         """
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
-            self._get_file_writer().add_graph(graph(model, input_to_model, verbose))
+            from distutils.version import LooseVersion
+            if LooseVersion(torch.__version__) >= LooseVersion("0.3.1"):
+                pass
+            else:
+                if LooseVersion(torch.__version__) >= LooseVersion("0.3.0"):
+                    print('You are using PyTorch==0.3.0, use add_onnx_graph()')
+                    return
+                if not hasattr(torch.autograd.Variable, 'grad_fn'):
+                    print('add_graph() only supports PyTorch v0.2.')
+                    return
+            self._get_file_writer().add_graph(graph(model, input_to_model, verbose, **kwargs))
         else:
             # Caffe2 models do not have the 'forward' method
             from caffe2.proto import caffe2_pb2
@@ -655,12 +665,15 @@ class SummaryWriter(object):
             )
             if isinstance(model, list):
                 if isinstance(model[0], core.Net):
-                    current_graph = nets_to_graph_def(model)
+                    current_graph = nets_to_graph_def(
+                        model, **kwargs)
                 elif isinstance(model[0], caffe2_pb2.NetDef):
-                    current_graph = protos_to_graph_def(model)
+                    current_graph = protos_to_graph_def(
+                        model, **kwargs)
             else:
                 # Handles cnn.CNNModelHelper, model_helper.ModelHelper
-                current_graph = model_to_graph_def(model)
+                current_graph = model_to_graph_def(
+                    model, **kwargs)
             event = event_pb2.Event(
                 graph_def=current_graph.SerializeToString())
             self._get_file_writer().add_event(event)
