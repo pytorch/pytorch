@@ -389,7 +389,14 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
 
-  if (dim == 0 && THTensor_(isContiguous)(src) && THTensor_(isContiguous)(tensor))
+  bool dim0_to_be_parallel = ((dim == 0) && THTensor_(isContiguous)(tensor));
+  bool src_to_be_contiguous = dim0_to_be_parallel && (numel > TH_PARALLEL_OVERHEAD_THRESHOLD);
+
+  if(src_to_be_contiguous) {
+    src = THTensor_(newContiguous)(src);
+  }
+
+  if (dim0_to_be_parallel && THTensor_(isContiguous)(src))
   {
     tensor_data = tensor->data<scalar_t>();
     src_data = src->data<scalar_t>();
@@ -409,14 +416,14 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
     // ubsan. So we skip copying at all when every slice to copy is empty.
     if (rowsize > 0) {
       if (src->dim() <= 1) {
-        at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD,
+        at::parallel_for(0, numel, TH_PARALLEL_OVERHEAD_THRESHOLD,
             [&](int64_t start, int64_t end) {
           for (auto i = start; i < end; i++) {
             tensor_data[i] = src_data[index_data[i]];
           }
         });
       } else {
-        at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD / rowsize,
+        at::parallel_for(0, numel, TH_PARALLEL_OVERHEAD_THRESHOLD / rowsize,
             [&](int64_t start, int64_t end) {
           for (auto i = start; i < end; i++) {
             memcpy(
@@ -447,6 +454,10 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       c10::raw::intrusive_ptr::decref(tSlice);
       c10::raw::intrusive_ptr::decref(sSlice);
     }
+  }
+
+  if(src_to_be_contiguous) {
+    c10::raw::intrusive_ptr::decref(src);
   }
 
   THLongTensor_free(index);
