@@ -129,20 +129,6 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             torch.jit.load('scriptmodule.pt', _extra_files = files)
             print (files['metadata.json'])
     """
-    base_name = "__main__"
-    cu = torch._C.CompilationUnit()
-    m = ScriptModule(_qualified_name=base_name, _compilation_unit=cu)
-
-    def module_lookup(names):
-        curr = m
-        qualified_name = base_name
-        for name in names:
-            qualified_name += "." + name
-            if not hasattr(curr, name):
-                setattr(curr, name, ScriptModule(_qualified_name=qualified_name,
-                                                 _compilation_unit=cu))
-            curr = getattr(curr, name)
-        return curr._c
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
@@ -155,6 +141,30 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if (str(map_location).startswith('cuda')):
         validate_cuda_device(map_location)
 
+    # A functor that sets up the module hierarchy lazily during the import process.
+    class ModuleLookup:
+        def __init__(self, cu):
+            self.cu = cu
+            self.base_module = None
+
+        def __call__(self, names):
+            if len(names) == 0:
+                raise RuntimeError("Can't ask for an empty module path")
+            if self.base_module is None:
+                self.base_module = ScriptModule(_qualified_name=names[0], _compilation_unit=self.cu)
+            curr = self.base_module
+            qualified_name = names[0]
+
+            # Skip the first name as we already used it to initialize `curr`
+            for name in names[1:]:
+                qualified_name += "." + name
+                if not hasattr(curr, name):
+                    setattr(curr, name, ScriptModule(_qualified_name=qualified_name,
+                                                     _compilation_unit=cu))
+                curr = getattr(curr, name)
+            return curr._c
+    cu = torch._C.CompilationUnit()
+    module_lookup = ModuleLookup(cu)
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
@@ -162,7 +172,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     else:
         torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location, _extra_files)
 
-    return m
+    return module_lookup.base_module
 
 
 def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
