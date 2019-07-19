@@ -1803,17 +1803,17 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
-    auto gsigma = prod_backward(grad, sigma, det);
+    auto gsigma = prod_backward(grad.unsqueeze(-1), sigma, det.unsqueeze(-1));
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
   if ((det != 0).all().item<uint8_t>()) {  // all matrices are invertible
-    return grad * det * self.inverse().transpose(-2, -1);
+    return unsqueeze_multiple(grad * det, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
   } else if ((det == 0).all().item<uint8_t>()) {  // all matrices are singular
     return singular_case_backward(grad, self, det);
   } else {  // some matrices are invertible, some matrices are singular
     return at::where(det != 0,
-                     grad * det * self.inverse().transpose(-2, -1), // invertible case
+                     unsqueeze_multiple(grad * det, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1), // invertible case
                      singular_case_backward(grad, self, det)); // non-invertible case, uses SVD
   }
 }
@@ -1823,17 +1823,17 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     // logdet = \sum log(sigma)
-    auto gsigma = grad.div(sigma);
+    auto gsigma = grad.unsqueeze(-1).div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
   if ((logdet != -INFINITY).all().item<uint8_t>()) {  // all matrices are invertible
-    return grad * self.inverse().transpose(-2, -1);
+    return unsqueeze_multiple(grad, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
   } else if ((logdet == -INFINITY).all().item<uint8_t>()) {  // all matrices are singular
     return singular_case_backward(grad, self);
   } else {  // some matrices are invertible, some matrices are singular
     return at::where(logdet != -INFINITY,
-                     grad * self.inverse().transpose(-2, -1), // invertible case
+                     grad.unsqueeze(-1) * self.inverse().transpose(-2, -1), // invertible case
                      singular_case_backward(grad, self)); // non-invertible case, uses SVD
   }
 }
@@ -1847,17 +1847,17 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
-    auto gsigma = grad_logabsdet.div(sigma);
+    auto gsigma = grad_logabsdet.unsqueeze(-1).div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
   if ((signdet != 0).all().item<uint8_t>()) {  // all matrices are invertible
-    return grad_logabsdet * self.inverse().transpose(-2, -1);
+    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
   } else if ((signdet == 0).all().item<uint8_t>()) {  // all matrices are singular
     return singular_case_backward(grad_logabsdet, self);
   } else {  // some matrices are invertible, some matrices are singular
     return at::where(signdet != 0,
-                     grad_logabsdet * self.inverse().transpose(-2, -1),
+                     unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1),
                      singular_case_backward(grad_logabsdet, self));
   }
 }
