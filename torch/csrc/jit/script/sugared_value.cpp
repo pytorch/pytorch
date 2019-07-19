@@ -73,6 +73,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         "device",
         "shape",
         "is_cuda",
+        "is_mkldnn",
         "requires_grad",
     };
     if (fields.count(field)) {
@@ -182,6 +183,7 @@ void SimpleValue::setAttr(
     // We are initializing if:
     const auto isInitializing =
         // 1. The method we're currently inserting into is an init method
+        // TODO this can be a qualified name check
         m.name() == "__init__" &&
         // 2. The `self` arg matches this value's type (i.e. we are in the init
         // method for this class, not some other class)
@@ -205,7 +207,7 @@ void SimpleValue::setAttr(
       if (insertPoint->owningBlock() != topLevelBlock) {
         throw ErrorReport(loc)
             << "First assignment cannot be in a control-flow block. "
-            << "Initialize the field at the top level first.";
+            << "Initialize the field at the top level first";
       }
     } else {
       throw ErrorReport(loc)
@@ -251,10 +253,14 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
         m.graph()
             ->insertNode(m.graph()->createTuple(context->node()->inputs()))
             ->output();
-    auto fn = CompilationUnit().create_function("anon", graph);
+    // TODO this needs to go in `m`s compilation unit
+    auto cu = std::make_shared<CompilationUnit>();
+    auto fn = cu->create_function(QualifiedName("anon"), graph);
+    auto ret = StrongFunctionPtr(std::move(cu), fn);
+
     std::vector<NamedValue> ctx_inputs = {close_context};
     ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
-    return FunctionValue(fn).call(loc, m, ctx_inputs, attributes, n_binders);
+    return FunctionValue(ret).call(loc, m, ctx_inputs, attributes, n_binders);
   }
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
@@ -274,20 +280,29 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-Value* SimpleValue::getelem(const SourceRange&loc, Function& m, Value* i) {
+Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
   Value* cur_elem = nullptr;
-  if (val_type->cast<ListType>()) {
-    cur_elem = g.insert(aten::select, {val, i}, {}, loc);
-  } else if (val_type->cast<StringType>()) {
-    cur_elem = g.insert(prim::StringIndex, {val, i}, {}, loc);
+
+  // if it's a List/String/Dict, emit a regular __getitem__ op
+  if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
+    cur_elem = g.insert(aten::__getitem__, {val, idx}, {}, loc);
+  } else if (auto dict_type = val_type->cast<DictType>()) {
+    if (!idx->type()->isSubtypeOf(dict_type->getKeyType())) {
+      throw ErrorReport(loc)
+          << "Expected key type '" << idx->type()->python_str()
+          << "' to subtype the key type '"
+          << dict_type->getKeyType()->python_str() << "' of the dict '"
+          << dict_type->python_str() << "'";
+    }
+    cur_elem = g.insert(aten::__getitem__, {val, idx}, {}, loc);
   } else if (val_type->isSubtypeOf(TensorType::get())) {
-    cur_elem = g.insert(aten::select, {val, 0, i}, {}, loc);
+    cur_elem = g.insert(aten::select, {val, 0, idx}, {}, loc);
   } else {
-    throw ErrorReport(loc)
-      << "cannot get element of the value type " << val_type->python_str();
+    throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
+                           << " object is not subscriptable";
   }
   return cur_elem;
 }
@@ -326,12 +341,12 @@ Value* RangeValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-Value* RangeValue::getelem(const SourceRange&loc, Function& m, Value* i)  {
+Value* RangeValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   if (has_only_end_) {
-    return i;
+    return idx;
   } else {
     auto& g = *m.graph();
-    return g.insert(aten::__derive_index, {i, start_, step_}, {}, loc);
+    return g.insert(aten::__derive_index, {idx, start_, step_}, {}, loc);
   }
 }
 
@@ -367,12 +382,12 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
   return g.insert(prim::min, {list_node->output()}, {}, loc);
 }
 
-Value* IterableTree::getelem(const SourceRange&loc, Function& m, Value* i)  {
+Value* IterableTree::getitem(const SourceRange& loc, Function& m, Value* idx) {
   std::vector<Value*> child_items;
   for(const SugaredValuePtr& child: children_) {
-    child_items.emplace_back(child->getelem(loc, m, i));
+    child_items.emplace_back(child->getitem(loc, m, idx));
   }
-  // If you call getelem() on a IterableTree sugared value, we will create Tuple
+  // If you call getitem() on a IterableTree sugared value, we will create Tuple
   // from the children items, and make the Tuple value as the element
   Graph& g = *m.graph();
   return g.insertNode(g.createTuple(child_items))->output();
@@ -392,7 +407,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   auto self = g.insertNode(g.createObject(type_))->output();
   if (!type_->getMethod("__init__")) {
     throw ErrorReport(loc)
-        << "Class " << type_->basename() << " does not have an __init__ function defined.";
+        << "Class " << type_->basename() << " does not have an __init__ function defined";
   }
 
   // Call the init function

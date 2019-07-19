@@ -1028,12 +1028,13 @@ const std::vector<std::string> functions = {
                        stride: List[int],
                        padding: List[int],
                        ceil_mode: bool,
-                       count_include_pad: bool):
+                       count_include_pad: bool,
+                       divisor_override: Optional[int]):
             def backward(grad_output):
-                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
-                return grad_self, None, None, None, None, None
+                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
+                return grad_self, None, None, None, None, None, None
 
-            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad), backward
+            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override), backward
 
         def max_pool2d(self,
                        kernel_size: List[int],
@@ -1180,8 +1181,8 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
-        def log_softmax(self, dim: int, *, dtype: Optional[int]):
-            result = torch.log_softmax(self, dim, dtype=dtype)
+        def log_softmax(self, dim: int, dtype: Optional[int]):
+            result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
                 grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
                 return grad_self, None, None
@@ -1398,7 +1399,7 @@ void loadModule(const script::CompilationUnit& module) {
 void loadFunctions() {
   for (const std::string& str : functions) {
     script::CompilationUnit cu;
-    cu.define(str, script::nativeResolver(), nullptr);
+    cu.define(c10::nullopt, str, script::nativeResolver(), nullptr);
     loadModule(cu);
   }
 }

@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -16,9 +15,9 @@ SmallVector<int64_t, 4> convOutputShape(
     int W, // input width
     int K, // output channels
     const std::vector<int64_t>& kernel,
-    const std::vector<int64_t>& stride,
-    const std::vector<int64_t>& padding,
-    const std::vector<int64_t>& dilation) {
+    const torch::List<int64_t>& stride,
+    const torch::List<int64_t>& padding,
+    const torch::List<int64_t>& dilation) {
   SmallVector<int64_t, 4> out_shape;
   out_shape.push_back(N);
 
@@ -68,10 +67,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
   Tensor operator()(
       Tensor act,
       Tensor packed_weight,
-      Tensor bias,
-      const std::vector<int64_t>& stride,
-      const std::vector<int64_t>& padding,
-      const std::vector<int64_t>& dilation,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
@@ -92,7 +91,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     int H = act.size(1);
     int W = act.size(2);
     int C = act.size(3);
-    int K = bias.size(0);
 
     Tensor act_contig = act.contiguous();
     const uint8_t* act_ptr =
@@ -104,6 +102,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     // packB->printPackedMatrix("PackedB inside QConv2dInt8:");
     auto& col_offsets = pack_ptr.col_offsets;
     auto& kernel = pack_ptr.kernel;
+
+    int K = packB->numCols() * packB->numGroups();
 
     std::vector<int32_t> row_offset_buf(
         fbgemm::PackAWithIm2Col<uint8_t>::rowOffsetBufferSize());
@@ -134,9 +134,16 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     fbgemm::DoNothing<> NoOpObj{};
 
-    auto bias_contig = bias.contiguous();
-    const auto* bias_ptr =
-        reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
+    const int32_t* bias_ptr = nullptr;
+    if (bias.has_value()) {
+      Tensor bias_vec = bias.value();
+      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias_vec.size(0) == K,
+          "bias should have K elements: " + std::to_string(K));
+      auto bias_contig = bias_vec.contiguous();
+      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
+    }
 
     float act_scale = act.q_scale();
     int32_t act_zero_point = act.q_zero_point();
@@ -187,11 +194,11 @@ class QConv2dInt8 final : public c10::OperatorKernel {
   Tensor operator()(
       Tensor /* activation */,
       Tensor /* packed_weight */,
-      Tensor /* bias */,
-      const std::vector<int64_t>& /* stride */,
-      const std::vector<int64_t>& /* padding */,
-      const std::vector<int64_t>& /* dilation */,
-      const std::vector<int64_t>& /* output padding */,
+      c10::optional<Tensor> /* bias */,
+      torch::List<int64_t> /* stride */,
+      torch::List<int64_t> /* padding */,
+      torch::List<int64_t> /* dilation */,
+      torch::List<int64_t> /* output padding */,
       int64_t /* groups */,
       double /* output scale */,
       int64_t /* output_zero_point */) {

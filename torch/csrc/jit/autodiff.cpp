@@ -89,7 +89,7 @@ bool isDifferentiable(Node* n) {
 
   if (n->matches(
           "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
-    return n->get<std::vector<int64_t>>(attr::size) &&
+    return n->get<c10::List<int64_t>>(attr::size) &&
         n->is_constant(attr::implicit);
   }
 

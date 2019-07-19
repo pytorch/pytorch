@@ -89,8 +89,6 @@ if (USE_TBB)
   add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
   set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
 
-  install(TARGETS tbb EXPORT Caffe2Targets DESTINATION lib)
-
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 endif()
 
@@ -967,10 +965,10 @@ if(USE_GLOO)
     set(BUILD_TEST ${__BUILD_TEST})
     set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
 
-    # Add explicit dependency if NCCL is built from third_party.
+    # Add explicit dependency since NCCL is built from third_party.
     # Without dependency, make -jN with N>1 can fail if the NCCL build
     # hasn't finished when CUDA targets are linked.
-    if(NCCL_EXTERNAL)
+    if(USE_NCCL)
       add_dependencies(gloo_cuda nccl_external)
     endif()
     # Pick the right dependency depending on USE_CUDA

@@ -8,7 +8,7 @@ import sys
 
 
 def namedtensor_enabled():
-    return '-DNAMEDTENSOR_ENABLED' in torch.__config__.show()
+    return '-DBUILD_NAMEDTENSOR' in torch.__config__.show()
 
 skipIfNamedTensorDisabled = \
     unittest.skipIf(not namedtensor_enabled(),
@@ -71,7 +71,56 @@ class TestNamedTensor(TestCase):
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
 
-    def test_unary_fns(self):
+    def test_info_smoke(self):
+        # Smoke test for info functions / methods / attributes on named tensors.
+        tensor = torch.empty(1, 1, names=('N', 'D'))
+
+        tensor.device
+        tensor.dtype
+        tensor.get_device()
+        tensor.is_complex()
+        tensor.is_floating_point()
+        tensor.is_nonzero()
+        torch.is_same_size(tensor, tensor)
+        torch.is_signed(tensor)
+        tensor.layout
+        tensor.numel()
+        tensor.dim()
+        tensor.element_size()
+        tensor.is_contiguous()
+        tensor.is_cuda
+        tensor.is_leaf
+        tensor.is_pinned()
+        tensor.is_shared()
+        tensor.is_sparse
+        tensor.ndimension()
+        tensor.nelement()
+        tensor.shape
+        tensor.size()
+        tensor.storage()
+        tensor.storage_offset()
+        tensor.storage_type()
+        tensor.stride()
+        tensor.data
+        tensor.data_ptr()
+        tensor.ndim
+        tensor.item()
+
+    def test_split_fns_propagates_names(self):
+        fns = [
+            lambda x: x.split(1, 0),
+            lambda x: x.split([1, 1], 1),
+            lambda x: x.chunk(2, 0),
+        ]
+
+        for device in torch.testing.get_all_device_types():
+            orig_tensor = torch.empty(2, 2, names=('N', 'D'), device=device)
+            for fn in fns:
+                splits = fn(orig_tensor)
+                for split in splits:
+                    self.assertEqual(split.names, orig_tensor.names)
+
+    def test_unary_propagate_names_fns(self):
         TestCase = namedtuple('TestCase', ['name', 'lambd'])
 
         def _test(testcase, names=('N', 'D'), device='cpu'):
@@ -104,7 +153,9 @@ class TestNamedTensor(TestCase):
         def flatten(lst):
             return [item for sublist in lst for item in sublist]
 
+        # All of these operate on 2x2 tensors.
         tests = [
+            # unary pointwise
             fn_method_and_inplace('abs'),
             fn_method_and_inplace('acos'),
             fn_method_and_inplace('asin'),
@@ -113,29 +164,50 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('clamp', -1, 1),
             fn_method_and_inplace('clamp_min', -2),
             fn_method_and_inplace('clamp_max', 2),
+            method('cauchy_'),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
+            fn_method_and_inplace('digamma'),
             fn_method_and_inplace('erf'),
             fn_method_and_inplace('erfc'),
+            fn_method_and_inplace('erfinv'),
             fn_method_and_inplace('exp'),
             fn_method_and_inplace('expm1'),
+            method('exponential_'),
             fn_method_and_inplace('floor'),
             fn_method_and_inplace('frac'),
+            method('geometric_', p=0.5),
+            fn_method_and_inplace('lgamma'),
             fn_method_and_inplace('log'),
             fn_method_and_inplace('log10'),
             fn_method_and_inplace('log1p'),
             fn_method_and_inplace('log2'),
+            method('log_normal_'),
             fn_method_and_inplace('neg'),
+            method('normal_'),
+            [TestCase('polygamma', lambda t: torch.polygamma(1, t))],
+            method('polygamma_', 1),
             fn_method_and_inplace('reciprocal'),
+            method('random_', 0, 1),
+            method('random_', 1),
+            method('random_'),
             fn_method_and_inplace('round'),
             fn_method_and_inplace('rsqrt'),
+            fn_method_and_inplace('sigmoid'),
+            fn_method_and_inplace('sign'),
             fn_method_and_inplace('sin'),
             fn_method_and_inplace('sinh'),
             fn_method_and_inplace('sqrt'),
             fn_method_and_inplace('tan'),
+            fn_method_and_inplace('tanh'),
             fn_method_and_inplace('trunc'),
+            method('uniform_'),
+            method('zero_'),
             method('fill_', 1),
             method('fill_', torch.tensor(3.14)),
+
+            # views
+            method('narrow', 0, 0, 1),
         ]
         tests = flatten(tests)
 
