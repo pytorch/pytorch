@@ -129,13 +129,18 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             torch.jit.load('scriptmodule.pt', _extra_files = files)
             print (files['metadata.json'])
     """
-    m = ScriptModule()
+    base_name = "__main__"
+    cu = torch._C.CompilationUnit()
+    m = ScriptModule(_qualified_name=base_name, _compilation_unit=cu)
 
     def module_lookup(names):
         curr = m
+        qualified_name = base_name
         for name in names:
+            qualified_name += "." + name
             if not hasattr(curr, name):
-                setattr(curr, name, ScriptModule())
+                setattr(curr, name, ScriptModule(_qualified_name=qualified_name,
+                                                 _compilation_unit=cu))
             curr = getattr(curr, name)
         return curr._c
     if isinstance(f, string_classes):
@@ -1072,6 +1077,12 @@ def _qualified_name(obj):
     return module_name + "." + name
 
 
+def _compile_and_register_class(obj, rcb, qualified_name):
+    ast = get_jit_class_def(obj, obj.__name__)
+    _jit_script_class_compile(qualified_name, ast, rcb)
+    _add_script_class(obj, qualified_name)
+
+
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
@@ -1085,9 +1096,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
-        ast = get_jit_class_def(obj, obj.__name__)
-        _jit_script_class_compile(qualified_name, ast, _rcb)
-        _add_script_class(obj, qualified_name)
+        _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
         ast = get_jit_def(obj)
@@ -1470,10 +1479,13 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, optimize=True, _name=None):
-            if _name is None:
-                _name = type(self).__name__
-            self.__dict__['_c'] = torch._C.ScriptModule(_name)
+        def __init__(self, optimize=True, _qualified_name=None, _compilation_unit=None):
+            if _qualified_name is None:
+                _qualified_name = type(self).__name__
+            if _compilation_unit is None:
+                _compilation_unit = torch._C.CompilationUnit()
+            self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit)
+
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
@@ -1607,7 +1619,7 @@ if _enabled:
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
-            super(WeakScriptModuleProxy, self).__init__(_name=type(original).__name__)
+            super(WeakScriptModuleProxy, self).__init__(_qualified_name=_qualified_name(type(original)))
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 

@@ -631,6 +631,10 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
     std::vector<c10::IValue>(),
     autograd::Function::peek_at_next_sequence_nr());
 
+  TORCH_WARN("Legacy autograd function with non-static forward method is deprecated and will be removed in 1.3. ",
+             "Please use new-style autograd function with static forward method. ",
+             "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)");
+
   auto info_pair = unpack_input<true>(_inputs);
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
@@ -815,10 +819,9 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     // for how to do it.
     TORCH_CHECK(cdata,
       "Legacy autograd function attempted to call backward before forward "
-      "was called.  This can occur if you manually set the grad_fn of a Variable "
-      "using the legacy _grad_fn keyword argument.  In any case, you've been "
-      "very naughty, and I'm not going to compute this program for you!  To make "
-      "this work, please port your code to use non-legacy autograd function, see: "
+      "was called.  This could occur if you manually called _do_backward on Function.  "
+      "In any case, this is very naughty!  If you absolutely need this to work, "
+      "try porting your code to use non-legacy autograd function, see: "
       "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd");
     THPUtils_assert(PyTuple_GET_SIZE(raw_grad_output) == cdata->num_inputs(),
                     "%s got an invalid number of gradients (expected %d got %d)",
@@ -866,6 +869,7 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
 
 PyObject* THPFunction__register_hook_dict(THPFunction *self, PyObject *_var)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a variable");
   THPVariable *var = (THPVariable*)_var;
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
@@ -878,10 +882,12 @@ PyObject* THPFunction__register_hook_dict(THPFunction *self, PyObject *_var)
     "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd")
   cdata->add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
 {
+  HANDLE_TH_ERRORS
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
     "Legacy autograd function had _register_hook called before the function was "
@@ -889,6 +895,7 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
     "AFTER calling your function, or port your code to use non-legacy autograd function, see: "
     "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd")
   return torch::autograd::registerFunctionHook(*cdata, hook);
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject *unpack_saved_variables(
@@ -905,17 +912,11 @@ static PyObject *unpack_saved_variables(
   if (!saved)
     return nullptr;
   auto saved_for = self->cdata.lock();
-  // This is really an assert, because we should only be unpacking saved
-  // variables while executing a 'backward' function, and if we're executing
-  // the backwards, that means that PyFunction for this backwards had
-  // better be live.  If this is ever not true, we want to know!
-  TORCH_CHECK(saved_for,
-    "Somehow, you've managed to request to unpack some saved variables, but "
-    "the backwards function for the variable you want to unpack has already "
-    "become dead.  The most likely way you arranged for this situation to "
-    "occur is that you saved the ctx object you received in backwards "
-    "externally, and then attempted to retrieve saved tensors after the fact. "
-    "Don't do that!");
+  // This is really a true assert, because we've already tested for the
+  // self->has_freed_buffers case at the beginning of this function:
+  // buffers are freed when PyFunction dies; if the buffers are not freed,
+  // PyFunction must be live.
+  TORCH_INTERNAL_ASSERT(saved_for);
   for (int i = 0; i < num_saved; i++) {
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
@@ -953,6 +954,7 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
 
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
+  HANDLE_TH_ERRORS
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
     "Legacy autograd function had next_functions accessed before the function was "
@@ -974,10 +976,12 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
     PyTuple_SET_ITEM(result.get(), i, fn_tuple.release());
   }
   return result.release();
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPFunction_metadata(THPFunction *self, void *_unused)
 {
+  HANDLE_TH_ERRORS
   auto cdata = self->cdata.lock();
   // The correct way to solve this problem is to stop exposing grad_fn
   // of PyFunctions as THPFunction; instead, we should use THPCppFunction
@@ -996,6 +1000,7 @@ PyObject *THPFunction_metadata(THPFunction *self, void *_unused)
 
   Py_INCREF(metadata);
   return metadata;
+  END_HANDLE_TH_ERRORS
 }
 
 typedef PyObject *(*getter)(PyObject *, void *);

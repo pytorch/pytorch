@@ -103,6 +103,9 @@ void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 void THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)

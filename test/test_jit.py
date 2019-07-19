@@ -10782,7 +10782,7 @@ a")
 
     def test_unsupported_builtin_error(self):
         with self.assertRaisesRegex(RuntimeError,
-                                    "calling a python builtin_function_or_method which is currently not supported"):
+                                    "Python builtin <built-in function hypot> is currently"):
             @torch.jit.script
             def test_unsupported(a):
                 return math.hypot(a, 2.0)
@@ -13182,6 +13182,29 @@ class TestRecursiveScript(JitTestCase):
                 return z + 20 + y
 
         self.checkModule(M(), (torch.randn(2, 2),))
+
+    def test_class_compile(self):
+        def other_fn(a, b):
+            # type: (int, Tensor) -> Tensor
+            return a * b
+
+        class B(object):
+            def __init__(self, x):
+                self.x = 2
+
+            def helper(self, a):
+                return self.x + a + other_fn(self.x, a)
+
+
+        class N(torch.nn.Module):
+            def __init__(self):
+                super(N, self).__init__()
+
+            def forward(self, x):
+                b = B(x)
+                return b.helper(x)
+
+        self.checkModule(N(), (torch.randn(2, 2),))
 
     def test_error_stack(self):
         def d(x):
