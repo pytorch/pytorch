@@ -36,6 +36,18 @@ using caffe2::serialize::ReadAdapterInterface;
 
 namespace {
 
+struct ClassResolver : public script::Resolver {
+  explicit ClassResolver(std::shared_ptr<script::CompilationUnit> cu)
+      : cu_(std::move(cu)) {}
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      const override {
+    return cu_->get_type(c10::QualifiedName(name));
+  }
+
+ private:
+  std::shared_ptr<script::CompilationUnit> cu_;
+};
+
 // this is a deserializer class which loads script modules from pt files. the
 // content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h. all the records except the last
@@ -81,6 +93,7 @@ class ScriptModuleDeserializer final {
 
   std::unordered_set<std::string> imported_libs_;
 
+  std::shared_ptr<script::CompilationUnit> compilation_unit_;
   script::Module main_module_;
 };
 
@@ -177,9 +190,16 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
 std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
-  std::tie(attributes_ptr, attributes_size) =
-      reader_.getRecord(name);
-  Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
+  std::tie(attributes_ptr, attributes_size) = reader_.getRecord(name);
+  Unpickler unpickler(
+      attributes_ptr.get(),
+      attributes_size,
+      &tensor_table_,
+      [&](const c10::QualifiedName& qn) {
+        importCallback(qn.prefix());
+        auto cu = main_module_.class_compilation_unit();
+        return c10::StrongTypePtr(cu, cu->get_class(qn));
+      });
   return unpickler.parse_ivalue_list();
 }
 
@@ -269,7 +289,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      *main_module_.class_compilation_unit(),
+      main_module_.class_compilation_unit(),
       qualifier,
       src,
       tensor_table_,
@@ -310,7 +330,8 @@ void ScriptModuleDeserializer::convertModule(
       module.register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
-  script::ScriptTypeParser typeParser;
+  script::ScriptTypeParser typeParser(
+      std::make_shared<ClassResolver>(main_module_.class_compilation_unit()));
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
     if (module.find_buffer(attr_def.name())) {
@@ -358,7 +379,6 @@ void ScriptModuleDeserializer::convertModule(
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
-        *main_module_.class_compilation_unit(),
         module,
         src,
         tensor_table_,
@@ -438,13 +458,17 @@ script::Module load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
-  script::Module module("__main__");
+  auto cu = std::make_shared<script::CompilationUnit>();
+  const auto basename = c10::QualifiedName("__main__");
+  script::Module module(basename, cu);
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
     script::Module curr = module;
+    auto qualname = basename;
     for (const auto& name : qualified_name) {
+      qualname = c10::QualifiedName(qualname, name);
       if (!curr.find_module(name)) {
-        curr.register_module(name, script::Module("__main__"));
+        curr.register_module(name, script::Module(qualname, cu));
       }
       curr = curr.get_module(name);
     }

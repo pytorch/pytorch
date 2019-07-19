@@ -57,6 +57,13 @@ def main():
     )
 
     parser.add_argument(
+        "--num_runs",
+        help="Run each test for num_runs. Each run executes an operator for number of <--iterations>",
+        type=int,
+        default=1,
+    )
+
+    parser.add_argument(
         "--min_time_per_test",
         help="Set the minimum time (unit: seconds) to run each test",
         type=int,
