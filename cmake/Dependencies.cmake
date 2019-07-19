@@ -89,8 +89,6 @@ if (USE_TBB)
   add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
   set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
 
-  install(TARGETS tbb EXPORT Caffe2Targets DESTINATION lib)
-
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 endif()
 
