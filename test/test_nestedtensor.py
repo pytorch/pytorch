@@ -116,11 +116,7 @@ class TestNestedTensor(TestCase):
             a3 = torch.nestedtensor([getattr(torch, func)(a, b),
                                      getattr(torch, func)(b, c)])
             self.assertTrue((a3 == getattr(torch, func)(a1, a2)).all())
-            self.assertTrue(not (a3 == a1).any())
-            self.assertTrue(not (a3 == a2).any())
             self.assertTrue((a3 == getattr(a1, func)(a2)).all())
-            self.assertTrue(not (a3 == a1).any())
-            self.assertTrue(not (a3 == a2).any())
             self.assertTrue((a3 == getattr(a1, func + "_")(a2)).all())
             self.assertTrue((a3 == a1).all())
 

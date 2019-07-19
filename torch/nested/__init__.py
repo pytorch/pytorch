@@ -4,6 +4,12 @@ import torch
 from . import nested
 from . import codegen
 
+USE_NESTEDTENSOR = os.getenv('USE_NESTEDTENSOR', 'OFF') == 'ON'
+if not USE_NESTEDTENSOR:
+    raise RuntimeError("Attempting to use NestedTensor code "
+                       "without the environment flag USE_NESTEDTENSOR "
+                       "set to ON")
+
 NestedTensor = nested.NestedTensor
 
 def _nary_gen(out_dtype=None):
@@ -37,6 +43,9 @@ def _nary_gen(out_dtype=None):
     return _nary
 
 
+# NOTE: This is inefficient! The functions that are being overwritten in torch
+# are being replaced by functions with very inefficient dispatch mechanisms to add
+# support for NestedTensor to torch.
 torch, NestedTensor = codegen.add_pointwise_unary_functions(torch, NestedTensor, _nary_gen())
 torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor, _nary_gen())
 torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _nary_gen(torch.uint8))

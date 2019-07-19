@@ -2,6 +2,22 @@ import torch
 from functools import wraps
 from collections import namedtuple
 
+# This entire file is half hack, half useful information.
+#
+# The function classifications (unary, binary, comparison)
+# are useful to generate generic code based on certaion assumptions
+# such as arity. For example, someone might implement a single function
+# to efficiently implement a pointwise unary function such as cos
+# and then generalize it using the list of unary functions.
+#
+# The hacky part of this file overwrites a module function via set_function
+# and adds a dispatch mechanism via isinstance. The user can specify
+# a function to be called if the overwritten function is called
+# with a new object of type cls (based on the first argument).
+# This dispatch mechanism is inherently inefficient and should be replaced.
+# In fact, no release should include this mechanism and it is solely
+# to support incremental development.
+#
 # Stores the relationship between a torch module function
 # and a torch.Tensor method. For example torch.add
 # maps to torch.Tensor.add and torch.Tensor.add can either
@@ -89,6 +105,9 @@ def get_comparison_functions():
 # and overwriting it with a function that dispatches
 # to func(tfunc, reference_to_tfunc, *args, **kwargs)
 # if the first argument is of instance cls.
+# NOTE: This function is a hack. This dispatch mechanism
+# is slow and should not be used in release code, but for
+# development only.
 def set_function(module, cls, tfunc, func):
     def _gen_func(tfunc):
         orig_tfunc = getattr(torch, tfunc)
