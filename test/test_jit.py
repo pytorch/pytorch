@@ -7697,15 +7697,12 @@ a")
 
     def test_import_constants_not_specialized(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
-                super(Mod).__init__()
-
             def forward(self, x):
                 return torch.cat(2 * [x], dim=0)
 
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self, mod):
-                super(ScriptMod).__init__()
+                super(ScriptMod, self).__init__()
                 x = torch.zeros(1, 3)
                 mod_fn = lambda : mod(x)  # noqa: E731
                 self.mod = torch.jit.trace(mod_fn, tuple())
