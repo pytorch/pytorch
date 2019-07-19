@@ -44,6 +44,13 @@ Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   }
 }
 
+Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
+  std::cout << "result: " << result.dtype() << " self: " << self.dtype() << std::endl;
+  result = Tensor(masked_select_cpu(self, mask));
+  std::cout << "result.has_storage(): " << result.has_storage() << std::endl;
+  return result;
+}
+
 Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }
