@@ -387,40 +387,40 @@ int64_t _compute_padding_same(IntArrayRef input_size, IntArrayRef filter_size, I
   return total_padding;
 }
 
-at::Tensor convolution(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntArrayRef stride, bool padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding, int64_t groups) {
-  auto& ctx = at::globalContext();
-  std::vector<int64_t> paddings(input.ndimension() - 2);
-  for (int i = 0; i < input.ndimension() - 2; i++) {
-    paddings[i] = _compute_padding_same(input.sizes(), weight.sizes(), stride, dilation, i);
-  }
-  std::vector<int64_t> uneven_padding;
-  bool is_uneven = false;
-  for (auto &&i: paddings) {
-    uneven_padding.push_back(i % 2);
-    uneven_padding.push_back(0);
-    if (i % 2 != 0) {
-      is_uneven = true;
-    }
-    i /= 2;
-  }
-  std::reverse(uneven_padding.begin(), uneven_padding.end());
-  for (auto i: uneven_padding) {
-    std::cout<<i<<' ';
-  }
-  std::cout<<std::endl;
-  if (is_uneven) {
-    auto res = at::constant_pad_nd(input, IntArrayRef{uneven_padding});
-    return at::_convolution(res, weight, bias, stride, IntArrayRef{paddings}, dilation,
-                            transposed, output_padding, groups,
-                            ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
-  }
-  return at::_convolution(input, weight, bias, stride, IntArrayRef{paddings}, dilation,
-                          transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
-}
+// at::Tensor convolution(
+//     const Tensor& input, const Tensor& weight, const Tensor& bias,
+//     IntArrayRef stride, bool padding, IntArrayRef dilation,
+//     bool transposed, IntArrayRef output_padding, int64_t groups) {
+//   auto& ctx = at::globalContext();
+//   std::vector<int64_t> paddings(input.ndimension() - 2);
+//   for (int i = 0; i < input.ndimension() - 2; i++) {
+//     paddings[i] = _compute_padding_same(input.sizes(), weight.sizes(), stride, dilation, i);
+//   }
+//   std::vector<int64_t> uneven_padding;
+//   bool is_uneven = false;
+//   for (auto &&i: paddings) {
+//     uneven_padding.push_back(i % 2);
+//     uneven_padding.push_back(0);
+//     if (i % 2 != 0) {
+//       is_uneven = true;
+//     }
+//     i /= 2;
+//   }
+//   std::reverse(uneven_padding.begin(), uneven_padding.end());
+//   for (auto i: uneven_padding) {
+//     std::cout<<i<<' ';
+//   }
+//   std::cout<<std::endl;
+//   if (is_uneven) {
+//     auto res = at::constant_pad_nd(input, IntArrayRef{uneven_padding});
+//     return at::_convolution(res, weight, bias, stride, IntArrayRef{paddings}, dilation,
+//                             transposed, output_padding, groups,
+//                             ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
+//   }
+//   return at::_convolution(input, weight, bias, stride, IntArrayRef{paddings}, dilation,
+//                           transposed, output_padding, groups,
+//                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
+// }
 
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
@@ -444,10 +444,49 @@ at::Tensor _convolution(
   int64_t dim = k - 2;
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
-
+  std::cout<<padding_.size()<<' '<<dim*2<<std::endl;
+  if (padding_.size() == size_t(dim) * 2) {
+    std::vector<int64_t> diffs;
+    bool is_uneven = false;
+    for (size_t i = 0; i < padding_.size(); i += 2) {
+      diffs.push_back(padding_[i] - padding_[i + 1]);
+      if (diffs.back() != 0) {
+        is_uneven = true;
+      }
+    }
+    if (!is_uneven) {
+      std::vector<int64_t> new_padding;
+      std::cout << "458: ";
+      for (size_t i = 0; i < padding_.size(); i += 2) {
+        new_padding.push_back(padding_[i]);
+        std::cout << new_padding.back() << ',' << padding_[i] << ' ';
+      }
+      std::cout << std::endl;
+      padding_ = IntArrayRef{new_padding};
+      std::cout<<"467: ";
+      for (int i=0; i<padding_.size(); i++) {
+        std::cout<<padding_[i]<<' ';
+      }
+      std::cout<<std::endl;
+      for (int i=0; i<padding_.size(); i++) {
+        std::cout<<padding_[i]<<' ';
+      }
+      std::cout<<std::endl;
+    }
+  }
+  std::cout<<"474: ";
+  for (int i=0; i<padding_.size(); i++) {
+    std::cout<<padding_[i]<<' ';
+  }
+  std::cout<<std::endl;
   ConvParams params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
   params.padding = expand_param_if_needed(padding_, "padding", dim);
+  std::cout<<"470: ";
+  for (int i=0; i<params.padding.size(); i++) {
+    std::cout<<params.padding[i]<<' ';
+  }
+  std::cout<<std::endl;
   params.dilation = expand_param_if_needed(dilation_, "dilation", dim);
   params.transposed = transposed_;
   params.output_padding = expand_param_if_needed(output_padding_, "output_padding", dim);
