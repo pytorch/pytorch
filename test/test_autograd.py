@@ -1808,6 +1808,79 @@ class TestAutograd(TestCase):
         # problem).
         self.assertRaises(RuntimeError, lambda: saved_ctx[0].saved_tensors)
 
+    def test_custom_autograd_repeated_grad_grad(self):
+        # This test failed the equality check in PR #22983; it's an interesting
+        # and different test case worth enshrining.  mult1 is not testing
+        # anything that interesting, but mult2 is the interesting case.
+
+        def mult1(x):
+            return x.prod(dim=-1).prod(dim=-1)
+
+        class Mult(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = mult1(x)
+                ctx.save_for_backward(x, y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return (grad_output * y)[:, None, None] / x
+
+        mult2 = Mult.apply
+
+        def check_gradgrad_repeated(x, y):
+            gy, = torch.autograd.grad(y[0], x, create_graph=True)
+            ggy_1, = torch.autograd.grad(gy[0, 0, 0], x, retain_graph=True)
+            gy, = torch.autograd.grad(y[0], x, create_graph=True)
+            ggy_2, = torch.autograd.grad(gy[0, 0, 0], x, retain_graph=True)
+            self.assertEqual(ggy_1[0, 0, 1], ggy_2[0, 0, 1])
+
+        x = torch.ones(2, 4, 4).requires_grad_()
+        check_gradgrad_repeated(x, mult1(x))
+        check_gradgrad_repeated(x, mult2(x))
+
+    def test_custom_autograd_no_early_free(self):
+        # This test failed complaining that buffers had already been freed
+        # prior to #22983.  Also pretty interesting test case.
+        class Double(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x ** 2
+                ctx.save_for_backward(x, y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, _ = ctx.saved_tensors
+                return grad_output * 2 * x
+
+        # this is equivalent, but uses the output of .forward() in .backward()
+        class Double2(Double):
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return grad_output * 2 * y / x
+
+        double = Double.apply
+        double2 = Double2.apply
+
+        x = torch.tensor(2).double().requires_grad_()
+
+        self.assertTrue(torch.autograd.gradcheck(double, x))
+        self.assertTrue(torch.autograd.gradgradcheck(double, x))
+        self.assertTrue(torch.autograd.gradcheck(double2, x))
+        self.assertTrue(torch.autograd.gradgradcheck(double2, x))
+
+        y = double(x)
+        torch.autograd.grad(y, x, create_graph=True)
+        torch.autograd.grad(y, x)
+
+        y = double2(x)
+        torch.autograd.grad(y, x, create_graph=True)
+        torch.autograd.grad(y, x)  # should not error!
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
     @skipIfRocm
     def test_unused_output_gpu(self):

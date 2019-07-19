@@ -11,7 +11,7 @@ path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
-    'pstrf', 'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'gels',
+    'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'gels',
     'triangular_solve'
 }
 
@@ -75,26 +75,11 @@ class TestNamedTupleAPI(unittest.TestCase):
                         self.assertIs(getattr(ret, name), ret[i])
 
         all_covered_operators = set([x for y in operators for x in y.operators])
-        all_covered_operators |= {
-            # operators manually covered below
-            'pstrf',  # this operator is deprecated and will be removed in later release
-        }
 
         self.assertEqual(all_operators_with_namedtuple_return, all_covered_operators, textwrap.dedent('''
         The set of covered operators does not match the `all_operators_with_namedtuple_return` of
         test_namedtuple_return_api.py. Do you forget to add test for that operator?
         '''))
-
-        # test pstrf
-        b = torch.eye(5)
-        ret = b.pstrf()
-        self.assertIs(ret.u, ret[0])
-        self.assertIs(ret.pivot, ret[1])
-        ret1 = torch.pstrf(b, out=tuple(ret))
-        self.assertIs(ret1.u, ret1[0])
-        self.assertIs(ret1.pivot, ret1[1])
-        self.assertIs(ret1.u, ret[0])
-        self.assertIs(ret1.pivot, ret[1])
 
 
 if __name__ == '__main__':
