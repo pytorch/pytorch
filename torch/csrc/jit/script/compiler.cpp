@@ -2694,7 +2694,11 @@ struct to_ir {
         ++dim;
         continue;
       }
-      auto index = emitExpr(subscript_expr, OptionalType::ofTensor());
+      TypePtr type_hint = OptionalType::ofTensor();
+      if (subscript_expr.kind() == TK_NONE) {
+        type_hint = NoneType::get();
+      }
+      auto index = emitExpr(subscript_expr, type_hint);
       if (index->type() == IntType::get()) {
         // NB: note, select squeezes out a dimension,
         // so dim is **not** incremented
