@@ -3804,15 +3804,6 @@
     CPU: legacy::cpu::_th_potri
     CUDA: legacy::cuda::_th_potri
 
-- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) -> (Tensor(a!) u, Tensor(b!) pivot)
-  dispatch:
-    CPU: legacy::cpu::_th_pstrf_out
-
-- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
-  variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_pstrf
-
 - func: qr(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
 
 - func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
