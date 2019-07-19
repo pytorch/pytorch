@@ -439,7 +439,8 @@ struct ParserImpl {
     auto type = maybeParseTypeAnnotation();
     auto maybeOp = maybeParseAssignmentOp();
     if (maybeOp) {
-      // There is an assignment operator, parse the RHS and generate the assignment.
+      // There is an assignment operator, parse the RHS and generate the
+      // assignment.
       auto rhs = parseExpOrExpTuple();
       L.expect(TK_NEWLINE);
       if (maybeOp.value()->kind() == '=') {
@@ -451,13 +452,15 @@ struct ParserImpl {
           throw ErrorReport(lhs.range())
               << " augmented assignment can only have one LHS expression";
         }
-        return AugAssign::create(lhs.range(), lhs, AugAssignKind(*maybeOp), Expr(rhs));
+        return AugAssign::create(
+            lhs.range(), lhs, AugAssignKind(*maybeOp), Expr(rhs));
       }
     } else {
       // There is no assignment operator, so this is of the form `lhs : <type>`
       TORCH_INTERNAL_ASSERT(type.present());
       L.expect(TK_NEWLINE);
-      return Assign::create(lhs.range(), lhs, Maybe<Expr>::create(lhs.range()), type);
+      return Assign::create(
+          lhs.range(), lhs, Maybe<Expr>::create(lhs.range()), type);
     }
   }
 
@@ -656,7 +659,8 @@ struct ParserImpl {
       }
     }
     L.expect(':');
-    const auto statements = parseStatements(/*expect_indent=*/true, /*in_class=*/true);
+    const auto statements =
+        parseStatements(/*expect_indent=*/true, /*in_class=*/true);
     return ClassDef::create(name.range(), name, List<Stmt>(statements));
   }
 

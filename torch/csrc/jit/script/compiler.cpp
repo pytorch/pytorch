@@ -1864,8 +1864,8 @@ struct to_ir {
     }
     const auto lhs = Select(stmt.lhs());
     const auto basename = Var(lhs.value()).name();
-    const auto rhsValue =
-        emitSugaredExpr(stmt.rhs().get(), 1)->asValue(stmt.rhs().range(), method);
+    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
+                              ->asValue(stmt.rhs().range(), method);
     auto userObject = environment_stack->getSugaredVar(basename);
     userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }

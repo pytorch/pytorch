@@ -29,7 +29,8 @@ void testClassParser() {
   ASSERT_EQ(classDef.body().size(), 3);
   ASSERT_EQ(Def(classDef.body()[0]).name().name(), "__init__");
   ASSERT_EQ(Def(classDef.body()[1]).name().name(), "get_x");
-  ASSERT_EQ(Var(Assign(classDef.body()[2]).lhs()).name().name(), "an_attribute");
+  ASSERT_EQ(
+      Var(Assign(classDef.body()[2]).lhs()).name().name(), "an_attribute");
   ASSERT_FALSE(Assign(classDef.body()[2]).rhs().present());
   ASSERT_TRUE(Assign(classDef.body()[2]).type().present());
 }
