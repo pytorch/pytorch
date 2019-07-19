@@ -238,6 +238,33 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
 
+    def test_sum(self):
+        for device in torch.testing.get_all_device_types():
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+
+            self.assertEqual(t.sum().names, [])
+
+            self.assertEqual(t.sum(1).names, ['N', 'L'])
+            self.assertEqual(t.sum('C').names, ['N', 'L'])
+
+            self.assertEqual(t.sum([1, 2]).names, ['N'])
+            self.assertEqual(t.sum(['C', 'L']).names, ['N'])
+
+            # Test keepdim
+            self.assertEqual(t.sum('C', keepdim=True).names, ['N', 'C', 'L'])
+            self.assertEqual(t.sum(['C', 'L'], keepdim=True).names, ['N', 'C', 'L'])
+
+            # Test out=
+            out = t.new_empty([0])
+            torch.sum(t, 'C', out=out)
+            self.assertEqual(out.names, ['N', 'L'])
+
+            with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
+                t.sum(None)
+            with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
+                t.sum([None, 'C'])
+            with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
+                t.sum('H')
 
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():

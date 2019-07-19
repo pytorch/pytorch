@@ -787,6 +787,12 @@ inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, c10::optional<ScalarTyp
     static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::sum(DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) const {
+    static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
+}
+#endif
 inline Tensor Tensor::sum_to_size(IntArrayRef size) const {
     static auto table = globalATenDispatch().getOpTable("aten::sum_to_size(Tensor self, int[] size) -> Tensor");
     return table->getOp<Tensor (const Tensor &, IntArrayRef)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, size);

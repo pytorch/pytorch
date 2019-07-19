@@ -178,6 +178,7 @@ blacklisted_types = {
     'DimnameList?',
     'ConstQuantizerPtr',
     'Dimname',
+    'DimnameList',
 }
 
 default_only_types = {'Generator'}

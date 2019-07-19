@@ -537,6 +537,9 @@ class CAFFE2_API Tensor {
   #endif
   Tensor sum(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor sum(IntArrayRef dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor sum(DimnameList dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor sum_to_size(IntArrayRef size) const;
   Tensor sqrt() const;
   Tensor & sqrt_();

@@ -19,6 +19,7 @@ CAFFE2_API void internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&
 // Converts dim to an positional index. Errors if `dim` cannot be used to
 // refer to any dimension of tensor.
 CAFFE2_API int64_t dimname_to_position(const Tensor& tensor, Dimname dim);
+CAFFE2_API std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dims);
 
 // Unifies two DimnameList to produce a third. This is useful for implementing
 // the named inference rule for binary broadcasting operations like add.
@@ -37,6 +38,7 @@ void propagate_names(Tensor& result, const Tensor& src);
 void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
 void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
+void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
 
 } // namespace namedinference
 
