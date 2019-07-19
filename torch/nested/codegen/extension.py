@@ -116,7 +116,7 @@ def set_function(module, cls, tfunc, func):
 
 
 def _check_meaningful_overwrite(cls, method_name):
-    class DefaultClass:
+    class DefaultClass(object):
         pass
 
     if getattr(cls, method_name, False) and not getattr(DefaultClass, method_name, False):

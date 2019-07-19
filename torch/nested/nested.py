@@ -49,7 +49,36 @@ def as_nestedtensor(data, dtype=None, device=None):
         ret = ret.to(device)
     return ret
 
-class NestedTensor():
+def _verify_tensors(tensors):
+    for tensor in tensors:
+        assert torch.is_tensor(tensor)
+    if len(tensors):
+        dim = tensors[0].dim()
+        layout = tensors[0].layout
+        device = tensors[0].device
+        dtype = tensors[0].dtype
+        requires_grad = tensors[0].requires_grad
+        is_pinned = tensors[0].is_pinned()
+        for tensor in tensors:
+            if not (dim == tensor.dim() and
+                    layout == tensor.layout and
+                    device == tensor.device and
+                    dtype == tensor.dtype and
+                    requires_grad == tensor.requires_grad and
+                    is_pinned == tensor.is_pinned()):
+                raise ValueError("Each passed Tensor "
+                                 "must match in dim, layout, "
+                                 "device, dtype and requires_grad")
+    else:
+        # Carrying around information as member variables vs.
+        # checking one entry of the owned Tensors is annoying
+        # and error-prone. Carrying around an is_empty attribute
+        # to hide the fact that we carry around a list with a
+        # single empty Tensor is also annoying and error-prone.
+        # Both are not worth it for a minor feature.
+        raise ValueError("We do not support empty lists for now.")
+
+class NestedTensor(object):
     # The attributes must match across all constiuents
     # and default to the empty Tensor's if the given list
     # is empty.
@@ -65,36 +94,12 @@ class NestedTensor():
     #     requires_grad
     #     is_pinned
     def __init__(self, tensors):
-        for tensor in tensors:
-            assert torch.is_tensor(tensor)
+        _verify_tensors(tensors)
         self.tensors = tensors
-        if len(tensors):
-            self.dim = tensors[0].dim()
-            self.layout = tensors[0].layout
-            self.device = tensors[0].device
-            self.dtype = tensors[0].dtype
-            requires_grad = tensors[0].requires_grad
-            is_pinned = tensors[0].is_pinned()
-            for tensor in tensors:
-                if not (self.dim == tensor.dim() and
-                        self.layout == tensor.layout and
-                        self.device == tensor.device and
-                        self.dtype == tensor.dtype and
-                        requires_grad == tensor.requires_grad and
-                        is_pinned == tensor.is_pinned()):
-                    raise ValueError("Each passed Tensor "
-                                     "must match in dim, layout, "
-                                     "device, dtype and requires_grad")
-        else:
-            # Carrying around information as member variables vs.
-            # checking one entry of the owned Tensors is annoying
-            # and error-prone. Carrying around an is_empty attribute
-            # to hide the fact that we carry around a list with a
-            # single empty Tensor is also annoying and error-prone.
-            # Both are not worth it for a minor feature.
-            raise ValueError("We do not support empty lists for now.")
 
     def __getattribute__(self, attr):
+        if attr == 'dim':
+            return self.tensors[0].dim
         if attr == 'shape':
             raise NotImplementedError()
         if attr == 'requires_grad':
@@ -125,7 +130,7 @@ class NestedTensor():
             for tensor in self.tensors:
                 data.append(tensor.data)
             return NestedTensor(data)
-        return super().__getattribute__(attr)
+        return super(NestedTensor, self).__getattribute__(attr)
 
     def __len__(self):
         return len(self.tensors)
@@ -135,18 +140,16 @@ class NestedTensor():
             "This has not been covered by NestedTensor 0.0.1")
 
     def __str__(self):
-        tensors = self.unbind()
         result = "nestedtensor([\n"
-        for tensor in tensors:
-            result += "  " + tensor.__str__() + "\n"
+        for tensor in self.tensors:
+            result += "  " + tensor.__str__() + ",\n"
         result += "])"
         return result
 
     def __repr__(self):
-        tensors = self.unbind()
         result = "nestedtensor([\n"
-        for tensor in tensors:
-            result += "  " + tensor.__repr__() + "\n"
+        for tensor in self.tensors:
+            result += "  " + tensor.__repr__() + ",\n"
         result += "])"
         return result
 

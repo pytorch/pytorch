@@ -1,19 +1,18 @@
-import torch
-from . import nested
-import torch.tensortypes.nestedtensor.codegen as codegen
 import os
+import torch
+
+from . import nested
+from . import codegen
 
 NestedTensor = nested.NestedTensor
 
-BUILD_NESTEDTENSOR = os.getenv('BUILD_NESTEDTENSOR', 'OFF') == 'ON'
-if not BUILD_NESTEDTENSOR:
-    raise RuntimeError("Building NestedTensor without environment variable "
-                       "BUILD_NESTEDTENSOR set to ON. Did you mean to do this?")
-
-
 def _nary_gen(out_dtype=None):
     # Follows signature of torch nary functions
-    def _nary(func_name, func, *inputs, out=None):
+    def _nary(*args, **kwargs):
+        func_name = args[0]
+        func = args[1]
+        inputs = args[2:]
+        out = kwargs.get('out', None)
         # NOTE: We are disabling broadcasting for now.
         for i in range(1, len(inputs)):
             for j in range(len(inputs[i])):

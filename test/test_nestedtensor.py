@@ -1,16 +1,6 @@
 import torch
 import unittest
-from common_utils import TEST_WITH_NESTEDTENSORS
-import torch.tensortypes.nestedtensor.codegen as codegen
-
-if TEST_WITH_NESTEDTENSORS:
-    import torch.tensortypes.nestedtensor as nestedtensor
-    from common_utils import TestCase
-    NestedTensor = nestedtensor.NestedTensor
-else:
-    print('NestedTensors not available, skipping tests')
-    TestCase = object
-
+from common_utils import TestCase
 
 def _shape_prod(shape_):
     shape = tuple(shape_)
@@ -115,7 +105,7 @@ class TestNestedTensor(TestCase):
 
 
     def test_unary(self):
-        for func in codegen.extension.get_unary_functions():
+        for func in torch.nested.codegen.extension.get_unary_functions():
             data = [self.gen_float_tensor(1, (2, 3)) - 0.5,
                     self.gen_float_tensor(2, (2, 3)) - 0.5]
             if func in ['log', 'log10', 'log2', 'rsqrt', 'sqrt']:
@@ -129,7 +119,7 @@ class TestNestedTensor(TestCase):
 
 
     def test_binary(self):
-        for func in codegen.extension.get_binary_functions():
+        for func in torch.nested.codegen.extension.get_binary_functions():
             a = self.gen_float_tensor(1, (2, 3))
             b = self.gen_float_tensor(2, (2, 3))
             c = self.gen_float_tensor(3, (2, 3))
