@@ -19,7 +19,8 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.custom_scalar import layout_pb2
-
+from tensorboard.plugins.hparams.plugin_data_pb2 import HParamsPluginData, SessionEndInfo, SessionStartInfo
+from tensorboard.plugins.hparams.api_pb2 import Experiment, HParamInfo, MetricInfo, MetricName, Status
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
@@ -71,6 +72,48 @@ def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', 
             display_str, fill=color_text, font=font
         )
     return image
+
+
+def hparams(hparam_dict=None, metric_dict=None):
+
+    PLUGIN_NAME = 'hparams'
+    PLUGIN_DATA_VERSION = 0
+
+    EXPERIMENT_TAG = '_hparams_/experiment'
+    SESSION_START_INFO_TAG = '_hparams_/session_start_info'
+    SESSION_END_INFO_TAG = '_hparams_/session_end_info'
+
+    # TODO: expose other parameters in the future.
+    # hp = HParamInfo(name='lr',display_name='learning rate', type=DataType.DATA_TYPE_FLOAT64, domain_interval=Interval(min_value=10, max_value=100))  # noqa E501
+    # mt = MetricInfo(name=MetricName(tag='accuracy'), display_name='accuracy', description='', dataset_type=DatasetType.DATASET_VALIDATION)  # noqa E501
+    # exp = Experiment(name='123', description='456', time_created_secs=100.0, hparam_infos=[hp], metric_infos=[mt], user='tw')  # noqa E501
+
+    hps = [HParamInfo(name=k) for k in hparam_dict.keys()]
+    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+
+    exp = Experiment(hparam_infos=hps, metric_infos=mts)
+
+    content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
+                                                                 content=content.SerializeToString()))
+    exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
+
+    ssi = SessionStartInfo()
+    for k, v in hparam_dict.items():
+        ssi.hparams[k].number_value = v
+
+    content = HParamsPluginData(session_start_info=ssi, version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
+                                                                 content=content.SerializeToString()))
+    ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
+
+    sei = SessionEndInfo(status=Status.STATUS_SUCCESS)
+    content = HParamsPluginData(session_end_info=sei, version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
+                                                                 content=content.SerializeToString()))
+    sei = Summary(value=[Summary.Value(tag=SESSION_END_INFO_TAG, metadata=smd)])
+
+    return exp, ssi, sei
 
 
 def scalar(name, scalar, collections=None):

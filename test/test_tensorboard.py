@@ -377,6 +377,11 @@ if TEST_TENSORBOARD:
                               'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
             summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
+        def test_hparams_smoke(self):
+            hp = {'lr': 0.1, 'bsize': 4}
+            mt = {'accuracy': 0.1, 'loss': 10}
+            summary.hparams(hp, mt)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
+
     def remove_whitespace(string):
         return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
