@@ -202,6 +202,50 @@ class TestQuantizedOps(TestCase):
         qa_pool_hat = q_max_pool(qa, kernel_size=k, stride=s, padding=p,
                                  dilation=d)
         a_pool_hat = qa_pool_hat.dequantize()
+        np.testing.assert_equal(a_pool.numpy(), a_pool_hat.numpy())
+
+    """Tests quantize concatenation (both fused and not)."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           num=st.integers(1, 4),
+           axis=st.integers(1, 4),
+           relu=st.booleans())
+    def test_cat(self, X, num, axis, relu):
+        tensors_q = []
+        tensors_ref = []
+        X, (scale, zero_point, torch_type) = X
+        assume(axis < X.ndim)
+        X = torch.from_numpy(X)
+        for idx in range(num):
+            tensors_q.append(torch.quantize_linear(X, scale, zero_point,
+                                                   torch_type))
+            tensors_ref.append(X)
+
+        cat_ref = torch.cat(tensors_ref, axis=axis)
+        cat_ref = torch.quantize_linear(cat_ref, scale, zero_point, torch_type)
+        cat_ref = cat_ref.dequantize()
+
+        if relu:
+            cat_ref = F.relu(cat_ref)
+            q_cat_op = torch.ops.quantized.cat_relu
+        else:
+            q_cat_op = torch.ops.quantized.cat
+        cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
+                         zero_point=zero_point)
+        cat_q = cat_q.dequantize()
+
+        np.testing.assert_equal(cat_ref.numpy(), cat_q.numpy())
+
+        # Test the cat on per-channel quantized tensor.
+        ch_axis = 1
+        scales = torch.from_numpy(np.array([1.0] * X.shape[ch_axis]))
+        zero_points = torch.from_numpy(np.array([0] * X.shape[ch_axis]))
+        tensors_q[0] = torch.quantize_linear_per_channel(
+            X, scales, zero_points, axis=[ch_axis], dtype=torch_type)
+        with self.assertRaisesRegex(RuntimeError, "supported.*cat"):
+            cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
+                             zero_point=zero_point)
 
 
 @unittest.skipIf(
