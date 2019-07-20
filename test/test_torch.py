@@ -4947,7 +4947,7 @@ class _TestTorchMixin(object):
                   (3, 0), (0, 3, 3), (3, 3, 0, 0),  # no numel matrices
                   (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
                   (1, 3), (5, 1, 3), (7, 5, 1, 3),  # very thin matrices
-                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions 
+                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions
         for s, d in product(shapes, diagonals):
             run_test(s, cast, d)
 
@@ -7962,41 +7962,47 @@ class _TestTorchMixin(object):
                     idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
     def test_flatten(self):
-        src = torch.randn(5, 5, 5, 5)
-        flat = src.flatten(0, -1)
-        self.assertEqual(flat.shape, torch.Size([625]))
-        self.assertEqual(src.view(-1), flat.view(-1))
+        # Test both float tensor and quantized tensor
+        tensors = [torch.randn(5, 5, 5, 5),
+                   torch._empty_affine_quantized([5, 5, 5, 5],
+                                                 scale=2,
+                                                 zero_point=3,
+                                                 dtype=torch.quint8)]
+        for src in tensors:
+            flat = src.flatten(0, -1)
+            self.assertEqual(flat.shape, torch.Size([625]))
+            self.assertEqual(src.view(-1), flat.view(-1))
 
-        flat = src.flatten(0, 2)
-        self.assertEqual(flat.shape, torch.Size([125, 5]))
-        self.assertEqual(src.view(-1), flat.view(-1))
+            flat = src.flatten(0, 2)
+            self.assertEqual(flat.shape, torch.Size([125, 5]))
+            self.assertEqual(src.view(-1), flat.view(-1))
 
-        flat = src.flatten(0, 1)
-        self.assertEqual(flat.shape, torch.Size([25, 5, 5]))
-        self.assertEqual(src.view(-1), flat.view(-1))
+            flat = src.flatten(0, 1)
+            self.assertEqual(flat.shape, torch.Size([25, 5, 5]))
+            self.assertEqual(src.view(-1), flat.view(-1))
 
-        flat = src.flatten(1, 2)
-        self.assertEqual(flat.shape, torch.Size([5, 25, 5]))
-        self.assertEqual(src.view(-1), flat.view(-1))
+            flat = src.flatten(1, 2)
+            self.assertEqual(flat.shape, torch.Size([5, 25, 5]))
+            self.assertEqual(src.view(-1), flat.view(-1))
 
-        flat = src.flatten(2, 3)
-        self.assertEqual(flat.shape, torch.Size([5, 5, 25]))
-        self.assertEqual(src.view(-1), flat.view(-1))
+            flat = src.flatten(2, 3)
+            self.assertEqual(flat.shape, torch.Size([5, 5, 25]))
+            self.assertEqual(src.view(-1), flat.view(-1))
 
-        flat = src.flatten(-2, -1)
-        self.assertEqual(flat.shape, torch.Size([5, 5, 25]))
-        self.assertEqual(src.view(-1), flat.view(-1))
+            flat = src.flatten(-2, -1)
+            self.assertEqual(flat.shape, torch.Size([5, 5, 25]))
+            self.assertEqual(src.view(-1), flat.view(-1))
 
-        flat = src.flatten(2, 2)
-        self.assertEqual(flat, src)
+            flat = src.flatten(2, 2)
+            self.assertEqual(flat, src)
 
-        # out of bounds index
-        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
-            src.flatten(5, 10)
+            # out of bounds index
+            with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
+                src.flatten(5, 10)
 
-        # invalid start and end
-        with self.assertRaisesRegex(RuntimeError, 'start_dim cannot come after end_dim'):
-            src.flatten(2, 0)
+            # invalid start and end
+            with self.assertRaisesRegex(RuntimeError, 'start_dim cannot come after end_dim'):
+                src.flatten(2, 0)
 
     @staticmethod
     def _test_gather(self, cast, test_bounds=True):
