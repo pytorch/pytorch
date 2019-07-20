@@ -37,7 +37,6 @@ __global__ void indexing_backward_kernel(
 //if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in this case
 //outer_dim is number of elements in the first unindexed dimensions
   using accscalar_t = at::acc_type<scalar_t, true>;
-  int idx = blockIdx.x * blockDim.y + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
   // If the preceding input has the same destination index as this input, then the warp
@@ -52,6 +51,7 @@ __global__ void indexing_backward_kernel(
 
   // Number of values processed by each thread (grain size)
   for (int z = blockIdx.z; z < outer_dim; z += gridDim.z){
+    int idx = blockIdx.x * blockDim.y + threadIdx.y;
     if (idx < numel
         && (idx == 0 || sorted_indices[idx] != sorted_indices[idx - 1])){
       do {
