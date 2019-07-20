@@ -4,7 +4,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
-#include <THNN/generic/pooling_shape.h>
+#include <ATen/native/Pool.h>
 
 #include <algorithm>
 #include <vector>

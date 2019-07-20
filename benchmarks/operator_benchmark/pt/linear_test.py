@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 
 
-"""Microbenchmarks for batchnorm operator."""
+"""Microbenchmarks for Linear operator."""
 
 configs = op_bench.config_list(
     attrs=[

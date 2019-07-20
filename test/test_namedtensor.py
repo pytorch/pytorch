@@ -106,7 +106,21 @@ class TestNamedTensor(TestCase):
         tensor.ndim
         tensor.item()
 
-    def test_unary_fns(self):
+    def test_split_fns_propagates_names(self):
+        fns = [
+            lambda x: x.split(1, 0),
+            lambda x: x.split([1, 1], 1),
+            lambda x: x.chunk(2, 0),
+        ]
+
+        for device in torch.testing.get_all_device_types():
+            orig_tensor = torch.empty(2, 2, names=('N', 'D'), device=device)
+            for fn in fns:
+                splits = fn(orig_tensor)
+                for split in splits:
+                    self.assertEqual(split.names, orig_tensor.names)
+
+    def test_unary_propagate_names_fns(self):
         TestCase = namedtuple('TestCase', ['name', 'lambd'])
 
         def _test(testcase, names=('N', 'D'), device='cpu'):
@@ -139,7 +153,9 @@ class TestNamedTensor(TestCase):
         def flatten(lst):
             return [item for sublist in lst for item in sublist]
 
+        # All of these operate on 2x2 tensors.
         tests = [
+            # unary pointwise
             fn_method_and_inplace('abs'),
             fn_method_and_inplace('acos'),
             fn_method_and_inplace('asin'),
@@ -148,6 +164,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('clamp', -1, 1),
             fn_method_and_inplace('clamp_min', -2),
             fn_method_and_inplace('clamp_max', 2),
+            method('cauchy_'),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
             fn_method_and_inplace('digamma'),
@@ -156,29 +173,41 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('erfinv'),
             fn_method_and_inplace('exp'),
             fn_method_and_inplace('expm1'),
+            method('exponential_'),
             fn_method_and_inplace('floor'),
             fn_method_and_inplace('frac'),
+            method('geometric_', p=0.5),
             fn_method_and_inplace('lgamma'),
             fn_method_and_inplace('log'),
             fn_method_and_inplace('log10'),
             fn_method_and_inplace('log1p'),
             fn_method_and_inplace('log2'),
+            method('log_normal_'),
             fn_method_and_inplace('neg'),
+            method('normal_'),
             [TestCase('polygamma', lambda t: torch.polygamma(1, t))],
             method('polygamma_', 1),
             fn_method_and_inplace('reciprocal'),
+            method('random_', 0, 1),
+            method('random_', 1),
+            method('random_'),
             fn_method_and_inplace('round'),
             fn_method_and_inplace('rsqrt'),
             fn_method_and_inplace('sigmoid'),
+            fn_method_and_inplace('sign'),
             fn_method_and_inplace('sin'),
             fn_method_and_inplace('sinh'),
             fn_method_and_inplace('sqrt'),
             fn_method_and_inplace('tan'),
             fn_method_and_inplace('tanh'),
             fn_method_and_inplace('trunc'),
+            method('uniform_'),
             method('zero_'),
             method('fill_', 1),
             method('fill_', torch.tensor(3.14)),
+
+            # views
+            method('narrow', 0, 0, 1),
         ]
         tests = flatten(tests)
 
