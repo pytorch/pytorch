@@ -321,8 +321,8 @@ struct ReduceOp {
       auto input_slice = (const char*)src + base_offsets[1];
       value = thread_reduce((const scalar_t*)input_slice);
     }
-    bool should_block_y_reduce = config.should_block_y_reduce();
-    if (should_block_y_reduce) {
+    
+    if (config.should_block_y_reduce()) {
       value = block_y_reduce(value, shared_memory);
     }
     if (config.should_block_x_reduce()) {
@@ -696,21 +696,42 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   int64_t dim0;
   int64_t dim1;
-  // adjust block size to fit width to fast changing dimension
-  if (iter.strides(/*arg=*/input_index)[0] == sizeof(scalar_t)) {
+
+  // Adjust block size to map block width to fastest changing dimension of input
+  // tensor. This grants the best possible memory accessing pattern, given that
+  // for non-contiguous tensor with space in between, we cannot have perfect
+  // memory coalescing.
+  bool reduction_on_fastest_striding_dimension =
+      (iter.num_reduce_dims() == iter.ndim()) ||
+      (iter.strides(/*arg=*/input_index)[0] <
+       iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()]);
+  // Notice that dim0 & dim1 does NOT guarantee any launch configuration here!
+  // dim0 & dim1 are more like the upper bound of the block dimension. The
+  // actual launch config and reduction scheme is determined by setting values
+  // to `config.input_mult` and `config.output_mult`.
+  // We try to max out dim1 so that we have enough threads per CTA to deliver
+  // performance for larger problem size.
+  if (reduction_on_fastest_striding_dimension) {
+    // Map block.x to the fastest reducing dimension. It implies: 
+    //   1. block_x_reduce is required.
+    //   2. block.y now max out to num_outputs.
     dim0 = iter.shape()[0];
     dim1 = num_outputs;
   } else {
+    // Map block.x to the fastest non reducing dimension. It implies: 
+    //   1. block_x_reduce is turned off.
+    //   2. block.y now max out to inputs_per_output.
     dim0 = iter.shape()[iter.num_reduce_dims()];
     dim1 = inputs_per_output;
   }
 
+  // Adjust block_width and block_height
   config.set_block_dimension(dim0, dim1);
 
   int block_width = config.block_width;
   int block_height = config.block_height;
 
-  if (iter.ndim() == 0 || iter.strides(/*arg=*/input_index)[0] == sizeof(scalar_t)) {
+  if (iter.ndim() == 0 || reduction_on_fastest_striding_dimension) {
     // Split the input across lanes if the input is contiguous in the reduced
     // dimension. This will require reduction between threads using warp
     // shuffle instructions and shared memory (if block_width > warpSize).
