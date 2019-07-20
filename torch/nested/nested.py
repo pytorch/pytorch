@@ -42,7 +42,7 @@ def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_m
                 new_data = new_data.pin_memory()
             tensors.append(new_data)
 
-        return NestedTensor(tensors)
+        return NestedTensor(tensors).contiguous()
 
 def as_nestedtensor(data, dtype=None, device=None):
     ret = NestedTensor(data)
@@ -118,6 +118,24 @@ class NestedTensor(object):
         if DEBUG:
             _verify_tensors(self._tensors)
         return self._tensors[0].dim
+
+    @property
+    def dtype(self):
+        if DEBUG:
+            _verify_tensors(self._tensors)
+        return self._tensors[0].dtype
+
+    @property
+    def layout(self):
+        if DEBUG:
+            _verify_tensors(self._tensors)
+        return self._tensors[0].layout
+
+    @property
+    def device(self):
+        if DEBUG:
+            _verify_tensors(self._tensors)
+        return self._tensors[0].device
 
     @property
     def shape(self):
@@ -197,11 +215,14 @@ class NestedTensor(object):
     def backward(self, *args, **kwargs):
         self.__apply(lambda x: x.backward(*args, **kwargs))
 
+    # The overhead on this function is very heavy
     def is_contiguous(self):
-        first_data_ptr = self.tensors[0].data_ptr()
+        first_data_ptr = self._tensors[0].data_ptr()
         current_offset = 0
-        is_cont = True
-        for tensor in self.tensors:
+        is_cont = hasattr(self, 'buffer_')
+        for tensor in self._tensors:
+            if not is_cont:
+                return False
             test_data_ptr = first_data_ptr + current_offset
             is_cont = is_cont and tensor.data_ptr() == test_data_ptr
             is_cont = is_cont and tensor.is_contiguous()
@@ -210,30 +231,26 @@ class NestedTensor(object):
 
     def contiguous(self):
         flat_tensors = []
-        for tensor in self.tensors:
+        for tensor in self._tensors:
             flat_tensors.append(tensor.view(-1))
         self.buffer_ = torch.cat(flat_tensors)
         current_offset = 0
-        for i in range(len(self.tensors)):
-            new_tensor = torch.empty_like(self.tensors[i], dtype=self.dtype, layout=self.layout, device=self.device)
+        for i in range(len(self._tensors)):
+            # This is an unnecessary allocation
+            new_tensor = torch.empty_like(self._tensors[i],
+                    dtype=self.dtype, layout=self.layout, device=self.device)
             with torch.no_grad():
                 new_tensor.set_(self.buffer_.storage(),
                                 storage_offset=current_offset,
-                                size=self.tensors[i].size(),
-                                stride=self.tensors[i].stride())
+                                size=self._tensors[i].size(),
+                                stride=self._tensors[i].stride())
             new_tensor.requires_grad_(self.requires_grad)
-            self.tensors[i] = new_tensor
-            current_offset += self.tensors[i].numel()
+            self._tensors[i] = new_tensor
+            current_offset += self._tensors[i].numel()
         return self
 
     def numel(self):
         all_numel = 0
-        for tensor in self.tensors:
+        for tensor in self._tensors:
             all_numel += tensor.numel()
         return all_numel
-
-    # This does allow the user to shoot herself in the foot
-    # by modifying shared memory, but then it also doesn't
-    # prevent her from being smart.
-    def buffer(self):
-        return self.buffer_

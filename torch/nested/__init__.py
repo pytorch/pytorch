@@ -19,7 +19,7 @@ def _nary_gen(out_dtype=None):
         func = args[1]
         inputs = args[2:]
         out = kwargs.get('out', None)
-        # NOTE: We are disabling broadcasting for now.
+        # NOTE: We are disabling broadcasting for now. These checks introduce a lot of overhead.
         for i in range(1, len(inputs)):
             for j in range(len(inputs[i])):
                 assert inputs[0]._tensors[j].size() == inputs[i]._tensors[j].size()
@@ -32,16 +32,16 @@ def _nary_gen(out_dtype=None):
                 out_tensors.append(out_tensor)
             return NestedTensor(out_tensors)
         else:
-            # NOTE: We are disabling broadcasting for now.
+            # NOTE: We are disabling broadcasting for now. These checks introduce a lot of overhead.
             for i in range(len(out)):
                 assert out._tensors[i].size() == inputs[0]._tensors[i].size()
             if out_dtype is not None:
                 out = out.to(out_dtype)
             if all(nested_tensor.is_contiguous() for nested_tensor in inputs):
-                func(*list(map(lambda x: x.buffer(), inputs)), out=out.buffer())
+                func(*list(map(lambda x: x.buffer_, inputs)), out=out.buffer_)
             else:
                 for i in range(len(inputs[0])):
-                    func(*list(map(lambda x: x.tensors[i], inputs)), out=out.tensors[i])
+                    func(*list(map(lambda x: x._tensors[i], inputs)), out=out._tensors[i])
             return out
     return _nary
 
