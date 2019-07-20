@@ -572,6 +572,17 @@ For loops over constant ``torch.nn.ModuleList``
           list for the type. For loops over a ``nn.ModuleList`` will unroll the body of the
           loop at compile time, with each member of the constant module list.
 
+Break and Continue
+
+    ::
+
+        for i in range(5):
+          if i == 1:
+            continue
+          if i == 3:
+            break
+          print(i)
+
 Return
     ``return a, b``
 

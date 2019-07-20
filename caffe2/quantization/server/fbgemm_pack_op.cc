@@ -591,7 +591,7 @@ TypeIdentifier Int8DNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId(
 
 TypeMeta Int8DNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
     const void* c) {
-  // There might be some problem if type if FC.
+  // There might be some problem if type is FC.
   // We should use a different function.
   const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
       reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
