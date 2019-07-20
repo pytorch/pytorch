@@ -25,5 +25,7 @@ _all__ = [
     'Observer', 'WeightObserver', 'observer', 'default_observer',
     'default_weight_observer',
     # QConfig
-    'QConfig', 'default_qconfig'
+    'QConfig', 'default_qconfig',
+    # Dynamic quantization utilities
+    'quantize_dynamic',
 ]

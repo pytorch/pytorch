@@ -208,6 +208,28 @@ DEFAULT_MODULE_MAPPING = {
     QuantStub: nnq.Quantize,
 }
 
+DEFAULT_DYNAMIC_MODULE_MAPPING = {
+    torch.nn.Linear: nnq.DynamicLinear
+}
+
+def quantize_dynamic(module, eval_fn, eval_args, qconfig_dict=None):
+    r"""Converts a float module to dynamic quantized module. Do dynamic training and output a quantized model
+    """
+    # module.eval()
+    eval_fn(module, eval_args)
+    propagate_qconfig(module, qconfig_dict)
+    add_observer(module)
+
+    print("After add_observer:")
+    print(module)
+    eval_fn(module, eval_args)
+    print("After eval_fn")
+
+    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING)
+    print("After convert:")
+    print(module)
+    return module
+
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
     parameters) to a quantized module.

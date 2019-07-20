@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn.quantized as nnq
 from torch.quantization import default_eval_fn, QConfig, default_qconfig, \
-    default_observer, quantize, prepare, convert
+    default_observer, quantize, prepare, convert, quantize_dynamic
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -12,6 +12,36 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 calib_data = [torch.rand(20, 5, dtype=torch.float) for _ in range(20)]
 
 class ModelQuantizeAPITest(QuantizationTestCase):
+
+    def test_single_layer_dynamic(self):
+        r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
+        to nnq.Linear which is the quantized version of the module
+        """
+        model = SingleLayerLinearModel()
+        qconfig_dict = {
+            '': default_qconfig
+        }
+
+        # model = prepare(model, qconfig_dict)
+        # # Check if observers and quant/dequant nodes are inserted
+        # self.checkNoPrepModules(model)
+        # self.checkHasPrepModules(model.fc1)
+        # self.checkObservers(model)
+
+        # default_eval_fn(model, calib_data)
+        # convert(model)
+
+        # def checkQuantized(model):
+        #     self.checkNoPrepModules(model)
+        #     self.checkHasPrepModules(model.fc1)
+        #     self.checkQuantizedLinear(model.fc1)
+        #     default_eval_fn(model, calib_data)
+
+        # checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(SingleLayerLinearModel(), default_eval_fn, calib_data, qconfig_dict)
+        # checkQuantized(model)
 
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
