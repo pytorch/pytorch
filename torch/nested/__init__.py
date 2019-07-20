@@ -54,3 +54,6 @@ torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor
 torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _nary_gen(torch.uint8))
 torch.nestedtensor = nested.make_nested_tensor
 torch.as_nestedtensor = nested.as_nestedtensor
+
+# nn monkey patching
+torch.nn.functional.conv2d = nested.orig_conv2d

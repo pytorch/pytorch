@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 # Set this flag to true, if you want to enable additional verifications.
 DEBUG = False
@@ -9,6 +10,20 @@ DEBUG = False
 
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
+
+orig_conv2d = F.conv2d
+
+def monkey_conv2d(input, weight, bias, stride,
+                  padding, dilation, groups):
+    if is_nested_tensor(input):
+        ret = []
+        for tensor in input._tensors:
+            ret.append(F.conv2d(tensor, weight, bias, stride,
+                     padding, dilation, groups))
+        return NestedTensor(ret)
+    else:
+        F.conv2d(input, weight, bias, stride,
+                 padding, dilation, groups)
 
 
 # Arguments match torch.tensor
