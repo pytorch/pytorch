@@ -156,6 +156,14 @@ Tensor quantized_max_pool2d(const Tensor& qx,
                             IntArrayRef stride,
                             IntArrayRef padding,
                             IntArrayRef dilation) {
+    TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+                (stride.empty() || stride.size() == 2) &&
+                (padding.size() == 1 || padding.size() == 2) &&
+                (dilation.size() == 1 || dilation.size() == 2),
+                "Can I haz proper args for the quantized_max_pool2d?");
+  if (stride.empty()) {
+    stride = kernel_size;
+  }
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d", [&]() {
     qy = q_maxpool_2d<scalar_t>(qx,

@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 
 import torch
 from torch._ops import ops
+from torch._jit_internal import List
 
 def _extend_to_list(val, length=2):
     if not isinstance(val, (tuple, list)):
@@ -80,5 +81,16 @@ def conv2d(input, weight, bias,
                                        stride, padding, dilation,
                                        groups, scale, zero_point)
 
-# MaxPool is in the native_functions.
-max_pool2d = torch.nn.functional.max_pool2d
+def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
+               ceil_mode=False, return_indices=False):
+    r"""Applies a 2D max pooling over an input signal composed of several
+    quantized input planes.
+
+    See :class:`~torch.nn.quantized.MaxPool2d` for details.
+    """
+    if return_indices:
+        raise NotImplementedError("return_indices is not yet implemented!")
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
+                                          dilation, ceil_mode, return_indices)

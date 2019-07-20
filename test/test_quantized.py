@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.jit
 import torch.nn.functional as F
+from torch.nn.modules.utils import _pair
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -70,6 +71,8 @@ class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
     def _pool_output_shape(self, input_size, kernel_size, padding, stride,
                            dilation, ceiling_mode=False):
+        if stride is None:
+            stride = kernel_size
         output_size = (
             (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
              + (stride - 1 if ceiling_mode else 0)) // stride + 1)
@@ -171,7 +174,7 @@ class TestQuantizedOps(TestCase):
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
            kernel=st.sampled_from((3, 5, 7)),
-           stride=st.integers(1, 2),
+           stride=st.sampled_from((None, 1, 2)),
            dilation=st.integers(1, 2),
            padding=st.integers(0, 2))
     def test_max_pool2d(self, X, kernel, stride, dilation, padding):
@@ -184,14 +187,10 @@ class TestQuantizedOps(TestCase):
         oW = self._pool_output_shape(iW, kernel, padding, stride, dilation)
         assume(oW > 0)
 
-        k = (kernel, kernel)
-        s = (stride, stride)
-        d = (dilation, dilation)
-        p = (padding, padding)
-
         a = torch.from_numpy(X)
-        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=k, stride=s,
-                                                padding=p, dilation=d)
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding, dilation=dilation)
         a_ref = torch.quantize_linear(a_pool, scale=scale,
                                       zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
@@ -199,15 +198,23 @@ class TestQuantizedOps(TestCase):
                                    dtype=torch_type)
 
         ops_under_test = {
-            "ops.quantized": torch.ops.quantized.max_pool2d,
             "torch": torch.max_pool2d,
             "nn.functional": torch.nn.functional.max_pool2d,
             "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d
         }
 
         for name, op in ops_under_test.items():
-            a_hat = op(qa, kernel_size=k, stride=s, padding=p, dilation=d)
-            self.assertEqual(a_ref, a_hat.dequantize())
+            a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                       dilation=dilation)
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             "{} results are off".format(name))
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.max_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding), dilation=_pair(dilation))
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         "torch.ops.quantized.max_pool2d results are off")
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
