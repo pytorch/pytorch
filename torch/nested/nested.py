@@ -44,7 +44,7 @@ def monkey_max_pool2d(*args, **kwargs):
         ret = []
         for tensor_ in args[0]._tensors:
             tensor = tensor_.view(*((1,) + tensor_.size()))
-            args_ = (tensor) + args[1:]
+            args_ = (tensor,) + args[1:]
             ret_ = orig_max_pool2d(*args_)
             ret.append(ret_.view(*(ret_.size()[1:])))
         return NestedTensor(ret)
@@ -212,6 +212,11 @@ class NestedTensor(object):
             result += "  " + tensor.__repr__() + ",\n"
         result += "])"
         return result
+
+    def __iadd__(self, other):
+        for i in range(len(self)):
+            self._tensors[i].add_(other._tensors[i])
+        return self
 
     def is_empty(self):
         # This condition can never be true, since we disallow an empty list for now.
