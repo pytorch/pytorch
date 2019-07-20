@@ -103,7 +103,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qY_hat = op(qX)
-            self.assertEqual(qY, qY_hat, "{} relu failed".format(name))
+            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
@@ -207,14 +207,14 @@ class TestQuantizedOps(TestCase):
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation)
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             "{} results are off".format(name))
+                             message="{} results are off".format(name))
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
             stride=_pair(kernel if stride is None else stride),
             padding=_pair(padding), dilation=_pair(dilation))
         self.assertEqual(a_ref, a_hat.dequantize(),
-                         "torch.ops.quantized.max_pool2d results are off")
+                         message="ops.quantized.max_pool2d results are off")
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
