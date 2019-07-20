@@ -22,7 +22,7 @@ def _nary_gen(out_dtype=None):
         # NOTE: We are disabling broadcasting for now. These checks introduce a lot of overhead.
         for i in range(1, len(inputs)):
             for j in range(len(inputs[i])):
-                assert inputs[0]._tensors[j].size() == inputs[i]._tensors[j].size()
+                assert inputs[0]._tensors[j].dim() == inputs[i]._tensors[j].dim()
         if out is None:
             out_tensors = []
             for i in range(len(inputs[0])):
@@ -34,7 +34,7 @@ def _nary_gen(out_dtype=None):
         else:
             # NOTE: We are disabling broadcasting for now. These checks introduce a lot of overhead.
             for i in range(len(out)):
-                assert out._tensors[i].size() == inputs[0]._tensors[i].size()
+                assert out._tensors[i].dim() == inputs[0]._tensors[i].dim()
             if out_dtype is not None:
                 out = out.to(out_dtype)
             if all(nested_tensor.is_contiguous() for nested_tensor in inputs):
@@ -56,4 +56,6 @@ torch.nestedtensor = nested.make_nested_tensor
 torch.as_nestedtensor = nested.as_nestedtensor
 
 # nn monkey patching
-torch.nn.functional.conv2d = nested.orig_conv2d
+torch.nn.functional.conv2d = nested.monkey_conv2d
+torch.nn.functional.relu = nested.monkey_relu
+torch.max_pool2d = nested.monkey_max_pool2d
