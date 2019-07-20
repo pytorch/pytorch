@@ -203,12 +203,33 @@ class TestQuantizedOps(TestCase):
         np.testing.assert_equal(a_pool.numpy(), a_pool_hat.numpy())
 
 
-@unittest.skipIf(
-    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized Linear requires FBGEMM. FBGEMM does not play"
-    " well with UBSAN at the moment, so we skip the test if"
-    " we are in a UBSAN environment.",
-)
+def _calculate_dynamic_qparams(X, dtype):
+    # max_min_ref
+    if dtype == torch.qint8:
+        qmin, qmax = -128, 127
+    else:  # dtype == torch.quint8
+        qmin, qmax = 0, 255
+    n_levels = 255.0
+    min_val = torch.min(X).item()
+    max_val = torch.max(X).item()
+    if min_val == max_val:
+        scale = 1.0
+        zero_point = 0
+    else:
+        scale = (max_val - min_val) / n_levels
+        scale = max(scale, torch.finfo(torch.float32).eps)
+        zero_point = qmin - round(min_val / scale)
+        zero_point = max(qmin, zero_point)
+        zero_point = min(qmax, zero_point)
+    return [scale, zero_point]
+
+
+# @unittest.skipIf(
+#     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+#     " Quantized Linear requires FBGEMM. FBGEMM does not play"
+#     " well with UBSAN at the moment, so we skip the test if"
+#     " we are in a UBSAN environment.",
+# )
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
     # @given(
@@ -223,7 +244,7 @@ class TestQuantizedLinear(unittest.TestCase):
         batch_size = 2
         input_channels = 2
         output_channels = 2
-        use_bias = False
+        use_bias = True
         use_relu = False
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         if use_relu:
@@ -269,22 +290,32 @@ class TestQuantizedLinear(unittest.TestCase):
             W_value_min,
             W_value_max,
         )
-
+        
         X_fp32 = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
         W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
         b_fp32 = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float) if use_bias else None
 
+        # X_fp32 = torch.rand(batch_size, input_channels).float()
+        # W_fp32 = torch.rand(output_channels, input_channels).float()
+        # b_fp32 = torch.rand(output_channels).float() if use_bias else None
+
+        X_scale, X_zp = _calculate_dynamic_qparams(X_fp32, torch.quint8)
+        W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
+
         X_q = torch.quantize_linear(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
         W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
         b_q = torch.quantize_linear(b_fp32, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
+        
+        # Reference quantized result from PyTorch Linear operator
+        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+        if use_relu:
+            Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+        # Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
 
-        # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
-        # Y_scale * 255 (max for uint8).
-        Y_scale = 125.1234
-        Y_zp = 5
+        Y_scale, Y_zp = _calculate_dynamic_qparams(Y_fp32_ref, torch.quint8)
 
         # Reference quantized Linear operator
-        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
+        Y_q_ref = qlinear_ref(X_q.int_repr().numpy(), X_scale, X_zp, W_q.int_repr().numpy(), W_scale, W_zp, b_q.int_repr().numpy() if use_bias else None, Y_scale, Y_zp)
         if use_relu:
             Y_q_ref[Y_q_ref < Y_zp] = Y_zp
 
@@ -301,22 +332,14 @@ class TestQuantizedLinear(unittest.TestCase):
         # # Assert equal
         # np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
         print(Y_fp32)
+        print(Y_fp32_ref)
+
         print(Y_q_ref_real)
         print(Y_q_real)
 
-        # # Reference quantized result from PyTorch Linear operator
-        # W_fp32 = W_q.dequantize().to(dtype=torch.float)
-        # X_fp32 = X_q.dequantize().to(dtype=torch.float)
-        # b_fp32 = b_q.dequantize().to(dtype=torch.float) if use_bias else None
-        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-        # if use_relu:
-        #     Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
-        print(Y_fp32_ref)
-        # Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
-
         # # Assert equal
         # np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
-        torch.testing.assert_allclose(Y_fp32, Y_fp32_ref, rtol=0.1, atol=1e-3)
+        torch.testing.assert_allclose(Y_fp32, Y_fp32_ref, rtol=0.1, atol=0.2)
 
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(
