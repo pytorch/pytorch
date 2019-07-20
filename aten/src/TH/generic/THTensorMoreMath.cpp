@@ -85,6 +85,9 @@ TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
     else if (*t_data < 0) *r__data = -1;
     else *r__data = 0;);
 #endif
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(r_, t);
+#endif
 }
 
 ptrdiff_t THTensor_(numel)(THTensor *t)

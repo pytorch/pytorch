@@ -86,11 +86,11 @@ void Variable::backward(
 
 void Variable::set_data(const at::Tensor &new_data) const {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
-  // from `new_data` to `var`. It requires that `new_data` has the same derived
-  // type of TensorImpl as `var`.
+  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
+  // tensor type.
   TORCH_CHECK(
-    _has_same_tensorimpl_type(*this, new_data),
-    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
+    _has_compatible_shallow_copy_type(*this, new_data),
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
 
   // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();

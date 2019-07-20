@@ -2079,6 +2079,7 @@ graph(%Ra, %Rb):
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
     def test_sparse_tensors_error(self):
+        @torch.jit.ignore
         def get_sparse():
             return torch.sparse.FloatTensor(2, 3)
 
@@ -2593,6 +2594,7 @@ graph(%Ra, %Rb):
                 z = x
             return x, z
 
+        @torch.jit.ignore
         def python_fn(x):
             return x + 10
 
@@ -2631,13 +2633,22 @@ graph(%Ra, %Rb):
         self.assertExpected(cu.foo.code)
 
     def test_import_method(self):
-        @torch.jit.script
-        def foo(x, y):
-            return 2 * x + y
+        with torch.jit._disable_emit_hooks():
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
 
-        r, _ = _jit_python_print(foo)
-        cu = torch.jit.CompilationUnit()._import(r, [])
-        self.assertExpected(cu.foo.code)
+                @torch.jit.script_method
+                def forward(self, x, y):
+                    return 2 * x + y
+
+            foo = Foo()
+            buffer = io.BytesIO()
+            torch.jit.save(foo, buffer)
+
+            buffer.seek(0)
+            foo_loaded = torch.jit.load(buffer)
+            self.assertExpected(foo_loaded.forward.code)
 
     def test_import_way_too_new(self):
         @torch.jit.script
@@ -3133,14 +3144,23 @@ def foo(x):
         mod.nan = float("nan")
 
         with torch.jit._disable_emit_hooks():
-            @torch.jit.script
-            def foo():
-                return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
 
-            pp, table = _jit_python_print(foo)
-            sm = torch.jit.CompilationUnit()._import(pp, table)
+                @torch.jit.script_method
+                def forward(self):
+                    return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
+
+            foo = Foo()
+            buffer = io.BytesIO()
+            torch.jit.save(foo, buffer)
+
+            buffer.seek(0)
+            foo_loaded = torch.jit.load(buffer)
+
             r = foo()
-            r2 = sm.foo()
+            r2 = foo_loaded()
             # use precise assert, we are checking floating point details
             self.assertTrue(r[:-1] == r2[:-1])
             self.assertTrue(math.isnan(r[-1]) and math.isnan(r2[-1]))
@@ -5940,7 +5960,6 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 x = self.conv(x)
-                return x
                 x = self.bn(x)
                 return F.relu(x, inplace=True)
 
@@ -5952,7 +5971,6 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 x = self.Conv2d_1a_3x3(x)
-                return x
                 return F.dropout(x, training=self.training)
 
         class EagerConv2d(torch.nn.Module):
@@ -5963,7 +5981,6 @@ a")
 
             def forward(self, x):
                 x = self.conv(x)
-                return x
                 x = self.bn(x)
                 return F.relu(x, inplace=True)
 
@@ -5974,7 +5991,6 @@ a")
 
             def forward(self, x):
                 x = self.Conv2d_1a_3x3(x)
-                return x
                 return F.dropout(x, training=self.training)
 
         script_input = torch.rand(4, 3, 299, 299)
@@ -6957,6 +6973,7 @@ a")
                 super(M, self).__init__(False)
                 self.value = 1
 
+            @torch.jit.ignore
             def foo(self):
                 return torch.ones(2, 2) + self.value
 
@@ -7648,6 +7665,7 @@ a")
                 def __init__(self):
                     super(M2, self).__init__(True)
 
+                    @torch.jit.ignore
                     def myfunc():
                         return torch.zeros(1, 2, 3), torch.zeros(1, 2, 3)
 
@@ -7814,6 +7832,7 @@ a")
 
     def test_python_call_non_tensor_wrong(self):
         with self.assertRaisesRegex(RuntimeError, r"but instead got value of type tuple"):
+            @torch.jit.ignore
             def foo():
                 # type: () -> Tensor
                 return ((3, 4),)  # noqa: T484
@@ -7970,6 +7989,32 @@ a")
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
 
+    def test_import_constants_not_specialized(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat(2 * [x], dim=0)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self, mod):
+                super(ScriptMod, self).__init__()
+                x = torch.zeros(1, 3)
+                mod_fn = lambda : mod(x)  # noqa: E731
+                self.mod = torch.jit.trace(mod_fn, tuple())
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.mod()
+
+        cm = ScriptMod(Mod())
+        # specialized tensor in graph
+        FileCheck().check("Double(1, 3)").run(cm.forward.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(cm, buffer)
+        buffer.seek(0)
+        # when tensor is loaded as constant it isnt specialized
+        cm_load = torch.jit.load(buffer)
+        FileCheck().check_not("Double(1, 3)").run(cm_load.forward.graph)
+
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
         def float_fn(x, y):
@@ -8082,6 +8127,7 @@ a")
         self.checkScript(fn_string, ("1", ("3", "4")), optimize=True)
 
     def test_type_annotations_varargs(self):
+        @torch.jit.ignore
         def fn_varargs(x, *args):
             return args[0] if args else x
 
@@ -8115,6 +8161,7 @@ a")
             with open(script_path, 'w') as f:
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
+            fn = torch.jit.ignore(fn)
 
             with self.assertRaisesRegex(RuntimeError, r"Expected a value of type 'Tensor' for argument"
                                                       r" '0' but instead found type 'Tuple\[Tensor,"):
@@ -8158,14 +8205,17 @@ a")
 
     def test_type_annotation_module(self):
         class BaseModule(torch.jit.ScriptModule):
+            @torch.jit.ignore
             def foo(self, x):
                 # type: (Tensor) -> Tensor
                 return x + 1
 
+            @torch.jit.ignore
             def bar(self, x, y):
                 # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
                 return x + y, y
 
+            @torch.jit.ignore
             def baz(self, x, y):
                 return x
 
@@ -8659,17 +8709,18 @@ a")
             example_outputs=outputs)
 
     def test_onnx_export_script_python_fail(self):
-        class ModuleToInline(torch.jit.ScriptModule):
+        class PythonModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(ModuleToInline, self).__init__()
+                super(PythonModule, self).__init__()
 
+            @torch.jit.ignore
             def forward(self, x):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
                 super(ModuleToExport, self).__init__()
-                self.mod = ModuleToInline()
+                self.mod = PythonModule()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -10011,16 +10062,6 @@ a")
                 return x
             ''')
 
-    def test_duplicate(self):
-        with self.assertRaisesRegex(RuntimeError, 'method \'test\' already defined'):
-            cu = torch.jit.CompilationUnit('''
-            def test():
-                return 1
-
-            def test():
-                return 2
-            ''')
-
     def test_call_ge(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected at most 1 arguments but found 3'):
             @_trace(torch.zeros(1, 2, 3))
@@ -10033,6 +10074,7 @@ a")
 
     def test_wrong_return_type(self):
         with self.assertRaisesRegex(RuntimeError, 'but instead got value of type tuple'):
+            @torch.jit.ignore
             def somefunc():
                 # type: () -> Tuple[Tuple[Tensor, Tensor]]
                 return torch.zeros(3, 4), torch.zeros(4, 5)  # noqa: T484
@@ -10354,6 +10396,7 @@ a")
         FileCheck().check_count("aten::mm", 2).check("aten::add").run(str(tm.graph))
 
     def test_call_python_fn_from_script_fn(self):
+        @torch.jit.ignore
         def python_fn(x):
             return torch.neg(x)
 
@@ -10444,6 +10487,7 @@ a")
                 return sm(x) + 1
 
     def test_call_python_fn_from_script_module(self):
+        @torch.jit.ignore
         def python_fn(x):
             return torch.neg(x)
 
@@ -10466,6 +10510,7 @@ a")
                 super(PythonMod, self).__init__()
                 self.param = torch.nn.Parameter(torch.rand(3, 5))
 
+            @torch.jit.ignore
             def forward(self, x):
                 return torch.mm(x, self.param)
 
@@ -10480,9 +10525,9 @@ a")
                 return self.pm(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        # Note: the call into PythonMod appears as ^<python_value>(). Parameters
+        # Note: the call into PythonMod appears as ^forward(). Parameters
         # are NOT inlined
-        FileCheck().check("aten::mm").check("python_value").run(str(sm.graph))
+        FileCheck().check("aten::mm").check("forward").run(str(sm.graph))
 
     def test_call_tracing_fn_from_script_module(self):
         @_trace(torch.rand(3, 3))
@@ -10763,7 +10808,7 @@ a")
 
     def test_unsupported_builtin_error(self):
         with self.assertRaisesRegex(RuntimeError,
-                                    "calling a python builtin_function_or_method which is currently not supported"):
+                                    "Python builtin <built-in function hypot> is currently"):
             @torch.jit.script
             def test_unsupported(a):
                 return math.hypot(a, 2.0)
@@ -11417,6 +11462,7 @@ a")
         self.checkScript(fn, (input,))
 
     def test_python_op_exception(self):
+        @torch.jit.ignore
         def python_op(x):
             raise Exception("bad!")
 
@@ -13099,13 +13145,6 @@ a")
 
 
 class TestRecursiveScript(JitTestCase):
-    """
-    Tests in this class are all run under `with torch.jit._enable_recursive_script()`
-    """
-    def run(self, result=None):
-        with torch.jit._enable_recursive_script():
-            super(TestRecursiveScript, self).run(result)
-
     def checkModule(self, nn_module, args):
         """
         Check that a nn.Module's results in Script mode match eager and that it
@@ -13123,6 +13162,18 @@ class TestRecursiveScript(JitTestCase):
         self.assertExportImportModule(sm, args)
 
         return sm
+
+    def test_module_name(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.x = 2
+
+            def forward(self, t):
+                return t + self.x
+
+        m = torch.jit.script(MyModule())
+        FileCheck().check("ClassType<MyModule>").run(m.graph)
 
     @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
@@ -13157,6 +13208,29 @@ class TestRecursiveScript(JitTestCase):
                 return z + 20 + y
 
         self.checkModule(M(), (torch.randn(2, 2),))
+
+    def test_class_compile(self):
+        def other_fn(a, b):
+            # type: (int, Tensor) -> Tensor
+            return a * b
+
+        class B(object):
+            def __init__(self, x):
+                self.x = 2
+
+            def helper(self, a):
+                return self.x + a + other_fn(self.x, a)
+
+
+        class N(torch.nn.Module):
+            def __init__(self):
+                super(N, self).__init__()
+
+            def forward(self, x):
+                b = B(x)
+                return b.helper(x)
+
+        self.checkModule(N(), (torch.randn(2, 2),))
 
     def test_error_stack(self):
         def d(x):
@@ -13217,9 +13291,13 @@ class TestRecursiveScript(JitTestCase):
             checker = FileCheck()
             checker.check("Expected a value of type 'int'")
             checker.check("return d(\"hello\")")
+            checker.check("\'b")
             checker.check("return c(x)")
+            checker.check("Submodule.forward\'")
             checker.check("return b(x)")
+            checker.check("M.some_method\'")
             checker.check("return y + self.submodule(y)")
+            checker.check("M.forward\'")
             checker.check("return self.some_method(x)")
             checker.run(str(e))
 
@@ -13320,6 +13398,17 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(M(), (torch.randn(5, 5),))
 
     def test_attributes(self):
+        @torch.jit.script
+        class Inner(object):
+            def __init__(self):
+                self.b = "a string"
+
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self):
+                self.a = 4
+                self.inner = Inner()
+
         untyped_values = (
             ('my_dict', {"I": "am", "a test": "test"}),
             ('my_float', 2.3),
@@ -13338,6 +13427,7 @@ class TestRecursiveScript(JitTestCase):
             ('my_empty_list', []),
             ('my_empty_dict', {}),
             ('my_none', None),
+            ('my_object', Foo()),
         )
 
         class M(torch.nn.Module):
@@ -13365,6 +13455,8 @@ class TestRecursiveScript(JitTestCase):
                     self.my_empty_list,
                     self.my_empty_dict,
                     self.my_none,
+                    self.my_object.a,
+                    self.my_object.inner.b,
                 )
 
         # TODO: as a followup, fix this test
@@ -13380,6 +13472,7 @@ class TestRecursiveScript(JitTestCase):
             'my_empty_list': List[int],
             'my_empty_dict': Dict[str, int],
             'my_none': Optional[int],
+            'my_object': Foo,
         }
 
         m = M()
@@ -14264,6 +14357,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
 # to resolve variable names. This function cannot be made local to
 # TestAutodiffSubgraphSlicing because those tests call torch.jit.script on functions
 # in a different scope than they are defined in.
+@torch.jit.ignore
 def pyfn(a, b):
     return a * b
 
@@ -15541,6 +15635,7 @@ class TestDataParallel(JitTestCase):
             self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
                                    nn.ReLU(), nn.Linear(2, 2))
 
+        @torch.jit.ignore
         def forward(self, input):
             return self.m(input)
 
@@ -15549,6 +15644,7 @@ class TestDataParallel(JitTestCase):
             super(TestDataParallel.Mpy1, self).__init__()
             self.m = block
 
+        @torch.jit.ignore
         def forward(self, input):
             return self.m.forward(input)
 
@@ -15558,6 +15654,7 @@ class TestDataParallel(JitTestCase):
             self.m1 = block1
             self.m2 = block2
 
+        @torch.jit.ignore
         def forward(self, input):
             x = self.m1.forward(input)
             return self.m2(x)
@@ -16570,6 +16667,7 @@ class TestDict(JitTestCase):
                 return x.get(y)  # noqa: T484
 
     def test_dict_to_python(self):
+        @torch.jit.ignore
         def python_lookup(my_dict, keys):
             # type: (Dict[str, int], List[str]) -> List[int]
             return [my_dict[k] for k in keys]

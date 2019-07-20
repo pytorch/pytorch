@@ -167,6 +167,26 @@ class TestAutograd(TestCase):
         MyFunction()(y).sum().backward()
         self.assertEqual(v.grad.data, torch.zeros(shape))
 
+    def test_legacy_function_deprecation_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+
+            # Trigger Warning
+            class MyFunction(Function):
+                def forward(self, x):
+                    return x
+
+                def backward(self, grad_output):
+                    return grad_output
+
+            MyFunction()(torch.randn(3, 4))
+
+            # Check warning occurs
+            self.assertIn(
+                'Legacy autograd function with non-static forward method is deprecated',
+                str(w[0]))
+
     def test_invalid_gradients(self):
         class MyFunction(Function):
             @staticmethod
@@ -504,31 +524,28 @@ class TestAutograd(TestCase):
         # WARNING: this is a test for autograd internals.
         # You should never have to use such things in your code.
         class NoneGradientFunction(Function):
-
-            def forward(self, x, y):
-                assert self.needs_input_grad[0]
-                assert not self.needs_input_grad[1]
+            @staticmethod
+            def forward(ctx, x, y):
+                assert ctx.needs_input_grad[0]
+                assert not ctx.needs_input_grad[1]
                 return x, y
 
-            def backward(self, grad_x, grad_y):
+            @staticmethod
+            def backward(ctx, grad_x, grad_y):
                 return grad_x, None
 
-        fn = NoneGradientFunction()
         was_called = [False]
 
-        def hook(grad_input, grad_output):
-            self.assertIsInstance(grad_input, tuple)
-            self.assertIsInstance(grad_output, tuple)
-            self.assertIsNotNone(grad_input[0])
-            self.assertIsNotNone(grad_input[1])
-            self.assertIsNotNone(grad_output[0])
-            self.assertIsNotNone(grad_output[1])
+        def hook(grad):
+            self.assertIsNotNone(grad)
             was_called[0] = True
-        fn.register_hook(hook)
 
         x = torch.randn(5, 5, requires_grad=True)
         y = torch.randn(5, 5)
-        sum(fn(x, y)).sum().backward()
+        rx, ry = NoneGradientFunction.apply(x, y)
+        rx.register_hook(hook)
+        ry.register_hook(hook)
+        sum(rx, ry).sum().backward()
         self.assertTrue(was_called[0])
 
     def test_retain_grad(self):
@@ -601,14 +618,15 @@ class TestAutograd(TestCase):
 
     def test_sparse_backward(self):
         class FixedGradientFunction(Function):
-            def __init__(self, grad):
-                self.grad = grad
-
-            def forward(self, x):
+            @staticmethod
+            def forward(ctx, x, grad_x):
+                ctx.save_for_backward(grad_x)
                 return x
 
-            def backward(self, grad_x):
-                return self.grad
+            @staticmethod
+            def backward(ctx, grad_x):
+                saved_grad_x, = ctx.saved_tensors
+                return saved_grad_x, None
 
         size = torch.Size([6, 3, 2])
         i1 = torch.LongTensor([
@@ -624,21 +642,19 @@ class TestAutograd(TestCase):
         v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
         sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
         dense_grad = torch.rand(size).double()
-        sparse_fn1 = FixedGradientFunction(sparse_grad1)
-        sparse_fn2 = FixedGradientFunction(sparse_grad2)
-        dense_fn = FixedGradientFunction(dense_grad)
+        fn = FixedGradientFunction
 
         # sparse first
         x = torch.randn(size, requires_grad=True)
-        (sparse_fn1(x) + dense_fn(x) + sparse_fn2(x)).sum().backward()
+        (fn.apply(x, sparse_grad1) + fn.apply(x, dense_grad) + fn.apply(x, sparse_grad2)).sum().backward()
         self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # dense first
         x = torch.randn(size, requires_grad=True)
-        (dense_fn(x) + sparse_fn1(x) + sparse_fn2(x)).sum().backward()
+        (fn.apply(x, dense_grad) + fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
         self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # sparse only
         x = torch.randn(size, requires_grad=True)
-        (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
+        (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     def test_sparse_mm_backward(self):
@@ -1913,18 +1929,19 @@ class TestAutograd(TestCase):
 
     def test_return_leaf(self):
         class Identity(Function):
-
-            def forward(self, a, b):
+            @staticmethod
+            def forward(ctx, a, b):
                 return a, a + b
 
-            def backward(self, grad_a, grad_b):
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
                 return grad_a + grad_b, grad_b
 
         hook_called = [False]
         x = torch.randn(5, 5, requires_grad=True)
         y = torch.randn(5, 5, requires_grad=True)
 
-        q, p = Identity()(x, y)
+        q, p = Identity.apply(x, y)
 
         # Make sure hooks only receive grad from usage of q, not x.
         def hook(grad):
@@ -1939,21 +1956,22 @@ class TestAutograd(TestCase):
 
     def test_return_leaf_inplace(self):
         class Inplace(InplaceFunction):
-
-            def forward(self, a, b):
-                self.mark_dirty(a)
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.mark_dirty(a)
                 return a.add_(b), b + 2
 
-            def backward(self, grad_a, grad_b):
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
                 return grad_a, grad_a + grad_b
 
         x = torch.randn(5, 5)
         y = torch.randn(5, 5, requires_grad=True)
 
         fn = Inplace(True)
-        q, p = fn(x, y)
+        q, p = fn.apply(x, y)
         self.assertIs(q, x)
-        self.assertIs(q.grad_fn, fn)
+        self.assertIs(q.grad_fn.__class__, fn._backward_cls)
         self.assertTrue(q.requires_grad)
         q.sum().backward()
         self.assertEqual(y.grad.data, torch.ones(5, 5))
@@ -2052,33 +2070,35 @@ class TestAutograd(TestCase):
         test_case = self
 
         class MyFn(Function):
-
-            def forward(self, input):
-                self.save_for_backward(None, input, None)
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(None, input, None)
                 return input * input
 
-            def backward(self, grad_output):
-                n1, input, n2 = self.saved_tensors
+            @staticmethod
+            def backward(ctx, grad_output):
+                n1, input, n2 = ctx.saved_tensors
                 test_case.assertIsNone(n1)
                 test_case.assertIsNone(n2)
                 return 2 * input * grad_output
 
         x = torch.randn(5, 5, requires_grad=True)
-        y = MyFn()(x)
+        y = MyFn.apply(x)
         y.sum().backward()
         self.assertEqual(x.grad, 2 * x)
 
     def test_too_many_grads(self):
         class MyFn(Function):
-
-            def forward(self, input):
+            @staticmethod
+            def forward(ctx, input):
                 return input
 
-            def backward(self, grad_output):
+            @staticmethod
+            def backward(ctx, grad_output):
                 return grad_output, None, None
 
         x = torch.randn(5, 5, requires_grad=True)
-        y = MyFn()(x)
+        y = MyFn.apply(x)
         y.sum().backward()
         self.assertEqual(x.grad, torch.ones_like(x))
 
@@ -2098,29 +2118,31 @@ class TestAutograd(TestCase):
 
     def test_dep_nograd(self):
         class F1(Function):
-
-            def forward(self, input):
+            @staticmethod
+            def forward(ctx, input):
                 out = torch.randn(input.size())
-                self.mark_non_differentiable(out)
+                ctx.mark_non_differentiable(out)
                 return input, out
 
-            def backward(self, grad_output, ignored):
+            @staticmethod
+            def backward(ctx, grad_output, ignored):
                 return grad_output
 
         class F2(Function):
-
-            def forward(self, input, ignored):
+            @staticmethod
+            def forward(ctx, input, ignored):
                 return input
 
-            def backward(self, grad_output):
+            @staticmethod
+            def backward(ctx, grad_output):
                 return grad_output, None
 
         x = torch.randn(5, requires_grad=True)
-        a, b = F1()(x)
+        a, b = F1.apply(x)
         b = b + 1  # separate F1 from F2 by another op
         self.assertTrue(a.requires_grad)
         self.assertFalse(b.requires_grad)
-        c = F2()(a, b)
+        c = F2.apply(a, b)
         c.backward(torch.ones(c.size()))
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
@@ -3167,7 +3189,7 @@ class TestAutograd(TestCase):
         # of type `SparseTensorImpl`.
         x = torch.randn(1, 2)
         x_s = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
-        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+        with self.assertRaisesRegex(RuntimeError, 'incompatible tensor type'):
             x.data = x_s
 
     def test_set_data_preserve_pyobj(self):
@@ -3219,6 +3241,15 @@ for shape in [(1,), ()]:
         # This will cause stack overflow if reentrant calls are handled
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
+        
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_advanced_indexing_backwards_large(self):
+        # See https://github.com/pytorch/pytorch/issues/22843
+        n = (1 << 16)
+        x = torch.rand(n, 1, device='cuda', requires_grad=True)
+        a = x[:, [0]]
+        a.sum().backward()
+        self.assertEqual(x.grad, torch.ones(n, 1, device='cuda'))
 
     def test_reentrant_priority(self):
         order = []

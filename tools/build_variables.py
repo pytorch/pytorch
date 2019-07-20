@@ -141,7 +141,6 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/codegen.cpp",
     "torch/csrc/jit/fuser/fallback.cpp",
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
-    "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
     "test/cpp/jit/test.cpp",
@@ -151,7 +150,6 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
-    "torch/csrc/jit/fuser/cuda/thnvrtc.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp"
 ]
@@ -355,7 +353,6 @@ def add_torch_libs():
         # TODO: putting USE_CUDA in propagated_pp_flags is error-prone
         propagated_pp_flags=propagated_pp_flags + [
             "-DUSE_CUDA",
-            "-DUSE_DIRECT_NVRTC",
         ],
         deps=[
             ":generated-autograd-headers",

@@ -435,8 +435,9 @@ class JitTestCase(TestCase):
 
     def assertExportImportModule(self, m, inputs):
         m_import = self.getExportImportCopy(m)
-        self.assertEqual(self.runAndSaveRNG(m, inputs),
-                         self.runAndSaveRNG(m_import, inputs))
+        a = self.runAndSaveRNG(m, inputs)
+        b = self.runAndSaveRNG(m_import, inputs)
+        self.assertEqual(a, b)
 
     def runAndSaveRNG(self, func, inputs, kwargs=None):
         kwargs = kwargs if kwargs else {}
