@@ -2986,9 +2986,10 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_view
-    CUDA: legacy::cuda::_th_view
+    CPU: view
+    CUDA: view
     MkldnnCPU: mkldnn_view
+    QuantizedCPU: view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
