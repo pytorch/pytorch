@@ -154,7 +154,6 @@ _(aten, _thnn_fused_gru_cell) \
 _(aten, _thnn_fused_gru_cell_backward) \
 _(aten, _thnn_fused_lstm_cell) \
 _(aten, _thnn_fused_lstm_cell_backward) \
-_(aten, _trilinear) \
 _(aten, _trunc) \
 _(aten, _unique) \
 _(aten, _unique_dim) \
