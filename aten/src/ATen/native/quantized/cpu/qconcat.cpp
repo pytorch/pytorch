@@ -29,6 +29,8 @@ Tensor quantized_cat(const std::vector<Tensor>& qxs, int64_t axis,
   xs.reserve(qxs.size());
   for (const auto& qx: qxs) {
     TORCH_CHECK(x_dtype == qx.scalar_type(), "All dtypes must be the same.");
+    TORCH_CHECK(x_qscheme == qx.qscheme(),
+                "Quantization schemes must be the same.");
     xs.push_back(qx.dequantize());
   }
   const Tensor y = at::cat(xs, axis);
