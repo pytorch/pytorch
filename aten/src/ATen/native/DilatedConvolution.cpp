@@ -202,7 +202,7 @@ void conv_dilated_all_cpu_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "conv_dilated<>", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "conv_dilated<>", [&] {
     // For each elt in batch, do:
     for (int elt = 0; elt < batchSize; elt++) {
       // Matrix multiply per output:

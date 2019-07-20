@@ -332,7 +332,8 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
   const auto name = QualifiedName(module.name(), "forward");
-  module.module_object()->compilation_unit()->create_function(name, graph);
+  auto method = module.class_compilation_unit()->create_function(name, graph);
+  module.type()->addMethod(method);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -346,7 +347,7 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module>(m, "ScriptModule")
-      .def(py::init<std::string>())
+      .def(py::init<std::string, std::shared_ptr<CompilationUnit>>())
       .def(
           "save",
           [](Module& m,
@@ -524,8 +525,9 @@ void initJitScriptBindings(PyObject* module) {
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, &self);
             const auto method_name = QualifiedName(self.name(), name);
-            self.module_object()->compilation_unit()->create_function(
+            auto fn = self.class_compilation_unit()->create_function(
                 method_name, graph);
+            self.type()->addMethod(fn);
             didFinishEmitModule(self);
           })
       .def(
@@ -547,8 +549,7 @@ void initJitScriptBindings(PyObject* module) {
             PythonPrint(
                 ss,
                 source_ranges,
-                *self.class_compilation_unit(),
-                true,
+                self,
                 tensors,
                 classes,
                 false);
@@ -654,9 +655,13 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             return self.function_->get_executor().getDebugState();
           })
-      .def_property_readonly("name", [](const StrongFunctionPtr& self) {
-        return self.function_->name();
-      });
+      .def_property_readonly(
+          "name",
+          [](const StrongFunctionPtr& self) { return self.function_->name(); })
+      .def_property_readonly(
+          "qualified_name", [](const StrongFunctionPtr& self) {
+            return self.function_->qualname().qualifiedName();
+          });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
@@ -681,12 +686,6 @@ void initJitScriptBindings(PyObject* module) {
             ss, source_ranges, self.function(), true, tensors, classes, false);
         return ss.str();
       });
-  m.def(
-      "_jit_recursive_script",
-      []() { return getRecursiveScriptMode(); });
-  m.def(
-      "_jit_recursive_script",
-      [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
       [](const std::string& qualname,
@@ -722,10 +721,10 @@ void initJitScriptBindings(PyObject* module) {
         auto typed_inputs = toTypedStack(input_tuple);
         auto graph = tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, force_outplace);
-        // TODO this should go in the global Python CU
-        auto cu = std::make_shared<CompilationUnit>();
-        const auto name = c10::QualifiedName(qualname);
-        auto result = cu->create_function(std::move(name), std::move(graph));
+        auto cu = get_python_cu();
+        auto name = c10::QualifiedName(qualname);
+        auto result = cu->create_function(
+            std::move(name), std::move(graph), /*shouldMangle=*/true);
         StrongFunctionPtr ret(std::move(cu), result);
         didFinishEmitFunction(ret);
         return ret;
@@ -790,12 +789,11 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_import_functions",
-      [](CompilationUnit& cu,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& src,
          const std::vector<at::Tensor>& constant_table) {
         import_functions(
             c10::nullopt,
-            *get_python_cu(),
             cu,
             std::make_shared<Source>(src),
             constant_table,
@@ -827,8 +825,7 @@ void initJitScriptBindings(PyObject* module) {
       PythonPrint(
           ss,
           source_ranges,
-          *self->class_compilation_unit(),
-          true,
+          *self,
           constants,
           classes,
           true);

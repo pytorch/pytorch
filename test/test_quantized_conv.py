@@ -6,36 +6,50 @@ from __future__ import unicode_literals
 import numpy as np
 import torch
 import torch.nn.quantized.functional as qF
-from torch.nn.quantized.modules.conv import _conv_output_shape
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import qtensors_conv
+import hypothesis_utils as hu
 
+from common_quantized import _conv_output_shape
 from common_utils import TestCase, run_tests
 
 
 class FunctionalAPITest(TestCase):
-    @given(Q=qtensors_conv(min_batch=1, max_batch=3,
-                           min_in_channels=1, max_in_channels=7,
-                           min_out_channels=1, max_out_channels=7,
-                           H_range=(6, 12), W_range=(6, 12),
-                           kH_range=(3, 5), kW_range=(3, 5),
-                           dtypes=((torch.quint8, 0),),
-                           max_groups=4),
+    @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
+                              min_in_channels=1, max_in_channels=7,
+                              min_out_channels=1, max_out_channels=7,
+                              H_range=(6, 12), W_range=(6, 12),
+                              kH_range=(3, 5), kW_range=(3, 5),
+                              max_groups=4,
+                              qparams=[hu.qparams(dtypes=torch.quint8,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0),
+                                       hu.qparams(dtypes=torch.qint8,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0),
+                                       hu.qparams(dtypes=torch.qint32,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0)]),
            padH=st.integers(1, 3), padW=st.integers(1, 3),
            sH=st.integers(1, 3), sW=st.integers(1, 3),
            dH=st.integers(1, 2), dW=st.integers(1, 2),
            prepacked=st.booleans())
-    def test_conv_api(self, Q, padH, padW, sH, sW, dH, dW, prepacked):
+    def test_conv_api(self, X, padH, padW, sH, sW, dH, dW, prepacked):
         """Tests the correctness of the conv functional.
 
         The correctness is defined by the behavior being similar to the
         `quantized._ops` implementation.
         """
-        # Random iunputs
-        X, (scale, zero_point), (qmin, qmax), torch_type = Q
+        # Random inputs
+        # X, (scale, zero_point, torch_type) = X
         (inputs, filters, bias, groups) = X
+        inputs, (inputs_scale, inputs_zero_point, inputs_qtype) = inputs
+        filters, (filters_scale, filters_zero_point, filters_qtype) = filters
+        bias, (bias_scale, bias_zero_point, bias_qtype) = bias
+
+        scale, zero_point = inputs_scale, inputs_zero_point
+        torch_type = inputs_qtype
 
         iC, oC = inputs.shape[1], filters.shape[0]
 
@@ -61,11 +75,14 @@ class FunctionalAPITest(TestCase):
         i_NHWC = inputs.permute([0, 2, 3, 1]).contiguous()
         w_RSCK = filters.permute([0, 2, 3, 1]).contiguous()
 
-        q_inputs = torch.quantize_linear(i_NHWC, scale, zero_point, torch.quint8)
-        q_filters = torch.quantize_linear(w_RSCK, scale, zero_point, torch.qint8)
+        q_inputs = torch.quantize_linear(i_NHWC, inputs_scale, inputs_zero_point,
+                                         inputs_qtype)
+        q_filters = torch.quantize_linear(w_RSCK, filters_scale,
+                                          filters_zero_point, filters_qtype)
         q_filters_ref = torch.ops.quantized.fbgemm_conv_prepack(q_filters,
                                                                 groups)
-        q_bias = torch.quantize_linear(bias, scale, zero_point, torch.qint32)
+        q_bias = torch.quantize_linear(bias, bias_scale, bias_zero_point,
+                                       bias_qtype)
 
         # Reference op
         ref_op = torch.ops.quantized.fbgemm_conv2d

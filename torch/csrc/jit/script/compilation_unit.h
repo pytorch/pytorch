@@ -100,7 +100,11 @@ struct TORCH_API CompilationUnit {
 
   Function* create_function(
       c10::QualifiedName name,
-      std::shared_ptr<Graph> graph) {
+      std::shared_ptr<Graph> graph,
+      bool shouldMangle = false) {
+    if (shouldMangle) {
+      name = c10::QualifiedName(name.prefix(), mangle(name.name()));
+    }
     auto fn = torch::make_unique<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
     auto ret = fn.get();
