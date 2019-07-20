@@ -660,7 +660,11 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch):
     # Replace the extern __shared__
     output_source = replace_extern_shared(output_source)
 
-    if not os.path.exists(fout_path) or open(fout_path, 'r').read() != output_source:
+    do_write = True
+    if os.path.exists(fout_path):
+        with open(fout_path, 'r') as fout_old:
+            do_write = fout_old.read() != output_source
+    if do_write:
         with open(fout_path, 'w') as fout:
             fout.write(output_source)
         return "ok"
