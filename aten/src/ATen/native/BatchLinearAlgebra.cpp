@@ -622,8 +622,9 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  bool inplace = checkTrilTriuBatchContiguous(self);
-  Tensor self_c = inplace ? self : self.contiguous();
+  bool inplace;
+  Tensor self_c;
+  std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self);
   Tensor result = inplace ? self : at::empty_like(self);
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "tril", [&]{
     apply_triu_tril<scalar_t, false>(result, self_c, inplace, k);
@@ -639,7 +640,8 @@ Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
+  Tensor self_c;
+  std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self);
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "tril", [&]{
     apply_triu_tril<scalar_t, false>(result, self_c, false, k);
   });
@@ -656,8 +658,9 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  bool inplace = checkTrilTriuBatchContiguous(self);
-  Tensor self_c = inplace ? self : self.contiguous();
+  bool inplace;
+  Tensor self_c;
+  std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self);
   Tensor result = inplace ? self : at::empty_like(self);
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "triu", [&]{
     apply_triu_tril<scalar_t, true>(result, self_c, inplace, k);
@@ -673,7 +676,8 @@ Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
+  Tensor self_c;
+  std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self);
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "triu", [&]{
     apply_triu_tril<scalar_t, true>(result, self_c, false, k);
   });

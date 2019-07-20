@@ -1083,9 +1083,10 @@ RegisterOperators reg(
          [](const Node* node) {
            const auto type = node->output()->type()->expect<ClassType>();
            const size_t numAttrs = type->numAttributes();
-           return [type, numAttrs](Stack& stack) {
+           auto cu = type->compilation_unit();
+           return [cu, type, numAttrs](Stack& stack) {
              auto userObj = c10::ivalue::Object::create(
-                 c10::StrongTypePtr(type->compilation_unit(), type), numAttrs);
+                 c10::StrongTypePtr(cu, type), numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };
@@ -2438,7 +2439,7 @@ RegisterOperators reg2({
           " key, t default_value) -> t(*)",                                   \
           dictGet<true>),                                                     \
       Operator(                                                               \
-          "aten::setdefault(Dict(" key_type ", t) self, " key_type            \
+          "aten::setdefault(Dict(" key_type ", t)(a!) self, " key_type        \
           " key, t default_value) -> t(*)",                                   \
           dictSetDefault),                                                    \
       Operator(                                                               \

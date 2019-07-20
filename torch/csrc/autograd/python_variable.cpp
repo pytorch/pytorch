@@ -113,6 +113,19 @@ static int THPVariable_clear(THPVariable *self)
     if (auto grad_acc = self->cdata.try_get_grad_accumulator()) {
       grad_acc->pre_hooks().clear();
     }
+    // We must clear the pyobj field in the base C++ Variable, to ensure
+    // that if we attempt to pass the Variable to Python, we don't
+    // attempt to reuse the (now-dead) PyObject.
+    //
+    // One non-obvious consequence of this: if you have a tensor x, you
+    // take its id(), and then you let it become dead in Python, if you
+    // get another reference to the tensor in Python later (because you
+    // passed it from C++ to Python), you'll get a *different* id() the
+    // second time around.  So you better make sure that if you're using
+    // id() to keep track of Tensors, you better make sure their Python
+    // objects stay live, buster!  See
+    // https://github.com/pytorch/pytorch/issues/22884 for an example of
+    // this actually showing up.
     self->cdata.set_pyobj(nullptr);
   }
   self->cdata.reset();
