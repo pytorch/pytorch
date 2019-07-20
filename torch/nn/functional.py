@@ -45,36 +45,97 @@ Examples::
     >>> F.conv1d(inputs, filters)
 """)
 
-conv2d = _add_docstr(torch.conv2d, r"""
-conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+@weak_script
+def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList4[int], BroadcastingList4[int], BroadcastingList4[int], int) -> Tensor  # noqa
+    r"""
+    conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
-Applies a 2D convolution over an input image composed of several input
-planes.
+    Applies a 2D convolution over an input image composed of several input
+    planes.
 
-See :class:`~torch.nn.Conv2d` for details and output shape.
+    See :class:`~torch.nn.Conv2d` for details and output shape.
 
-.. include:: cudnn_deterministic.rst
+    .. include:: cudnn_deterministic.rst
 
-Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
-    bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
-    stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
-      single number or a tuple `(padH, padW)`. Default: 0
-    dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dH, dW)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
-      number of groups. Default: 1
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+        weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
+        bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
+        stride: the stride of the convolving kernel. Can be a single number or a
+        tuple `(sH, sW)`. Default: 1
+        padding: implicit paddings on both sides of the input. Can be a
+        single number or a tuple `(padH, padW)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+        a tuple `(dH, dW)`. Default: 1
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+        number of groups. Default: 1
 
-Examples::
+    Examples::
 
-    >>> # With square kernels and equal stride
-    >>> filters = torch.randn(8,4,3,3)
-    >>> inputs = torch.randn(1,4,5,5)
-    >>> F.conv2d(inputs, filters, padding=1)
-""")  # noqa: E501
+        >>> # With square kernels and equal stride
+        >>> filters = torch.randn(8,4,3,3)
+        >>> inputs = torch.randn(1,4,5,5)
+        >>> F.conv2d(inputs, filters, padding=1)
+    """
+    return torch.conv2d(input, weight, bias, stride, padding, dilation, groups)
+
+def _compute_padding_same(input_size, dim, weight, stride, dilation):
+    # type: (List[int], int, Tensor, List[int], List[int]) -> int
+    # When calculating convolutions, we can examine each dimension independently
+    input_size = input_size[dim + 2] # Ignoring batch size + channel dims
+    filter_size = weight.size(dim + 2)
+    # Here we calculate the equivalent filter size factoring in dilation
+    effective_filter_size = (filter_size - 1) * dilation[dim] + 1
+    out_size = math.ceil(input_size / stride[dim])
+    # We calculate the starting position of the last filter
+    last_start = (out_size - 1) * stride[dim]
+    # The final necessary input size is equal to the starting position of the last filter +
+    # the effective filter size. Padding is equal to the difference
+    total_padding = max(0, last_start + effective_filter_size - input_size)
+    return total_padding
+
+@weak_script
+def conv2d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList4[int], str, BroadcastingList4[int], int) -> Tensor  # noqa
+    r"""
+    conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+
+    Applies a 2D convolution over an input image composed of several input
+    planes.
+
+    See :class:`~torch.nn.Conv2d` for details and output shape.
+
+    .. include:: cudnn_deterministic.rst
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+        weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
+        bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
+        stride: the stride of the convolving kernel. Can be a single number or a
+        tuple `(sH, sW)`. Default: 1
+        padding: implicit paddings on both sides of the input. Can be a
+        single number or a tuple `(padH, padW)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+        a tuple `(dH, dW)`. Default: 1
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+        number of groups. Default: 1
+
+    Examples::
+
+        >>> # With square kernels and equal stride
+        >>> filters = torch.randn(8,4,3,3)
+        >>> inputs = torch.randn(1,4,5,5)
+        >>> F.conv2d(inputs, filters, padding=1)
+    """
+    stride = _pair(stride)
+    dilation = _pair(dilation)
+    padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
+    padding_cols = _compute_padding_same(input.size(), 1, weight, stride, dilation)
+    final_padding = [padding_rows//2, (padding_rows+1)//2,
+                     padding_cols//2, (padding_cols+1)//2]
+    return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
+
 
 conv3d = _add_docstr(torch.conv3d, r"""
 conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor

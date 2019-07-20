@@ -327,7 +327,7 @@ class Conv2d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
-        padding = True if isinstance(padding, bool) else _pair(padding)
+        padding = padding if isinstance(padding, str) else _pair(padding)
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -335,12 +335,12 @@ class Conv2d(_ConvNd):
 
     @weak_script_method
     def forward(self, input):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[1] + 1) // 2, self.padding[1] // 2,
-                                (self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
-                            self.weight, self.bias, self.stride,
-                            _pair(0), self.dilation, self.groups)
+        # if self.padding_mode == 'circular':
+        #     expanded_padding = ((self.padding[1] + 1) // 2, self.padding[1] // 2,
+        #                         (self.padding[0] + 1) // 2, self.padding[0] // 2)
+        #     return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
+        #                     self.weight, self.bias, self.stride,
+        #                     _pair(0), self.dilation, self.groups)
         return F.conv2d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 

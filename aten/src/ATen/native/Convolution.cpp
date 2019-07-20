@@ -444,49 +444,36 @@ at::Tensor _convolution(
   int64_t dim = k - 2;
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
-  std::cout<<padding_.size()<<' '<<dim*2<<std::endl;
+  std::vector<int64_t> new_padding = padding_.vec();
   if (padding_.size() == size_t(dim) * 2) {
-    std::vector<int64_t> diffs;
+    std::vector<int64_t> asymmetric;
     bool is_uneven = false;
     for (size_t i = 0; i < padding_.size(); i += 2) {
-      diffs.push_back(padding_[i] - padding_[i + 1]);
-      if (diffs.back() != 0) {
+      if (padding_[i] > padding_[i+1]) {
+        asymmetric.push_back(0);
+        asymmetric.push_back(padding_[i] - padding_[i+1]);
         is_uneven = true;
+      } else if (padding_[i] < padding_[i+1]) {
+        asymmetric.push_back(padding_[i+1] - padding_[i]);
+        asymmetric.push_back(0);
+        is_uneven = true;
+      } else {
+        asymmetric.push_back(0);
+        asymmetric.push_back(0);
       }
     }
-    if (!is_uneven) {
-      std::vector<int64_t> new_padding;
-      std::cout << "458: ";
-      for (size_t i = 0; i < padding_.size(); i += 2) {
-        new_padding.push_back(padding_[i]);
-        std::cout << new_padding.back() << ',' << padding_[i] << ' ';
-      }
-      std::cout << std::endl;
-      padding_ = IntArrayRef{new_padding};
-      std::cout<<"467: ";
-      for (int i=0; i<padding_.size(); i++) {
-        std::cout<<padding_[i]<<' ';
-      }
-      std::cout<<std::endl;
-      for (int i=0; i<padding_.size(); i++) {
-        std::cout<<padding_[i]<<' ';
-      }
-      std::cout<<std::endl;
+    std::reverse(asymmetric.begin(), asymmetric.end());
+    if (is_uneven) {
+      input = at::constant_pad_nd(input, IntArrayRef{asymmetric});
+    }
+    new_padding.clear();
+    for (size_t i = 0; i < padding_.size(); i += 2) {
+      new_padding.push_back(std::min(padding_[i], padding_[i+1]));
     }
   }
-  std::cout<<"474: ";
-  for (int i=0; i<padding_.size(); i++) {
-    std::cout<<padding_[i]<<' ';
-  }
-  std::cout<<std::endl;
   ConvParams params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
-  params.padding = expand_param_if_needed(padding_, "padding", dim);
-  std::cout<<"470: ";
-  for (int i=0; i<params.padding.size(); i++) {
-    std::cout<<params.padding[i]<<' ';
-  }
-  std::cout<<std::endl;
+  params.padding = expand_param_if_needed(IntArrayRef{new_padding}, "padding", dim);
   params.dilation = expand_param_if_needed(dilation_, "dilation", dim);
   params.transposed = transposed_;
   params.output_padding = expand_param_if_needed(output_padding_, "output_padding", dim);
