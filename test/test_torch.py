@@ -2037,9 +2037,24 @@ class _TestTorchMixin(object):
         a, b = cast(a), cast(b)
         LU_data, pivots, info = a.lu(get_infos=True, pivot=pivot)
         self.assertEqual(info.abs().sum(), 0)
-        x = torch.lu_solve(b, LU_data, pivots)
-        b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
-        self.assertEqual(b_, b)
+        with warnings.catch_warnings(record=True) as w:
+            x = torch.lu_solve(b, LU_data, pivots)
+            b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
+            self.assertEqual(b_, b)
+            # Warning related check
+            self.assertEqual(len(w), 1)
+            self.assertTrue("Passing RHS tensor with number of dimensions = 2 is deprecated" in str(w[-1].message))
+
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+        for b in [2, 5]:
+            for k, n in zip([2, 3, 5], [3, 5, 7]):
+                A = cast(random_fullrank_matrix_distinct_singular_value(n, b))
+                b = cast(torch.randn(b, n, k))
+                LU_data, LU_pivots, infos = A.lu(get_infos=True)
+                self.assertEqual(infos, torch.zeros_like(infos))
+                x = torch.lu_solve(b, LU_data, LU_pivots)
+                b_ = torch.matmul(A, x)
+                self.assertEqual(b_, b)
 
     @skipIfNoLapack
     def test_lu_solve(self):

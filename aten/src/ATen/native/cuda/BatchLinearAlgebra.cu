@@ -1450,9 +1450,9 @@ AT_ERROR("lu_solve: MAGMA library not found in "
     scalar_t** lu_array;
     scalar_t** b_array;
 
-    ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size, b);
-    ALLOCATE_ARRAY(lu_array, scalar_t*, batch_size, b);
-    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
+    ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
+    ALLOCATE_ARRAY(lu_array, scalar_t*, batch_size);
+    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
 
     for (int64_t i = 0; i < batch_size; i++) {
       pivots_array[i] = &pivots_data[i * pivots_stride];

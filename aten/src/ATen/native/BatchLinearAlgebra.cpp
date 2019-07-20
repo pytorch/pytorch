@@ -1137,7 +1137,6 @@ Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Ten
   return self_working_copy;
 }
 
-// Supports arbitrary batch dimensions for self and LU_data (implicity LU_pivots also)
 Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
   TORCH_CHECK(self.dim() == 3 || self.dim() == 2,
               "b should have 2 or 3 dimensions, but has ", self.dim(), " dimensions instead");

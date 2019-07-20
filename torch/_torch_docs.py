@@ -2657,8 +2657,7 @@ Returns the LU solve of the linear system :math:`Ax = b` using the partially piv
 LU factorization of A from :meth:`torch.lu`.
 
 Arguments:
-    b (Tensor): the RHS tensor of size :math:`(b, m, *)`, where :math:`*` is a zero or one
-                right hand side dimension
+    b (Tensor): the RHS tensor of size :math:`(b, m, k)`
     LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(b, m, m)`
     LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(b, m)`
     out (Tensor, optional): the optional output tensor
