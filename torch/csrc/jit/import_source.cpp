@@ -96,6 +96,10 @@ struct ConstantTableValue : public SugaredValue {
                              << constants_.size() << " entries)";
     }
     Value* value = m.graph()->insertConstant(constants_[offset], nullptr, loc);
+
+    // specializing tensor type on compilation messes up typing relations
+    value->setType(unshapedType(value->type()));
+
     return std::make_shared<SimpleValue>(value);
   }
 

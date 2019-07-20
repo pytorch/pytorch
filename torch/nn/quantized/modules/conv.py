@@ -6,18 +6,12 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import math
-
 import torch
 from torch._ops import ops
 from torch.nn.modules.conv import _ConvNd
+from torch.nn import Conv2d as NNConv2d
+# from torch.nn.qat import Conv2d as QATConv2d
 from torch.nn.modules.utils import _pair
-
-"""Computes the output shape given convolution parameters."""
-def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
-                       output_padding=0):
-    return math.floor((input_size + 2 * padding - kernel_size - (kernel_size - 1)
-                      * (dilation - 1)) / stride) + 2 * output_padding + 1
 
 
 class Conv2d(_ConvNd):
@@ -57,8 +51,8 @@ class Conv2d(_ConvNd):
         self.register_buffer('_packed_weight',
                              torch.ops.quantized.fbgemm_conv_prepack(qweight, self.groups))
         self.register_buffer('bias', qbias)
-        self.register_buffer('_scale', torch.tensor([1.0], dtype=torch.double))
-        self.register_buffer('_zero_point', torch.tensor([0], dtype=torch.long))
+        self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
+        self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
 
     @property
     def weight(self):
@@ -90,13 +84,6 @@ class Conv2d(_ConvNd):
         else:
             self._zero_point = torch.Tensor([zp]).to(torch.int)
 
-    @staticmethod
-    def from_float(mod):
-        assert hasattr(mod, 'observer'), "No observer in module."
-        qparams = mod.observer.calculate_qparams()
-        return Quantize(qparams[0].item(), qparams[1].item(),
-                        mod.observer.dtype)
-
     def forward(self, input):
         if input.ndim != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
@@ -105,3 +92,37 @@ class Conv2d(_ConvNd):
                                            self.stride, self.padding,
                                            self.dilation, self.groups,
                                            self.scale, self.zero_point)
+
+    @staticmethod
+    def from_float(mod):
+        r"""Create a quantized module from a float module or qparams_dict
+
+            Args: `mod` a float module, either produced by torch.quantization utilities
+            or directly from user
+        """
+        if hasattr(mod, 'weight_fake_quant'):
+            # assert type(mod) == QATConv2d, 'nnq.Conv2d.from_float only works for nn.Conv2d or nn.qat.Conv2d'
+            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+            weight_observer = mod.weight_fake_quant
+        else:
+            assert type(mod) == NNConv2d, 'nnq.Conv2d.from_float only works for nn.Conv2d or nn.qat.Conv2d'
+            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+            weight_observer = mod.qconfig.weight()
+            weight_observer(mod.weight)
+        activation_observer = mod.observer
+        act_scale, act_zp = activation_observer.calculate_qparams()
+        wt_scale, wt_zp = weight_observer.calculate_qparams()
+        bias_scale = (wt_scale * act_scale).float()
+        qweight = torch.quantize_linear(
+            mod.weight.float().permute([0, 2, 3, 1]).contiguous(),
+            wt_scale, wt_zp.long().item(), torch.qint8)
+        qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
+        qconv = Conv2d(mod.in_channels, mod.out_channels, mod.kernel_size,
+                       mod.stride, mod.padding, mod.dilation, mod.groups,
+                       mod.bias is not None, mod.padding_mode)
+        qconv._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(qweight, qconv.groups)
+        qconv.bias = qbias
+        qconv.scale = torch.tensor([act_scale], dtype=torch.double)
+        qconv.zero_point = torch.tensor([act_zp], dtype=torch.long)
+        return qconv
