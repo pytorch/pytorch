@@ -406,6 +406,35 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Returns whether the `Module` is serializable.
   virtual bool is_serializable() const;
 
+  /// Replaces a registered submodule with this `Module`.
+  ///
+  /// This takes care of the registration, if you used submodule members, you should
+  //  assign the submodule as well, i.e. use as
+  ///     module->submodule_ = module->replace_module("linear", torch::nn::Linear(3, 4));
+  /// It only works when a module of the name is already registered.
+  ///
+  /// This is useful for replacing a module after initialization, e.g.
+  /// for finetuning.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> replace_module(
+      const std::string& name,
+      std::shared_ptr<ModuleType> module);
+
+  /// Replaces a registered submodule with this `Module`.
+  /// This method deals with `ModuleHolder`s.
+  ///
+  /// This takes care of the registration, if you used submodule members, you should
+  //  assign the submodule as well, i.e. use as
+  ///     module->submodule_ = module->replace_module("linear", linear_holder);
+  /// It only works when a module of the name is already registered.
+  ///
+  /// This is useful for replacing a module after initialization, e.g.
+  /// for finetuning.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> replace_module(
+      const std::string& name,
+      ModuleHolder<ModuleType> module_holder);
+
  protected:
   /// Registers a parameter with this `Module`.
   ///
@@ -474,31 +503,6 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(
       std::string name,
-      ModuleHolder<ModuleType> module_holder);
-
-  /// Replaces a registered submodule with this `Module`.
-  ///
-  /// This takes care of the registration, you should assign the submodule
-  /// as well. It only works when a module of the name is already registered.
-  ///
-  /// This is useful for replacing a module after initialization, e.g.
-  /// for finetuning.
-  template <typename ModuleType>
-  std::shared_ptr<ModuleType> replace_module(
-      const std::string& name,
-      std::shared_ptr<ModuleType> module);
-
-  /// Replaces a registered submodule with this `Module`.
-  /// This method deals with `ModuleHolder`s.
-  ///
-  /// This takes care of the registration, you should assign the submodule
-  /// as well. It only works when a module of the name is already registered.
-  ///
-  /// This is useful for replacing a module after initialization, e.g.
-  /// for finetuning.
-  template <typename ModuleType>
-  std::shared_ptr<ModuleType> replace_module(
-      const std::string& name,
       ModuleHolder<ModuleType> module_holder);
 
  private:
