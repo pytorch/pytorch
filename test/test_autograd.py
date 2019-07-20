@@ -3241,6 +3241,15 @@ for shape in [(1,), ()]:
         # This will cause stack overflow if reentrant calls are handled
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
+        
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_advanced_indexing_backwards_large(self):
+        # See https://github.com/pytorch/pytorch/issues/22843
+        n = (1 << 16)
+        x = torch.rand(n, 1, device='cuda', requires_grad=True)
+        a = x[:, [0]]
+        a.sum().backward()
+        self.assertEqual(x.grad, torch.ones(n, 1, device='cuda'))
 
     def test_reentrant_priority(self):
         order = []
