@@ -1551,10 +1551,6 @@ inline Tensor Tensor::cholesky_inverse(bool upper) const {
     static auto table = globalATenDispatch().getOpTable("aten::cholesky_inverse(Tensor self, bool upper=False) -> Tensor");
     return table->getOp<Tensor (const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, upper);
 }
-inline std::tuple<Tensor,Tensor> Tensor::pstrf(bool upper, Scalar tol) const {
-    static auto table = globalATenDispatch().getOpTable("aten::pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)");
-    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, upper, tol);
-}
 inline std::tuple<Tensor,Tensor> Tensor::qr(bool some) const {
     static auto table = globalATenDispatch().getOpTable("aten::qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)");
     return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, some);

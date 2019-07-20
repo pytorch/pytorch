@@ -263,69 +263,6 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
-    def pstrf(self, upper=True):
-        r"""See :func:`torch.pstrf`"""
-        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release.", stacklevel=2)
-        return super(Tensor, self).pstrf(upper=upper)
-
-    def potrf(self, upper=True):
-        r"""See :func:`torch.cholesky`"""
-        warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release. Please use torch.cholesky instead and note that the "
-                      ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky(upper=upper)
-
-    def potri(self, upper=True):
-        r"""See :func:`torch.cholesky_inverse`"""
-        warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be "
-                      "removed in the next release. Please use torch.cholesky_inverse instead and "
-                      "note that the :attr:`upper` argument in torch.cholesky_inverse defaults to "
-                      "``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky_inverse(upper=upper)
-
-    def potrs(self, u, upper=True):
-        r"""See :func:`torch.cholesky_solve`"""
-        warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
-                      "will be removed in the next release. Please use torch.cholesky_solve instead "
-                      "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
-                      "to ``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky_solve(u, upper=upper)
-
-    def gesv(self, A):
-        r"""See :func:`torch.solve`"""
-        warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
-                      "next release. Please use torch.solve instead.", stacklevel=2)
-        return super(Tensor, self).solve(A)
-
-    def trtrs(self, A, upper=True, transpose=False, unitriangular=False):
-        r"""See :func:`torch.triangular_solve`"""
-        warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
-                      "removed in the next release. Please use torch.triangular_solve instead.",
-                      stacklevel=2)
-        return super(Tensor, self).triangular_solve(A, upper=upper,
-                                                    transpose=transpose, unitriangular=unitriangular)
-
-    def btrifact(self, pivot=True):
-        r"""See :func:`torch.lu`"""
-        warnings.warn("torch.btrifact is deprecated in favour of torch.lu and will be removed in "
-                      "the next release. Please use torch.lu instead.", stacklevel=2)
-        return torch._lu_with_info(self, pivot=pivot, check_errors=True)
-
-    def btrifact_with_info(self, pivot=True):
-        r"""See :func:`torch.lu`"""
-        warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu with the "
-                      "get_infos argument and will be removed in the next release. Please use "
-                      "torch.lu with the get_infos argument set to True instead.", stacklevel=2)
-        return torch._lu_with_info(self, pivot=pivot, check_errors=False)
-
-    def btrisolve(self, LU_data, LU_pivots):
-        r"""See :func:`torch.lu_solve`"""
-        warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
-                      "removed in the next release. Please use torch.lu_solve instead.",
-                      stacklevel=2)
-        return super(Tensor, self).lu_solve(LU_data=LU_data, LU_pivots=LU_pivots)
-
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
