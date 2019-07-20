@@ -131,7 +131,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
       /*row_offsets=*/packA.getRowOffsetBuffer(),
       /*col_offsets=*/col_offsets.data<int32_t>(),
       /*bias=*/bias_contig.data<float>(),
-      /*ncol=*/N);
+      /*nCol=*/N);
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   auto output = at::zeros({M, N}, bias.options().dtype(at::kFloat));
@@ -261,7 +261,7 @@ Tensor fbgemm_linear_int8_weight(
       /*row_offsets=*/packA.getRowOffsetBuffer(),
       /*col_offsets=*/col_offsets.data<int32_t>(),
       /*bias=*/bias_contig.data<float>(),
-      /*ncol=*/N);
+      /*nCol=*/N);
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   auto output = at::zeros({M, N}, bias.options().dtype(at::kFloat));
@@ -287,7 +287,6 @@ Tensor fbgemm_linear_int8_weight(
   out_sizes.back() = N;
   return output.view(out_sizes);
 }
-
 
 namespace {
 // Calculate the column offsets
@@ -560,7 +559,6 @@ Tensor fbgemm_linear_fp16_weight(
 
   return output;
 }
-
 
 #else // USE_FBGEMM
 
