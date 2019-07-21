@@ -6396,6 +6396,7 @@ class _TestTorchMixin(object):
     def _test_det_logdet_slogdet_batched(self, device):
         from common_utils import (random_symmetric_matrix, random_symmetric_psd_matrix,
                                   random_symmetric_pd_matrix, random_square_matrix_of_rank)
+
         # mat_chars denotes matrix characteristics
         # possible values are: sym, sym_psd, sym_pd, sing, non_sym
         def run_test(matsize, batchdims, mat_chars):
