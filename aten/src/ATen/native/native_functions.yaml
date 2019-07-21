@@ -1252,6 +1252,11 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
 
+- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_max_pool2d
+
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
