@@ -131,8 +131,8 @@ namespace {
     /* resize output */
     if (input.ndimension() == 3 || input.size(-4) == 1)
     {
-      output.resize_({sizeD, osizeH, osizeW});
-
+      output.resize_((input.ndimension() == 3) ? {sizeD, osizeH, osizeW}
+                                               : {1, sizeD, osizeH, osizeW});
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
           auto input_data = input.data<scalar_t>();
           auto output_data = output.data<scalar_t>();
