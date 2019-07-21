@@ -93,6 +93,13 @@ class QuantizationTestCase(TestCase):
         self.assertEqual(mod.module.bias.dtype, torch.qint32)
         self.checkQuantDequant(mod)
 
+    def checkDynamicQuantizedLinear(self, mod):
+        r"""Checks that mod has been swapped for an nnq.DynamicLinear
+            module, the bias is float.
+        """
+        self.assertEqual(type(mod), nnq.DynamicLinear)
+        self.assertEqual(mod.bias.dtype, torch.float)
+
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
@@ -217,5 +224,4 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.fc2(x)
-        # print('after net:', x.shape)
         return self.dequant(x)

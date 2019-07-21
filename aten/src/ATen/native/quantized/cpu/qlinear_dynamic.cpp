@@ -42,7 +42,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeight>(packed_weight);
     auto packB = pack_ptr.w.get();
-    // packB->printPackedMatrix("packedB inside fbgemm_linear
+    // packB->printPackedMatrix("packedB inside fbgemm_linear_dynamic
     // (QLinearDynamicInt8): ");
     auto& col_offsets = pack_ptr.col_offsets;
 

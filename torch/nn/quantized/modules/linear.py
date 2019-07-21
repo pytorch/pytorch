@@ -209,28 +209,17 @@ class DynamicLinear(NNLinear):
     def __init__(self, in_features, out_features, bias=True):
         super(DynamicLinear, self).__init__(in_features, out_features, bias)
         del self.weight
-        # weight_fp32 = torch.Tensor(out_features, in_features).float()
-        # self.register_buffer('weight', weight_fp32)
         del self.bias
         bias_fp32 = torch.Tensor(out_features).float()
         self.register_buffer('bias', bias_fp32)
 
-        # weight_prepack, col_offsets, self.scale, self.zero_point = torch.fbgemm_linear_quantize_weight(weight_fp32)
-        # self.register_buffer(
-        #     '_packed_weight',
-        #     torch.fbgemm_pack_quantized_matrix(weight_prepack))
-        # self.register_buffer('col_offsets', col_offsets)
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0,
             dtype=torch.qint8)
         self.register_buffer('_packed_weight',
                              torch.ops.quantized.fbgemm_linear_prepack(qweight))
 
-
     def forward(self, x):
-        # Y = torch.fbgemm_linear_int8_weight_fp32_activation(
-        #     x.float(), self.weight, self._packed_weight, self.col_offsets,
-        #     self.scale, self.zero_point, self.bias)
         # Note that we can handle self.bias == None case.
         Y = torch.ops.quantized.fbgemm_linear_dynamic(
             x, self._packed_weight,
@@ -249,16 +238,13 @@ class DynamicLinear(NNLinear):
         assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-        # activation_observer = mod.observer
-        # act_qparams = activation_observer.calculate_qparams()
         weight_observer = mod.qconfig.weight()
         weight_observer(mod.weight)
         wt_qparams = weight_observer.calculate_qparams()
         bias_scale = (wt_qparams[0]).float()
         qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long().item(), torch.qint8)
-        # weight_prepack, col_offsets, self.scale, self.zero_point = torch.fbgemm_linear_quantize_weight(weight_fp32)
-        qlinear = Linear(mod.in_features, mod.out_features)
+        qlinear = DynamicLinear(mod.in_features, mod.out_features)
         qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
         qlinear.bias = mod.bias.float()
-        return qlinear
 
+        return qlinear

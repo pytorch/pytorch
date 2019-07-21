@@ -3,7 +3,8 @@ import torch
 import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
     default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
-    quantize, prepare, convert, prepare_qat, quantize_dynamic, quantize_qat
+    quantize, prepare, convert, prepare_dynamic, prepare_qat, quantize_dynamic, quantize_qat, \
+    convert_dynamic
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
@@ -12,34 +13,30 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 class PostTrainingQuantTest(QuantizationTestCase):
 
     def test_single_layer_dynamic(self):
-        r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
-        to nnq.Linear which is the quantized version of the module
+        r"""Dynamic Quantize SingleLayerLinearModel which has one Linear module,
+        make sure it is swapped to nnq.Linear which is the quantized version of
+        the module
         """
-        model = SingleLayerLinearModel()
+        model = SingleLayerLinearModel().eval()
         qconfig_dict = {
             '': default_qconfig
         }
+        model = prepare_dynamic(model, qconfig_dict)
+        # Check if observers are inserted
+        self.checkObservers(model)
 
-        # model = prepare(model, qconfig_dict)
-        # # Check if observers and quant/dequant nodes are inserted
-        # self.checkNoPrepModules(model)
-        # self.checkHasPrepModules(model.fc1)
-        # self.checkObservers(model)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
 
-        # default_eval_fn(model, calib_data)
-        # convert(model)
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.fc1)
+            test_only_eval_fn(model, self.calib_data)
 
-        # def checkQuantized(model):
-        #     self.checkNoPrepModules(model)
-        #     self.checkHasPrepModules(model.fc1)
-        #     self.checkQuantizedLinear(model.fc1)
-        #     default_eval_fn(model, calib_data)
-
-        # checkQuantized(model)
+        checkQuantized(model)
 
         # test one line API
-        model = quantize_dynamic(SingleLayerLinearModel(), default_eval_fn, calib_data, qconfig_dict)
-        # checkQuantized(model)
+        model = quantize_dynamic(SingleLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        checkQuantized(model)
 
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped

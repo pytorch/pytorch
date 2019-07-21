@@ -8,6 +8,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from common_utils import TestCase, run_tests, tempfile
+from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -38,42 +39,16 @@ class ModuleAPITest(TestCase):
         in_features = 2
         out_features = 2
         W = torch.rand(out_features, in_features).float()
-
-        # W_int8, col_offsets, scale, zero_point = torch.fbgemm_linear_quantize_weight(W)
-        # W_pack = torch.fbgemm_pack_quantized_matrix(W_int8.clone())
-
-        # max_min_ref
-        qmin, qmax = -128, 127
-        n_levels = 255.0
-        min_val = torch.min(W).item()
-        max_val = torch.max(W).item()
-        if min_val == max_val:
-            scale = 1.0
-            zero_point = 0
-        else:
-            scale = (max_val - min_val) / n_levels
-            scale = max(scale, torch.finfo(torch.float32).eps)
-            zero_point = qmin - round(min_val / scale)
-            zero_point = max(qmin, zero_point)
-            zero_point = min(qmax, zero_point)
-        # scale = 
-        # zero_point = 
-        W_q = torch.quantize_linear(W, scale, zero_point, torch.qint8)
+        W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
+        W_q = torch.quantize_linear(W, W_scale, W_zp, torch.qint8)
         W_pack_col_offset = torch.ops.quantized.fbgemm_linear_prepack(W_q)
-
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float()
         qlinear = nnq.DynamicLinear(in_features, out_features)
         qlinear._packed_weight = W_pack_col_offset
         qlinear.bias = B
-        # qlinear.col_offsets = col_offsets
-        # qlinear.scale = scale
-        # qlinear.zero_point = zero_point
-        Z_dq = qlinear(X)
 
-        # Z_ref = torch.fbgemm_linear_int8_weight_fp32_activation(
-        #     X, W, W_pack, col_offsets,
-        #     scale, zero_point, B)
+        Z_dq = qlinear(X)
         Z_ref = torch.ops.quantized.fbgemm_linear_dynamic(X, W_pack_col_offset, B)
 
         self.assertEqual(Z_ref, Z_dq)
