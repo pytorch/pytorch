@@ -102,6 +102,18 @@ void RNNImplBase<Derived>::to(torch::Dtype dtype, bool non_blocking) {
 template <typename Derived>
 void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
   nn::Module::to(device, non_blocking);
+  const auto num_directions = options.bidirectional_ ? 2 : 1;
+  for (int64_t layer = 0; layer < options.layers_; layer++) {
+    for (auto direction = 0; direction < num_directions; direction++) {
+      const auto layer_idx = (layer * num_directions) + direction;
+      w_ih[layer_idx] = w_ih[layer_idx].to(torch::kCUDA);
+      w_hh[layer_idx] = w_hh[layer_idx].to(torch::kCUDA);
+      if (options.with_bias_) {
+        b_ih[layer_idx] = b_ih[layer_idx].to(torch::kCUDA);
+        b_hh[layer_idx] = b_hh[layer_idx].to(torch::kCUDA);
+      }
+    }
+  }
   flatten_parameters();
 }
 
@@ -169,8 +181,8 @@ std::vector<Tensor> RNNImplBase<Derived>::flat_weights() const {
   // (w_ih, w_hh, b_ih, b_hh), repeated for each layer (next to each other).
   std::vector<Tensor> flat;
   const auto num_directions = options.bidirectional_ ? 2 : 1;
-  for (auto direction = 0; direction < num_directions; direction++) {
-    for (int64_t layer = 0; layer < options.layers_; layer++) {
+  for (int64_t layer = 0; layer < options.layers_; layer++) {
+    for (auto direction = 0; direction < num_directions; direction++) {
       const auto layer_idx = (layer * num_directions) + direction;
       flat.push_back(w_ih[layer_idx]);
       flat.push_back(w_hh[layer_idx]);

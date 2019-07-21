@@ -376,3 +376,122 @@ TEST_F(RNNTest, BidirectionalLSTMReverseForward) {
 TEST_F(RNNTest, BidirectionalLSTMReverseForward_CUDA) {
   BidirectionalLSTMReverseForwardTest(true);
 }
+
+TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
+  // Create two GRUs with the same options
+  GRU gru_cpu {GRUOptions(2, 4)
+                  .layers(3).batch_first(false).bidirectional(true)};
+  GRU gru_cuda {GRUOptions(2, 4)
+                  .layers(3).batch_first(false).bidirectional(true)};
+
+  // Copy weights and biases from CPU GRU to CUDA GRU
+  {
+    at::NoGradGuard guard;
+    const auto num_directions = gru_cpu->options.bidirectional_ ? 2 : 1;
+    for (int64_t layer = 0; layer < gru_cpu->options.layers_; layer++) {
+      for (auto direction = 0; direction < num_directions; direction++) {
+        const auto layer_idx = (layer * num_directions) + direction;
+        gru_cuda->w_ih[layer_idx] = gru_cpu->w_ih[layer_idx];
+        gru_cuda->w_hh[layer_idx] = gru_cpu->w_hh[layer_idx];
+        gru_cuda->b_ih[layer_idx] = gru_cpu->b_ih[layer_idx];
+        gru_cuda->b_hh[layer_idx] = gru_cpu->b_hh[layer_idx];
+      }
+    }
+  }
+
+  gru_cpu->flatten_parameters();
+  gru_cuda->flatten_parameters();
+
+  // Move GRU to CUDA
+  gru_cuda->to(torch::kCUDA);
+
+  // Create the same inputs
+  auto options = torch::TensorOptions()
+                        .dtype(torch::kFloat32).requires_grad(false);
+  auto input_cpu =
+              torch::tensor({1, 2, 3, 4, 5, 6}, options).reshape({3, 1, 2});
+  auto input_cuda =
+              torch::tensor({1, 2, 3, 4, 5, 6}, options).reshape({3, 1, 2})
+              .to(torch::kCUDA);
+
+  // Call forward on both GRUs
+  auto output_cpu = gru_cpu->forward(input_cpu);
+  auto output_cuda = gru_cuda->forward(input_cuda);
+
+  output_cpu.output = output_cpu.output.to(torch::kCPU);
+  output_cpu.state = output_cpu.state.to(torch::kCPU);
+
+  // Assert that the output and state are equal on CPU and CUDA
+  ASSERT_EQ(output_cpu.output.dim(), output_cuda.output.dim());
+  for (int i = 0; i < output_cpu.output.dim(); i++) {
+    ASSERT_EQ(output_cpu.output.size(i), output_cuda.output.size(i));
+  }
+  for (int i = 0; i < output_cpu.output.size(0); i++) {
+    for (int j = 0; j < output_cpu.output.size(1); j++) {
+      for (int k = 0; k < output_cpu.output.size(2); k++) {
+        ASSERT_NEAR(
+          output_cpu.output[i][j][k].item<float>(),
+          output_cuda.output[i][j][k].item<float>(), 1e-5);
+      }
+    }
+  }
+}
+
+TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
+  // Create two LSTMs with the same options
+  LSTM lstm_cpu {LSTMOptions(2, 4)
+                  .layers(3).batch_first(false).bidirectional(true)};
+  LSTM lstm_cuda {LSTMOptions(2, 4)
+                  .layers(3).batch_first(false).bidirectional(true)};
+
+  // Copy weights and biases from CPU LSTM to CUDA LSTM
+  {
+    at::NoGradGuard guard;
+    const auto num_directions = lstm_cpu->options.bidirectional_ ? 2 : 1;
+    for (int64_t layer = 0; layer < lstm_cpu->options.layers_; layer++) {
+      for (auto direction = 0; direction < num_directions; direction++) {
+        const auto layer_idx = (layer * num_directions) + direction;
+        lstm_cuda->w_ih[layer_idx] = lstm_cpu->w_ih[layer_idx];
+        lstm_cuda->w_hh[layer_idx] = lstm_cpu->w_hh[layer_idx];
+        lstm_cuda->b_ih[layer_idx] = lstm_cpu->b_ih[layer_idx];
+        lstm_cuda->b_hh[layer_idx] = lstm_cpu->b_hh[layer_idx];
+      }
+    }
+  }
+
+  lstm_cpu->flatten_parameters();
+  lstm_cuda->flatten_parameters();
+
+  // Move LSTM to CUDA
+  lstm_cuda->to(torch::kCUDA);
+
+  auto options = torch::TensorOptions()
+                        .dtype(torch::kFloat32).requires_grad(false);
+  auto input_cpu =
+              torch::tensor({1, 2, 3, 4, 5, 6}, options).reshape({3, 1, 2});
+  auto input_cuda =
+              torch::tensor({1, 2, 3, 4, 5, 6}, options).reshape({3, 1, 2})
+              .to(torch::kCUDA);
+
+  // Call forward on both LSTMs
+  auto output_cpu = lstm_cpu->forward(input_cpu);
+  auto output_cuda = lstm_cuda->forward(input_cuda);
+
+  output_cpu.output = output_cpu.output.to(torch::kCPU);
+  output_cpu.state = output_cpu.state.to(torch::kCPU);
+
+  // Assert that the output and state are equal on CPU and CUDA
+  ASSERT_EQ(output_cpu.output.dim(), output_cuda.output.dim());
+  for (int i = 0; i < output_cpu.output.dim(); i++) {
+    ASSERT_EQ(output_cpu.output.size(i), output_cuda.output.size(i));
+  }
+  for (int i = 0; i < output_cpu.output.size(0); i++) {
+    for (int j = 0; j < output_cpu.output.size(1); j++) {
+      for (int k = 0; k < output_cpu.output.size(2); k++) {
+        ASSERT_NEAR(
+          output_cpu.output[i][j][k].item<float>(),
+          output_cuda.output[i][j][k].item<float>(), 1e-5);
+      }
+    }
+  }
+}
