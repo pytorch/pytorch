@@ -37,6 +37,10 @@ sample operator invocations. This can be enabled on per-callback basis with a
 global sampling rate specified by
 `torch::autograd::profiler::setSamplingProbability`.
 
+Note, that ``pushCallback`` and ``setSamplingProbability`` are not thread-safe
+and can be called only when no PyTorch operator is running. Usually, it's a good
+idea to call them once during initialization.
+
 Here's an example:
 
 .. code-block:: cpp
@@ -55,7 +59,7 @@ Here's an example:
 
     void onFunctionEnter(const RecordFunction& fn) {
         std::cerr << "Before function " << fn.name() 
-                  << " with " << fn.inputs().size() << "inputs" << std::endl;
+                  << " with " << fn.inputs().size() << " inputs" << std::endl;
     }
 
     void onFunctionExit(const RecordFunction& fn) {
@@ -67,13 +71,13 @@ API usage logging
 
 When running in a broader ecosystem, for example in managed job scheduler, it's
 often useful to track which binaries invoke particular PyTorch APIs. There
-exists simple intrumentation injected at several important API points that
+exists simple instrumentation injected at several important API points that
 triggers a given callback. Because usually PyTorch is invoked in one-off python
 scripts, the callback fires only once for a given process for each of the APIs.
 
 ``c10::SetAPIUsageHandler`` can be used to register API usage instrumentation
 handler. Passed argument is going to be an "api key" identifying used point, for
-example ``python.import`` for pytorch extension import or
+example ``python.import`` for PyTorch extension import or
 ``torch.script.compile`` if TorchScript compilation was triggered.
 
 .. code-block:: cpp
@@ -117,7 +121,10 @@ usage might look like:
 Build environment considerations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-TorchScript's compilation needs to have access to the original python files as it uses python's ``inspect.getsource`` call. In certain production environments it might require explicitly deploying ``.py`` files along with precompiled ``.pyc``.
+TorchScript's compilation needs to have access to the original python files as
+it uses python's ``inspect.getsource`` call. In certain production environments
+it might require explicitly deploying ``.py`` files along with precompiled
+``.pyc``.
 
 Common extension points
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -126,8 +133,4 @@ PyTorch APIs are generally loosely coupled and it's easy to replace a component
 with specialized version. Common extension points include:
 
 * Custom operators implemented in C++ - see `tutorial for more details <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_.
-
-* Custom data reading can be often integrated directly by invoking corresponding
-python library. Existing functionality of :mod:`torch.utils.data` can be
-utilized by extending :class:`~torch.utils.data.Dataset` or
-:class:`~torch.utils.data.IterableDataset`.
+* Custom data reading can be often integrated directly by invoking corresponding python library. Existing functionality of :mod:`torch.utils.data` can be utilized by extending :class:`~torch.utils.data.Dataset` or :class:`~torch.utils.data.IterableDataset`.
