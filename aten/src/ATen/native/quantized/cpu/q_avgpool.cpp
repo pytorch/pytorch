@@ -100,7 +100,7 @@ void adaptive_avg_pool2d_out_frame(scalar_t *input_p,
   });
 }
 
-void adaptive_avg_pool2d_out_template(Tensor output, Tensor input,
+void adaptive_avg_pool2d_out_template(Tensor& output, Tensor input,
                                       IntArrayRef output_size) {
   for (int64_t i = 0; i < input.dim(); i++) {
     TORCH_CHECK(input.size(i) > 0,
@@ -125,11 +125,16 @@ void adaptive_avg_pool2d_out_template(Tensor output, Tensor input,
   auto osizeW = output_size[1];
 
   /* resize output */
+  std::vector<int64_t> output_sizes;
   if (input.dim() == 3 || input.size(0) == 1) {
     if (input.dim() == 3) {
-      output.resize_({sizeD, osizeH, osizeW});
+      // output_sizes = {sizeD, osizeH, osizeW};
+      // output.resize_({sizeD, osizeH, osizeW});
+      output = output.view({sizeD, osizeH, osizeW});
     } else {
-      output.resize_({1, sizeD, osizeH, osizeW});
+      // output_sizes = {1, sizeD, osizeH, osizeW}
+      // output.resize_({1, sizeD, osizeH, osizeW});
+      output = output.view({1, sizeD, osizeH, osizeW});
     }
 
     AT_DISPATCH_QINT_TYPES(input.scalar_type(),
@@ -148,7 +153,7 @@ void adaptive_avg_pool2d_out_template(Tensor output, Tensor input,
     );
   } else {
     int64_t sizeB = input.size(-4);
-    output.resize_({sizeB, sizeD, osizeH, osizeW});
+    output = output.view({sizeB, sizeD, osizeH, osizeW});
     int64_t istrideB = input.stride(-4);
 
     AT_DISPATCH_QINT_TYPES(input.scalar_type(),
@@ -178,7 +183,7 @@ class QAdaptiveAvgPool2D final : public torch::OperatorKernel {
 };
 
 static auto registry = torch::RegisterOperators().op(
-  "quantized::adaptive_avg_pool2d(Tensor qx, int[] poutput_size",
+  "quantized::adaptive_avg_pool2d(Tensor qx, int[] output_size) -> Tensor",
   torch::RegisterOperators::options()
     .kernel<QAdaptiveAvgPool2D>(QuantizedCPUTensorId()));
 
@@ -193,7 +198,23 @@ Tensor& quantized_adaptive_avg_pool2d_out(Tensor& output, const Tensor& input,
 
 Tensor quantized_adaptive_avg_pool2d(const at::Tensor& input,
                                      IntArrayRef output_size) {
-  auto output = at::empty({0}, input.options());
+  Tensor output;
+  if (input.dim() == 3) {
+    output = at::_empty_affine_quantized({input.size(0),
+                                          output_size[0],
+                                          output_size[1]},
+                                         input.options(),
+                                         input.q_scale(),
+                                         input.q_zero_point());
+  } else {
+    output = at::_empty_affine_quantized({input.size(0),
+                                          input.size(1),
+                                          output_size[0],
+                                          output_size[1]},
+                                         input.options(),
+                                         input.q_scale(),
+                                         input.q_zero_point());
+  }
   adaptive_avg_pool2d_out_template(output, input, output_size);
   return output;
 }

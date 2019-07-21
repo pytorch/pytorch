@@ -216,6 +216,47 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10)),
+           qparams=hu.qparams(),
+           output_size_h=st.integers(1, 10),
+           output_size_w=st.integers(1, 10))
+    def test_adaptive_avg_pool2d(self, X, qparams, output_size_h, output_size_w):
+        if output_size_h == output_size_w:
+            output_size = output_size_h
+        else:
+            output_size = (output_size_h, output_size_w)
+
+        scale, zero_point, torch_type = qparams
+        X = torch.from_numpy(X[0])
+        X_ref = torch.nn.functional.adaptive_avg_pool2d(X, output_size)
+        X_ref = torch.quantize_linear(X_ref, scale=scale, zero_point=zero_point,
+                                      dtype=torch_type)
+
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.adaptive_avg_pool2d,
+            "nn.quantized.functional":
+                torch.nn.quantized.functional.adaptive_avg_pool2d
+        }
+
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, output_size=output_size)
+            self.assertEqual(X_ref, qX_hat,
+                             message=error_message.format(name, X_ref, qX_hat))
+        # Quantized kernel signature is very rigid. Testing separately.
+        name = "ops.quantized"
+        op = torch.ops.quantized.adaptive_avg_pool2d
+        output_size = _pair(output_size)
+        qX_hat = op(qX, output_size=output_size)
+        self.assertEqual(X_ref, qX_hat,
+                         message=error_message.format(name, X_ref, qX_hat))
+
+
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),

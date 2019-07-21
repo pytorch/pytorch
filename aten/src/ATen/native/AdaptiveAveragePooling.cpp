@@ -312,7 +312,12 @@ namespace {
     at::Tensor const& input,
     IntArrayRef output_size)
   {
-    auto output = at::empty({0}, input.options());
+    Tensor output;
+    if (input.is_quantized()) {
+      output = at::_empty_affine_quantized({0}, input.options());
+    } else {
+      output = at::empty({0}, input.options());
+    }
     adaptive_avg_pool2d_out_cpu_template(
       output, input, output_size);
     return output;
@@ -324,12 +329,20 @@ namespace {
     }
 
     if (output_size[0] == 1 && output_size[1] == 1) {
-//in this case, adaptive pooling is just computing mean over hw dimensions, which can be done more efficiently
-       int64_t mean_size = input.size(-1) * input.size(-2);
-       Tensor out = input.contiguous().view({-1, mean_size}).mean(-1);
-       return input.ndimension() == 3 ? out.view({input.size(0), 1, 1}) : out.view({input.size(0), input.size(1), 1, 1});
+      // in this case, adaptive pooling is just computing mean over hw
+      // dimensions, which can be done more efficiently
+      int64_t mean_size = input.size(-1) * input.size(-2);
+      Tensor out = input.contiguous().view({-1, mean_size});
+      if (out.is_quantized()) {
+        TORCH_WARN("Quantized mean is WIP! Falling back to AdaptiveAvgPool");
+        return _adaptive_avg_pool2d(input, output_size);
+      } else {
+        out = out.mean(-1);
+      }
+      return input.dim() == 3 ? out.view({input.size(0), 1, 1})
+                              : out.view({input.size(0), input.size(1), 1, 1});
     } else {
-       return _adaptive_avg_pool2d(input, output_size);
+      return _adaptive_avg_pool2d(input, output_size);
     }
   }
 
