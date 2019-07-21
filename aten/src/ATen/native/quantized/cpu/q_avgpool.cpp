@@ -3,7 +3,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 
-#include <algorithms>
+#include <algorithm>
+#include <limits>
 #include <vector>
 
 namespace at { namespace native {
@@ -18,11 +19,11 @@ inline int end_index(int a, int b, int c) {
 }
 
 template <typename underlying_t>
-inline underlying_t clamp_and_cast(int32_t value, underlying_t min,
-                                   underlying_t) {
+inline underlying_t clamp_and_cast(int32_t value) {
   const auto lower = std::numeric_limits<underlying_t>::lowest();
   const auto upper = std::numeric_limits<underlying_t>::max();
-  return static_cast<underlying_t>(max(lower, min(upper, value)));
+  return static_cast<underlying_t>(
+      std::max<int32_t>(lower, std::min<int32_t>(upper, value)));
 }
 
 template <typename scalar_t, typename underlying_t>
@@ -65,7 +66,7 @@ static void adaptive_avg_pool2d_single_out_frame(scalar_t *input_p,
           }
 
           /* set output to local average */
-          *op = clamp_and_cast<underlying_t>(sum / kW / kH);
+          *op = scalar_t(clamp_and_cast<underlying_t>(sum / kW / kH));
         }
       }
     }
