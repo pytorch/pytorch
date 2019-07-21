@@ -129,7 +129,7 @@ namespace {
     auto osizeW = output_size[1];
 
     /* resize output */
-    if (input.ndimension() == 3)
+    if (input.ndimension() == 3 || input.size(0) == 1)
     {
       output.resize_({sizeD, osizeH, osizeW});
 
