@@ -1807,14 +1807,36 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
-  if ((det != 0).all().item<uint8_t>()) {  // all matrices are invertible
+  auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
     return unsqueeze_multiple(grad * det, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
-  } else if ((det == 0).all().item<uint8_t>()) {  // all matrices are singular
-    return singular_case_backward(grad, self, det);
-  } else {  // some matrices are invertible, some matrices are singular
-    return at::where(det != 0,
-                     unsqueeze_multiple(grad * det, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1), // invertible case
-                     singular_case_backward(grad, self, det)); // non-invertible case, uses SVD
+  };
+  
+  if (self.dim() == 2) {
+    if ((det == 0).item<uint8_t>()) {
+      return singular_case_backward(grad, self, det);
+    } else {
+      return nonsingular_case_backward(grad, self, det);
+    }
+  } else {
+    Tensor grad_det = at::empty_like(self);
+    auto nonzero_det_indices = at::where(det != 0);
+    auto zero_det_indices = at::where(det == 0);
+
+    if (nonzero_det_indices[0].size(0) > 0) {  // invertible case
+      auto indexed_grad = grad.index(nonzero_det_indices);
+      auto indexed_det = det.index(nonzero_det_indices);
+      auto indexed_self = self.index(nonzero_det_indices);
+      grad_det.index_put_(/*indices=*/nonzero_det_indices,
+                          /*value=*/nonsingular_case_backward(indexed_grad, indexed_self, indexed_det));
+    }
+    if (zero_det_indices[0].size(0) > 0) {  // non-invertible case, uses SVD
+      auto indexed_grad = grad.index(zero_det_indices);
+      auto indexed_det = det.index(zero_det_indices);
+      auto indexed_self = self.index(zero_det_indices);
+      grad_det.index_put_(/*indices=*/zero_det_indices,
+                          /*value=*/singular_case_backward(indexed_grad, indexed_self, indexed_det));
+    }
+    return grad_det;
   }
 }
 
@@ -1827,14 +1849,34 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
-  if ((logdet != -INFINITY).all().item<uint8_t>()) {  // all matrices are invertible
+  auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
     return unsqueeze_multiple(grad, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
-  } else if ((logdet == -INFINITY).all().item<uint8_t>()) {  // all matrices are singular
-    return singular_case_backward(grad, self);
-  } else {  // some matrices are invertible, some matrices are singular
-    return at::where(logdet != -INFINITY,
-                     grad.unsqueeze(-1) * self.inverse().transpose(-2, -1), // invertible case
-                     singular_case_backward(grad, self)); // non-invertible case, uses SVD
+  };
+
+  if (self.dim() == 2) {
+    if ((logdet != -INFINITY).item<uint8_t>()) {
+      return nonsingular_case_backward(grad, self);
+    } else {
+      return singular_case_backward(grad, self);
+    }
+  } else {
+    Tensor grad_logdet = at::empty_like(self);
+    auto finite_logdet_indices = at::where(logdet != -INFINITY);
+    auto neginf_logdet_indices = at::where(logdet == -INFINITY);
+
+    if (finite_logdet_indices[0].size(0) > 0) {  // invertible case
+      auto indexed_grad = grad.index(finite_logdet_indices);
+      auto indexed_self = self.index(finite_logdet_indices);
+      grad_logdet.index_put_(/*indices=*/finite_logdet_indices,
+                          /*value=*/nonsingular_case_backward(indexed_grad, indexed_self));
+    }
+    if (neginf_logdet_indices[0].size(0) > 0) {  // non-invertible case, uses SVD
+      auto indexed_grad = grad.index(neginf_logdet_indices);
+      auto indexed_self = self.index(neginf_logdet_indices);
+      grad_logdet.index_put_(/*indices=*/neginf_logdet_indices,
+                          /*value=*/singular_case_backward(indexed_grad, indexed_self));
+    }
+    return grad_logdet;
   }
 }
 
@@ -1851,14 +1893,34 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
-  if ((signdet != 0).all().item<uint8_t>()) {  // all matrices are invertible
+  auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
     return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
-  } else if ((signdet == 0).all().item<uint8_t>()) {  // all matrices are singular
-    return singular_case_backward(grad_logabsdet, self);
-  } else {  // some matrices are invertible, some matrices are singular
-    return at::where(signdet != 0,
-                     unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1),
-                     singular_case_backward(grad_logabsdet, self));
+  };
+
+  if (self.dim() == 2) {
+    if ((signdet == 0).item<uint8_t>()) {
+      return singular_case_backward(grad_logabsdet, self);
+    } else {
+      return nonsingular_case_backward(grad_logabsdet, self);
+    }
+  } else {
+    Tensor grad_slogdet = at::empty_like(self);
+    auto nonzero_signdet_indices = at::where(signdet != 0);
+    auto zero_signdet_indices = at::where(signdet == 0);
+
+    if (nonzero_signdet_indices[0].size(0) > 0) {  // invertible case
+      auto indexed_grad = grad_logabsdet.index(nonzero_signdet_indices);
+      auto indexed_self = self.index(nonzero_signdet_indices);
+      grad_slogdet.index_put_(/*indices=*/nonzero_signdet_indices,
+                          /*value=*/nonsingular_case_backward(indexed_grad, indexed_self));
+    }
+    if (zero_signdet_indices[0].size(0) > 0) {  // non-invertible case, uses SVD
+      auto indexed_grad = grad_logabsdet.index(zero_signdet_indices);
+      auto indexed_self = self.index(zero_signdet_indices);
+      grad_slogdet.index_put_(/*indices=*/zero_signdet_indices,
+                          /*value=*/singular_case_backward(indexed_grad, indexed_self));
+    }
+    return grad_slogdet;
   }
 }
 
