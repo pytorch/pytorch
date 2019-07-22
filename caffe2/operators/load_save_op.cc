@@ -15,14 +15,28 @@ template <int VALUE_TYPE = TensorProto_DataType_FLOAT>
 std::vector<TensorShape> LoadTensorInference(
     const OperatorDef& def,
     const vector<TensorShape>& /* unused */) {
-  vector<TensorShape> out(1);
   ArgumentHelper helper(def);
-  out[0].set_data_type(static_cast<TensorProto_DataType>(
-      helper.GetSingleArgument<int>("dtype", VALUE_TYPE)));
-
   auto shape = helper.GetRepeatedArgument<int64_t>("shape");
-  for (auto d : shape) {
-    out[0].add_dims(d);
+  vector<TensorShape> out;
+  // Currently load op supports only shape.
+  // TODO: We have to extend it to support shapes vector.
+  // Since it support just one shape, we return
+  // the right shape information only when there is just one blob loaded.
+  // Otherwise, we return unknown TensorShapes.
+  if (def.output_size() == 1 and shape.size() > 0) {
+    TensorShape ts;
+    ts.set_data_type(static_cast<TensorProto_DataType>(
+        helper.GetSingleArgument<int>("dtype", VALUE_TYPE)));
+    for (auto d : shape) {
+      ts.add_dims(d);
+    }
+    out.push_back(ts);
+  } else {
+    for (int i = 0; i < def.output_size(); i++) {
+      TensorShape ts;
+      ts.set_unknown_shape(true);
+      out.push_back(ts);
+    }
   }
   return out;
 }
