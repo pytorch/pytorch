@@ -2556,7 +2556,7 @@ RegisterOperators reg2({
           "aten::__getitem__(Dict(" key_type ", t) self, " key_type           \
           " key) -> t(*)",                                                    \
           dictIndex,                                                          \
-          aliasAnalysisSpecialCase()),                                        \
+          aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::get(Dict(" key_type ", t) self, " key_type " key) -> t(*)?", \
           dictGet<false>,                                                     \
