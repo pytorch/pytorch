@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -11,8 +12,8 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/script/convert_to_ssa.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -348,19 +349,19 @@ struct Environment {
           {"float",
            makeMagic(
                "__float__",
-               std::make_shared<CastValue>(FloatType::get(), prim::Float))},
+               std::make_shared<CastValue>(FloatType::get(), aten::Float))},
           {"int",
            makeMagic(
                "__int__",
-               std::make_shared<CastValue>(IntType::get(), prim::Int))},
+               std::make_shared<CastValue>(IntType::get(), aten::Int))},
           {"bool",
            makeMagic(
                "__bool__",
-               std::make_shared<CastValue>(BoolType::get(), prim::Bool))},
+               std::make_shared<CastValue>(BoolType::get(), aten::Bool))},
           {"str",
            makeMagic(
                "__str__",
-               std::make_shared<CastValue>(StringType::get(), prim::str))},
+               std::make_shared<CastValue>(StringType::get(), aten::str))},
           {"getattr", std::make_shared<GetAttrValue>()},
           {"isinstance", std::make_shared<IsInstanceValue>()},
           // todo(zach): remove when we can correctly export torch.full via ONNX
@@ -388,7 +389,8 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
-          {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
+          {"divmod",
+           std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
@@ -491,7 +493,7 @@ struct to_ir {
   to_ir(
       const Def& def,
       ResolverPtr resolver_,
-      const Self& self,
+      const Self* self,
       Function& method) // method being constructed
       : method(method),
         graph(method.graph()),
@@ -541,7 +543,7 @@ struct to_ir {
     return old_frame;
   }
 
-  FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
+  FunctionSchema emitDef(const Def& def, const Self* self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
@@ -590,13 +592,13 @@ struct to_ir {
     CompilationUnit cu;
     // set optimize to false since we don't need to run it in optimize mode
     cu.set_optimized(false);
-    cu.define({def}, {resolver}, nullptr);
+    cu.define(c10::nullopt, {def}, {resolver}, nullptr);
     Stack stack;
-    cu.get_function("defaults").run(stack);
+    cu.get_function(def.name().name()).run(stack);
     return stack.at(0).toTuple()->elements();
   }
 
-  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self* self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -677,7 +679,7 @@ struct to_ir {
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false)};
   }
-  FunctionSchema extractSchemaFromDef(const Def& def, const Self& self) {
+  FunctionSchema extractSchemaFromDef(const Def& def, const Self* self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -687,7 +689,7 @@ struct to_ir {
 
   std::vector<Argument> emitFormalArguments(
       const Def& def,
-      const Self& self,
+      const Self* self,
       const FunctionSchema& schema,
       Block* block) {
     std::vector<Argument> arguments; // for schema
@@ -711,7 +713,7 @@ struct to_ir {
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
-          (*it).ident().range(), name, self(new_input));
+          (*it).ident().range(), name, self->makeSugared(new_input));
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
@@ -790,6 +792,18 @@ struct to_ir {
         def.name().range(), def.name().name(), closure_value);
   }
 
+  void emitBreak(const Break& stmt) {
+    auto break_node =
+        graph->create(prim::BreakStmt, {}, 0)->setSourceRange(stmt.range());
+    graph->insertNode(break_node);
+  }
+
+  void emitContinue(const Continue& stmt) {
+    auto continue_node =
+        graph->create(prim::ContinueStmt, {}, 0)->setSourceRange(stmt.range());
+    graph->insertNode(continue_node);
+  }
+
   void emitReturn(const Return& stmt) {
     Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
@@ -837,6 +851,7 @@ struct to_ir {
       List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
+      ErrorReport::CallStack::update_pending_range(stmt.range());
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -872,6 +887,12 @@ struct to_ir {
           break;
         case TK_RETURN: {
           emitReturn(Return(stmt));
+        } break;
+        case TK_CONTINUE: {
+          emitContinue(Continue(stmt));
+        } break;
+        case TK_BREAK: {
+          emitBreak(Break(stmt));
         } break;
         case TK_PASS:
           // Emit nothing for pass
@@ -1291,13 +1312,17 @@ struct to_ir {
 
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     auto* body_block = n->addBlock();
-
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
-      WithInsertPoint insert(condition_block);
-      Value* out = cond ? emitCond(cond.value())
-                        : graph->insertConstant(true, nullptr, range);
+      Value* out;
+      if (cond) {
+        WithInsertPoint insert(condition_block);
+        out = emitCond(cond.value());
+      } else {
+        WithInsertPoint insert(n);
+        out = graph->insertConstant(true, nullptr, range);
+      }
       condition_block->registerOutput(out);
       popFrame();
     }
@@ -1311,7 +1336,7 @@ struct to_ir {
 
       // if the FOR iters and targets are present, emit FOR target assignments
       if (iter_val != nullptr && targets) {
-        Value* cur_elem = iter_val->getelem(range, method, trip_count);
+        Value* cur_elem = iter_val->getitem(range, method, trip_count);
         SugaredValuePtr sv = std::make_shared<SimpleValue>(cur_elem);
         List<Expr> target_exprs = targets.value();
         validateAssignLhsExpr(target_exprs, range);
@@ -1337,7 +1362,7 @@ struct to_ir {
     auto body = stmt.body();
     if (stmt.itrs().size() != 1) {
       throw ErrorReport(stmt)
-          << "List of iterables is not supported currently.";
+          << "List of iterables is not supported currently";
     }
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
@@ -1439,19 +1464,19 @@ struct to_ir {
         num_starred++;
       } else {
         throw ErrorReport(assignee) << "lhs of assignment must be a variable, "
-                                    << "subscript, or starred expression.";
+                                    << "subscript, or starred expression";
       }
     }
 
     if (num_starred > 1) {
       throw ErrorReport(r)
-          << "Only one starred expression is allowed on the lhs.";
+          << "Only one starred expression is allowed on the lhs";
     }
 
     if (num_starred > 0 && num_normal_assign == 0) {
       throw ErrorReport(r) << "A Starred expression may only appear on the "
                            << "lhs within the presence of another non-starred"
-                           << " expression.";
+                           << " expression";
     }
 
     return num_starred;
@@ -1498,7 +1523,7 @@ struct to_ir {
       default:
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on "
-            << "left-hand side of augmented assignment.";
+            << "left-hand side of augmented assignment";
     }
   }
 
@@ -1640,7 +1665,7 @@ struct to_ir {
         throw ErrorReport(subscriptExprs)
             << "Sliced expression not yet supported for"
             << " subscripted list augmented assignment. "
-            << "File a bug if you want this.";
+            << "File a bug if you want this";
       }
       const auto idxValue = emitExpr(subscriptExprs[0]);
 
@@ -1650,7 +1675,7 @@ struct to_ir {
           NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
 
       const auto getItem =
-          graph->insert(aten::select, {listArg, idxArg}, {}, stmt.range());
+          graph->insert(aten::__getitem__, {listArg, idxArg}, {}, stmt.range());
       const auto augmentedItem = graph->insert(
           getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
       graph->insert(
@@ -1710,7 +1735,7 @@ struct to_ir {
         throw ErrorReport(subscript)
             << "Sliced expression not yet supported for"
             << " subscripted list assignment. "
-            << "File a bug if you want this.";
+            << "File a bug if you want this";
       }
 
       std::vector<NamedValue> args;
@@ -1773,7 +1798,7 @@ struct to_ir {
           auto var = Starred(assignee).expr();
           if (var.kind() != TK_VAR) {
             throw ErrorReport(var)
-                << "Cannot pack a tuple into a non-variable.";
+                << "Cannot pack a tuple into a non-variable";
           }
           size_t n_matched = outputs.size() - n_binders;
           ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
@@ -1825,7 +1850,7 @@ struct to_ir {
         break;
       default:
         throw ErrorReport(stmt.lhs())
-            << "unexpected expression on left-hand side of assignment.";
+            << "unexpected expression on left-hand side of assignment";
     }
   }
 
@@ -2168,6 +2193,9 @@ struct to_ir {
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
+    // Push the source range of a call in case compiling this function
+    // triggers an error
+    ErrorReport::CallStack::update_pending_range(tree.range());
     return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
   }
 
@@ -2415,7 +2443,7 @@ struct to_ir {
       }
       case TK_STARRED: {
         throw ErrorReport(tree)
-            << "Unexpected starred expansion. File a bug report.";
+            << "Unexpected starred expansion. File a bug report";
       }
       case TK_CONST: {
         return emitConst(Const(tree));
@@ -2723,7 +2751,7 @@ struct to_ir {
     if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
       throw ErrorReport(loc)
           << "Unsupported operation: attempted to use multidimensional "
-          << "indexing on a non-tensor type.";
+          << "indexing on a non-tensor type";
     }
 
     std::vector<Value*> tensor_indices;
@@ -2807,24 +2835,6 @@ struct to_ir {
         ->output();
   }
 
-  Value* emitDictIndex(
-      const SourceRange& loc,
-      Value* dict_val,
-      Value* key_val) {
-    auto dict_type = dict_val->type()->cast<DictType>();
-
-    if (!key_val->type()->isSubtypeOf(dict_type->getKeyType())) {
-      throw ErrorReport(loc)
-          << "Expected key type '" << key_val->type()->python_str()
-          << "' to subtype the key type '"
-          << dict_type->getKeyType()->python_str() << "' of the dict '"
-          << dict_type->python_str() << "'";
-    }
-
-    return graph->insertNode(graph->createDictIndex(dict_val, key_val))
-        ->output();
-  }
-
   int64_t getSliceInd(Value* idx_val, const SourceRange& loc) {
     auto ivalue = toIValue(idx_val);
     if (ivalue && ivalue->isInt()) {
@@ -2863,60 +2873,30 @@ struct to_ir {
   }
 
   Value* emitSubscript(const Subscript& subscript) {
-    return emitSubscript(
-        subscript.range(),
-        emitExpr(subscript.value()),
-        subscript.subscript_exprs());
-  }
-
-  Value* emitSubscript(
-      const SourceRange& loc,
-      Value* sliceable,
-      const List<Expr>& subscript_exprs) {
+    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+    const SourceRange& range = subscript.range();
+    const SourceRange& val_range = subscript.value().range();
     if (subscript_exprs.size() != 1) {
-      return emitMultidimSlicing(loc, sliceable, subscript_exprs);
+      return emitMultidimSlicing(
+          range, sv->asValue(val_range, method), subscript_exprs);
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return emitBasicSlice(loc, sliceable, subscript_exprs);
+      return emitBasicSlice(
+          range, sv->asValue(val_range, method), subscript_exprs);
     } else {
-      return emitBasicGather(loc, sliceable, subscript_exprs);
-    }
-  }
+      // Desugars gather syntactic sugar foo[i]
+      Value* idx = emitExpr(subscript_exprs[0]);
+      Value* val = sv->asValue(val_range, method);
+      AT_ASSERT(subscript_exprs.size() == 1);
 
-  // Desugars gather syntactic sugar foo[i]
-  Value* emitBasicGather(
-      const SourceRange& loc,
-      Value* gatherable,
-      const List<Expr>& subscript_exprs) {
-    AT_ASSERT(subscript_exprs.size() == 1);
-
-    if (gatherable->type()->kind() == TypeKind::ListType) {
-      // if it's a list, emit a regular index selection op
-      auto* idx = emitExpr(subscript_exprs[0]);
-      return emitBuiltinCall(
-          loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
-    } else if (gatherable->type()->isSubtypeOf(TensorType::get())) {
-      return emitMultidimSlicing(loc, gatherable, subscript_exprs);
-    } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
-      auto* idx = emitExpr(subscript_exprs[0]);
-      return emitTupleIndex(loc, gatherable, idx);
-    } else if (auto dict_type = gatherable->type()->cast<DictType>()) {
-      auto* idx = emitExpr(subscript_exprs[0]);
-      return emitDictIndex(loc, gatherable, idx);
-    } else if (auto string_type = gatherable->type()->cast<StringType>()) {
-      auto* idx = emitExpr(subscript_exprs[0]);
-      return emitBuiltinCall(
-          loc,
-          *graph,
-          prim::StringIndex,
-          c10::nullopt,
-          {gatherable, idx},
-          {},
-          true);
-    } else {
-      throw ErrorReport(loc) << "Indexing only supported on List, Dict, "
-                                "Tensor, Tuple, and str but got type '"
-                             << gatherable->type()->python_str() << "'";
+      if (val->type()->cast<TupleType>()) {
+        return emitTupleIndex(range, sv->asValue(val_range, method), idx);
+      } else if (val->type()->isSubtypeOf(TensorType::get())) {
+        return emitMultidimSlicing(range, val, subscript_exprs);
+      } else {
+        return sv->getitem(range, method, idx);
+      }
     }
   }
 };
@@ -2924,7 +2904,7 @@ struct to_ir {
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      const std::unordered_map<std::string, Function*>&
           functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
@@ -2945,22 +2925,41 @@ struct FunctionResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, std::shared_ptr<Function>>&
+  const std::unordered_map<std::string, Function*>&
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source) {
+CompilationUnit::CompilationUnit(const std::string& source)
+    : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
-  define(source, nativeResolver(), nullptr);
+  define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
-std::shared_ptr<Function> CompilationUnit::define(
+// Mangle a qualified name so that it is globally unique.
+std::string CompilationUnit::mangle(const std::string& name) const {
+  static const std::string manglePrefix = "___torch_mangle_";
+
+  std::string mangledName;
+  auto pos = name.find(manglePrefix);
+  if (pos != std::string::npos) {
+    // If the name is already mangled, avoid re-appending the prefix.
+    mangledName.reserve(name.size());
+    // Append the part of the name up to the end of the prefix
+    mangledName.append(name, 0, pos);
+    mangledName.append(std::to_string(mangleIndex_++));
+  } else {
+    mangledName = c10::str(name, manglePrefix, std::to_string(mangleIndex_++));
+  }
+  return mangledName;
+}
+
+std::unique_ptr<Function> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
-    const Self& self,
-    const std::unordered_map<std::string, std::shared_ptr<Function>>&
-        function_table) const {
-  const std::string& name = def.name().name();
+    const Self* self,
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -2971,17 +2970,44 @@ std::shared_ptr<Function> CompilationUnit::define(
         std::make_shared<FunctionResolver>(resolver.get(), function_table);
   }
   auto creator = [def, _resolver, self](Function& method) {
+    // Store the function name so that it can be referenced if there is an error
+    // while compiling this function
+    if (self) {
+      // Include the fully qualified name if this is a method
+      ErrorReport::CallStack::push_function(method.qualname().qualifiedName());
+    } else {
+      ErrorReport::CallStack::push_function(method.qualname().name());
+    }
     to_ir(def, _resolver, self, method);
+    // Compilation was successful, so remove the function def info
+    ErrorReport::CallStack::pop_function();
   };
-  return std::make_shared<Function>(
-      name, is_optimized(), std::make_shared<Graph>(), creator);
+  auto name = prefix ? QualifiedName(*prefix, def.name().name())
+                     : QualifiedName(def.name().name());
+  if (shouldMangle) {
+    // If `shouldMangle` is set, we should generate a unique name for this
+    // function if there is already an existing one.
+    if (auto fn = find_function(name)) {
+      auto newBase = mangle(name.name());
+      name = QualifiedName(name.prefix(), newBase);
+    }
+  }
+  auto fn = torch::make_unique<Function>(
+      std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
+  if (self) {
+    // Register this as a method on `self`'s type
+    self->getClassType()->addMethod(fn.get());
+  }
+  return fn;
 }
 
-void CompilationUnit::define(
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
-    const Self& self) {
-  AT_ASSERT(definitions.size() == resolvers.size());
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
   c10::optional<size_t> init_idx;
@@ -2993,15 +3019,20 @@ void CompilationUnit::define(
     }
   }
 
-  std::vector<Function*> methods;
-  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
+  std::vector<Function*> functions;
+  std::unordered_map<std::string, Function*> function_table;
   if (init_idx.has_value()) {
     // if we have an init, do it first.
     auto fn = define(
-        definitions[*init_idx], resolvers[*init_idx], self, function_table);
+        prefix,
+        definitions[*init_idx],
+        resolvers[*init_idx],
+        self,
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
-    function_table[name] = fn;
-    methods.push_back(fn.get());
+    function_table[name] = fn.get();
+    functions.push_back(fn.get());
     register_function(std::move(fn));
   }
 
@@ -3011,22 +3042,30 @@ void CompilationUnit::define(
       continue;
     }
 
-    auto fn = define(definitions[i], resolvers[i], self, function_table);
+    auto fn = define(
+        prefix,
+        definitions[i],
+        resolvers[i],
+        self,
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
-    function_table[name] = fn;
-    methods.push_back(fn.get());
+    function_table[name] = fn.get();
+    functions.push_back(fn.get());
     register_function(std::move(fn));
   }
 
-  for (Function* method : methods) {
-    method->ensure_defined();
+  for (Function* function : functions) {
+    function->ensure_defined();
   }
+  return functions;
 }
 
-void CompilationUnit::define(
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
-    const Self& self) {
+    const Self* self) {
   Parser p(std::make_shared<Source>(source, "<string>", 1));
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
@@ -3035,7 +3074,7 @@ void CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  define(definitions, resolvers, self);
+  return define(prefix, definitions, resolvers, self);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
@@ -3043,6 +3082,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   // so subsequent cleanups do not need reconvert it
   if (convert_ssa) {
     ConvertToSSA(to_clean);
+    // convert loops with an iter and body condition specified to
+    // python-recognize while loops. we do this so they can be exported,
+    // and run the pass early to avoid jitter. Like conversion to SSA,
+    // it only needs to run once.
+    CanonicalizeModifiedLoops(to_clean);
   }
   // NB ORDERING: SSA conversion has to occur before
   // lifting of closures and forks, this way closures are converted

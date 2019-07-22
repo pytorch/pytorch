@@ -14,6 +14,8 @@ static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(threshold_stub);
+DEFINE_DISPATCH(hardshrink_cpu_stub);
+DEFINE_DISPATCH(hardshrink_backward_cpu_stub);
 
 Tensor relu(const Tensor & self) {
   return at::threshold(self, 0, 0);
@@ -339,35 +341,15 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // -----------------------------------
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_cpu", [&] {
-    auto lambd_val = lambd.to<scalar_t>();
-    at::CPU_tensor_apply2<scalar_t, scalar_t>(
-      self,
-      out_tensor,
-      [&](
-        scalar_t& self_val,
-        scalar_t& out_tensor_val) {
-          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : self_val;
-    });
-  });
+  auto iter = TensorIterator::unary_op(out_tensor, self);
+  hardshrink_cpu_stub(kCPU, *iter, lambd);
   return out_tensor;
 }
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_backward_cpu", [&] {
-    auto lambd_val = lambd.to<scalar_t>();
-    at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-      self,
-      grad,
-      out_tensor,
-      [&](
-        scalar_t& self_val,
-        scalar_t& grad_val,
-        scalar_t& out_tensor_val) {
-          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : grad_val;
-    });
-  });
+  auto iter = TensorIterator::binary_op(out_tensor, grad, self);
+  hardshrink_backward_cpu_stub(kCPU, *iter, lambd);
   return out_tensor;
 }
 

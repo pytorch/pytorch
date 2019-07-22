@@ -1,5 +1,4 @@
 # Torch
-from torch._C import _jit_python_print
 from torch._six import PY2
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map
@@ -24,6 +23,7 @@ import inspect
 import io
 import math
 import os
+import pickle
 import tempfile
 import textwrap
 
@@ -71,44 +71,17 @@ class JitTestCase(TestCase):
                 return True
         return False
 
-    def emitFunctionHook(self, func):
-        # func has invalid names for export, skip the jitter check
-        if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
-            return
-        # disable the hook while we parse code, otherwise we will re-enter the hook
-        with torch.jit._disable_emit_hooks():
-            try:
-                src, constants = _jit_python_print(func)
-                cu = torch.jit.CompilationUnit()._import(src, constants)
-                func2 = getattr(cu, func.name)
-                src2, constants2 = _jit_python_print(func2)
-                self.assertMultiLineEqual(src, src2)
-            except RuntimeError as e:
-                if not self._isHookExceptionOk(e):
-                    raise
-
-    def emitModuleHook(self, module):
+    def _compared_saved_loaded(self, m):
         import zipfile
-
-        def copy_structure_and_params(m):
-            c = torch.jit.ScriptModule()
-            for name, v in m._get_parameters():
-                c._c._register_parameter(name, v, False)
-            for name, the_type, v in m._get_attributes():
-                c._c._register_attribute(name, the_type, v)
-            for name, s in m._get_modules():
-                c._c._register_module(name, copy_structure_and_params(s)._c)
-            return c
-
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with torch.jit._disable_emit_hooks():
             try:
-                if len(module.code) == 0:
+                if len(m.code) == 0:
                     # short-circuit if this is an empty module
                     return
                 # save the module to a buffer
                 buffer = io.BytesIO()
-                torch.jit.save(module, buffer)
+                torch.jit.save(m, buffer)
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -120,6 +93,8 @@ class JitTestCase(TestCase):
                 self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
                 main_module = archive.open('archive/code/archive.py')
                 main_module_code = "".join([line.decode() for line in main_module])
+                main_module_debug_file = archive.open('archive/debug/archive.pkl')
+                main_module_debug = pickle.load(main_module_debug_file)
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -138,15 +113,24 @@ class JitTestCase(TestCase):
             archive2 = zipfile.ZipFile(saved_module_buffer_2)
             main_module_2 = archive2.open('archive/code/archive.py')
             main_module_2_code = "".join([line.decode() for line in main_module_2])
+            main_module_2_debug_file = archive.open('archive/debug/archive.pkl')
+            main_module_2_debug = pickle.load(main_module_2_debug_file)
 
             self.assertMultiLineEqual(main_module_code, main_module_2_code)
+            self.assertEqual(main_module_debug, main_module_2_debug)
+
+
+    def emitFunctionHook(self, func):
+        # func has invalid names for export, skip the jitter check
+        if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
+            return
+        self._compared_saved_loaded(func)
+
+    def emitModuleHook(self, module):
+        self._compared_saved_loaded(module)
+
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
-        if isinstance(m, torch._C.Function):
-            src, constants = _jit_python_print(m)
-            cu = torch.jit.CompilationUnit()._import(src, constants)
-            return getattr(cu, m.name)
-
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
@@ -156,7 +140,7 @@ class JitTestCase(TestCase):
             return imported
 
         with TemporaryFileName() as fname:
-            imported.save(fname)
+            torch.jit.save(imported, fname)
             return torch.jit.load(fname, map_location=map_location)
 
     def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
@@ -451,8 +435,9 @@ class JitTestCase(TestCase):
 
     def assertExportImportModule(self, m, inputs):
         m_import = self.getExportImportCopy(m)
-        self.assertEqual(self.runAndSaveRNG(m, inputs),
-                         self.runAndSaveRNG(m_import, inputs))
+        a = self.runAndSaveRNG(m, inputs)
+        b = self.runAndSaveRNG(m_import, inputs)
+        self.assertEqual(a, b)
 
     def runAndSaveRNG(self, func, inputs, kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -463,8 +448,10 @@ class JitTestCase(TestCase):
 @contextmanager
 def enable_profiling_mode():
     torch._C._jit_set_profiling_mode(True)
-    yield
-    torch._C._jit_set_profiling_mode(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_profiling_mode(False)
 
 _inline_everything = True
 @contextmanager
@@ -473,17 +460,21 @@ def disable_inline_everything_mode():
     old = _inline_everything
     _inline_everything = False
     torch._C._jit_set_inline_everything_mode(False)
-    yield
-    _inline_everything = old
-    torch._C._jit_set_inline_everything_mode(old)
+    try:
+        yield
+    finally:
+        _inline_everything = old
+        torch._C._jit_set_inline_everything_mode(old)
 
 
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
     torch._C._debug_set_autodiff_subgraph_inlining(not enabled)
-    yield
-    torch._C._debug_set_autodiff_subgraph_inlining(True)
+    try:
+        yield
+    finally:
+        torch._C._debug_set_autodiff_subgraph_inlining(True)
 
 
 # make it easy to quicky define/trace a function for these tests

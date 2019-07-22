@@ -18,13 +18,15 @@ import torch.onnx.symbolic_opset9
 # release on 04/24/19
 
 
-@parse_args('v', 'i', 'i', 'i', 'i')
+@parse_args('v', 'v', 'i', 'i', 'i')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
         _unimplemented("TopK", "Out parameter is not supported for topk")
     if not largest:
         _unimplemented("TopK", "Ascending TopK is not supported")
-    k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
+    k = sym_help._maybe_get_const(k, 'i')
+    if not sym_help._is_value(k):
+        k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
     from torch.onnx.symbolic_opset9 import unsqueeze
     k = unsqueeze(g, k, 0)
     return g.op("TopK", self, k, axis_i=dim, outputs=2)
@@ -63,8 +65,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                                         strides_i=[1 for _ in range(ndims)])
             # convert indices to have non-flattened indices values
             from torch.onnx.symbolic_opset9 import sub
-            s = _slice_op(g, flattened_indices, axes=[2 + i for i in range(ndims)],
-                          starts=tuple_fn(0), ends=tuple_fn(1))
+            s = sym_help._slice_helper(g, flattened_indices, axes=[2 + i for i in range(ndims)],
+                                       starts=tuple_fn(0), ends=tuple_fn(1))
             indices = sub(g, indices, s)
             return r, indices
         else:
@@ -83,8 +85,10 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 
 
 def _avg_pool(name, tuple_fn):
-    @parse_args('v', 'is', 'is', 'is', 'i', 'i')
-    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
+    @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
+    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
+        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
+            return _unimplemented(name, "divisor_override")
         if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))

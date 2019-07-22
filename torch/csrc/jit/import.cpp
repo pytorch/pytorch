@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
@@ -33,6 +35,18 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
 
 namespace {
+
+struct ClassResolver : public script::Resolver {
+  explicit ClassResolver(std::shared_ptr<script::CompilationUnit> cu)
+      : cu_(std::move(cu)) {}
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      const override {
+    return cu_->get_type(c10::QualifiedName(name));
+  }
+
+ private:
+  std::shared_ptr<script::CompilationUnit> cu_;
+};
 
 // this is a deserializer class which loads script modules from pt files. the
 // content of the file is written using PyTorchStreamWriter, for details please
@@ -79,6 +93,7 @@ class ScriptModuleDeserializer final {
 
   std::unordered_set<std::string> imported_libs_;
 
+  std::shared_ptr<script::CompilationUnit> compilation_unit_;
   script::Module main_module_;
 };
 
@@ -175,9 +190,16 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
 std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
-  std::tie(attributes_ptr, attributes_size) =
-      reader_.getRecord(name);
-  Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
+  std::tie(attributes_ptr, attributes_size) = reader_.getRecord(name);
+  Unpickler unpickler(
+      attributes_ptr.get(),
+      attributes_size,
+      &tensor_table_,
+      [&](const c10::QualifiedName& qn) {
+        importCallback(qn.prefix());
+        auto cu = main_module_.class_compilation_unit();
+        return c10::StrongTypePtr(cu, cu->get_class(qn));
+      });
   return unpickler.parse_ivalue_list();
 }
 
@@ -267,7 +289,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      *main_module_.class_compilation_unit(),
+      main_module_.class_compilation_unit(),
       qualifier,
       src,
       tensor_table_,
@@ -277,11 +299,10 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
 void ScriptModuleDeserializer::moduleSetState(
     const script::Module& module,
     IValue state) {
-  auto setstate =
-      module.class_compilation_unit()->find_function("__setstate__");
+  auto setstate = module.find_method("__setstate__");
 
   TORCH_CHECK(
-      setstate != nullptr,
+      setstate,
       "Cannot call '__setstate__' method because"
       " it does not exist");
 
@@ -309,7 +330,8 @@ void ScriptModuleDeserializer::convertModule(
       module.register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
-  script::ScriptTypeParser typeParser;
+  script::ScriptTypeParser typeParser(
+      std::make_shared<ClassResolver>(main_module_.class_compilation_unit()));
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
     if (module.find_buffer(attr_def.name())) {
@@ -328,6 +350,20 @@ void ScriptModuleDeserializer::convertModule(
     module.register_attribute(
         attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
   }
+
+  // If present, load in the table of source ranges from the original
+  // generating code.
+  std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr;
+  if (module_def.has_torchscript_debug_arena()) {
+    at::DataPtr data;
+    size_t size;
+    std::tie(data, size) =
+        reader_.getRecord(module_def.torchscript_debug_arena().key());
+
+    gen_ranges =
+        std::make_shared<ConcreteSourceRangeUnpickler>(std::move(data), size);
+  }
+
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
     size_t size;
@@ -337,12 +373,12 @@ void ScriptModuleDeserializer::convertModule(
     auto src = std::make_shared<Source>(
         std::string(static_cast<const char*>(data.get()), size),
         module_def.torchscript_arena().key(),
-        1);
+        1,
+        std::move(gen_ranges));
 
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
-        *main_module_.class_compilation_unit(),
         module,
         src,
         tensor_table_,
@@ -422,13 +458,17 @@ script::Module load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
-  script::Module module("__main__");
+  auto cu = std::make_shared<script::CompilationUnit>();
+  const auto basename = c10::QualifiedName("__main__");
+  script::Module module(basename, cu);
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
     script::Module curr = module;
+    auto qualname = basename;
     for (const auto& name : qualified_name) {
+      qualname = c10::QualifiedName(qualname, name);
       if (!curr.find_module(name)) {
-        curr.register_module(name, script::Module("__main__"));
+        curr.register_module(name, script::Module(qualname, cu));
       }
       curr = curr.get_module(name);
     }

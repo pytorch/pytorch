@@ -13,7 +13,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
 #include <vector>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
@@ -450,7 +450,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
     if (self.names().has_value()) {
       AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()->at(dim));
@@ -459,7 +459,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   const auto outnames = namedinference::erase_name(self.names(), dim);
 #endif
   if (index < 0) {
@@ -471,7 +471,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
   auto result = self.as_strided(sizes, strides, storage_offset);
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   if (outnames) {
     internal_set_names_inplace(result, *outnames);
   }
@@ -479,7 +479,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   return result;
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 Tensor select(const Tensor& self, Dimname dim, int64_t index) {
   return at::select(self, dimname_to_position(self, dim), index);
 }
@@ -515,7 +515,11 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   auto len = end - start;
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
-  return self.as_strided(sizes, strides, storage_offset);
+  auto result = self.as_strided(sizes, strides, storage_offset);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -896,6 +900,24 @@ Tensor numpy_T(const Tensor &self) {
   }
   return self.permute(transpose_dims);
 }
+
+Tensor view(const Tensor& self, IntArrayRef size) {
+  auto inferred_size = at::infer_size(size, self.numel());
+  if (self.sizes() == inferred_size) {
+    return self;
+  }
+
+  auto stride = at::detail::computeStride(self.sizes(),
+                                           self.strides(),
+                                           inferred_size);
+  TORCH_CHECK(stride.has_value(), "view size is "
+    "not compatible with input tensor's size and stride (at least one dimension"
+    " spans across two contiguous subspaces). Use .reshape(...) instead.");
+  auto stride_value = *stride;
+  auto self_ = self.clone();
+  self_.set_(self.storage(), self.storage_offset(), inferred_size,
+             stride_value);
+  return self_;
 }
 
-}
+}} // at::native
