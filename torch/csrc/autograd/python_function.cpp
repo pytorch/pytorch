@@ -236,7 +236,9 @@ auto PyFunction::name() const -> std::string {
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 {
   // cdata could be null if someone constructed a legacy function but haven't
-  // actually called backward() on it yet.
+  // actually called backward() on it yet, or if the PyFunction has already
+  // gone out of scope by the time we're GC'ing this THPFunction (e.g., the
+  // user saved grad_fn only).
   //
   // TODO: I'm not really sure if we're actually obligated to traverse PyObject
   // that is stored in PyFunction, since we don't really own that C++ object.
@@ -877,8 +879,8 @@ PyObject* THPFunction__register_hook_dict(THPFunction *self, PyObject *_var)
       var->backward_hooks, var->cdata.output_nr()));
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
-    "Legacy autograd function had _register_hook_dict called before the function was "
-    "invoked.  This usage pattern is no longer supported: please call _register_hook_dict "
+    "Legacy autograd function had register_hook called before the function was "
+    "invoked.  This usage pattern is no longer supported: please call register_hook "
     "AFTER calling your function, or port your code to use non-legacy autograd function, see: "
     "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd")
   cdata->add_pre_hook(std::move(hook));
@@ -916,7 +918,10 @@ static PyObject *unpack_saved_variables(
   // This is really a true assert, because we've already tested for the
   // self->has_freed_buffers case at the beginning of this function:
   // buffers are freed when PyFunction dies; if the buffers are not freed,
-  // PyFunction must be live.
+  // PyFunction must be live.  (Note that the buffers could be freed
+  // even though the PyFunction is live, but that doesn't matter here
+  // because we will never hit this line of code if the buffers are freed--
+  // and in any case saved_for will be non-NULL.)
   TORCH_INTERNAL_ASSERT(saved_for);
   for (int i = 0; i < num_saved; i++) {
     auto unpacked_var = saved_variables[i].unpack(saved_for);
