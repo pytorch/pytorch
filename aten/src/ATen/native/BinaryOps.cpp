@@ -5,6 +5,9 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at {
 namespace native {
@@ -80,6 +83,17 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_mul_out(result, self, other);
   }
   at::assert_no_internal_overlap(result, "mul");
+#ifdef BUILD_NAMEDTENSOR
+  if (self.is_named() || other.is_named()) {
+    Tensor self_, other_;
+    optional<std::vector<Dimname>> outnames;
+    std::tie(self_, other_, outnames) =
+        namedinference::unify_names_for_binary_op(self, other);
+    auto iter = TensorIterator::binary_op(result, self_, other_);
+    mul_stub(iter->device_type(), *iter);
+    return at::internal_set_names_inplace(result, outnames.value());
+  }
+#endif
   auto iter = TensorIterator::binary_op(result, self, other);
   mul_stub(iter->device_type(), *iter);
   return result;
@@ -91,6 +105,19 @@ Tensor mul(const Tensor& self, const Tensor& other) {
     result = at::empty({0}, self.options());
     return native::mul_out(result, self, other);
   }
+#ifdef BUILD_NAMEDTENSOR
+  if (self.is_named() || other.is_named()) {
+    Tensor self_, other_;
+    optional<std::vector<Dimname>> outnames;
+    std::tie(self_, other_, outnames) =
+        namedinference::unify_names_for_binary_op(self, other);
+    auto iter = TensorIterator::binary_op(result, self_, other_);
+    mul_stub(iter->device_type(), *iter);
+    auto result_ = iter->output();
+    at::internal_set_names_inplace(result_, outnames.value());
+    return result_;
+  }
+#endif
   auto iter = TensorIterator::binary_op(result, self, other);
   mul_stub(iter->device_type(), *iter);
   return iter->output();

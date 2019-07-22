@@ -40,6 +40,22 @@ void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
 void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
 
+// [Binary op interface]
+// There are two main behaviors for binary ops that we are considering:
+// 1. Broadcasting by position, names act as a type system to check alignment.
+// 2. Broadcasting by names, names get auto-aligned before the binary op.
+// I want to leave open the option of experimenting with both of them, so we're
+// going to define the following interface and usage so that it is possible to
+// easily switch between the two behaviors.
+//
+// tensor', other', outnames = unify_names_for_binary_op(tensor, other);
+// result = binary_op(tensor', other')
+// return result.set_names_(outnames)
+//
+// TODO(rzou): cleanup when we're done experimenting.
+std::tuple<Tensor,Tensor,optional<std::vector<Dimname>>>
+unify_names_for_binary_op(const Tensor& tensor, const Tensor& other);
+
 } // namespace namedinference
 
 } // namespace at

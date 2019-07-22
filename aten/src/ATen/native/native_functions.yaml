@@ -1387,6 +1387,7 @@
     SparseCPU: mul
     SparseCUDA: mul
     MkldnnCPU: mkldnn_mul
+  named_guard: False
 
 
 - func: mul_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -1397,6 +1398,7 @@
     SparseCPU: mul_
     SparseCUDA: mul_
     MkldnnCPU: mkldnn_mul_
+  named_guard: False
 
 - func: mul(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1405,6 +1407,7 @@
     SparseCPU: mul_out
     SparseCUDA: mul_out
     MkldnnCPU: mkldnn_mul_out
+  named_guard: False
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul(Tensor self, Scalar other) -> Tensor
