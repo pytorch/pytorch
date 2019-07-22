@@ -173,6 +173,29 @@ class ModuleAPITest(TestCase):
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
 
+    def test_pool_api(self):
+        """Tests the correctness of the pool module.
+
+        The correctness is defined against the functional implementation.
+        """
+        N, C, H, W = 10, 10, 10, 3
+        kwargs = {
+            'kernel_size': 2,
+            'stride': None,
+            'padding': 0,
+            'dilation': 1
+        }
+
+        scale, zero_point = 1.0 / 255, 128
+
+        X = torch.randn(N, C, H, W, dtype=torch.float32)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch.quint8)
+        qX_expect = torch.nn.functional.max_pool2d(qX, **kwargs)
+
+        pool_under_test = torch.nn.quantized.MaxPool2d(**kwargs)
+        qX_hat = pool_under_test(qX)
+        self.assertEqual(qX_expect, qX_hat)
 
 if __name__ == '__main__':
     run_tests()
