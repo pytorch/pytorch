@@ -12197,6 +12197,33 @@ a")
         self.assertEqual(loaded.submodule.buffer1, torch.ones(2, 2) + 10)
         self.assertEqual(loaded.submodule.buffer2, torch.ones(2, 2) + 10)
 
+        # Check simpler module
+        class NoArgState(torch.nn.Module):
+            def __init__(self):
+                super(NoArgState, self).__init__()
+                self.register_buffer('buffer1', torch.ones(2, 2))
+                self.register_buffer('buffer2', torch.ones(2, 2))
+
+            def forward(self):
+                pass
+
+            @torch.jit.export
+            def __getstate__(self):
+                pass
+
+            @torch.jit.export
+            def __setstate__(self):
+                self.buffer1 = torch.ones(2, 2) + 10
+                self.buffer2 = torch.ones(2, 2) + 10
+
+        with TemporaryFileName() as fname:
+            m = torch.jit.script(NoArgState())
+            m.save(fname)
+            loaded = torch.jit.load(fname)
+            self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 10)
+            self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
+
+
 
     def test_string_slicing(self):
         def fn1(x):
