@@ -1,5 +1,6 @@
 import math
 
+import torch
 from torch._six import inf
 from torch.distributions import constraints
 from torch.distributions.transforms import AbsTransform
@@ -49,6 +50,9 @@ class HalfCauchy(TransformedDistribution):
         return self.base_dist.variance
 
     def log_prob(self, value):
+        if not isinstance(value, torch.Tensor) and \
+           (isinstance(value, int) or isinstance(value, float)):
+            value = torch.tensor(value)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
         log_prob[value.expand(log_prob.shape) < 0] = -inf
         return log_prob
