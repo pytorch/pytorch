@@ -167,6 +167,26 @@ class TestAutograd(TestCase):
         MyFunction()(y).sum().backward()
         self.assertEqual(v.grad.data, torch.zeros(shape))
 
+    def test_legacy_function_deprecation_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+
+            # Trigger Warning
+            class MyFunction(Function):
+                def forward(self, x):
+                    return x
+
+                def backward(self, grad_output):
+                    return grad_output
+
+            MyFunction()(torch.randn(3, 4))
+
+            # Check warning occurs
+            self.assertIn(
+                'Legacy autograd function with non-static forward method is deprecated',
+                str(w[0]))
+
     def test_invalid_gradients(self):
         class MyFunction(Function):
             @staticmethod
@@ -3221,6 +3241,15 @@ for shape in [(1,), ()]:
         # This will cause stack overflow if reentrant calls are handled
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_advanced_indexing_backwards_large(self):
+        # See https://github.com/pytorch/pytorch/issues/22843
+        n = (1 << 16)
+        x = torch.rand(n, 1, device='cuda', requires_grad=True)
+        a = x[:, [0]]
+        a.sum().backward()
+        self.assertEqual(x.grad, torch.ones(n, 1, device='cuda'))
 
     def test_reentrant_priority(self):
         order = []
