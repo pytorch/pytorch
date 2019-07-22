@@ -749,7 +749,7 @@ Example::
     tensor([[5., 0., 0.],
             [0., 5., 0.],
             [0., 0., 5.]])
-    >>> b = torch.zeros(7, 3)        
+    >>> b = torch.zeros(7, 3)
     >>> b.fill_diagonal_(5)
     tensor([[5., 0., 0.],
             [0., 5., 0.],
@@ -2560,6 +2560,12 @@ add_docstr_all('char',
 char() -> Tensor
 
 ``self.char()`` is equivalent to ``self.to(torch.int8)``. See :func:`to`.
+""")
+
+add_docstr_all('bfloat16',
+               r"""
+bfloat16() -> Tensor
+``self.bfloat16()`` is equivalent to ``self.to(torch.bfloat16)``. See :func:`to`.
 """)
 
 add_docstr_all('double',

@@ -8,7 +8,6 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const at::ArrayRef<Variable> raw_outputs,
   const std::shared_ptr<Function> &cdata) {
-  // Sets the grad_fn and output_nr of an output Variable.
 
   std::unordered_set<at::TensorImpl*> inputs;
   inputs.reserve(input_vars.size());
@@ -16,6 +15,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     inputs.emplace(var.unsafeGetTensorImpl());
   }
 
+  // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {
     if (!is_differentiable) {
@@ -85,33 +85,77 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   return outputs;
 }
 
+
+template <typename T, typename... Args>
+void extract_vars(variable_list& list, T&& cur, Args&& ... args) {
+  extract_vars(list, std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+void extract_vars(variable_list& list, Variable&& cur, Args&& ... args) {
+  list.push_back(cur);
+  extract_vars(list, std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+void extract_vars(variable_list& list, Variable& cur, Args&& ... args) {
+  list.push_back(cur);
+  extract_vars(list, std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+void extract_vars(variable_list& list, Args&& ... args) {
+}
+
+
 template<class T>
-void CFunction<T>::apply(variable_list&& input_vars) {
+template<typename... Args>
+variable_list CFunction<T>::apply(Args&&... args) {
+  variable_list input_vars;
+  extract_vars(input_vars, std::forward<Args>(args)...);
+
   bool is_executable =  GradMode::is_enabled() && any_variable_requires_grad(input_vars);
   auto next_edges = collect_next_edges(input_vars);
 
-  std::shared_ptr<CustomFunc<T>> grad_fn = std::make_shared<CustomFunc<T>>();
-  grad_fn->ctx.set_next_edges(std::move(next_edges));
-  grad_fn->ctx.clear_input_metadata();
+  std::shared_ptr<CustomFunc<T>> grad_fn(new CustomFunc<T>, deleteFunction);
+  grad_fn->set_next_edges(std::move(next_edges));
+  grad_fn->clear_input_metadata();
+
 
   variable_list outputs;
   {
     AutoGradMode grad_mode(false);
-    outputs = T::forward(&grad_fn->ctx, input_vars);
+    outputs = T::forward(&grad_fn->ctx, std::forward<Args>(args)...);
   }
 
-  _wrap_outputs(input_vars, grad_fn.ctx->non_differentiable, grad_fn.ctx->dirty_inputs, outputs, is_executable ? grad_fn : nullptr);
+  return _wrap_outputs(input_vars, grad_fn->ctx.non_differentiable, grad_fn->ctx.dirty_inputs, outputs, is_executable ? grad_fn : nullptr);
 }
 
 template<class T>
 variable_list CustomFunc<T>::apply(variable_list&& inputs) {
   auto outputs = T::backward(&ctx, inputs);
 
-  if (outputs.size() != inputs.size()) {
+  auto num_forward_inputs = inputs.size();
+  auto num_outputs = outputs.size();
+
+  // Returning too many results is ok, but only as long as they're all undefined.
+  // Truncate the result vector in that case.
+  if (num_outputs > num_forward_inputs) {
+    bool all_undef = true;
+    for (int i = num_forward_inputs; i < num_outputs; ++i) {
+      all_undef &= (outputs[i].defined());
+    }
+    if (all_undef) {
+      outputs.resize(num_forward_inputs);
+      num_outputs = num_forward_inputs;
+    }
+  }
+
+  if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(inputs.size()) + ", got " ;
-    msg += std::to_string(outputs.size()) + ")";
+    msg += std::to_string(num_forward_inputs) + ", got " ;
+    msg += std::to_string(num_outputs) + ")";
     throw std::runtime_error(msg);
   }
 
@@ -122,5 +166,4 @@ template<class T>
 void CustomFunc<T>::release_variables() {
   ctx.saved_variables.clear();
 }
-
 }} // namespace torch::autograd

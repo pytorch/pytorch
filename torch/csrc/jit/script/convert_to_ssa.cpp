@@ -1,7 +1,10 @@
 #include <torch/csrc/jit/script/convert_to_ssa.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/exit_transforms.h>
+#include <torch/csrc/jit/script/inline_loop_condition.h>
 #include <torch/csrc/jit/script/mini_environment.h>
 
 namespace torch {
@@ -35,13 +38,13 @@ struct ControlFlowLoadStores {
   }
 
   static void addBlockOutput(
-      Block* b,
+      Block* exit_block,
       const TypePtr& type,
       const std::string& name) {
-    WithInsertPoint insert(b);
-    auto g = b->owningGraph();
-    auto block_output = g->insertNode(g->createLoad(name, type))->output();
-    b->registerOutput(block_output);
+    WithInsertPoint insert(exit_block);
+    auto g = exit_block->owningGraph();
+    auto block_exit = g->insertNode(g->createLoad(name, type))->output();
+    exit_block->registerOutput(block_exit);
   }
 
   static void addNodeOutput(
@@ -87,7 +90,6 @@ struct ControlFlowLoadStores {
     // Following the same logic as emitIfElseBlocks in compiler.cpp,
     // we emit a node output if the variable is defined in each block
     // and the types of each block can be unified
-
     for (const auto& x : mutated_variables) {
       auto true_type = true_vars->findInAnyFrame(x);
       auto false_type = false_vars->findInAnyFrame(x);
@@ -114,6 +116,7 @@ struct ControlFlowLoadStores {
   void addLoopLoadStores(Node* n) {
     auto body_block = n->blocks().at(0);
     auto loop_vars = addControlFlowLoadStores(body_block);
+
     for (const auto& name : loop_vars->definedVariables()) {
       // we require that the variable is defined outside the loop to be emitted,
       // and we do not refine the type of the parent variable since the loop may
@@ -172,70 +175,16 @@ struct ControlFlowLoadStores {
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
 
-void moveBlockBeforeNode(Node* before_node, Block* block) {
-  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
-    auto block_node = *it++;
-    block_node->moveBefore(before_node);
-  }
-}
-
-// The loop node is initially emitted as:
-// Loop(max_trip_count)
-//    block0(loop_counter) {
-//      <body>
-//    }
-//    block1 {
-//      <loop condition>
-//      -> (condition)
-//    }
-// Here, we inline the loop condition and convert the loop to the form:
-// Loop(max_trip_count, start_condition)
-//    block0(loop_counter, loop_carried_block*) {
-//      <body>
-//      -> (continue_condition)
-//    }
-void inlineLoopCondition(Node* n) {
-  Block* body_block = n->blocks().at(0);
-
-  auto pre_header = n->blocks().at(1);
-  auto header_block = n->addBlock();
-  header_block->cloneFrom(pre_header, [](Value* v) { return v; });
-  moveBlockBeforeNode(n, header_block);
-  n->addInput(header_block->outputs().at(0));
-  n->eraseBlock(2);
-
-  moveBlockBeforeNode(body_block->return_node(), pre_header);
-  body_block->insertOutput(0, pre_header->outputs().at(0));
-  n->eraseBlock(1);
-}
-
-void inlineLoopCondition(Block* block) {
-  for (Node* n : block->nodes()) {
-    for (Block* b : n->blocks()) {
-      inlineLoopCondition(b);
-    }
-    if (n->kind() == prim::Loop) {
-      inlineLoopCondition(n);
-    }
-  }
-}
-
 // Given a graph where outputs have been added to control flow nodes, and
-// loads and stores are represented in the graph, converts the graph to SSA
-struct SSATransformer {
-  void convertBlockToSSA(Block* block) {
+// loads and stores are represented in the graph, erases the Loads & Stores.
+struct EraseLoadStores {
+  void eraseBlockLoadStores(Block* block) {
     pushFrame(block);
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       auto n = *it;
       it++;
+
       switch (n->kind()) {
-        case prim::If:
-        case prim::Loop:
-        case prim::Function: {
-          for (auto b : n->blocks()) {
-            convertBlockToSSA(b);
-          }
-        } break;
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input());
           n->destroy();
@@ -247,6 +196,11 @@ struct SSATransformer {
               var, "Typechecking should ensure the variable name is set");
           n->output()->replaceAllUsesWith(var);
           n->destroy();
+        } break;
+        default: {
+          for (auto b : n->blocks()) {
+            eraseBlockLoadStores(b);
+          }
         } break;
       }
     }
@@ -265,21 +219,108 @@ struct SSATransformer {
   }
 
   void run(std::shared_ptr<Graph>& graph) {
-    convertBlockToSSA(graph->block());
+    eraseBlockLoadStores(graph->block());
   }
 
   std::shared_ptr<ValueEnvironment> environment_stack = nullptr;
 };
 
-// Converting to SSA works in multiple parts. First we inline the loop condition
-// before and into the body of loops, then we add outputs to control flow
-// nodes, then we stitch together Loads & Stores into SSA form.
+// This pass transforms Breaks & Continues to be LoopContinuations,
+// of the form LoopContinuations(%loop_continue_condition, *loop_carried_vars)
+// Break Statements have the condition set to false, and Continue statements
+// inline the loop condition as the first input.
+struct LoopContinuations {
+ public:
+  void run(std::shared_ptr<Graph>& graph) {
+    run(graph->block());
+  }
+
+ private:
+  void addLoopCarriedOutputs(Node* n) {
+    auto g = n->owningGraph();
+    WithInsertPoint insert(n);
+    auto continuation = curr_loop_->blocks().at(0)->return_node();
+    for (auto out : continuation->inputs()) {
+      auto load_node = out->node();
+      TORCH_INTERNAL_ASSERT(load_node->kind() == prim::Load);
+      auto new_load =
+          g->insertNode(g->createClone(load_node, [](Value* v) { return v; }));
+      n->addInput(new_load->output());
+    }
+  }
+
+  void assignExitContinuations(Block* block) {
+    for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+      Node* n = *it;
+      it++;
+      switch (n->kind()) {
+        case prim::If: {
+          assignExitContinuations(n->blocks().at(0));
+          assignExitContinuations(n->blocks().at(1));
+        } break;
+        case prim::Function: {
+          LoopContinuations closure_block;
+          closure_block.run(n->blocks().at(0));
+        } break;
+        case prim::Loop: {
+          Node* prev_loop = curr_loop_;
+          curr_loop_ = n;
+          assignExitContinuations(n->blocks().at(0));
+          curr_loop_ = prev_loop;
+        } break;
+        case prim::ContinueStmt: {
+          auto loop_continuation =
+              graph_->create(prim::LoopContinuation, 0)->insertAfter(n);
+          auto header_block = loop_continuation->addBlock();
+          auto pre_header = curr_loop_->blocks().at(1);
+          header_block->cloneFrom(pre_header, [](Value* v) { return v; });
+          InlineBlockBeforeNode(n, header_block);
+          loop_continuation->addInput(header_block->outputs().at(0));
+          loop_continuation->eraseBlock(0);
+          addLoopCarriedOutputs(loop_continuation);
+          n->destroy();
+        } break;
+        case prim::BreakStmt: {
+          auto loop_exit =
+              graph_->create(prim::LoopContinuation, 0)->insertAfter(n);
+          // first input is the loop continue condition - break sets false
+          loop_exit->addInput(false_val_);
+          addLoopCarriedOutputs(loop_exit);
+          n->destroy();
+        } break;
+      }
+    }
+  }
+
+  void run(Block* b) {
+    {
+      graph_ = b->owningGraph();
+      WithInsertPoint guard(b->nodes().front());
+      false_val_ = graph_->insertConstant(false);
+    }
+    assignExitContinuations(b);
+  }
+
+  Graph* graph_ = nullptr;
+  Value* false_val_ = nullptr;
+  Node* curr_loop_ = nullptr;
+};
+
+// Converting to SSA works in multiple parts. First, we add control flow
+// loads and stores to the graph. Now that control flow outputs are set,
+// we can set remove Break & Continue to have the correct continuations to the
+// end of the block (LoopContinuation). Then we inline the loop condition into
+// the graph. Then, we erase Loads & Stores. Finally, we remove
+// LoopContinuations from the graph.
 void ConvertToSSA(std::shared_ptr<Graph>& graph) {
-  inlineLoopCondition(graph->block());
   ControlFlowLoadStores ctrl;
   ctrl.run(graph);
-  SSATransformer ssa;
-  ssa.run(graph);
+  LoopContinuations exit_vars;
+  exit_vars.run(graph);
+  InlineLoopCondition(graph);
+  EraseLoadStores erase_loads_stores;
+  erase_loads_stores.run(graph);
+  TransformExits(graph);
 }
 
 } // namespace script
