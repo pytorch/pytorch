@@ -436,6 +436,11 @@ inline IValue toIValue(
       return userObj;
     }
     case TypeKind::NumberType:
+      if (py::isinstance<py::int_>(obj)) {
+        return py::cast<int64_t>(obj);
+      } else if (py::isinstance<py::float_>(obj)) {
+        return py::cast<double>(obj);
+      }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:

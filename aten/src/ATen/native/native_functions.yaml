@@ -1854,6 +1854,11 @@
   device_guard: False
   named_guard: False
 
+- func: size(Tensor self, Dimname dim) -> int
+  variants: function, method
+  device_guard: False
+  named_guard: False
+
 - func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
   device_guard: False
@@ -1965,6 +1970,12 @@
 - func: stride(Tensor self, int dim) -> int
   variants: function, method
   device_guard: False
+  named_guard: False
+
+- func: stride(Tensor self, Dimname dim) -> int
+  variants: function, method
+  device_guard: False
+  named_guard: False
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method

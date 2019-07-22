@@ -715,6 +715,12 @@ inline int64_t Tensor::size(int64_t dim) const {
     static auto table = globalATenDispatch().getOpTable("aten::size(Tensor self, int dim) -> int");
     return table->getOp<int64_t (const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline int64_t Tensor::size(Dimname dim) const {
+    static auto table = globalATenDispatch().getOpTable("aten::size(Tensor self, Dimname dim) -> int");
+    return table->getOp<int64_t (const Tensor &, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
+}
+#endif
 inline Tensor Tensor::slice(int64_t dim, int64_t start, int64_t end, int64_t step) const {
     static auto table = globalATenDispatch().getOpTable("aten::slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, start, end, step);
@@ -767,6 +773,12 @@ inline int64_t Tensor::stride(int64_t dim) const {
     static auto table = globalATenDispatch().getOpTable("aten::stride(Tensor self, int dim) -> int");
     return table->getOp<int64_t (const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline int64_t Tensor::stride(Dimname dim) const {
+    static auto table = globalATenDispatch().getOpTable("aten::stride(Tensor self, Dimname dim) -> int");
+    return table->getOp<int64_t (const Tensor &, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
+}
+#endif
 inline Tensor Tensor::sum(c10::optional<ScalarType> dtype) const {
     static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dtype);
