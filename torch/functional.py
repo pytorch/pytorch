@@ -2,32 +2,21 @@ import torch
 import torch.nn.functional as F
 from torch._six import inf
 from itertools import product
-import warnings
 
 __all__ = [
     'broadcast_tensors',
-    'btrifact',
-    'btrifact_with_info',
-    'btrisolve',
-    'btriunpack',
     'cartesian_prod',
     'chain_matmul',
     'einsum',
-    'gesv',
     'isfinite',
     'isinf',
     'lu',
     'lu_unpack',
     'norm',
     'meshgrid',
-    'pstrf',
-    'potrf',
-    'potri',
-    'potrs',
     'split',
     'stft',
     'tensordot',
-    'trtrs',
     'unique',
     'unique_consecutive',
 ]
@@ -742,199 +731,6 @@ def chain_matmul(*matrices):
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
     return torch._C._VariableFunctions.chain_matmul(matrices)
-
-
-def pstrf(a, upper=True, out=None):
-    r"""Computes the pivoted Cholesky decomposition of a symmetric positive-definite
-    matrix :attr:`a`. returns a namedtuple (u, pivot) of matrice.
-
-    If :attr:`upper` is ``True`` or not provided, `u` is upper triangular
-    such that :math:`a = p^T u^T u p`, with `p` the permutation given by `pivot`.
-
-    If :attr:`upper` is ``False``, `u` is lower triangular such that
-    :math:`a = p^T u u^T p`.
-
-    .. warning::
-        :func:`torch.pstrf` is deprecated in favour of :func:`torch.cholesky` and will
-        be removed in the next release.
-
-    Args:
-        a (Tensor): the input 2-D tensor
-        upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-        out (tuple, optional): namedtuple of `u` and `pivot` tensors
-
-    Example::
-
-        >>> a = torch.randn(3, 3)
-        >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-        >>> a
-        tensor([[ 3.5405, -0.4577,  0.8342],
-                [-0.4577,  1.8244, -0.1996],
-                [ 0.8342, -0.1996,  3.7493]])
-        >>> u,piv = torch.pstrf(a)
-        >>> u
-        tensor([[ 1.9363,  0.4308, -0.1031],
-                [ 0.0000,  1.8316, -0.2256],
-                [ 0.0000,  0.0000,  1.3277]])
-        >>> piv
-        tensor([ 2,  0,  1], dtype=torch.int32)
-        >>> p = torch.eye(3).index_select(0,piv.long()).index_select(0,piv.long()).t() # make pivot permutation
-        >>> torch.mm(torch.mm(p.t(),torch.mm(u.t(),u)),p) # reconstruct
-        tensor([[ 3.5405, -0.4577,  0.8342],
-                [-0.4577,  1.8244, -0.1996],
-                [ 0.8342, -0.1996,  3.7493]])
-    """
-    warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
-                  "in the next release.", stacklevel=2)
-    return torch._C._VariableFunctions.pstrf(a, upper=upper, out=out)
-
-
-def potrf(a, upper=True, out=None):
-    r"""Computes the Cholesky decomposition of a symmetric positive-definite
-    matrix :math:`A`.
-
-    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
-
-    .. warning::
-        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
-        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
-        argument in :func:`torch.cholesky` defaults to ``False``.
-    """
-    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
-                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
-                  " torch.cholesky defaults to ``False``.", stacklevel=2)
-    return torch.cholesky(a, upper=upper, out=out)
-
-
-def potri(a, upper=True, out=None):
-    r"""Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
-    Cholesky factor.
-
-    For more information regarding :func:`torch.potri`, please check :func:`torch.cholesky_inverse`.
-
-    .. warning::
-        :func:`torch.potri` is deprecated in favour of :func:`torch.cholesky_inverse` and will be removed
-        in the next release. Please use :func:`torch.cholesky_inverse` instead and note that the :attr:`upper`
-        argument in :func:`torch.cholesky_inverse` defaults to ``False``.
-    """
-    warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be removed in "
-                  "the next release. Please use torch.cholesky_inverse instead and note that the :attr:`upper` "
-                  "argument in torch.cholesky_inverse defaults to ``False``.", stacklevel=2)
-    return torch.cholesky_inverse(a, upper=upper, out=out)
-
-
-def potrs(b, u, upper=True, out=None):
-    r"""Solves a linear system of equations with a positive semidefinite
-    matrix to be inverted given its Cholesky factor matrix :attr:`u`.
-
-    For more information regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
-
-    .. warning::
-        :func:`torch.potrs` is deprecated in favour of :func:`torch.cholesky_solve` and will be
-        removed in the next release. Please use :func:`torch.cholesky_solve` instead and note that
-        the :attr:`upper` argument in :func:`torch.cholesky_solve` defaults to ``False``.
-    """
-    warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and will be removed "
-                  "in the next release. Please use torch.cholesky instead and note that the "
-                  ":attr:`upper` argument in torch.cholesky_solve defaults to ``False``.", stacklevel=2)
-    return torch.cholesky_solve(b, u, upper=upper, out=out)
-
-
-def gesv(b, A, out=None):
-    r"""This function returns the solution to the system of linear equations represented
-    by :math:`AX = B` and the LU factorization of A, in order as a tuple `X, LU`.
-
-    For more information regarding :func:`torch.gesv`, please check :func:`torch.solve`.
-
-    .. warning::
-        :func:`torch.gesv` is deprecated in favour of :func:`torch.solve` and will be removed in the
-        next release. Please use :func:`torch.solve` instead.
-    """
-    warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
-                  "next release. Please use torch.solve instead.", stacklevel=2)
-    return torch.solve(b, A, out=out)
-
-
-def trtrs(b, A, upper=True, transpose=False, unitriangular=False, out=None):
-    r"""Solves a system of equations with a triangular coefficient matrix :math:`A`
-    and multiple right-hand sides :attr:`b`.
-
-    In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
-    with the default keyword arguments.
-
-    For more information regarding :func:`torch.trtrs`, please check :func:`torch.triangular_solve`.
-
-    .. warning::
-        :func:`torch.trtrs` is deprecated in favour of :func:`torch.triangular_solve` and will be
-        removed in the next release. Please use :func:`torch.triangular_solve` instead.
-    """
-    warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
-                  "removed in the next release. Please use torch.triangular_solve instead.", stacklevel=2)
-    return torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular, out=out)
-
-
-def btrifact(A, pivot=True, out=None):
-    r"""Returns a tuple containing the LU factorization and pivots of :attr:`A`.
-    Pivoting is done if :attr:`pivot` is set.
-
-    For more information regarding :func:`torch.btrifact`, please check :func:`torch.lu`.
-
-    .. warning::
-        :func:`torch.btrifact` is deprecated in favour of :func:`torch.lu` and will be
-        removed in the next release. Please use :func:`torch.lu` instead.
-    """
-    warnings.warn("torch.btrifact is deprecated in favour of torch.lu and will be "
-                  "removed in the next release. Please use torch.lu instead.", stacklevel=2)
-    return lu(A, pivot=pivot, get_infos=False, out=out)
-
-
-def btrifact_with_info(A, pivot=True, out=None):
-    r"""Performs LU factorization and returns additional status information along with the LU
-    factorization and pivots.
-
-    For more information regarding :func:`torch.btrifact_with_info`, please check :func:`torch.lu`.
-
-    .. warning::
-        :func:`torch.btrifact_with_info` is deprecated in favour of :func:`torch.lu` and will
-        be removed in the next release. Please use :func:`torch.lu` with the :attr:`get_infos`
-        argument set to ``True`` instead.
-    """
-    warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu and will be "
-                  "removed in the next release. Please use torch.lu with the get_infos argument "
-                  "set to True instead.",
-                  stacklevel=2)
-    return lu(A, pivot=pivot, get_infos=True, out=out)
-
-
-def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    r"""Unpacks the data and pivots from a LU factorization of a tensor.
-
-    For more information regarding :func:`torch.btriunpack`, please check :func:`torch.lu_unpack`.
-
-    .. warning::
-        :func:`torch.btriunpack` is deprecated in favour of :func:`torch.lu_unpack` and will be
-        removed in the next release. Please use :func:`torch.lu_unpack` instead.
-    """
-    warnings.warn("torch.btriunpack is deprecated in favour of torch.lu_unpack and will be "
-                  "removed in the next release. Please use torch.lu_unpack instead.", stacklevel=2)
-    return lu_unpack(LU_data=LU_data, LU_pivots=LU_pivots,
-                     unpack_data=unpack_data, unpack_pivots=unpack_pivots)
-
-
-def btrisolve(b, LU_data, LU_pivots, out=None):
-    r"""Solves the system of equations :math:`Ax = b` using the partially pivoted LU
-    factorization of :math:`A` given by :attr:`LU_data` and :attr:`LU_pivots`.
-
-    For more information regarding :func:`torch.btrisolve`, please check
-    :func:`torch.lu_solve`.
-
-    .. warning::
-        :func:`torch.btrisolve` is deprecated in favour of :func:`torch.lu_solve` and will be
-        removed in the next release. Please use :func:`torch.lu_solve` instead.
-    """
-    warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
-                  "removed in the next release. Please use torch.lu_solve instead.", stacklevel=2)
-    return torch.lu_solve(b, LU_data=LU_data, LU_pivots=LU_pivots, out=out)
 
 
 def lu(A, pivot=True, get_infos=False, out=None):
