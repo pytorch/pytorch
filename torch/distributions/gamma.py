@@ -65,8 +65,7 @@ class Gamma(ExponentialFamily):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        if not isinstance(value, torch.Tensor) and \
-           (isinstance(value, int) or isinstance(value, float)):
+        if not self._validate_args and isinstance(value, Number):
             value = torch.tensor(value)
         return (self.concentration * torch.log(self.rate) +
                 (self.concentration - 1) * torch.log(value) -
