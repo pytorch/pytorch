@@ -9,12 +9,12 @@ TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
 #if !defined(TH_REAL_IS_HALF) && !defined(TH_REAL_IS_BFLOAT16)
 
-TH_API void THTensor_(ltValue)(THByteTensor *r_, THTensor* t, scalar_t value);
-TH_API void THTensor_(leValue)(THByteTensor *r_, THTensor* t, scalar_t value);
-TH_API void THTensor_(gtValue)(THByteTensor *r_, THTensor* t, scalar_t value);
-TH_API void THTensor_(geValue)(THByteTensor *r_, THTensor* t, scalar_t value);
-TH_API void THTensor_(neValue)(THByteTensor *r_, THTensor* t, scalar_t value);
-TH_API void THTensor_(eqValue)(THByteTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(ltValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(leValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(gtValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(geValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(neValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(eqValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
 
 TH_API void THTensor_(ltValueT)(THTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(leValueT)(THTensor *r_, THTensor* t, scalar_t value);
@@ -23,12 +23,12 @@ TH_API void THTensor_(geValueT)(THTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(neValueT)(THTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(eqValueT)(THTensor *r_, THTensor* t, scalar_t value);
 
-TH_API void THTensor_(ltTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
-TH_API void THTensor_(leTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
-TH_API void THTensor_(gtTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
-TH_API void THTensor_(geTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
-TH_API void THTensor_(neTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
-TH_API void THTensor_(eqTensor)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(ltTensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(leTensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(gtTensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(geTensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(neTensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(eqTensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb);
 
 TH_API void THTensor_(ltTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(leTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
@@ -36,6 +36,20 @@ TH_API void THTensor_(gtTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(geTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(neTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(eqTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
+
+TH_API void THTensor_(ltValueByte)(THByteTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(leValueByte)(THByteTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(gtValueByte)(THByteTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(geValueByte)(THByteTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(neValueByte)(THByteTensor *r_, THTensor* t, scalar_t value);
+TH_API void THTensor_(eqValueByte)(THByteTensor *r_, THTensor* t, scalar_t value);
+
+TH_API void THTensor_(ltTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(leTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(gtTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(geTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(neTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+TH_API void THTensor_(eqTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
 
 TH_API accreal THTensor_(sumall)(THTensor *t);
 TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);

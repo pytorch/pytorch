@@ -115,12 +115,9 @@ if ((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lit
   #     "Please set the proper paths so that I can find protobuf correctly.")
 endif()
 
-# Protobuf generated files use <> as inclusion path, so maybe we should use
-# SYSTEM inclusion path. But we need these include dirs to be found before
-# other protobuf include dirs in Anaconda
 get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "Caffe2 protobuf include directory: " ${__tmp})
-include_directories(BEFORE ${__tmp})
+include_directories(BEFORE SYSTEM ${__tmp})
 
 # If Protobuf_VERSION is known (true in most cases, false if we are building
 # local protobuf), then we will add a protobuf version check in

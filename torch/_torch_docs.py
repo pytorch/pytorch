@@ -896,7 +896,7 @@ tensor will be composed of lower-triangular Cholesky factors of each of the indi
 matrices.
 
 Args:
-    a (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    a (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
     upper (bool, optional): flag that indicates whether to return a
                             upper or lower triangular matrix. Default: ``False``
@@ -2278,7 +2278,7 @@ individual inverses.
     transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).stride()`
 
 Args:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                     batch dimensions
     out (Tensor, optional): the optional output tensor
 
@@ -4420,7 +4420,10 @@ add_docstr(torch.sign,
            r"""
 sign(input, out=None) -> Tensor
 
-Returns a new tensor with the sign of the elements of :attr:`input`.
+Returns a new tensor with the signs of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \operatorname{sgn}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -6283,26 +6286,27 @@ this normalizes the result by multiplying it with
 :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary, where
 :math:`N_i` is the size of signal dimension :math:`i`.
 
-Due to the conjugate symmetry, :attr:`input` do not need to contain the full
-complex frequency values. Roughly half of the values will be sufficient, as
-is the case when :attr:`input` is given by :func:`~torch.rfft` with
-``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
-argument of this method to ``True``. Moreover, the original signal shape
-information can sometimes be lost, optionally set :attr:`signal_sizes` to be
-the size of the original signal (without the batch dimensions if in batched
-mode) to recover it with correct shape.
+.. note::
+    Due to the conjugate symmetry, :attr:`input` do not need to contain the full
+    complex frequency values. Roughly half of the values will be sufficient, as
+    is the case when :attr:`input` is given by :func:`~torch.rfft` with
+    ``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
+    argument of this method to ``True``. Moreover, the original signal shape
+    information can sometimes be lost, optionally set :attr:`signal_sizes` to be
+    the size of the original signal (without the batch dimensions if in batched
+    mode) to recover it with correct shape.
 
-Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
-:attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
-and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
-example below for a case of size mismatch.
+    Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
+    :attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
+    and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
+    example below for a case of size mismatch.
 
-See :func:`~torch.rfft` for details on conjugate symmetry.
+    See :func:`~torch.rfft` for details on conjugate symmetry.
 
 The inverse of this function is :func:`~torch.rfft`.
 
 .. warning::
-    Generally speaking, the input of this function should contain values
+    Generally speaking, input to this function should contain values
     following conjugate symmetry. Note that even if :attr:`onesided` is
     ``True``, often symmetry on some part is still needed. When this
     requirement is not satisfied, the behavior of :func:`~torch.irfft` is

@@ -87,7 +87,7 @@ class BatchNormNet(nn.Module):
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
-ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99) 
+ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99)
 
 
 def get_timeout(test_id):
@@ -1435,7 +1435,7 @@ class _DistTestBase(object):
         self._barrier()
 
     @unittest.skipIf(
-        BACKEND == "nccl", "nccl does not support DistributedDataParallelCPU"
+        BACKEND == "nccl", "nccl does not support DDP on CPU models"
     )
     def test_DistributedDataParallelCPU(self):
         # Run a simple end to end DDP-CPU model, use result of single node
@@ -1454,7 +1454,6 @@ class _DistTestBase(object):
         global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
         # check two model parameters over 5 iterations
-        # TODO: add state pickling support for DistributedDataParallelCPU
         self._test_DDP_5iter(
             model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False
         )
