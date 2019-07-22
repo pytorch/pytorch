@@ -898,15 +898,23 @@ bool Node::hasSideEffects() const {
 
   auto op = findOperatorFor(this);
   if (!op) {
-    TORCH_INTERNAL_ASSERT(kind_.is_prim(), "Only prim ops are allowed to not have a registered operator but ", kind_.toDisplayString(), " doesn't have one either. We don't know if this op has side effects.");
+    TORCH_INTERNAL_ASSERT(
+        kind_.is_prim(),
+        "Only prim ops are allowed to not have a registered operator but ",
+        kind_.toDisplayString(),
+        " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
 
   switch (op->aliasAnalysisKind()) {
-    case AliasAnalysisKind::PURE: return false;
-    case AliasAnalysisKind::FROM_SCHEMA: return false;
-    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE: return false;
-    case AliasAnalysisKind::CONSERVATIVE: return true;
+    case AliasAnalysisKind::PURE:
+      return false;
+    case AliasAnalysisKind::FROM_SCHEMA:
+      return false;
+    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
+      return false;
+    case AliasAnalysisKind::CONSERVATIVE:
+      return true;
   }
   TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
   return false; // silence compiler warning

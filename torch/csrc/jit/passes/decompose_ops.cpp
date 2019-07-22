@@ -16,7 +16,7 @@ c10::OperatorOptions aliasAnalysisFromSchema() {
   result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
   return result;
 }
-}
+} // namespace
 
 // helper to determine if an optional tensor argument/value passed in is
 // statically defined (neither a None constant nor a Optional[Tensor] type)
@@ -85,7 +85,6 @@ RegisterOperators reg_ln_view({Operator(
       };
     },
     aliasAnalysisFromSchema())});
-
 
 bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
   bool decomposed = false;

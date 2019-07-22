@@ -13,7 +13,7 @@ c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
   options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
   return options;
 }
-}
+} // namespace
 
 Value* insertConstant(
     Graph& g,
@@ -186,7 +186,8 @@ RegisterOperators reg({
             ss << "constant literal not supported for: " << type->str();
             throw std::runtime_error(ss.str());
           }
-        }, aliasAnalysisInternalSpecialCase()),
+        },
+        aliasAnalysisInternalSpecialCase()),
 });
 
 c10::optional<IValue> toIValue(const Value* v) {

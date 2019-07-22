@@ -807,7 +807,8 @@ void testNoneSchemaMatch() {
               push(stack, IValue());
               return 0;
             };
-          }, aliasAnalysisFromSchema()),
+          },
+          aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
           [](const Node* node) {
@@ -820,7 +821,8 @@ void testNoneSchemaMatch() {
               }
               return 0;
             };
-          }, aliasAnalysisFromSchema()),
+          },
+          aliasAnalysisFromSchema()),
   });
 
   // Constant propagation will run test_none and produce a None,

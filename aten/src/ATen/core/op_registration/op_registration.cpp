@@ -47,7 +47,12 @@ void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNam
       // schema was explicitly specified. Check it matches the inferred one and register the op.
 
       auto schema = std::move(schemaOrName).right();
-      TORCH_CHECK(options.aliasAnalysisKind_ == AliasAnalysisKind::FROM_SCHEMA || !schema.hasAnyAliasInfo(), "In operator registration: Tried to register operator ", schemaOrNameStr, " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
+      TORCH_CHECK(
+          options.aliasAnalysisKind_ == AliasAnalysisKind::FROM_SCHEMA ||
+              !schema.hasAnyAliasInfo(),
+          "In operator registration: Tried to register operator ",
+          schemaOrNameStr,
+          " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
 
       checkSchemaAndRegisterOp_(std::move(schema), std::move(options));
     } else {
@@ -66,8 +71,13 @@ void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNam
 
       checkNoDuplicateKernels_(inferred_schema_with_name, options);
 
-      // This would have unexpected behavior since an inferred schema will not have aliasing annotations.
-      TORCH_CHECK(options.aliasAnalysisKind_ != AliasAnalysisKind::FROM_SCHEMA, "In operator registration: Tried to register operator ", schemaOrNameStr, " with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred.");
+      // This would have unexpected behavior since an inferred schema will not
+      // have aliasing annotations.
+      TORCH_CHECK(
+          options.aliasAnalysisKind_ != AliasAnalysisKind::FROM_SCHEMA,
+          "In operator registration: Tried to register operator ",
+          schemaOrNameStr,
+          " with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred.");
 
       // Register all kernels with the schema we inferred
       registerOp_(std::move(inferred_schema_with_name), std::move(options));
