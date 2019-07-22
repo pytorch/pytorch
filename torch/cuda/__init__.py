@@ -199,7 +199,7 @@ def _after_fork(arg):
         _initialized = False
         _in_bad_fork = True
         _CudaBase.__new__ = _lazy_new
-
+        torch._C._cuda_set_run_yet_variable_to_false()
 
 _register_after_fork(_after_fork, _after_fork)
 
