@@ -519,6 +519,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/adamw.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/adabound.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
