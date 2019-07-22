@@ -18,7 +18,7 @@ void testSaveExtraFilesHook() {
   {
     std::stringstream ss;
     {
-      Module m("m");
+      Module m("__torch__.m");
       ExtraFilesMap extra;
       extra["metadata.json"] = "abc";
       m.save(ss, extra);
@@ -40,7 +40,7 @@ void testSaveExtraFilesHook() {
       SetExportModuleExtraFilesHook([](const Module&) -> ExtraFilesMap {
         return {{"secret.json", "topsecret"}};
       });
-      Module m("m");
+      Module m("__torch__.m");
       ExtraFilesMap extra;
       extra["metadata.json"] = "abc";
       m.save(ss, extra);

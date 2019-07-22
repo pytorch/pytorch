@@ -47,7 +47,8 @@ ModulePtr Module::module_object() const {
   if (!module_value_) {
     // User has created a Model without assigning it to something already
     // loaded. This is done in tests, and when using the .define method.
-    module_value_ = create_module_object("__main__", std::make_shared<CompilationUnit>());
+    module_value_ =
+        create_module_object("Module", std::make_shared<CompilationUnit>());
   }
   return module_value_;
 }

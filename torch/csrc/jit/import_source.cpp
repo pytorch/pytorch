@@ -195,7 +195,7 @@ struct SourceImporter {
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
         bool is_module = class_def.superclass().present();
-        if (is_module && Var(class_def.superclass()).name().name() != "Module") {
+        if (is_module && Var(class_def.superclass().get()).name().name() != "Module") {
           throw ErrorReport(class_def.range())
               << "Torchscript does not support class inheritance.";
         }
@@ -216,24 +216,47 @@ struct SourceImporter {
           switch (statement.kind()) {
             case TK_ASSIGN: {
               const auto assign = Assign(statement);
-              const auto name = Var(assign.lhs()).name().name();
-              if (name == "__parameters__") {
-                // Populate the module parameter list. This is a field that
-                // looks like:
-                //   __parameters__ = [foo, bar, baz]
-                // which tells us which attributes are module parameters.
-                // TODO these should be string literals, not raw idents
-                TORCH_INTERNAL_ASSERT(
-                    is_module,
-                    "Assignments in class body only "
-                    "supported on modules right now");
-                const auto param_list =
-                    ListLiteral(assign.rhs().get()).inputs();
-                for (const auto& param : param_list) {
-                  parameter_names.insert(Var(param).name().name());
+              switch (assign.lhs().kind()) {
+                case TK_VAR: {
+                  const auto name = Var(assign.lhs()).name().name();
+                  if (name == "__parameters__") {
+                    // Populate the module parameter list. This is a field that
+                    // looks like:
+                    //   __parameters__ = ["foo", "bar", "baz"]
+                    // which tells us which attributes are module parameters.
+                    TORCH_INTERNAL_ASSERT(
+                        is_module,
+                        "Assignments in class body only "
+                        "supported on modules right now");
+                    const auto param_list =
+                        ListLiteral(assign.rhs().get()).inputs();
+                    for (const auto& param : param_list) {
+                      parameter_names.insert(StringLiteral(param).text());
+                    }
+                  } else if (name == "__annotations__") {
+                    // This is to initialize the annotations dict, just ignore.
+                    continue;
+                  } else {
+                    // This is a regular attribute assignment, of the form:
+                    //   foo : Tensor
+                    attributes.push_back(assign);
+                  }
+                } break;
+                case TK_SUBSCRIPT: {
+                  // This is a special attribute assignment where the attribute
+                  // is not a valid python, identifier. Looks like:
+                  //    __annotations__["0"] = Tensor
+                  const auto lhs = Subscript(assign.lhs());
+                  TORCH_INTERNAL_ASSERT(Var(lhs.value()).name().name() == "__annotations__");
+                  TORCH_INTERNAL_ASSERT(lhs.subscript_exprs().size() == 1);
+                  attributes.push_back(assign);
+                } break;
+                default: {
+                  TORCH_INTERNAL_ASSERT(
+                      false,
+                      "Unexpected statement kind in module metadata: ",
+                      kindToString(statement.kind()));
                 }
-              } else {
-                attributes.push_back(assign);
               }
             } break;
             case TK_DEF: {
@@ -252,11 +275,25 @@ struct SourceImporter {
         // Populate class attributes
         ScriptTypeParser type_parser(resolver_);
         for (const auto& assign : attributes) {
-          const auto name = Var(assign.lhs()).name().name();
-          TORCH_INTERNAL_ASSERT(name != "__parameters__");
-          const auto type = type_parser.parseTypeFromExpr(assign.type().get());
-          const bool is_parameter = parameter_names.count(name);
-          class_type->addAttribute(name, type, is_parameter);
+          switch (assign.lhs().kind()) {
+            case TK_VAR: {
+              const auto name = Var(assign.lhs()).name().name();
+              TORCH_INTERNAL_ASSERT(name != "__parameters__");
+              const auto type =
+                  type_parser.parseTypeFromExpr(assign.type().get());
+              const bool is_parameter = parameter_names.count(name);
+              class_type->addAttribute(name, type, is_parameter);
+            } break;
+            case TK_SUBSCRIPT: {
+              const auto name =
+                  StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0])
+                      .text();
+              const auto type =
+                  type_parser.parseTypeFromExpr(assign.rhs().get());
+              const bool is_parameter = parameter_names.count(name);
+              class_type->addAttribute(name, type, is_parameter);
+            }
+          }
         }
 
         owner->register_class(class_type);

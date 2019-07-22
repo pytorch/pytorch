@@ -1223,18 +1223,14 @@ struct PythonPrintPass {
     // Populate the __parameters__ field. This tells the importer which
     // attributes are parameters.
     for (size_t i = 0; i < numAttrs; i++) {
-      // TODO: Note that we have to query parameters on the type itself, NOT
-      // through Module::get_parameters(). Check that there is no difference
-      // once we properly unpickle the state.
       if (moduleType->is_parameter(i)) {
         params.push_back(moduleType->getAttributeName(i));
       }
     }
     indent();
     body_ << "__parameters__ = [";
-    // TODO this should be a string literal, not a raw ident
     for (const auto& param : params) {
-      body_ << param << ", ";
+      body_ << "\"" << param << "\", ";
     }
     body_ << "]\n";
 
@@ -1244,7 +1240,25 @@ struct PythonPrintPass {
       registerClassDependencies(type);
 
       indent();
-      body_ << name << " : " << type->python_str() << "\n";
+
+      // Handling for when the attribute name is not a valid Python identifier.
+      // This happens for, e.g. ModuleList.
+      if (!isValidIdentifier(name)) {
+        if (i == 0) {
+          // Initialize the annotations dict if necessary.
+          body_ << "__annotations__ = []\n";
+          indent();
+        }
+        // Print out a direct manipulation of the annotations dict, like:
+        //   __annotations__["0"] = SomeType
+        body_ << "__annotations__["
+              << "\"" << name << "\"] = " << type->python_str() << "\n";
+      } else {
+        // Otherwise: just emit a python 3 attribute annotation, like:
+        //   foo : SomeType
+        body_ << name << " : " << type->python_str() << "\n";
+
+      }
     }
   }
 

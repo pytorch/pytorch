@@ -72,8 +72,6 @@ class ScriptModuleDeserializer final {
       const torch::TensorDef& tensor_proto,
       std::unordered_map<std::string, at::Storage>& storageMap);
 
-  script::Module convertModule(const torch::ModuleDef& module_def);
-
   void loadTensorTable(torch::ModelDef* model_def);
   std::vector<IValue> loadPickleArchive(const std::string& name);
   void importCallback(const std::string& qualifier);
@@ -86,8 +84,6 @@ class ScriptModuleDeserializer final {
   std::vector<std::string> moduleStack_;
 
   std::vector<at::Tensor> tensor_table_;
-  std::vector<IValue> pickled_ivalues_;
-
   std::unordered_set<std::string> imported_libs_;
 };
 
@@ -127,8 +123,6 @@ script::Module ScriptModuleDeserializer::deserialize(
       "JSON transcoder produced invalid protobuf output.");
   device_ = device;
 
-  const auto& module_def = model_def.main_module();
-
   // Load extra files.
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
@@ -142,11 +136,22 @@ script::Module ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  if (model_def.proto_version() >= 2) {
-    pickled_ivalues_ = loadPickleArchive("attributes.pkl");
-  }
 
-  return convertModule(module_def);
+  // TODO: getstate/setstate
+  // TODO: get source ranges to work
+  at::DataPtr pickle_ptr;
+  size_t pickle_size;
+  std::tie(pickle_ptr, pickle_size) = reader_->getRecord("module.pkl");
+  Unpickler unpickler(
+      pickle_ptr.get(),
+      pickle_size,
+      &tensor_table_,
+      [&](const c10::QualifiedName& qn) {
+        importCallback(qn.prefix());
+        return c10::StrongTypePtr(
+            compilation_unit_, compilation_unit_->get_class(qn));
+      });
+  return script::Module(unpickler.parseModule().toObject());
 }
 
 void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
@@ -154,22 +159,6 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   for (const torch::TensorDef& tensor : model_def->tensors()) {
     tensor_table_.emplace_back(loadTensor(tensor, storageMap));
   }
-}
-
-std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
-  at::DataPtr attributes_ptr;
-  size_t attributes_size;
-  std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
-  Unpickler unpickler(
-      attributes_ptr.get(),
-      attributes_size,
-      &tensor_table_,
-      [&](const c10::QualifiedName& qn) {
-        importCallback(qn.prefix());
-        return c10::StrongTypePtr(
-            compilation_unit_, compilation_unit_->get_class(qn));
-      });
-  return unpickler.parse_ivalue_list();
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
@@ -281,58 +270,6 @@ void ScriptModuleDeserializer::moduleSetState(
     AT_ERROR("Unexpected schema on '__setstate__'");
   }
 }
-
-script::Module ScriptModuleDeserializer::convertModule(
-    const torch::ModuleDef& module_def) {
-  // If present, load in the table of source ranges from the original
-  // generating code.
-  std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr;
-  // if (module_def.has_torchscript_debug_arena()) {
-  //   at::DataPtr data;
-  //   size_t size;
-  //   std::tie(data, size) =
-  //       reader_->getRecord(module_def.torchscript_debug_arena().key());
-
-  //   gen_ranges =
-  //       std::make_shared<ConcreteSourceRangeUnpickler>(std::move(data),
-  //       size);
-  // }
-  // import the module_def.
-  at::DataPtr attributes_ptr;
-  size_t attributes_size;
-  std::tie(attributes_ptr, attributes_size) = reader_->getRecord("module.pkl");
-  Unpickler unpickler(
-      attributes_ptr.get(),
-      attributes_size,
-      &tensor_table_,
-      [&](const c10::QualifiedName& qn) {
-        importCallback(qn.prefix());
-        return c10::StrongTypePtr(
-            compilation_unit_, compilation_unit_->get_class(qn));
-      });
-  return script::Module(unpickler.parseModule().toObject());
-
-  // if (module_def.has_get_state_attribute_id()) {
-  //   moduleSetState(
-  //       module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
-  // }
-
-  // for (const auto& slot : module.get_attributes()) {
-  //   // Verify that all the non-optional attributes have been initialized
-  //   // TODO: Issue #20497
-  //   if (slot.type()->kind() != TypeKind::OptionalType) {
-  //     TORCH_CHECK(
-  //         !slot.value().isNone(),
-  //         "The field '",
-  //         slot.name(),
-  //         "' was left unitialized after __setstate__, but expected a ",
-  //         "value of type '",
-  //         slot.type()->python_str(),
-  //         "'");
-  //   }
-  // }
-}
-
 } // namespace
 
 script::Module import_ir_module(
