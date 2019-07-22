@@ -243,6 +243,10 @@ def is_request_only_scalar(scalar):
             return False
     return True
 
+# Contains features accessed in a model layer of a given type
+# type: A string representing the kind of feature, consistent with FeatureSpec
+# ids: A set of feature IDs that are accessed in the model layer
+AccessedFeatures = namedtuple("AccessedFeatures", ["type", "ids"])
 
 class ModelLayer(object):
     def __init__(
@@ -354,6 +358,13 @@ class ModelLayer(object):
 
     def get_memory_usage(self):
         return 0
+
+    def get_accessed_features(self):
+        """
+        Return a map from field to AccessedFeatures, the map should contain all
+        features accessed in the model layer
+        """
+        return {}
 
     def add_init_params(self, init_net):
         """
