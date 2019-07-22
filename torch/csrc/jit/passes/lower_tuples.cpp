@@ -22,11 +22,10 @@ std::unordered_set<Symbol> white_list = {
     prim::Return,
 };
 
-// return true iff the node can be removed
-bool removeTupleNodes(Node* n, bool must_remove_tuples) {
+void removeTupleNodes(Node* n, bool must_remove_tuples) {
   if (n->kind() != prim::TupleUnpack && n->kind() != prim::TupleIndex &&
       n->kind() != prim::TupleSlice) {
-    return false;
+    return;
   }
   // tuple index has two inputs, tuple and index
   auto construct = n->inputs().at(0)->node();
@@ -34,13 +33,12 @@ bool removeTupleNodes(Node* n, bool must_remove_tuples) {
     if (must_remove_tuples) {
       AT_ERROR(n->kind().toQualString(), " not matched to tuple construct");
     }
-    return false;
+    return;
   }
   if (n->kind() == prim::TupleUnpack) {
     for (size_t i = 0; i < n->outputs().size(); ++i) {
       n->outputs()[i]->replaceAllUsesWith(construct->inputs().at(i));
     }
-    return true;
   } else if (n->kind() == prim::TupleIndex) {
     auto idx = n->inputs().at(1);
     auto maybe_int = constant_as<int64_t>(idx);
@@ -48,7 +46,7 @@ bool removeTupleNodes(Node* n, bool must_remove_tuples) {
       if (must_remove_tuples) {
         AT_ERROR(n->sourceRange(), "tuple index with non-constant index");
       }
-      return false;
+      return;
     }
     auto int_idx = *maybe_int;
     auto len = construct->output()->type()->containedTypes().size();
@@ -60,7 +58,6 @@ bool removeTupleNodes(Node* n, bool must_remove_tuples) {
     if (int_idx >= 0 && static_cast<size_t>(int_idx) < len) {
       n->output()->replaceAllUsesWith(construct->inputs().at(int_idx));
     }
-    return true;
   } else if (n->kind() == prim::TupleSlice) {
     std::vector<Value*> values;
     int64_t beg = n->i(attr::beg);
@@ -73,9 +70,7 @@ bool removeTupleNodes(Node* n, bool must_remove_tuples) {
     WithInsertPoint insert(n);
     graph->insertNode(tuple_out);
     n->output()->replaceAllUsesWith(tuple_out->output());
-    return true;
   }
-  return false;
 }
 } // anonymous namespace
 
@@ -192,18 +187,17 @@ void LowerAllTuples(std::shared_ptr<Graph>& graph) {
 }
 
 void LowerSimpleTuples(Block* block) {
-  for (auto n_iter = block->nodes().begin(); n_iter != block->nodes().end(); ++n_iter) {
-    for (auto b : (*n_iter)->blocks()) {
+  for (auto n : block->nodes()) {
+    removeTupleNodes(n, /*must_remove_tuples*/ false);
+    for (auto b : n->blocks()) {
       LowerSimpleTuples(b);
-    }
-    if (removeTupleNodes(*n_iter, /*must_remove_tuples*/ false)) {
-      n_iter.destroyCurrent();
     }
   }
 }
 
 void LowerSimpleTuples(std::shared_ptr<Graph>& graph) {
   LowerSimpleTuples(graph->block());
+  EliminateDeadCode(graph);
 }
 } // namespace jit
 } // namespace torch
