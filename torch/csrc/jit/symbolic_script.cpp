@@ -1028,12 +1028,13 @@ const std::vector<std::string> functions = {
                        stride: List[int],
                        padding: List[int],
                        ceil_mode: bool,
-                       count_include_pad: bool):
+                       count_include_pad: bool,
+                       divisor_override: Optional[int]):
             def backward(grad_output):
-                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
-                return grad_self, None, None, None, None, None
+                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
+                return grad_self, None, None, None, None, None, None
 
-            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad), backward
+            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override), backward
 
         def max_pool2d(self,
                        kernel_size: List[int],

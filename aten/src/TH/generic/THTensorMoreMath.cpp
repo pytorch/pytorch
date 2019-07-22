@@ -42,6 +42,27 @@ TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
 TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
+#define TENSOR_IMPLEMENT_LOGICAL_BYTE(NAME,OP)                                            \
+  void THTensor_(NAME##ValueByte)(THByteTensor *r_, THTensor* t, scalar_t value)          \
+  {                                                                                       \
+    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                    \
+    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                                      \
+                     *r__data = (*t_data OP value) ? 1 : 0;);                             \
+  }                                                                                       \
+  void THTensor_(NAME##TensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb)          \
+  {                                                                                       \
+    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                  \
+    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                       \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;);                         \
+  }                                                                                       \
+
+TENSOR_IMPLEMENT_LOGICAL_BYTE(lt,<)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(gt,>)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(le,<=)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(eq,==)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(ne,!=)
+
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
 {
   int equal = 1;
@@ -84,6 +105,9 @@ TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
     if (*t_data > 0) *r__data = 1;
     else if (*t_data < 0) *r__data = -1;
     else *r__data = 0;);
+#endif
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(r_, t);
 #endif
 }
 
