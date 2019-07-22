@@ -106,11 +106,11 @@ void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
   for (int64_t layer = 0; layer < options.layers_; layer++) {
     for (auto direction = 0; direction < num_directions; direction++) {
       const auto layer_idx = (layer * num_directions) + direction;
-      w_ih[layer_idx] = w_ih[layer_idx].to(torch::kCUDA);
-      w_hh[layer_idx] = w_hh[layer_idx].to(torch::kCUDA);
+      w_ih[layer_idx] = w_ih[layer_idx].to(device, non_blocking);
+      w_hh[layer_idx] = w_hh[layer_idx].to(device, non_blocking);
       if (options.with_bias_) {
-        b_ih[layer_idx] = b_ih[layer_idx].to(torch::kCUDA);
-        b_hh[layer_idx] = b_hh[layer_idx].to(torch::kCUDA);
+        b_ih[layer_idx] = b_ih[layer_idx].to(device, non_blocking);
+        b_hh[layer_idx] = b_hh[layer_idx].to(device, non_blocking);
       }
     }
   }
