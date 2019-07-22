@@ -649,14 +649,14 @@ struct ParserImpl {
   TreeRef parseClassLike() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
-    Maybe<Ident> superclass = Maybe<Ident>::create(name.range());
+    Maybe<Expr> superclass = Maybe<Expr>::create(name.range());
     if (L.nextIf('(')) {
       // Only support inheriting from NamedTuple right now.
-      auto id = L.expect(TK_IDENT);
-      if (id.text() == "NamedTuple") {
+      auto id = parseExp();
+      if (id.kind() == TK_VAR && Var(id).name().name() == "NamedTuple") {
         return parseNamedTuple(name);
       } else {
-        superclass = Maybe<Ident>::create(id.range, Ident::create(id.range, id.text()));
+        superclass = Maybe<Expr>::create(id.range(), id);
         L.expect(')');
       }
     }
