@@ -715,48 +715,20 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
 }
 
 namespace ivalue {
-#define CREATE_FACTORY_INIT(type) inline IValue from(type v) { return IValue(v); }
-#define CONVERSION_TYPES(_) \
-_(at::Tensor)\
-_(intrusive_ptr<caffe2::Blob>)\
-_(intrusive_ptr<c10::intrusive_ptr_target>)\
-_(intrusive_ptr<ivalue::Tuple>)\
-_(double)\
-_(c10::intrusive_ptr<ivalue::Future>)\
-_(int64_t)\
-_(int32_t)\
-_(bool)\
-_(c10::List<int64_t>)\
-_(c10::ArrayRef<int64_t>)\
-_(std::vector<int64_t>)\
-_(c10::intrusive_ptr<ivalue::ConstantString>)\
-_(std::basic_string<char>)\
-_(c10::List<double>)\
-_(std::vector<double>)\
-_(c10::List<bool>)\
-_(std::vector<bool>)\
-_(c10::List<at::Tensor>)\
-_(std::vector<at::Tensor>)\
-_(c10::intrusive_ptr<ivalue::Object>)\
-_(at::Scalar)\
-_(c10::Device)\
-_(c10::nullopt_t)\
-
-CONVERSION_TYPES(CREATE_FACTORY_INIT)
-
-template<class T>
-IValue from(std::vector<T> v) { return IValue(v); }
-
-inline IValue from(c10::Dict<IValue, IValue> v) { return IValue(v); }
-template<class Key, class Value>
-IValue from(c10::Dict<Key, Value> v) { return IValue(v); }
-template<class Key, class Value>
-IValue from(std::unordered_map<Key, Value> v) { return IValue(v); }
-template<class T>
-IValue from(c10::optional<T> v) { return IValue(v); }
-
+namespace detail {
+template<class> struct type_sink { typedef void type; }; // consumes a type, and makes it `void`
+template<class T> using type_sink_t = typename type_sink<T>::type;
+template<class T, class=void> struct has_constructor : std::false_type {}; \
+template<class T> struct has_constructor<
+  T,
+  type_sink_t< decltype( IValue(std::declval<T>())) >
+>: std::true_type {};
 template <typename T>
-IValue from(T x) {
+IValue from_(T x, std::true_type) {
+  return IValue(x);
+}
+template <typename T>
+IValue from_(T x, std::false_type) {
   auto tmap = c10::getTypeMap();
   auto res = tmap.find(typeid(T).name());
   if (res == tmap.end()) {
@@ -766,7 +738,12 @@ IValue from(T x) {
   retObject->setAttr("capsule", IValue(x));
   auto resIVal = IValue(std::move(retObject));
   return resIVal;
+}
+}
 
+template <typename T>
+IValue from(T x) {
+  return detail::from_(x, detail::has_constructor<T>{});
 }
 }
 } // namespace c10
