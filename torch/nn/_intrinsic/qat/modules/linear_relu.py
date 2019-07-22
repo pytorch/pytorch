@@ -10,8 +10,7 @@ class LinearReLU(QATLinear):
     FakeQuantize modules for output activation and weight, used in
     quantization aware training.
 
-    We adopt the same interface as `torch.nn.Linear`, please see https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
-    for documentation.
+    We adopt the same interface as :class:`torch.nn.Linear`.
 
     Similar to `torch.nn._intrinsic.LinearReLU`, with FakeQuantize modules initialized to
     default.
@@ -29,12 +28,11 @@ class LinearReLU(QATLinear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __constants__ = ['bias', 'in_features', 'out_features']
     __FLOAT_MODULE__ = NNLinearReLU2d
 
     def __init__(self, in_features, out_features, bias=True,
-                 activation_fake_quant=default_qat_qconfig.activation(),
-                 weight_fake_quant=default_qat_qconfig.weight()):
+                 activation_fake_quant=default_qat_qconfig.activation,
+                 weight_fake_quant=default_qat_qconfig.weight):
         assert bias, 'nobias is not supported in qat LinearReLU module yet'
         super(LinearReLU, self).__init__(in_features, out_features, bias, activation_fake_quant, weight_fake_quant)
 

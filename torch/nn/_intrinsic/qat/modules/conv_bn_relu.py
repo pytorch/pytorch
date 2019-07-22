@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from torch.nn import Conv2d as NNConv2d
 from torch.nn._intrinsic import ConvBn2d as NNConvBn2d
 from torch.nn._intrinsic import ConvBnReLU2d as NNConvBnReLU2d
-from torch.nn.modules.conv import conv2d_forward
 from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
@@ -12,25 +11,21 @@ class ConvBn2d(NNConv2d):
     attached with FakeQuantize modules for both output activation and weight,
     used in quantization aware training.
 
-    We combined the interface of `torch.nn.Conv2d` and `torch.nn.BatchNorm2d`,
-    please refer to
-    https://pytorch.org/docs/stable/nn.html?highlight=conv2d#torch.nn.Conv2d
-    and
-    https://pytorch.org/docs/stable/nn.html?highlight=batchnorm#torch.nn.BatchNorm2d
-    for documentation.
+    We combined the interface of :class:`torch.nn.Conv2d` and
+    :class:`torch.nn.BatchNorm2d`.
 
     Implementation details: https://arxiv.org/pdf/1806.08342.pdf
 
-    Similar to `torch.nn.Conv2d`, with FakeQuantize modules initialized to
-    default.
+    Similar to :class:`torch.nn.Conv2d`, with FakeQuantize modules initialized
+    to default.
 
     Attributes:
+        freeze_bn:
         observer: fake quant module for output activation, it's called observer
             to align with post training flow
         weight_fake_quant: fake quant module for weight
 
     """
-    __constants__ = ['momentum', 'eps', 'running_mean', 'running_var', 'num_batches_tracked']
     __FLOAT_MODULE__ = NNConvBn2d
 
     def __init__(self,
@@ -45,9 +40,8 @@ class ConvBn2d(NNConv2d):
                  # tracking_running_stats: enforce this is True before fusion
                  # args for this module
                  freeze_bn=False,
-                 activation_fake_quant=default_qat_qconfig.activation(),
-                 weight_fake_quant=default_qat_qconfig.weight()
-                 ):
+                 activation_fake_quant=default_qat_qconfig.activation,
+                 weight_fake_quant=default_qat_qconfig.weight):
         super(ConvBn2d, self).__init__(in_channels, out_channels, kernel_size,
                                        stride=stride, padding=padding, dilation=dilation,
                                        groups=groups, bias=bias, padding_mode=padding_mode)
@@ -60,8 +54,8 @@ class ConvBn2d(NNConv2d):
         self.register_buffer('running_mean', torch.zeros(out_channels))
         self.register_buffer('running_var', torch.ones(out_channels))
         self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
-        self.observer = activation_fake_quant
-        self.weight_fake_quant = weight_fake_quant
+        self.observer = activation_fake_quant()
+        self.weight_fake_quant = weight_fake_quant()
 
     def reset_running_stats(self):
         self.running_mean.zero_()
@@ -131,8 +125,8 @@ class ConvBn2d(NNConv2d):
                          padding_mode=mod.padding_mode,
                          eps=mod.eps, momentum=mod.momentum,
                          freeze_bn=False,
-                         activation_fake_quant=qconfig.activation(),
-                         weight_fake_quant=qconfig.weight())
+                         activation_fake_quant=qconfig.activation,
+                         weight_fake_quant=qconfig.weight)
 
         qat_convbn.weight = mod.weight
         qat_convbn.bias = mod.bias
@@ -149,14 +143,8 @@ class ConvBnReLU2d(ConvBn2d):
         attached with FakeQuantize modules for both output activation and weight,
         used in quantization aware training.
 
-        We combined the interface of `torch.nn.Conv2d` and `torch.nn.BatchNorm2d` and
-        `torch.nn.ReLU`, please refer to
-        https://pytorch.org/docs/stable/nn.html?highlight=conv2d#torch.nn.Conv2d
-        and
-        https://pytorch.org/docs/stable/nn.html?highlight=batchnorm#torch.nn.BatchNorm2d
-        and
-        https://pytorch.org/docs/stable/nn.html?highlight=relu#torch.nn.ReLU
-        for documentation.
+        We combined the interface of :class:`torch.nn.Conv2d` and
+        :class:`torch.nn.BatchNorm2d` and :class:`torch.nn.ReLU`.
 
         Implementation details: https://arxiv.org/pdf/1806.08342.pdf
 
@@ -169,7 +157,6 @@ class ConvBnReLU2d(ConvBn2d):
             weight_fake_quant: fake quant module for weight
 
         """
-        __constants__ = ['momentum', 'eps', 'running_mean', 'running_var', 'num_batches_tracked']
         __FLOAT_MODULE__ = NNConvBnReLU2d
 
         def __init__(self,
@@ -184,9 +171,8 @@ class ConvBnReLU2d(ConvBn2d):
                      # tracking_running_stats: enforce this is True before fusion
                      # args for this module
                      freeze_bn=False,
-                     activation_fake_quant=default_qat_qconfig.activation(),
-                     weight_fake_quant=default_qat_qconfig.weight()
-                     ):
+                     activation_fake_quant=default_qat_qconfig.activation,
+                     weight_fake_quant=default_qat_qconfig.weight):
             super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride=stride,
                                                padding=padding, dilation=dilation, groups=groups, bias=bias,
                                                padding_mode=padding_mode, eps=eps, momentum=momentum,
