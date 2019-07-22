@@ -68,18 +68,6 @@ struct TORCH_API CompilationUnit {
     TORCH_CHECK(false, "attempted to get undefined function ", name.name());
   }
 
-  void set_optimized(const c10::QualifiedName& name, bool optimized) {
-    optimizedMap_[name] = optimized;
-  }
-
-  bool is_optimized(const c10::QualifiedName& name) const {
-    auto it = optimizedMap_.find(name);
-    if (it == optimizedMap_.end()) {
-      return true;
-    }
-    return it->second;
-  }
-
   // for historic reasons, these are defined in compiler.cpp
   // Returns the list of Function's just defined.
   std::vector<Function*> define(
@@ -90,7 +78,6 @@ struct TORCH_API CompilationUnit {
                      variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
       const Self* self,
-      bool optimize,
       // see [name mangling]
       bool shouldMangle = false);
 
@@ -101,18 +88,17 @@ struct TORCH_API CompilationUnit {
       const c10::optional<c10::QualifiedName>& prefix,
       const std::string& source,
       const ResolverPtr& resolver,
-      const Self* self, bool optimize);
+      const Self* self);
 
   Function* create_function(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
-      bool optimized,
       bool shouldMangle = false) {
     if (shouldMangle) {
       name = c10::QualifiedName(name.prefix(), mangle(name.name()));
     }
     auto fn = torch::make_unique<Function>(
-        std::move(name), optimized, std::move(graph), nullptr);
+        std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));
     return ret;
@@ -229,7 +215,6 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
-      bool optimize,
       bool shouldMangle = false) const;
 
   Function& register_function(std::unique_ptr<Function> fn) {
@@ -246,7 +231,6 @@ struct TORCH_API CompilationUnit {
   // for fast lookup
   std::unordered_map<c10::QualifiedName, size_t> dict_;
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
-  std::unordered_map<c10::QualifiedName, bool> optimizedMap_;
 
   // [class ownership] Right now there aree two relationships between classes
   // and compilation units:

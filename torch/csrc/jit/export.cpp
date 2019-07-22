@@ -854,7 +854,7 @@ void ScriptModuleSerializer::convertModule(
     const script::Module& module,
     torch::ModuleDef* module_def) {
   module_def->set_name(module.name().qualifiedName());
-  module_def->set_optimize(module.is_optimized());
+  module_def->set_optimize(true);
 
   // TODO support getstate/setstate
 

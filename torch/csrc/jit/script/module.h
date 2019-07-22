@@ -115,22 +115,11 @@ struct TORCH_API Module {
       bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
-  explicit Module(ModulePtr module_value)
-      : module_value_(std::move(module_value)) {}
+  Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
 
   const c10::QualifiedName& name() const {
     return *module_object()->type()->qualified_name_obj();
-  }
-
-  // note this doesn't change the flags of existing methods just ones
-  // added afterward.
-  void set_optimized(bool o) {
-    class_compilation_unit()->set_optimized(name(), o);
-  }
-
-  bool is_optimized() const {
-    return class_compilation_unit()->is_optimized(name());
   }
 
   IValue forward(std::vector<IValue> inputs) {

@@ -255,8 +255,7 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
             ->output();
     // TODO this needs to go in `m`s compilation unit
     auto cu = std::make_shared<CompilationUnit>();
-    auto fn =
-        cu->create_function(QualifiedName("anon"), graph, /*optimized=*/true);
+    auto fn = cu->create_function(QualifiedName("anon"), graph);
     auto ret = StrongFunctionPtr(std::move(cu), fn);
 
     std::vector<NamedValue> ctx_inputs = {close_context};

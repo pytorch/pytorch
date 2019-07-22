@@ -332,8 +332,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
   const auto name = QualifiedName(module.name(), "forward");
-  auto method = module.class_compilation_unit()->create_function(
-      name, graph, module.is_optimized());
+  auto method = module.class_compilation_unit()->create_function(name, graph);
   module.type()->addMethod(method);
 }
 
@@ -366,7 +365,6 @@ void initJitScriptBindings(PyObject* module) {
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
-      .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
           [](Module& m,
@@ -375,7 +373,7 @@ void initJitScriptBindings(PyObject* module) {
              ResolutionCallback rcb) {
             const auto self = ModuleSelf(m, py_m);
             m.class_compilation_unit()->define(
-                m.name(), script, pythonResolver(rcb), &self, m.is_optimized());
+                m.name(), script, pythonResolver(rcb), &self);
             didFinishEmitModule(m);
           })
       .def(
@@ -393,8 +391,7 @@ void initJitScriptBindings(PyObject* module) {
             }
             const auto& prefix = m.name();
             const auto self = ModuleSelf(m, py_m);
-            m.class_compilation_unit()->define(
-                prefix, defs, resolvers, &self, m.is_optimized());
+            m.class_compilation_unit()->define(prefix, defs, resolvers, &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
@@ -523,7 +520,7 @@ void initJitScriptBindings(PyObject* module) {
                 func, typed_inputs, var_lookup_fn, force_outplace, &self);
             const auto method_name = QualifiedName(self.name(), name);
             auto fn = self.class_compilation_unit()->create_function(
-                method_name, graph, self.is_optimized());
+                method_name, graph);
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
           })
@@ -574,10 +571,8 @@ void initJitScriptBindings(PyObject* module) {
           "define",
           [](CompilationUnit& cu,
              const std::string& src,
-             ResolutionCallback rcb,
-             bool optimized) {
-            cu.define(
-                c10::nullopt, src, pythonResolver(rcb), nullptr, optimized);
+             ResolutionCallback rcb) {
+            cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
           });
 
   py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
@@ -686,8 +681,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualname,
          const Def& def,
          ResolutionCallback rcb,
-         FunctionDefaults defaults,
-         bool optimize) {
+         FunctionDefaults defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         const auto name = c10::QualifiedName(qualname);
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
@@ -697,7 +691,6 @@ void initJitScriptBindings(PyObject* module) {
             {def},
             {pythonResolver(std::move(rcb))},
             nullptr,
-            optimize,
             true);
         TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
         auto& defined = defined_functions[0];
@@ -721,10 +714,7 @@ void initJitScriptBindings(PyObject* module) {
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
         auto result = cu->create_function(
-            std::move(name),
-            std::move(graph),
-            /*optimized=*/true,
-            /*shouldMangle=*/true);
+            std::move(name), std::move(graph), /*shouldMangle=*/true);
         StrongFunctionPtr ret(std::move(cu), result);
         didFinishEmitFunction(ret);
         return ret;
@@ -757,7 +747,7 @@ void initJitScriptBindings(PyObject* module) {
               pythonResolver(rcb, classDef.name().name(), classType));
         }
         const auto self = SimpleSelf(classType);
-        cu->define(classname, methodDefs, rcbs, &self, /*optimize=*/true);
+        cu->define(classname, methodDefs, rcbs, &self);
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
@@ -814,7 +804,8 @@ void initJitScriptBindings(PyObject* module) {
             cu,
             std::make_shared<Source>(src),
             constant_table,
-            /*optimize=*/true);
+            nullptr,
+            nullptr);
       });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
@@ -859,8 +850,7 @@ void initJitScriptBindings(PyObject* module) {
         // TODO this should go in the global Python CU
         auto cu = std::make_shared<CompilationUnit>();
         c10::QualifiedName name(qualname);
-        auto fn =
-            cu->create_function(std::move(name), graph, /*optimized=*/true);
+        auto fn = cu->create_function(std::move(name), graph);
         return StrongFunctionPtr(std::move(cu), fn);
       });
 
@@ -911,6 +901,12 @@ void initJitScriptBindings(PyObject* module) {
       "_logging_set_logger",
       [](logging::LoggerBase* logger) { return logging::setLogger(logger); },
       py::return_value_policy::reference);
+  m.def("set_graph_executor_optimize", [](bool optimize) {
+    setGraphExecutorOptimize(optimize);
+  });
+
+  m.def("get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
   py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")

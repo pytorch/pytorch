@@ -15,12 +15,10 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 struct TORCH_API Function {
   Function(
       c10::QualifiedName name,
-      bool optimize,
       std::shared_ptr<Graph> graph,
       std::function<void(Function&)> function_creator)
       : name_(std::move(name)),
         graph_(std::move(graph)),
-        optimize_(optimize),
         function_creator_(std::move(function_creator)) {}
 
   void run(Stack& stack) {
@@ -81,10 +79,6 @@ struct TORCH_API Function {
     return get_executor().getDebugState();
   }
 
-  bool is_optimized() const {
-    return optimize_;
-  }
-
   void check_single_output() {
     TORCH_CHECK(
         graph()->outputs().size() == 1,
@@ -95,7 +89,7 @@ struct TORCH_API Function {
     ensure_defined();
     std::call_once(executor_init_, [&] {
       check_single_output();
-      executor_ = GraphExecutor(graph(), optimize_);
+      executor_ = GraphExecutor(graph());
     });
     return executor_;
   }
@@ -120,7 +114,6 @@ struct TORCH_API Function {
 
   c10::QualifiedName name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
-  bool optimize_;
 
   GraphExecutor executor_; // for execution
 
