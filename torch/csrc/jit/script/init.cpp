@@ -768,7 +768,6 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "import_ir_module",
       [](std::shared_ptr<CompilationUnit> cu,
-         ModuleLookup module_lookup,
          const std::string& filename,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -778,9 +777,8 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(
+        return import_ir_module(
             std::move(cu),
-            module_lookup,
             filename,
             optional_device,
             extra_files);
@@ -788,7 +786,6 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "import_ir_module_from_buffer",
       [](std::shared_ptr<CompilationUnit> cu,
-         ModuleLookup module_lookup,
          const std::string& buffer,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -799,8 +796,8 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(
-            std::move(cu), module_lookup, in, optional_device, extra_files);
+        return import_ir_module(
+            std::move(cu), in, optional_device, extra_files);
       });
 
   m.def(
