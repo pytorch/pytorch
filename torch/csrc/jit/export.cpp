@@ -653,6 +653,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 // python print all classes that this class depends on.
 void ScriptModuleSerializer::convertClass(
     const c10::NamedTypePtr& class_type) {
+      LOG(ERROR) << class_type->qualname();
   if (converted_classes_.contains(class_type)) {
     return;
   }
@@ -852,8 +853,23 @@ void ScriptModuleSerializer::writePickleArchive(
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,
     torch::ModuleDef* module_def) {
-  module_def->set_name(module.name().name());
+  module_def->set_name(module.name().qualifiedName());
   module_def->set_optimize(module.is_optimized());
+
+  // TODO support getstate/setstate
+
+  // Write out the module code to libs/
+  convertClass(module.type());
+
+  Pickler pickler(&tensor_table_);
+  pickler.start();
+  pickler.addIValue(module.module_object());
+  pickler.finish();
+  writer_.writeRecord("module.pkl", pickler.stack().data(), pickler.stack().size());
+
+  // Then pickle the module state.
+  // Write the attribute's index if it's actually saved, -1 if it needs  to
+  // come from __getstate__
 
   // If __getstate__ and __setstate__ methods are provided, use those for
   // serializing instead of serializing the attributes directly
@@ -885,7 +901,8 @@ void ScriptModuleSerializer::convertModule(
   //   attribute_def->set_type(attribute.type()->python_str());
 
   //   if (!user_provided_serialization) {
-  //     // Write the attribute's index if it's actually saved, -1 if it needs to
+  //     // Write the attribute's index if it's actually saved, -1 if it needs
+  //     to
   //     // come from __getstate__
   //     pickled_ivalues_.push_back(attribute.value());
   //     attribute_def->set_id(pickled_ivalues_.size() - 1);
@@ -896,8 +913,6 @@ void ScriptModuleSerializer::convertModule(
   //     attribute_def->set_id(-1);
   //   }
   // }
-
-  convertClass(module.type());
 
   // std::stringstream module_name;
   // if (module.type()->methods().size() > 0) {

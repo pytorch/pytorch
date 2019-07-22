@@ -477,8 +477,8 @@ struct TORCH_API IterableValue : SugaredValue {
 //    enumerate(x) -> (range(0, math.inf, 1), x)
 // So a complicated expression like zip(a, enumerate(b), range(0, 100)) will be:
 // (a, (range(0, math.inf, 1), b), range(0, 100))
-// We use those base iterables to fill in the loop information like max_trip_count
-// and set the value table for loop targets
+// We use those base iterables to fill in the loop information like
+// max_trip_count and set the value table for loop targets
 struct TORCH_API IterableTree : SugaredValue {
   IterableTree() = default;
   IterableTree(const std::vector<SugaredValuePtr> children): children_(std::move(children)) {}

@@ -6,6 +6,7 @@ from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
+from torch._jit_internal import _qualified_name
 from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
     string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -153,7 +154,10 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             if self.base_module is None:
                 self.base_module = ScriptModule(_qualified_name=names[0], _compilation_unit=self.cu)
             curr = self.base_module
-            qualified_name = names[0]
+            qualified_name = self.base_module._c.name
+            print(qualified_name)
+            print(names)
+            assert(qualified_name == names[0])
 
             # Skip the first name as we already used it to initialize `curr`
             for name in names[1:]:
@@ -168,9 +172,9 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(module_lookup, f, map_location, _extra_files)
+        torch._C.import_ir_module(cu, module_lookup, f, map_location, _extra_files)
     else:
-        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location, _extra_files)
+        torch._C.import_ir_module_from_buffer(cu, module_lookup, f.read(), map_location, _extra_files)
 
     return module_lookup.base_module
 
@@ -516,6 +520,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 check_trace=False,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
+                _compilation_unit=torch._C.CompilationUnit(),
                 **executor_options)
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
@@ -664,10 +669,10 @@ def make_tuple(example_inputs):
     return example_inputs
 
 
-def make_module(mod, _module_class, executor_options):
+def make_module(mod, _module_class, _compilation_unit, executor_options):
     if _module_class is None:
         _module_class = TopLevelTracedModule
-    return _module_class(mod, **executor_options)
+    return _module_class(mod, _compilation_unit=_compilation_unit, **executor_options)
 
 def wrap_check_inputs(check_inputs):
     if check_inputs is None:
@@ -682,7 +687,8 @@ def trace(func,
           check_inputs=None,
           check_tolerance=1e-5,
           _force_outplace=False,
-          _module_class=None):
+          _module_class=None,
+          _compilation_unit=_python_cu):
     """
     Trace a function and return an executable ``ScriptModule`` or ``torch.jit._C.Function``
     that will be optimized using just-in-time compilation.
@@ -815,7 +821,8 @@ def trace_module(mod,
                  check_inputs=None,
                  check_tolerance=1e-5,
                  _force_outplace=False,
-                 _module_class=None):
+                 _module_class=None,
+                 _compilation_unit=_python_cu):
     """
     Trace a module and return an executable ``ScriptModule`` that will be optimized
     using just-in-time compilation.
@@ -882,7 +889,6 @@ def trace_module(mod,
         module = torch.jit.trace_module(n, inputs)
 
     """
-
     if not _enabled:
         return mod
     executor_options = {'optimize': bool(optimize)}
@@ -894,13 +900,13 @@ def trace_module(mod,
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
-    module = make_module(mod, _module_class, executor_options)
+    module = make_module(mod, _module_class, _compilation_unit, executor_options)
 
     for method_name, example_inputs in inputs.items():
         # this is needed since Module.__call__ sets up some extra tracing
         func = mod if method_name == "forward" else getattr(mod, method_name)
         example_inputs = make_tuple(example_inputs)
-        module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+        fn = module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
         check_trace_method = module._c._get_method(method_name)
 
         # Check the trace against new traces created from user-specified inputs
@@ -918,14 +924,14 @@ def trace_module(mod,
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True, _frames_up=0):
         self._c = torch._C.CompilationUnit()
-        self._c.set_optimized(optimize)
+        self.optimize = optimize
         if lang is not None:
             self.define(lang, _frames_up=_frames_up + 1)
 
     def define(self, lang, rcb=None, _frames_up=0):
         if not rcb:
             rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-        self._c.define(lang, rcb)
+        self._c.define(lang, rcb, self.optimize)
 
     def __getattr__(self, attr):
         r = self._c.find_function(attr)
@@ -1053,40 +1059,6 @@ def whichmodule(obj):
     return '__main__'
 
 
-# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj):
-    # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.Function):
-        return obj.qualified_name
-
-    name = obj.__name__
-    module_name = obj.__module__
-
-    # The Python docs are very clear that `__module__` can be None, but I can't
-    # figure out when it actually would be.
-    if module_name is None:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "__module__ can't be None.".format(name))
-
-    # if getattr(sys.modules[module_name], name) is not obj:
-    #     raise RuntimeError("Could not get qualified name for class '{}': "
-    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
-
-    # __main__ is a builtin module, so rewrite it to "__torch__".
-    if module_name == "__main__":
-        module_name = "__torch__"
-    else:
-        # Everything else gets a "__torch__" prefix to avoid name collisions
-        # with the names of user values.
-        module_name = "__torch__." + module_name
-
-    if "." in name:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "'{}' is not a valid identifier".format(name, name))
-
-    return module_name + "." + name
-
-
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     _jit_script_class_compile(qualified_name, ast, rcb)
@@ -1106,11 +1078,12 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
+        # TODO: we don't currently persist class optimization settings
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
         ast = get_jit_def(obj)
-        fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
+        fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj), optimize)
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn
@@ -1493,8 +1466,9 @@ if _enabled:
             if _qualified_name is None:
                 _qualified_name = type(self).__name__
             if _compilation_unit is None:
-                _compilation_unit = torch._C.CompilationUnit()
-            self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit)
+                _compilation_unit = _python_cu
+
+            self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
             Module.__init__(self)
             self._c._set_optimized(optimize)
@@ -1809,9 +1783,11 @@ for name, method in _get_methods(torch.nn.Module):
 class TracedModule(ScriptModule):
     __frozen = False
 
-    def __init__(self, orig, id_set=None, optimize=True):
+    def __init__(self, orig, id_set=None, optimize=True, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
-        super(TracedModule, self).__init__(optimize=optimize)
+        super(TracedModule, self).__init__(optimize=optimize,
+                                           _qualified_name=_jit_internal._qualified_name(orig.__class__),
+                                           _compilation_unit=_compilation_unit)
         if id_set is None:
             id_set = set()
 
@@ -2037,6 +2013,7 @@ _script_classes = {}
 
 
 def _add_script_class(cls, name):
+    cls.__torch_script_class__ = True
     global _script_classes
     _script_classes[name] = cls
 

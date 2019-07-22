@@ -277,19 +277,12 @@ struct PythonPrintPass {
   std::vector<c10::NamedTypePtr> direct_class_deps_;
   // Helper to avoid duplicating class types
   void addToClassTable(const c10::NamedTypePtr& type) {
-    // we serialize module classes separately.
-    // Including them in the class table as well will cause the code
-    // to get imported twice.
-    if (auto classType = type->cast<ClassType>()) {
-      if (classType->is_module()) {
-        return;
-      }
-    }
     if (std::find(class_table_.cbegin(), class_table_.cend(), type) ==
         class_table_.cend()) {
       class_table_.push_back(type);
     }
-    if (std::find(direct_class_deps_.cbegin(), direct_class_deps_.cend(), type) ==
+    if (std::find(
+            direct_class_deps_.cbegin(), direct_class_deps_.cend(), type) ==
         direct_class_deps_.cend()) {
       direct_class_deps_.push_back(type);
     }
@@ -1195,6 +1188,8 @@ struct PythonPrintPass {
       if (already_printed.count(c->qualifier())) {
         continue;
       }
+      // TODO we try to print a def for TestLinear in TestLinear.forward
+      LOG(ERROR) << c->qualname();
       ret << "import " << c->qualifier() << "\n";
       already_printed.insert(c->qualifier());
     }
@@ -1256,12 +1251,12 @@ struct PythonPrintPass {
 
   void printClass(const c10::NamedTypePtr& type) {
     if (auto classType = type->cast<ClassType>()) {
-      body_ << "class "
-            << classType->basename()
-            // TODO add support for limited inheritance to the parser
-            // So we can inherit from ScriptModule, e.g.
-            // << "(torch.jit.ScriptModule):\n";
-            << ":\n";
+      bool is_module = classType->is_module();
+      body_ << "class " << classType->basename();
+      if (is_module) {
+        body_ << "(Module)";
+      }
+      body_ << ":\n";
       {
         const auto guard = WithIndented();
         // For modules, we need to print special information about the module's
@@ -1310,8 +1305,7 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table, class_table,  enforce_importable, is_method);
+  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printFunction(func);
   pp.print(out, source_ranges_out);
 }
@@ -1323,8 +1317,7 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table, class_table,  enforce_importable, true);
+  PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);
   pp.print(out, source_ranges_out);
 }

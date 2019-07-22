@@ -36,14 +36,8 @@ TORCH_API void import_functions(
     std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table,
+    bool optimize,
     const Self* self = nullptr,
-    const std::function<void(const std::string&)>& import_callback = nullptr);
-
-TORCH_API void import_module(
-    // An empty module to import into
-    Module& module,
-    const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback = nullptr);
 
 } // namespace script

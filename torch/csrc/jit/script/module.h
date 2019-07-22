@@ -109,10 +109,14 @@ struct TORCH_API Method {
 
 struct TORCH_API Module {
   explicit Module(c10::QualifiedName class_name);
-  Module(c10::QualifiedName, std::shared_ptr<CompilationUnit> cu);
+  Module(
+      c10::QualifiedName,
+      std::shared_ptr<CompilationUnit> cu,
+      bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
-  Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
+  explicit Module(ModulePtr module_value)
+      : module_value_(std::move(module_value)) {}
   ~Module() {}
 
   const c10::QualifiedName& name() const {
@@ -122,11 +126,11 @@ struct TORCH_API Module {
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
   void set_optimized(bool o) {
-    class_compilation_unit()->set_optimized(o);
+    class_compilation_unit()->set_optimized(name(), o);
   }
 
   bool is_optimized() const {
-    return class_compilation_unit()->is_optimized();
+    return class_compilation_unit()->is_optimized(name());
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -201,7 +205,7 @@ struct TORCH_API Module {
 
   const std::vector<Method> get_methods() const {
     return fmap(
-        class_compilation_unit()->get_functions(),
+        type()->methods(),
         [&](Function* func) {
           return Method(module_object(), func);
         });
@@ -227,9 +231,11 @@ struct TORCH_API Module {
     return c10::nullopt;
   }
   c10::optional<Method> find_method(const std::string& basename) const {
-    if (const auto fn = class_compilation_unit()->find_function(
-            getNameForMethod(basename))) {
-      return Method(module_object(), fn);
+    for (Function* fn : type()->methods()) {
+      if (fn->name() == basename) {
+        return Method(module_object(), fn);
+      }
+
     }
     return c10::nullopt;
   }
@@ -311,7 +317,7 @@ struct TORCH_API Module {
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    if (class_compilation_unit()->find_function(getNameForMethod(name))) {
+    if (find_method(name)) {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
@@ -352,7 +358,7 @@ struct TORCH_API Module {
  private:
   void clone_method(
       const Module& orig,
-      const QualifiedName& orig_method_name,
+      const Function& method,
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {

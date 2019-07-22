@@ -96,6 +96,10 @@ struct ConstantTableValue : public SugaredValue {
                              << constants_.size() << " entries)";
     }
     Value* value = m.graph()->insertConstant(constants_[offset], nullptr, loc);
+
+    // specializing tensor type on compilation messes up typing relations
+    value->setType(unshapedType(value->type()));
+
     return std::make_shared<SimpleValue>(value);
   }
 
@@ -166,8 +170,7 @@ struct SourceImporter {
         import_callback_(import_callback),
         tensor_table_(tensor_table) {
     version_ = parseVersionNumber();
-    resolver_ =
-        std::make_shared<SourceResolver>(cu_, version_, tensor_table_);
+    resolver_ = std::make_shared<SourceResolver>(cu_, version_, tensor_table_);
   }
 
   void checkVersionNumber() {
@@ -193,24 +196,82 @@ struct SourceImporter {
       auto parsed_treeref = p_.parseClassLike();
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
-        TORCH_CHECK(
-            !class_def.superclass().present(),
-            "Torchscript does not support class inheritance.");
+        bool is_module = class_def.superclass().present();
+        if (is_module) {
+          TORCH_INTERNAL_ASSERT(
+              class_def.superclass().get().name() == "Module",
+              "Only Module is supported a fake-superclass");
+        }
         const auto qualified_classname = QualifiedName(
             QualifiedName(class_qualifier), class_def.name().name());
+        auto class_type = ClassType::create(
+            c10::QualifiedName(qualified_classname), owner, is_module);
 
-        std::vector<Def> definitions;
+        std::vector<Def> methods;
         std::vector<ResolverPtr> resolvers;
-        for (const auto& method_def : class_def.body()) {
-          definitions.emplace_back(Def(method_def));
-          resolvers.emplace_back(resolver_);
+        std::vector<Assign> attributes;
+
+        // Module-specific: which attrs are parameters?
+        std::unordered_set<std::string> parameter_names;
+        // Process statements, splitting things into attribute and method
+        // definitions.
+        for (const auto& statement : class_def.body()) {
+          switch (statement.kind()) {
+            case TK_ASSIGN: {
+              const auto assign = Assign(statement);
+              const auto name = Var(assign.lhs()).name().name();
+              if (name == "__parameters__") {
+                // Populate the module parameter list. This is a field that
+                // looks like:
+                //   __parameters__ = [foo, bar, baz]
+                // which tells us which attributes are module parameters.
+                // TODO these should be string literals, not raw idents
+                TORCH_INTERNAL_ASSERT(
+                    is_module,
+                    "Assignments in class body only "
+                    "supported on modules right now");
+                const auto param_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& param : param_list) {
+                  parameter_names.insert(Var(param).name().name());
+                }
+              } else {
+                attributes.push_back(assign);
+              }
+            } break;
+            case TK_DEF: {
+              methods.push_back(Def(statement));
+              resolvers.push_back(resolver_);
+            } break;
+            default: {
+              TORCH_INTERNAL_ASSERT(
+                  false,
+                  "Unexpected statement kind in class body: ",
+                  kindToString(statement.kind()));
+            }
+          }
         }
 
-        auto class_type =
-            ClassType::create(c10::QualifiedName(qualified_classname), owner);
+        // Populate class attributes
+        ScriptTypeParser type_parser(resolver_);
+        for (const auto& assign : attributes) {
+          const auto name = Var(assign.lhs()).name().name();
+          TORCH_INTERNAL_ASSERT(name != "__parameters__");
+          const auto type = type_parser.parseTypeFromExpr(assign.type().get());
+          const bool is_parameter = parameter_names.count(name);
+          class_type->addAttribute(name, type, is_parameter);
+        }
+
         owner->register_class(class_type);
         const auto self = SimpleSelf(class_type);
-        owner->define(qualified_classname, definitions, resolvers, &self);
+        // TODO we don't currently export class optimization settings, so just
+        // set to true for now.
+        owner->define(
+            qualified_classname,
+            methods,
+            resolvers,
+            &self,
+            /*optimize=*/true);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
         auto named_tuple_def = NamedTupleDef(parsed_treeref);
 
@@ -237,7 +298,8 @@ struct SourceImporter {
         auto tt = TupleType::create(
             field_types,
             qualified_name,
-            TupleType::namedTupleSchemaFromNamesAndTypes(qualified_name, field_names, field_types));
+            TupleType::namedTupleSchemaFromNamesAndTypes(
+                qualified_name, field_names, field_types));
         owner->register_class(tt);
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -248,74 +310,10 @@ struct SourceImporter {
     }
   }
 
-  void importModule(Module& module) {
-    checkVersionNumber();
-    auto& L = p_.lexer();
-
-    while (L.cur().kind != TK_EOF) {
-      parseImportsAndDoCallback();
-
-      auto parsed_treeref = p_.parseClassLike();
-      TORCH_INTERNAL_ASSERT(parsed_treeref->kind() == TK_CLASS_DEF);
-      auto class_def = ClassDef(parsed_treeref);
-      std::vector<Assign> attributes;
-      std::vector<Def> methods;
-      std::vector<ResolverPtr> resolvers;
-      std::unordered_set<std::string> parameter_names;
-      // Process statements, splitting things into attribute and method
-      // definitions.
-      for (const auto& statement : class_def.body()) {
-        switch (statement.kind()) {
-          case TK_ASSIGN: {
-            const auto assign = Assign(statement);
-            const auto name = Var(assign.lhs()).name().name();
-            if (name == "__parameters__") {
-              // Populate the parameter list. This is a field that looks like:
-              //   __parameters__ = [foo, bar, baz]
-              // which tells us which attributes are module parameters.
-              // TODO these should be string literals, not raw idents
-              const auto param_list = ListLiteral(assign.rhs().get()).inputs();
-              LOG(ERROR) << "params:";
-              for (const auto& param : param_list) {
-                LOG(ERROR) << "\t" << Var(param).name().name();
-                parameter_names.insert(Var(param).name().name());
-              }
-            } else {
-              attributes.push_back(assign);
-            }
-          } break;
-          case TK_DEF: {
-            methods.push_back(Def(statement));
-            resolvers.push_back(resolver_);
-          } break;
-          default: {
-            TORCH_INTERNAL_ASSERT(
-                false,
-                "Unexpected statement kind in Module body: ",
-                kindToString(statement.kind()));
-          }
-        }
-      }
-
-      // Populate module attributes
-      ScriptTypeParser type_parser(resolver_);
-      for (const auto& assign : attributes) {
-        const auto name = Var(assign.lhs()).name().name();
-        TORCH_INTERNAL_ASSERT(name != "__parameters__");
-        const auto type = type_parser.parseTypeFromExpr(assign.type().get());
-        const bool is_parameter = parameter_names.count(name);
-        LOG(ERROR) << name << ": " << is_parameter;
-        module.type()->addAttribute(name, type, is_parameter);
-      }
-
-      const auto self = SimpleSelf(module.type());
-      module.class_compilation_unit()->define(module.name(), methods, resolvers, &self);
-    }
-  }
-
   void importFunctions(
       const c10::optional<c10::QualifiedName>& prefix,
-      const Self* self) {
+      const Self* self,
+      bool optimize) {
     checkVersionNumber();
     parseImportsAndDoCallback();
 
@@ -326,7 +324,7 @@ struct SourceImporter {
       definitions.emplace_back(def);
       resolvers.emplace_back(resolver_);
     }
-    cu_->define(prefix, definitions, resolvers, self);
+    cu_->define(prefix, definitions, resolvers, self, optimize);
   }
 
   size_t parseVersionNumber() {
@@ -383,10 +381,11 @@ void import_functions(
     std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table,
+    bool optimize,
     const Self* self,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(cu, src, tensor_table, import_callback);
-  importer.importFunctions(prefix, self);
+  SourceImporter importer(cu, src, constant_table, import_callback);
+  importer.importFunctions(prefix, self, optimize);
 }
 
 void import_libs(
@@ -395,22 +394,11 @@ void import_libs(
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback) {
+  LOG(ERROR) << "Calling import_libs:" << class_qualifier;
+  LOG(ERROR) << "source:" << src->text();
   SourceImporter importer(cu, src, tensor_table, import_callback);
   importer.importLibs(cu, class_qualifier);
 }
-
-void import_module(
-    // An empty module to import into
-    Module& module,
-    const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table,
-    const std::function<void(const std::string&)>& import_callback) {
-      LOG(ERROR) << src->text();
-  SourceImporter importer(
-      module.class_compilation_unit(), src, tensor_table, import_callback);
-  importer.importModule(module);
-}
-
 } // namespace script
 } // namespace jit
 } // namespace torch

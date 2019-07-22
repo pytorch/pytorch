@@ -3145,7 +3145,6 @@ def foo(x):
 
         with torch.jit._disable_emit_hooks():
             class Foo(torch.jit.ScriptModule):
-            r
                 def __init__(self):
                     super(Foo, self).__init__()
 
@@ -7989,6 +7988,32 @@ a")
         m = self.createFunctionFromGraph(list_tensors.graph)
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
+
+    def test_import_constants_not_specialized(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat(2 * [x], dim=0)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self, mod):
+                super(ScriptMod, self).__init__()
+                x = torch.zeros(1, 3)
+                mod_fn = lambda : mod(x)  # noqa: E731
+                self.mod = torch.jit.trace(mod_fn, tuple())
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.mod()
+
+        cm = ScriptMod(Mod())
+        # specialized tensor in graph
+        FileCheck().check("Double(1, 3)").run(cm.forward.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(cm, buffer)
+        buffer.seek(0)
+        # when tensor is loaded as constant it isnt specialized
+        cm_load = torch.jit.load(buffer)
+        FileCheck().check_not("Double(1, 3)").run(cm_load.forward.graph)
 
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
@@ -13266,9 +13291,13 @@ class TestRecursiveScript(JitTestCase):
             checker = FileCheck()
             checker.check("Expected a value of type 'int'")
             checker.check("return d(\"hello\")")
+            checker.check("\'b")
             checker.check("return c(x)")
+            checker.check("Submodule.forward\'")
             checker.check("return b(x)")
+            checker.check("M.some_method\'")
             checker.check("return y + self.submodule(y)")
+            checker.check("M.forward\'")
             checker.check("return self.some_method(x)")
             checker.run(str(e))
 
@@ -13369,6 +13398,17 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(M(), (torch.randn(5, 5),))
 
     def test_attributes(self):
+        @torch.jit.script
+        class Inner(object):
+            def __init__(self):
+                self.b = "a string"
+
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self):
+                self.a = 4
+                self.inner = Inner()
+
         untyped_values = (
             ('my_dict', {"I": "am", "a test": "test"}),
             ('my_float', 2.3),
@@ -13387,6 +13427,7 @@ class TestRecursiveScript(JitTestCase):
             ('my_empty_list', []),
             ('my_empty_dict', {}),
             ('my_none', None),
+            ('my_object', Foo()),
         )
 
         class M(torch.nn.Module):
@@ -13414,6 +13455,8 @@ class TestRecursiveScript(JitTestCase):
                     self.my_empty_list,
                     self.my_empty_dict,
                     self.my_none,
+                    self.my_object.a,
+                    self.my_object.inner.b,
                 )
 
         # TODO: as a followup, fix this test
@@ -13429,6 +13472,7 @@ class TestRecursiveScript(JitTestCase):
             'my_empty_list': List[int],
             'my_empty_dict': Dict[str, int],
             'my_none': Optional[int],
+            'my_object': Foo,
         }
 
         m = M()

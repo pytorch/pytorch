@@ -237,12 +237,16 @@ pytorch/builder
   - build_wheel.sh            # Entrypoint for wheel builds
 ```
 
+Every type of package has an entrypoint build script that handles the all the important logic.
+
 ## Conda
+
+Both Linux and MacOS use the same code flow for the conda builds.
 
 Conda packages are built with conda-build, see https://conda.io/projects/conda-build/en/latest/resources/commands/conda-build.html 
 
-Basically, you pass ```conda build``` a build folder (pytorch-nightly/ above) that contains a build script and a meta.yaml. The meta.yaml specifies in what python environment to build the package in, and what dependencies the resulting package should have, and the build script gets called in the env to build the thing.
-TLDR on conda-build is
+Basically, you pass `conda build` a build folder (pytorch-nightly/ above) that contains a build script and a meta.yaml. The meta.yaml specifies in what python environment to build the package in, and what dependencies the resulting package should have, and the build script gets called in the env to build the thing.
+tldr; on conda-build is
 
 1. Creates a brand new conda environment, based off of deps in the meta.yaml
     1. Note that environment variables do not get passed into this build env unless they are specified in the meta.yaml
@@ -254,10 +258,19 @@ TLDR on conda-build is
 
 The build.sh we use is essentially a wrapper around ```python setup.py build``` , but it also manually copies in some of our dependent libraries into the resulting tarball and messes with some rpaths.
 
+The entrypoint file `builder/conda/build_conda.sh` is complicated because
+
+* It works for both Linux and MacOS
+    * The mac builds used to create their own environments, since they all used to be on the same machine. There’s now a lot of extra logic to handle conda envs. This extra machinery could be removed
+* It used to handle testing too, which adds more logic messing with python environments too. This extra machinery could be removed.
+
 ## Manywheels (linux pip and libtorch packages)
 
-Manywheels are pip packages for linux distros. 
-This file is really really complicated because
+Manywheels are pip packages for linux distros. Note that these manywheels are not actually manylinux compliant. 
+
+`builder/manywheel/build_cpu.sh` and `builder/manywheel/build.sh` (for CUDA builds) just set different env vars and then call into `builder/manywheel/build_common.sh`
+
+The entrypoint file `builder/manywheel/build_common.sh` is really really complicated because
 
 * This used to handle building for several different python versions at the same time. This is why there are loops everywhere
     * The script is never used this way anymore. This extra machinery could be removed.
@@ -269,12 +282,14 @@ This file is really really complicated because
 
 ## Wheels (MacOS pip and libtorch packages)
 
-This file is complicated because
+The entrypoint file `builder/wheel/build_wheel.sh` is complicated because
 
 * The mac builds used to all run on one machine (we didn’t have autoscaling mac machines till circleci). So this script handled siloing itself by setting-up and tearing-down its build env and siloing itself into its own build directory.
     * The script is never used this way anymore. This extra machinery could be removed.
 * This also builds libtorch packages
     * Ditto the comment above. This should definitely be separated out.
+
+Note that the MacOS Python wheels are still built in conda environments. Some of the dependencies present during build also come from conda.
 
 ## General notes
 
@@ -289,9 +304,10 @@ This file is complicated because
 
 Libtorch packages are built in the wheel build scripts: manywheel/build_*.sh for linux and build_wheel.sh for mac. There are several things wrong with this
 
-* It’s confusinig. Most of those scripts deal with python specifics
+* It’s confusinig. Most of those scripts deal with python specifics.
+* The extra conditionals everywhere severely complicate the wheel build scripts
 * The process for building libtorch is different from the official instructions (a plain call to cmake, or a call to a script)
-* For Linux specifically, the job is set up to build all libtorch varieties in a single go. This leads to 9+ hour builds times for CUDA 10.0 libtorch. This is more of a problem with the circleci setup.
+* For Linux specifically, the job is set up to build all libtorch varieties in a single go. This leads to 9+ hour builds times for CUDA 10.0 libtorch. This is more of a problem with the circleci setup though.
 
 ### Note on docker images / Dockerfiles
 
@@ -360,3 +376,104 @@ git push origin my_branch --force
 ```
 
 The advantage of this flow is that you can make new changes to the base commit and regenerate the .circleci without having to re-write which binary jobs you want to test on. The downside is that all updates will be force pushes.
+
+## How to build a binary locally
+
+### Linux
+
+You can build Linux binaries locally easily using docker. 
+
+```
+# Run the docker
+# Use the correct docker image, soumith/conda-cuda used here as an example
+#
+# -v path/to/foo:path/to/bar makes path/to/foo on your local machine (the
+#    machine that you're running the command on) accessible to the docker
+#    container at path/to/bar. So if you then run `touch path/to/bar/baz`
+#    in the docker container then you will see path/to/foo/baz on your local
+#    machine. You could also clone the pytorch and builder repos in the docker.
+#
+# If you're building a CUDA binary then use `nvidia-docker run` instead, see below.
+#
+# If you know how, add ccache as a volume too and speed up everything
+docker run \
+    -v your/pytorch/repo:/pytorch \
+    -v your/builder/repo:/builder \
+    -v where/you/want/packages/to/appear:/final_pkgs \
+    -it soumith/conda-cuda /bin/bash
+    
+# Export whatever variables are important to you. All variables that you'd
+# possibly need are in .circleci/scripts/binary_populate_env.sh
+# You should probably always export at least these 3 variables
+export PACKAGE_TYPE=conda
+export DESIRED_PYTHON=3.6
+export DESIRED_CUDA=cpu
+
+# Call the entrypoint
+# `|& tee foo.log` just copies all stdout and stderr output to foo.log
+# The builds generate lots of output so you probably need this when 
+# building locally.
+/builder/conda/build_pytorch.sh |& tee build_output.log
+```
+
+**Building CUDA binaries on docker**
+
+To build a CUDA binary you need to use `nvidia-docker run` instead of just `docker run` (or you can manually pass `--runtime=nvidia`). This adds some needed libraries and things to build CUDA stuff. 
+
+You can build CUDA binaries on CPU only machines, but you can only run CUDA binaries on CUDA machines. This means that you can build a CUDA binary on a docker on your laptop if you so choose (though it’s gonna take a loong time).
+
+For Facebook employees, ask about beefy machines that have docker support and use those instead of your laptop; it will be 5x as fast.
+
+### MacOS
+
+There’s no easy way to generate reproducible hermetic MacOS environments. If you have a Mac laptop then you can try emulating the .circleci environments as much as possible, but you probably have packages in /usr/local/, possibly installed by brew, that will probably interfere with the build. If you’re trying to repro an error on a Mac build in .circleci and you can’t seem to repro locally, then my best advice is actually to iterate on .circleci    :/
+
+But if you want to try, then I’d recommend
+
+```
+# Create a new terminal
+# Clear your LD_LIBRARY_PATH and trim as much out of your PATH as you 
+# know how to do
+
+# Install a new miniconda
+# First remove any other python or conda installation from your PATH
+# Always install miniconda 3, even if building for Python <3
+new_conda="~/my_new_conda"
+conda_sh="$new_conda/install_miniconda.sh"
+curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+chmod +x "$conda_sh"
+"$conda_sh" -b -p "$MINICONDA_ROOT"
+rm -f "$conda_sh"
+export PATH="~/my_new_conda/bin:$PATH"
+
+# Create a clean python env
+# All MacOS builds use conda to manage the python env and dependencies
+# that are built with, even the pip packages
+conda create -yn binary python=2.7
+conda activate binary
+
+# Export whatever variables are important to you. All variables that you'd
+# possibly need are in .circleci/scripts/binary_populate_env.sh
+# You should probably always export at least these 3 variables
+export PACKAGE_TYPE=conda
+export DESIRED_PYTHON=3.6
+export DESIRED_CUDA=cpu
+
+# Call the entrypoint you want
+path/to/builder/wheel/build_wheel.sh
+```
+
+N.B. installing a brand new miniconda is important. This has to do with how conda installations work. See the “General Python” section above, but tldr; is that 
+
+1. You make the ‘conda’ command accessible by prepending `path/to/conda_root/bin` to your PATH.
+2. You make a new env and activate it, which then also gets prepended to your PATH. Now you have `path/to/conda_root/envs/new_env/bin:path/to/conda_root/bin:$PATH` 
+3. Now say you (or some code that you ran) call python executable `foo` 
+    1. if you installed `foo` in `new_env`, then `path/to/conda_root/envs/new_env/bin/foo` will get called, as expected.
+    2. But if you forgot to installed `foo` in `new_env` but happened to previously install it in your root conda env (called ‘base’), then unix/linux will still find `path/to/conda_root/bin/foo` . This is dangerous, since `foo` can be a different version than you want; `foo` can even be for an incompatible python version!
+
+Newer conda versions and proper python hygeine can prevent this, but just install a new miniconda to be safe.
+
+### Windows
+
+Maybe @peterjc123 can fill this section in.
+

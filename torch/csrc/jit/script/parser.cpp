@@ -657,6 +657,7 @@ struct ParserImpl {
         return parseNamedTuple(name);
       } else {
         superclass = Maybe<Ident>::create(id.range, Ident::create(id.range, id.text()));
+        L.expect(')');
       }
     }
     L.expect(':');
