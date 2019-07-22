@@ -6,6 +6,7 @@ circular dependency problems
 
 import inspect
 import weakref
+import torch._C
 from torch._six import builtins
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
@@ -386,3 +387,36 @@ class BroadcastingListCls(object):
 BroadcastingList1 = BroadcastingListCls()
 for i in range(2, 7):
     globals()["BroadcastingList{}".format(i)] = BroadcastingList1
+
+# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
+def _qualified_name(obj):
+    # short-circuit in cases where the object already has a known qualified name
+    if isinstance(obj, torch._C.Function):
+        return obj.qualified_name
+
+    name = obj.__name__
+    module_name = obj.__module__
+
+    # The Python docs are very clear that `__module__` can be None, but I can't
+    # figure out when it actually would be.
+    if module_name is None:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "__module__ can't be None.".format(name))
+
+    # if getattr(sys.modules[module_name], name) is not obj:
+    #     raise RuntimeError("Could not get qualified name for class '{}': "
+    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
+
+    # __main__ is a builtin module, so rewrite it to "__torch__".
+    if module_name == "__main__":
+        module_name = "__torch__"
+    else:
+        # Everything else gets a "__torch__" prefix to avoid name collisions
+        # with the names of user values.
+        module_name = "__torch__." + module_name
+
+    if "." in name:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "'{}' is not a valid identifier".format(name, name))
+
+    return module_name + "." + name
