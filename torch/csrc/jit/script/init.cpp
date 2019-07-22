@@ -526,7 +526,6 @@ void initJitScriptBindings(PyObject* module) {
                 method_name, graph, self.is_optimized());
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
-            return StrongFunctionPtr(self.class_compilation_unit(), fn);
           })
       .def(
           "get_debug_state",

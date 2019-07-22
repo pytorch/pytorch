@@ -2941,7 +2941,7 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr, true);
 }
 
-std::string CompilationUnit::getMangleNamespace() const {
+std::string CompilationUnit::getMangleString() const {
   static const std::string manglePrefix = "___torch_mangle_";
   return manglePrefix + std::to_string(mangleIndex_++);
 }

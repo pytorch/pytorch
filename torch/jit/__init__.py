@@ -906,7 +906,7 @@ def trace_module(mod,
         # this is needed since Module.__call__ sets up some extra tracing
         func = mod if method_name == "forward" else getattr(mod, method_name)
         example_inputs = make_tuple(example_inputs)
-        fn = module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+        module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
         check_trace_method = module._c._get_method(method_name)
 
         # Check the trace against new traces created from user-specified inputs
