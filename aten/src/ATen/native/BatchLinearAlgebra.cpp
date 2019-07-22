@@ -120,7 +120,7 @@ void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
 }
 
 template<class scalar_t>
-void lapackLuSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
+void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
   AT_ERROR("lu_solve only takes float or double Tensors");
 }
 
@@ -207,12 +207,12 @@ template<> void lapackSvd<float>(char jobz, int m, int n, float *a, int lda,
   sgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 
-template<> void lapackLuSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
-  dgetrs_("N", &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+template<> void lapackLuSolve<double>(char trans, int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
+  dgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
-template<> void lapackLuSolve<float>(int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
-  sgetrs_("N", &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
+  sgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 #endif
 
@@ -1111,7 +1111,7 @@ static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, st
     scalar_t* b_working_ptr = &b_data[i * b_stride];
     scalar_t* lu_working_ptr = &lu_data[i * lu_stride];
     int* pivots_working_ptr = &pivots_data[i * pivots_stride];
-    lapackLuSolve<scalar_t>(n, nrhs, lu_working_ptr, n, pivots_working_ptr,
+    lapackLuSolve<scalar_t>('N', n, nrhs, lu_working_ptr, n, pivots_working_ptr,
                             b_working_ptr, n, &info);
     infos[i] = info;
     if (info != 0) {
