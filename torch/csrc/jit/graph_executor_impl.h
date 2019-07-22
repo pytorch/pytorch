@@ -61,7 +61,9 @@ struct GraphExecutorImplBase {
         // disables all optimization
         optimize(optimize),
         num_inputs(this->graph->inputs().size()),
-        num_outputs(this->graph->outputs().size()) {}
+        num_outputs(this->graph->outputs().size()) {
+          LOG(ERROR) << optimize;
+        }
 
   // entry point where execution begins
   void run(Stack& stack);

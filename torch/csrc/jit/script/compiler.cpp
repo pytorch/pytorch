@@ -2941,6 +2941,11 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr, true);
 }
 
+std::string CompilationUnit::getMangleNamespace() const {
+  static const std::string manglePrefix = "___torch_mangle_";
+  return manglePrefix + std::to_string(mangleIndex_++);
+}
+
 // Mangle a qualified name so that it is globally unique.
 std::string CompilationUnit::mangle(const std::string& name) const {
   static const std::string manglePrefix = "___torch_mangle_";

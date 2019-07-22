@@ -348,7 +348,7 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module>(m, "ScriptModule")
-      .def(py::init<std::string, std::shared_ptr<CompilationUnit>>())
+      .def(py::init<std::string, std::shared_ptr<CompilationUnit>, bool>())
       .def(
           "save",
           [](Module& m,
@@ -391,7 +391,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            const auto prefix = QualifiedName(m.name());
+            const auto& prefix = m.name();
             const auto self = ModuleSelf(m, py_m);
             m.class_compilation_unit()->define(
                 prefix, defs, resolvers, &self, m.is_optimized());
@@ -420,11 +420,6 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::keep_alive<0, 1>())
       .def("_register_parameter", &Module::register_parameter)
-      .def(
-          "_get_functions",
-          [](Module& self) {
-            return self.class_compilation_unit()->get_functions();
-          })
       .def(
           "_register_attribute",
           [](Module& self, std::string name, TypePtr type, py::object value) {
@@ -531,6 +526,7 @@ void initJitScriptBindings(PyObject* module) {
                 method_name, graph, self.is_optimized());
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
+            return StrongFunctionPtr(self.class_compilation_unit(), fn);
           })
       .def(
           "get_debug_state",
