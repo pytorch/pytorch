@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -exu -o pipefail
 
-echo "This check is currently disabled in favor of branch-based filtering"
-exit 0
-
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # Check if we should actually run
@@ -21,10 +18,12 @@ if ! [ -e "$SCRIPT_DIR/COMMIT_MSG" ]; then
   exit 1
 fi
 if [ -n "${CIRCLE_PULL_REQUEST:-}" ]; then
-  # Don't swallow "script doesn't exist
-  [ -e "$SCRIPT_DIR/should_run_job.py"  ]
-  if ! python "$SCRIPT_DIR/should_run_job.py" "${BUILD_ENVIRONMENT:-}" < "$SCRIPT_DIR/COMMIT_MSG" ; then
-    circleci step halt
-    exit
+  if [[ $CIRCLE_BRANCH != "ci-all/"* ]]; then
+    # Don't swallow "script doesn't exist
+    [ -e "$SCRIPT_DIR/should_run_job.py"  ]
+    if ! python "$SCRIPT_DIR/should_run_job.py" "${BUILD_ENVIRONMENT:-}" < "$SCRIPT_DIR/COMMIT_MSG" ; then
+      circleci step halt
+      exit
+    fi
   fi
 fi

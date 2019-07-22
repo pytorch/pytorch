@@ -651,6 +651,7 @@ BAD_EXAMPLES = [
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = False
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -3468,7 +3469,7 @@ class TestKL(TestCase):
 
 
 class TestConstraints(TestCase):
-    def test_params_contains(self):
+    def test_params_constraints(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -3491,7 +3492,7 @@ class TestConstraints(TestCase):
                         Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
-    def test_support_contains(self):
+    def test_support_constraints(self):
         for Dist, params in EXAMPLES:
             self.assertIsInstance(Dist.support, Constraint)
             for i, param in enumerate(params):

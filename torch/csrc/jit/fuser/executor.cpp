@@ -313,8 +313,11 @@ void launchFusion(
       }
     }
   }
-
-  fusion.launch_raw(numel, arguments);
+  // Skip launching the kernel for zero-element tensor inputs
+  // launches are skipped, empty zero-sized output is returned
+  if (numel > 0) {
+    fusion.launch_raw(numel, arguments);
+  }
 }
 
 bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
@@ -385,7 +388,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
     if (omap.needsSumToSize()) {
       return at::sum_to(
           raw_outputs[omap.offset()],
-          all_inputs[omap.sizeInput()].toIntList()->elements());
+          all_inputs[omap.sizeInput()].toIntListRef());
     } else {
       return raw_outputs[omap.offset()];
     }

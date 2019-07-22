@@ -1,4 +1,4 @@
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/operators/layer_norm_op.h"
 
 #include "caffe2/core/context_gpu.h"
@@ -49,7 +49,13 @@ __global__ void LayerNormForwardCUDAKernel(
     const T* X,
     const T* scale,
     const T* bias,
-    T* Y);
+    T* Y) {
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < M * N) {
+    const int i = index / N;
+    Y[index] = X[index] * scale[i] + bias[i];
+  }
+}
 
 template <typename T>
 __global__ void LayerNormForwardCUDAKernel(
@@ -60,44 +66,14 @@ __global__ void LayerNormForwardCUDAKernel(
     const T* bias,
     const T* gamma,
     const T* beta,
-    T* Y);
-
-#define DELEGATE_LAYER_NORM_FORWARD_CUDA_KERNEL(T, FmaFunc)                 \
-  template <>                                                               \
-  __global__ void LayerNormForwardCUDAKernel<T>(                            \
-      const int M,                                                          \
-      const int N,                                                          \
-      const T* X,                                                           \
-      const T* scale,                                                       \
-      const T* bias,                                                        \
-      T* Y) {                                                               \
-    const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;    \
-    if (index < M * N) {                                                    \
-      const int i = index / N;                                              \
-      Y[index] = FmaFunc(X[index], scale[i], bias[i]);                      \
-    }                                                                       \
-  }                                                                         \
-  template <>                                                               \
-  __global__ void LayerNormForwardCUDAKernel<T>(                            \
-      const int M,                                                          \
-      const int N,                                                          \
-      const T* X,                                                           \
-      const T* scale,                                                       \
-      const T* bias,                                                        \
-      const T* gamma,                                                       \
-      const T* beta,                                                        \
-      T* Y) {                                                               \
-    const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;    \
-    if (index < M * N) {                                                    \
-      const int i = index / N;                                              \
-      const int j = index % N;                                              \
-      Y[index] =                                                            \
-          FmaFunc(FmaFunc(X[index], scale[i], bias[i]), gamma[j], beta[j]); \
-    }                                                                       \
+    T* Y) {
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < M * N) {
+    const int i = index / N;
+    const int j = index % N;
+    Y[index] = (X[index] * scale[i] + bias[i]) * gamma[j] + beta[j];
   }
-DELEGATE_LAYER_NORM_FORWARD_CUDA_KERNEL(float, fmaf)
-DELEGATE_LAYER_NORM_FORWARD_CUDA_KERNEL(double, fma)
-#undef DELEGATE_LAYER_NORM_FORWARD_CUDA_KERNEL
+}
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
@@ -173,38 +149,21 @@ __global__ void ComputeFusedParamsCUDAKernel(
     T* rstd,
     T* X_scale,
     T* bias,
-    T* g_scale);
-
-#define DELEGATE_COMPUTE_FUSED_PARAMS_CUDA_KERNEL(T, FmaFunc)               \
-  template <>                                                               \
-  __global__ void ComputeFusedParamsCUDAKernel<T>(                          \
-      const int M,                                                          \
-      const int N,                                                          \
-      const T* mean,                                                        \
-      const T* sigma,                                                       \
-      const T* ds,                                                          \
-      const T* db,                                                          \
-      T* rstd,                                                              \
-      T* X_scale,                                                           \
-      T* bias,                                                              \
-      T* g_scale) {                                                         \
-    const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;    \
-    if (index < M) {                                                        \
-      const T scale = T(1) / static_cast<T>(N);                             \
-      const T rstd_val = T(1) / sigma[index];                               \
-      const T X_scale_val = FmaFunc(db[index], mean[index], -ds[index]) *   \
-          math::utils::Cube<T>(rstd_val) * scale;                           \
-      rstd[index] = rstd_val;                                               \
-      X_scale[index] = X_scale_val;                                         \
-      bias[index] =                                                         \
-          -FmaFunc(X_scale_val, mean[index], db[index] * rstd_val * scale); \
-      if (g_scale != nullptr) {                                             \
-        g_scale[index] = -rstd_val * mean[index];                           \
-      }                                                                     \
-    }                                                                       \
+    T* g_scale) {
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < M) {
+    const T scale = T(1) / static_cast<T>(N);
+    const T rstd_val = T(1) / sigma[index];
+    const T X_scale_val = (db[index] * mean[index] - ds[index]) *
+        math::utils::Cube<T>(rstd_val) * scale;
+    rstd[index] = rstd_val;
+    X_scale[index] = X_scale_val;
+    bias[index] = -(X_scale_val * mean[index] + db[index] * rstd_val * scale);
+    if (g_scale != nullptr) {
+      g_scale[index] = -rstd_val * mean[index];
+    }
   }
-DELEGATE_COMPUTE_FUSED_PARAMS_CUDA_KERNEL(float, fmaf)
-#undef DELEGATE_COMPUTE_FUSED_PARAMS_CUDA_KERNEL
+}
 
 template <typename T>
 __global__ void LayerNormBackwardCUDAKenrel(
@@ -215,7 +174,13 @@ __global__ void LayerNormBackwardCUDAKenrel(
     const T* dY_scale,
     const T* X_scale,
     const T* bias,
-    T* dX);
+    T* dX) {
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < M * N) {
+    const int i = index / N;
+    dX[index] = dY[index] * dY_scale[i] + X[index] * X_scale[i] + bias[i];
+  }
+}
 
 template <typename T>
 __global__ void LayerNormBackwardCUDAKenrel(
@@ -227,49 +192,15 @@ __global__ void LayerNormBackwardCUDAKenrel(
     const T* dY_scale,
     const T* X_scale,
     const T* bias,
-    T* dX);
-
-#define DELEGATE_LAYER_NORM_BACKWARD_CUDA_KERNEL(T, FmaFunc)               \
-  template <>                                                              \
-  __global__ void LayerNormBackwardCUDAKenrel<T>(                          \
-      const int M,                                                         \
-      const int N,                                                         \
-      const T* dY,                                                         \
-      const T* X,                                                          \
-      const T* dY_scale,                                                   \
-      const T* X_scale,                                                    \
-      const T* bias,                                                       \
-      T* dX) {                                                             \
-    const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;   \
-    if (index < M * N) {                                                   \
-      const int i = index / N;                                             \
-      dX[index] = FmaFunc(                                                 \
-          dY[index], dY_scale[i], FmaFunc(X[index], X_scale[i], bias[i])); \
-    }                                                                      \
-  }                                                                        \
-  template <>                                                              \
-  __global__ void LayerNormBackwardCUDAKenrel<T>(                          \
-      const int M,                                                         \
-      const int N,                                                         \
-      const T* dY,                                                         \
-      const T* X,                                                          \
-      const T* gamma,                                                      \
-      const T* dY_scale,                                                   \
-      const T* X_scale,                                                    \
-      const T* bias,                                                       \
-      T* dX) {                                                             \
-    const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;   \
-    if (index < M * N) {                                                   \
-      const int i = index / N;                                             \
-      const int j = index % N;                                             \
-      dX[index] = FmaFunc(                                                 \
-          dY[index],                                                       \
-          dY_scale[i] * gamma[j],                                          \
-          FmaFunc(X[index], X_scale[i], bias[i]));                         \
-    }                                                                      \
+    T* dX) {
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < M * N) {
+    const int i = index / N;
+    const int j = index % N;
+    dX[index] =
+        dY[index] * dY_scale[i] * gamma[j] + X[index] * X_scale[i] + bias[i];
   }
-DELEGATE_LAYER_NORM_BACKWARD_CUDA_KERNEL(float, fmaf)
-#undef DELEGATE_LAYER_NORM_BACKWARD_CUDA_KERNEL
+}
 
 } //  namespace
 
@@ -400,8 +331,7 @@ void LayerNormGradientOp<CUDAContext>::GammaBetaBackward(
     const T* rstd,
     const T* g_scale,
     T* dgamma,
-    T* dbeta,
-    T* scratch) {
+    T* dbeta) {
   if (M == 0) {
     math::Set<T, CUDAContext>(N, T(0), dgamma, &context_);
     math::Set<T, CUDAContext>(N, T(0), dbeta, &context_);
@@ -425,13 +355,13 @@ REGISTER_CUDA_OPERATOR(LayerNormGradient, LayerNormGradientOp<CUDAContext>);
 
 } // namespace caffe2
 
-C10_REGISTER_CAFFE2_OPERATOR_CUDA(
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
     LayerNorm,
     caffe2::LayerNormOp<caffe2::CUDAContext>)
 
 namespace caffe2 {
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(
+C10_EXPORT_C10_OP_TO_CAFFE2_CUDA(
     "_caffe2::LayerNorm",
     C10LayerNorm_DontUseThisOpYet);
 

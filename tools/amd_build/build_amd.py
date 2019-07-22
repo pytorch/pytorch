@@ -79,6 +79,7 @@ includes = [
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cudnn/*",
     "aten/src/ATen/native/sparse/cuda/*",
+    "aten/src/ATen/native/quantized/cuda/*",
     "aten/src/THC/*",
     "aten/src/THCUNN/*",
     "aten/src/ATen/test/*",
@@ -107,8 +108,6 @@ ignores = [
     "torch/lib/tmp_install/*",
     "torch/include/*",
 ]
-
-json_settings = os.path.join(amd_build_dir, "disabled_features.json")
 
 if not args.out_of_place_only:
     # Apply patch files in place (PyTorch only)
@@ -149,5 +148,4 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_settings,
     hip_clang_launch=args.hip_clang_launch)

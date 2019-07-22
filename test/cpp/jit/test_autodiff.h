@@ -63,7 +63,7 @@ std::shared_ptr<Graph> trace(
   Stack input_vars = fmap<IValue>(vars_in);
   std::vector<TypePtr> input_types;
   input_types.reserve(input_vars.size());
-  for (auto i = 0; i < input_vars.size(); i++) {
+  for (size_t i = 0; i < input_vars.size(); i++) {
     input_types.push_back(TensorType::get());
   }
   auto input_typeptr = TupleType::create(std::move(input_types));

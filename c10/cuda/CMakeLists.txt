@@ -47,7 +47,7 @@ endif()
 # ---[ Dependency of c10_cuda
 target_link_libraries(c10_cuda PUBLIC c10)
 
-target_link_libraries(c10_cuda INTERFACE caffe2::cudart)
+target_link_libraries(c10_cuda INTERFACE torch::cudart)
 
 target_include_directories(
     c10_cuda PUBLIC

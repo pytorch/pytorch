@@ -202,15 +202,15 @@ class profile(object):
             Default: ``False``
 
         record_shapes (bool, optional): If shapes recording is set, information
-        about input dimensions will be collected. This allows one to see which
-        dimensions have been used under the hood and further group by them
-        using prof.key_averages(group_by_input_shape=True). Please note that
-        shape recording might skew your profiling data. It is recommended to
-        use separate runs with and without shape recording to validate the timing.
-        Most likely the skew will be negligible for bottom most events (in a case
-        of nested function calls). But for higher level functions the total
-        self cpu time might be artificially increased because of the shape
-        collection.
+            about input dimensions will be collected. This allows one to see which
+            dimensions have been used under the hood and further group by them
+            using prof.key_averages(group_by_input_shape=True). Please note that
+            shape recording might skew your profiling data. It is recommended to
+            use separate runs with and without shape recording to validate the timing.
+            Most likely the skew will be negligible for bottom most events (in a case
+            of nested function calls). But for higher level functions the total
+            self cpu time might be artificially increased because of the shape
+            collection.
 
     .. warning:
         This context managers should not be called recursively, i.e. at most one
@@ -327,8 +327,16 @@ class emit_nvtx(object):
         instance should be enabled at any given time.
 
     Arguments:
-        enabled (bool, optional): Setting this to False makes this context manager a no-op.
+        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
+        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
+            each autograd op will append information about the sizes of Tensor arguments received
+            by that op, in the following format:
+            ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
+            Non-tensor arguments will be represented by ``[]``.
+            Arguments will be listed in the order they are received by the backend op.
+            Please note that this order may not match the order in which those arguments were passed
+            on the Python side.  Also note that shape recording may increase the overhead of nvtx range creation.
 
     Example:
         >>> with torch.cuda.profiler.profile():
@@ -345,7 +353,7 @@ class emit_nvtx(object):
 
     During the forward pass, each function range is decorated with ``seq=<N>``.  ``seq`` is a running
     counter, incremented each time a new backward Function object is created and stashed for backward.
-    Thus, the `seq=<N>` annotation associated with each forward function range tells you that
+    Thus, the ``seq=<N>`` annotation associated with each forward function range tells you that
     if a backward Function object is created by this forward function,
     the backward object will receive sequence number N.
     During the backward pass, the top-level range wrapping each C++ backward Function's
@@ -381,9 +389,10 @@ class emit_nvtx(object):
         backward Function object.  You may need to make a judgment based on analytic knowledge of what
         the expected correspondence should be.
     """
-    def __init__(self, enabled=True):
+    def __init__(self, enabled=True, record_shapes=False):
         self.enabled = enabled
         self.entered = False
+        self.record_shapes = record_shapes
 
     def __enter__(self):
         if not self.enabled:

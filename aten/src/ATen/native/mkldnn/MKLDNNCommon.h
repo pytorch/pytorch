@@ -10,13 +10,11 @@ namespace at { namespace native {
 
 // Custom allocator using c10 CPU allocator for `ideep::tensor`
 struct AllocForMKLDNN {
-  template<class computation_t = void>
   static char* malloc(size_t size) {
     auto allocator = c10::GetAllocator(c10::DeviceType::CPU);
     return (char*)allocator->raw_allocate(size);
   }
 
-  template<class computation_t = void>
   static void free(void* p) {
     auto allocator = c10::GetAllocator(c10::DeviceType::CPU);
     allocator->raw_deallocate(p);

@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/DilatedMaxPool.h>
+#include <ATen/native/Pool.h>
 #include <tuple>
 
 
@@ -129,9 +129,8 @@ void max_pool2d_with_indices_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX JIT: Pooling.cpp allows stride.empty().
-  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 2 &&
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
               (stride.empty() || stride.size() == 2) &&
               (padding.size() == 1 || padding.size() == 2) &&
               (dilation.size() == 1 || dilation.size() == 2),
@@ -141,7 +140,7 @@ void max_pool2d_with_indices_out_cpu_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
@@ -161,7 +160,7 @@ void max_pool2d_with_indices_out_cpu_template(
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  max_pool2d_with_indices_shape_check(
+  pool2d_shape_check(
     input_,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
@@ -303,9 +302,8 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX JIT: Pooling.cpp allows stride.empty().
-  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 2 &&
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
               (stride.empty() || stride.size() == 2) &&
               (padding.size() == 1 || padding.size() == 2) &&
               (dilation.size() == 1 || dilation.size() == 2),
@@ -315,7 +313,7 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
@@ -345,7 +343,7 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
   const int64_t outputHeight_for_shape_check = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth_for_shape_check = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  max_pool2d_with_indices_shape_check(
+  max_pool2d_backward_shape_check(
     input,
     gradOutput_,
     indices,

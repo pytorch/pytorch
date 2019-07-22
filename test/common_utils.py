@@ -18,6 +18,7 @@ import warnings
 import random
 import contextlib
 import socket
+import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -46,9 +47,12 @@ torch.backends.cudnn.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('--subprocess', action='store_true',
+                    help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
+TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
@@ -56,8 +60,61 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
+def shell(command, cwd=None):
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # The following cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    try:
+        return p.wait()
+    except KeyboardInterrupt:
+        # Give `p` a chance to handle KeyboardInterrupt. Without this,
+        # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except:  # noqa E722, copied from python core library
+        p.kill()
+        raise
+    finally:
+        # Always call p.wait() to ensure exit
+        p.wait()
+
+
 def run_tests(argv=UNITTEST_ARGS):
-    unittest.main(argv=argv)
+    if TEST_IN_SUBPROCESS:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = []
+
+        def add_to_test_cases(suite_or_case):
+            if isinstance(suite_or_case, unittest.TestCase):
+                test_cases.append(suite_or_case)
+            else:
+                for element in suite_or_case:
+                    add_to_test_cases(element)
+
+        add_to_test_cases(suite)
+        failed_tests = []
+        for case in test_cases:
+            test_case_full_name = case.id().split('.', 1)[1]
+            exitcode = shell([sys.executable] + argv + [test_case_full_name])
+            if exitcode != 0:
+                failed_tests.append(test_case_full_name)
+
+        assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
+            len(failed_tests), '\n\t'.join(failed_tests))
+    else:
+        unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
@@ -198,6 +255,12 @@ def skipCUDAMemoryLeakCheckIf(condition):
         return fn
     return dec
 
+def skipCUDANonDefaultStreamIf(condition):
+    def dec(fn):
+        if getattr(fn, '_do_cuda_non_default_stream', True):  # if current True
+            fn._do_cuda_non_default_stream = not condition
+        return fn
+    return dec
 
 def suppress_warnings(fn):
     @wraps(fn)
@@ -282,6 +345,26 @@ def is_iterable(obj):
     except TypeError:
         return False
 
+class CudaNonDefaultStream():
+    def __enter__(self):
+        # Before starting CUDA test save currently active streams on all
+        # CUDA devices and set new non default streams to all CUDA devices
+        # to ensure CUDA tests do not use default stream by mistake.
+        beforeDevice = torch.cuda.current_device()
+        self.beforeStreams = []
+        for d in range(torch.cuda.device_count()):
+            self.beforeStreams.append(torch.cuda.current_stream(d))
+            deviceStream = torch.cuda.Stream(device=d)
+            torch._C._cuda_setStream(deviceStream._cdata)
+        torch._C._cuda_setDevice(beforeDevice)
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # After completing CUDA test load previously active streams on all
+        # CUDA devices.
+        beforeDevice = torch.cuda.current_device()
+        for d in range(torch.cuda.device_count()):
+            torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
+        torch._C._cuda_setDevice(beforeDevice)
 
 class CudaMemoryLeakCheck():
     def __init__(self, testcase, name=None):
@@ -308,6 +391,7 @@ class CudaMemoryLeakCheck():
         # Don't check for leaks if an exception was thrown
         if exec_type is not None:
             return
+
         afters = self.get_cuda_memory_usage()
 
         for i, (before, after) in enumerate(zip(self.befores, afters)):
@@ -321,31 +405,45 @@ class CudaMemoryLeakCheck():
                     warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
                         self.name, after - before, i), RuntimeWarning)
 
-
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
     _do_cuda_memory_leak_check = False
+    _do_cuda_non_default_stream = False
 
     def __init__(self, method_name='runTest'):
         super(TestCase, self).__init__(method_name)
-        # Wraps the tested method if we should do CUDA memory check.
+
         test_method = getattr(self, method_name)
+        # Wraps the tested method if we should do CUDA memory check.
         self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
         # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
         if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-            # the import below may initialize CUDA context, so we do it only if
-            # self._do_cuda_memory_leak_check is True.
-            from common_cuda import TEST_CUDA
-            fullname = self.id().lower()  # class_name.method_name
-            if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
-                setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+            self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+
+        # Wraps the tested method if we should enforce non default CUDA stream.
+        self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
+        if self._do_cuda_non_default_stream and not IS_WINDOWS:
+            self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
         return CudaMemoryLeakCheck(self, name)
 
-    def wrap_with_cuda_memory_check(self, method):
+    def enforceNonDefaultStream(self):
+        return CudaNonDefaultStream()
+
+    def wrap_with_cuda_policy(self, method_name, policy):
+        test_method = getattr(self, method_name)
+        # the import below may initialize CUDA context, so we do it only if
+        # self._do_cuda_memory_leak_check or self._do_cuda_non_default_stream
+        # is True.
+        from common_cuda import TEST_CUDA
+        fullname = self.id().lower()  # class_name.method_name
+        if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
+            setattr(self, method_name, self.wrap_method_with_cuda_policy(test_method, policy))
+
+    def wrap_method_with_cuda_policy(self, method, policy):
         # Assumes that `method` is the tested function in `self`.
         # NOTE: Python Exceptions (e.g., unittest.Skip) keeps objects in scope
         #       alive, so this cannot be done in setUp and tearDown because
@@ -354,9 +452,12 @@ class TestCase(expecttest.TestCase):
         #       call in try-finally and always do the check.
         @wraps(method)
         def wrapper(self, *args, **kwargs):
-            with self.assertLeaksNoCudaTensors():
+            with policy():
                 method(*args, **kwargs)
         return types.MethodType(wrapper, self)
+
+    def wrap_with_cuda_memory_check(self, method):
+        return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
     def setUp(self):
         if TEST_SKIP_FAST:
@@ -462,8 +563,8 @@ class TestCase(expecttest.TestCase):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
-                    if a.device.type == 'cpu' and a.dtype == torch.float16:
-                        # CPU half tensors don't have the methods we need below
+                    if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
+                        # CPU half and bfloat16 tensors don't have the methods we need below
                         a = a.to(torch.float32)
                     b = b.to(a)
 
@@ -494,11 +595,17 @@ class TestCase(expecttest.TestCase):
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
+            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
+            elif x.is_quantized and y.is_quantized:
+                self.assertEqual(x.qscheme(), y.qscheme())
+                self.assertEqual(x.q_scale(), y.q_scale())
+                self.assertEqual(x.q_zero_point(), y.q_zero_point())
+                self.assertEqual(x.int_repr(), y.int_repr())
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -723,11 +830,30 @@ class TestCase(expecttest.TestCase):
             else:
                 self.assertEqual(s, expected)
 
+    # returns captured stderr
+    @staticmethod
+    def runWithPytorchAPIUsageStderr(code):
+        import subprocess
+
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        pipes = subprocess.Popen(
+            [sys.executable, '-c', code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env)
+        return pipes.communicate()[1].decode('ascii')
+
     if sys.version_info < (3, 2):
         # assertRegexpMatches renamed to assertRegex in 3.2
         assertRegex = unittest.TestCase.assertRegexpMatches
         # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
+
+    if sys.version_info < (3, 5):
+        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
+        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
+
 
 
 def download_file(url, binary=True):
@@ -805,11 +931,11 @@ def random_square_matrix_of_rank(l, rank):
     return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
 
 
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
+def random_symmetric_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
     for i in range(l):
         for j in range(i):
-            A[i, j] = A[j, i]
+            A[..., i, j] = A[..., j, i]
     return A
 
 

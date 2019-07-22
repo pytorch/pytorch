@@ -13,7 +13,7 @@ TensorTypeIds& TensorTypeIds::singleton() {
 
 TensorTypeIdCreator::TensorTypeIdCreator() : last_id_(0) {}
 
-c10::TensorTypeId TensorTypeIdCreator::create() {
+TensorTypeId TensorTypeIdCreator::create() {
   auto id = TensorTypeId(++last_id_);
 
   if (last_id_ == 0) { // overflow happened!
@@ -30,31 +30,51 @@ c10::TensorTypeId TensorTypeIdCreator::create() {
 
 TensorTypeIdRegistry::TensorTypeIdRegistry() : registeredTypeIds_(), mutex_() {}
 
-void TensorTypeIdRegistry::registerId(c10::TensorTypeId id) {
+void TensorTypeIdRegistry::registerId(TensorTypeId id, std::string name) {
   std::lock_guard<std::mutex> lock(mutex_);
-  registeredTypeIds_.emplace(id);
+  registeredTypeIds_.emplace(id, std::move(name));
 }
 
-void TensorTypeIdRegistry::deregisterId(c10::TensorTypeId id) {
+void TensorTypeIdRegistry::deregisterId(TensorTypeId id) {
   std::lock_guard<std::mutex> lock(mutex_);
   registeredTypeIds_.erase(id);
 }
 
-c10::TensorTypeId TensorTypeIds::createAndRegister() {
-  c10::TensorTypeId id = creator_.create();
-  registry_.registerId(id);
+const std::string& TensorTypeIdRegistry::toString(TensorTypeId id) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  auto found = registeredTypeIds_.find(id);
+  TORCH_INTERNAL_ASSERT(found != registeredTypeIds_.end());
+  return found->second;
+}
+
+TensorTypeId TensorTypeIds::createAndRegister(std::string name) {
+  TensorTypeId id = creator_.create();
+  registry_.registerId(id, std::move(name));
   return id;
 }
 
-void TensorTypeIds::deregister(c10::TensorTypeId id) {
+void TensorTypeIds::deregister(TensorTypeId id) {
   registry_.deregisterId(id);
 }
 
-TensorTypeIdRegistrar::TensorTypeIdRegistrar()
-    : id_(TensorTypeIds::singleton().createAndRegister()) {}
+const std::string& TensorTypeIds::toString(TensorTypeId id) const {
+  return registry_.toString(id);
+}
+
+TensorTypeIdRegistrar::TensorTypeIdRegistrar(std::string name)
+    : id_(TensorTypeIds::singleton().createAndRegister(std::move(name))) {}
 
 TensorTypeIdRegistrar::~TensorTypeIdRegistrar() {
   TensorTypeIds::singleton().deregister(id_);
+}
+
+std::ostream& operator<<(std::ostream& str, c10::TensorTypeId rhs) {
+  return str << toString(rhs);
+}
+
+std::string toString(TensorTypeId id) {
+  return TensorTypeIds::singleton().toString(id);
 }
 
 C10_DEFINE_TENSOR_TYPE(UndefinedTensorId);

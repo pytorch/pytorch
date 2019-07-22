@@ -71,15 +71,28 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: unsqueeze
 .. autofunction:: where
 
+.. _generators:
+
+Generators
+----------------------------------
+.. autoclass:: torch._C.Generator
+   :members:
+
 .. _random-sampling:
 
 Random sampling
 ----------------------------------
+.. autofunction:: seed
 .. autofunction:: manual_seed
 .. autofunction:: initial_seed
 .. autofunction:: get_rng_state
 .. autofunction:: set_rng_state
-.. autodata:: default_generator
+.. autoattribute:: torch.default_generator
+   :annotation:  Returns the default CPU torch.Generator
+.. autoattribute:: torch.cuda.default_generators
+   :annotation:  If cuda is available, returns a tuple of default CUDA torch.Generator-s.
+                 The number of CUDA torch.Generator-s returned is equal to the number of
+                 GPUs available in the system.
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal
@@ -133,7 +146,9 @@ Locally disabling gradient computation
 The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
 :func:`torch.set_grad_enabled` are helpful for locally disabling and enabling
 gradient computation. See :ref:`locally-disable-grad` for more details on
-their usage.
+their usage.  These context managers are thread local, so they won't
+work if you send work to another thread using the :module:`threading`
+module, etc.
 
 Examples::
 
@@ -174,6 +189,7 @@ Pointwise Ops
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2
+.. autofunction:: bitwise_not
 .. autofunction:: ceil
 .. autofunction:: clamp
 .. autofunction:: cos
@@ -304,10 +320,6 @@ BLAS and LAPACK Operations
 .. autofunction:: addr
 .. autofunction:: baddbmm
 .. autofunction:: bmm
-.. autofunction:: btrifact
-.. autofunction:: btrifact_with_info
-.. autofunction:: btrisolve
-.. autofunction:: btriunpack
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
 .. autofunction:: cholesky_inverse
@@ -317,7 +329,6 @@ BLAS and LAPACK Operations
 .. autofunction:: gels
 .. autofunction:: geqrf
 .. autofunction:: ger
-.. autofunction:: gesv
 .. autofunction:: inverse
 .. autofunction:: det
 .. autofunction:: logdet
@@ -333,16 +344,12 @@ BLAS and LAPACK Operations
 .. autofunction:: orgqr
 .. autofunction:: ormqr
 .. autofunction:: pinverse
-.. autofunction:: potrf
-.. autofunction:: potri
-.. autofunction:: potrs
-.. autofunction:: pstrf
 .. autofunction:: qr
 .. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: symeig
+.. autofunction:: trapz
 .. autofunction:: triangular_solve
-.. autofunction:: trtrs
 
 Utilities
 ----------------------------------

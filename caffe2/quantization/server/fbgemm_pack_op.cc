@@ -591,7 +591,7 @@ TypeIdentifier Int8DNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId(
 
 TypeMeta Int8DNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
     const void* c) {
-  // There might be some problem if type if FC.
+  // There might be some problem if type is FC.
   // We should use a different function.
   const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
       reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
@@ -629,7 +629,7 @@ void Int8DNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
     const Blob* blob,
     std::vector<std::vector<uint64_t>>* shapes,
     std::vector<std::vector<float>>* all_scales,
-    std::vector<std::vector<float>>* all_offsets,
+    std::vector<std::vector<int32_t>>* all_offsets,
     ExternalTensorDescriptor* desc) {
   const auto& dnntensor = blob->template Get<Int8ConvDNNLowPPackedWeightBlob>();
   const Tensor& cpu_tensor = dnntensor.original_tensor;
@@ -651,15 +651,16 @@ void Int8DNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
 
   desc->quantizationParams = dnntensor.qparams.size();
   desc->quantizationAxis = 1;
-  std::vector<float> scales, offsets;
+  std::vector<float> scales;
+  std::vector<int32_t> offsets;
   for (const auto v : dnntensor.qparams) {
-    scales.emplace_back(v.scale);
-    offsets.emplace_back(v.zero_point);
+    scales.push_back(v.scale);
+    offsets.push_back(reinterpret_cast<int32_t>(v.zero_point));
   }
   all_scales->push_back(scales);
   all_offsets->push_back(offsets);
   desc->scales = all_scales->back().data();
-  desc->biases = reinterpret_cast<int32_t*>(all_offsets->back().data());
+  desc->biases = all_offsets->back().data();
 
   // Set up dim and shape
   const auto shape = cpu_tensor.sizes();

@@ -194,20 +194,20 @@ void testNetDefConverter() {
     std::unordered_map<std::string, Value*> vmap;
     convertNetDefToIR(net, &graph, &vmap);
     AT_ASSERT(graph.inputs().size() == 3);
-    AT_ASSERT(graph.inputs()[0]->uniqueName() == "a");
-    AT_ASSERT(graph.inputs()[1]->uniqueName() == "b");
-    AT_ASSERT(graph.inputs()[2]->uniqueName() == "c");
+    AT_ASSERT(graph.inputs()[0]->debugName() == "a");
+    AT_ASSERT(graph.inputs()[1]->debugName() == "b");
+    AT_ASSERT(graph.inputs()[2]->debugName() == "c");
 
     AT_ASSERT(graph.outputs().size() == 1);
-    AT_ASSERT(graph.outputs()[0]->uniqueName() == "x");
+    AT_ASSERT(graph.outputs()[0]->debugName() == "x");
 
     Node* quux = graph.outputs()[0]->node();
     Value* a0 = quux->inputs()[0];
     Value* x0 = quux->inputs()[1];
     Value* u = quux->inputs()[2];
-    AT_ASSERT(a0->uniqueName() != "a" && a0->uniqueNameBase() == "a");
-    AT_ASSERT(x0->uniqueName() != "x" && x0->uniqueNameBase() == "x");
-    AT_ASSERT(u->uniqueName() == "u");
+    AT_ASSERT(a0->debugName() != "a" && a0->debugNameBase() == "a");
+    AT_ASSERT(x0->debugName() != "x" && x0->debugNameBase() == "x");
+    AT_ASSERT(u->debugName() == "u");
 
     // Convert back to netdef and check if the names are preserved.
     // We still expect them to be in SSA form, but we should preserve names for
@@ -231,7 +231,7 @@ void testNetDefConverter() {
     std::unordered_map<std::string, Value*> vmap;
     convertNetDefToIR(net, &graph, &vmap, "caffe2::");
     // Sanity check that value map is returned and it works.
-    AT_ASSERT(vmap["a"]->uniqueName() == "a");
+    AT_ASSERT(vmap["a"]->debugName() == "a");
 
     caffe2::NetDef net2;
     convertIRToNetDef(&net2, graph, "caffe2::");

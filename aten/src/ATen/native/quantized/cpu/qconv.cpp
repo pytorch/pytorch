@@ -1,9 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/SmallVector.h>
 #include <cmath>
 
@@ -17,9 +15,9 @@ SmallVector<int64_t, 4> convOutputShape(
     int W, // input width
     int K, // output channels
     const std::vector<int64_t>& kernel,
-    const std::vector<int64_t>& stride,
-    const std::vector<int64_t>& padding,
-    const std::vector<int64_t>& dilation) {
+    const torch::List<int64_t>& stride,
+    const torch::List<int64_t>& padding,
+    const torch::List<int64_t>& dilation) {
   SmallVector<int64_t, 4> out_shape;
   out_shape.push_back(N);
 
@@ -34,16 +32,45 @@ SmallVector<int64_t, 4> convOutputShape(
   return out_shape;
 }
 
+/*
+ * FBGEMM uses vpmaddubsw instruction to multiply activations (uint8_t) and
+ * weights (int8_t).
+ *
+ * https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm256_maddubs_epi16&expand=3284,3530
+ *
+ * vpmaddubsw operates on a vector of activations and a vector of
+ * weights. If these vectors are
+ *
+ *    A (uint8_t) = a0, a1, a2, a3 ...
+ *
+ * and
+ *
+ *    B (int8_t)  = b0, b1, b2, b3 ...
+ *
+ * the result of this instruction is an int16_t vector with values
+ *
+ *    C (int16_t) = a0*b0 + a1*b1, a2*b2 + a3*b3 ...
+ *
+ * For large values of A and/or B the result (a0*b0 + a1*b1) might not fit into
+ * an int16_t number. So the instruction saturates them to max (or min) possible
+ * value of an int16_t number. Such behavior is expected for the
+ * implementation below.
+ *
+ * For example, a0 = 255, a1 = 255, b0 = 127 and b1 = 127 the actual result
+ * 64770 overflows for an int16_t number (-32768, 32767) so the returned result
+ * is 32767.
+ *
+ */
 class QConv2dInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   Tensor operator()(
       Tensor act,
       Tensor packed_weight,
-      Tensor bias,
-      const std::vector<int64_t>& stride,
-      const std::vector<int64_t>& padding,
-      const std::vector<int64_t>& dilation,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
@@ -64,7 +91,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     int H = act.size(1);
     int W = act.size(2);
     int C = act.size(3);
-    int K = bias.size(0);
 
     Tensor act_contig = act.contiguous();
     const uint8_t* act_ptr =
@@ -76,6 +102,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     // packB->printPackedMatrix("PackedB inside QConv2dInt8:");
     auto& col_offsets = pack_ptr.col_offsets;
     auto& kernel = pack_ptr.kernel;
+
+    int K = packB->numCols() * packB->numGroups();
 
     std::vector<int32_t> row_offset_buf(
         fbgemm::PackAWithIm2Col<uint8_t>::rowOffsetBufferSize());
@@ -101,17 +129,24 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         conv_p,
         act_ptr,
         nullptr,
-        act.q_zero_point().toInt(),
+        act.q_zero_point(),
         row_offset_buf.data());
 
     fbgemm::DoNothing<> NoOpObj{};
 
-    auto bias_contig = bias.contiguous();
-    const auto* bias_ptr =
-        reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
+    const int32_t* bias_ptr = nullptr;
+    if (bias.has_value()) {
+      Tensor bias_vec = bias.value();
+      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias_vec.size(0) == K,
+          "bias should have K elements: " + std::to_string(K));
+      auto bias_contig = bias_vec.contiguous();
+      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
+    }
 
-    float act_scale = act.q_scale().toFloat();
-    int32_t act_zero_point = act.q_zero_point().toInt();
+    float act_scale = act.q_scale();
+    int32_t act_zero_point = act.q_zero_point();
 
     float weight_scale_float = pack_ptr.w_scale;
     int32_t weight_zero_point_int32 = pack_ptr.w_zp;
@@ -159,16 +194,16 @@ class QConv2dInt8 final : public c10::OperatorKernel {
   Tensor operator()(
       Tensor /* activation */,
       Tensor /* packed_weight */,
-      Tensor /* bias */,
-      const std::vector<int64_t>& /* stride */,
-      const std::vector<int64_t>& /* padding */,
-      const std::vector<int64_t>& /* dilation */,
-      const std::vector<int64_t>& /* output padding */,
+      c10::optional<Tensor> /* bias */,
+      torch::List<int64_t> /* stride */,
+      torch::List<int64_t> /* padding */,
+      torch::List<int64_t> /* dilation */,
+      torch::List<int64_t> /* output padding */,
       int64_t /* groups */,
       double /* output scale */,
       int64_t /* output_zero_point */) {
-    TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
+    TORCH_CHECK(false, "This PyTorch installation was not built "
+                       "with FBGEMM operators");
   }
 #endif // USE_FBGEMM
 };
