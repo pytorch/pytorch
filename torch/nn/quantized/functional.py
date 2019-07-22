@@ -24,7 +24,7 @@ def relu(input, inplace=False):
     :class:`~torch.nn.quantized.ReLU` for more details.
     """
     if inplace:
-      raise NotImplementedError("`inplace` is not implemented in quantized relu")
+        raise NotImplementedError("`inplace` is not implemented in quantized relu")
     return _ops.quantized.relu(input)
 
 def linear(input, weight, bias=None, scale=None, zero_point=None):
