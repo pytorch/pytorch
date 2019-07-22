@@ -8,6 +8,7 @@ from __future__ import print_function
 import os
 import six
 import time
+import torch
 
 from tensorboard.compat.proto.event_pb2 import SessionLog
 from tensorboard.compat.proto.event_pb2 import Event
@@ -201,6 +202,7 @@ class SummaryWriter(object):
             # folder location: runs/May04_22-14-54_s-MacBook-Pro.localLR_0.1_BATCH_16/
 
         """
+        torch._C._log_api_usage_once("tensorboard.create.summarywriter")
         if not log_dir:
             import socket
             from datetime import datetime
@@ -643,7 +645,6 @@ class SummaryWriter(object):
         """
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
-            import torch
             from distutils.version import LooseVersion
             if LooseVersion(torch.__version__) >= LooseVersion("0.3.1"):
                 pass
