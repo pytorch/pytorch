@@ -13409,6 +13409,22 @@ class TestRecursiveScript(JitTestCase):
                 self.a = 4
                 self.inner = Inner()
 
+        @torch.jit.script
+        class SFoo(object):
+            def __init__(self):
+                self.a = 4
+                self.inner = Inner()
+
+            def __setstate__(self, obj):
+                # type: (Tuple[int, Inner]) -> None
+                a, inner = obj
+                self.a = a
+                self.inner = inner
+
+            def __getstate__(self):
+                return (self.a, self.inner)
+
+
         untyped_values = (
             ('my_dict', {"I": "am", "a test": "test"}),
             ('my_float', 2.3),
@@ -13428,6 +13444,7 @@ class TestRecursiveScript(JitTestCase):
             ('my_empty_dict', {}),
             ('my_none', None),
             ('my_object', Foo()),
+            ('my_object2', SFoo()),
         )
 
         class M(torch.nn.Module):
@@ -13457,6 +13474,8 @@ class TestRecursiveScript(JitTestCase):
                     self.my_none,
                     self.my_object.a,
                     self.my_object.inner.b,
+                    self.my_object.a,
+                    self.my_object2.inner.b,
                 )
 
         # TODO: as a followup, fix this test
@@ -13473,6 +13492,7 @@ class TestRecursiveScript(JitTestCase):
             'my_empty_dict': Dict[str, int],
             'my_none': Optional[int],
             'my_object': Foo,
+            'my_object2': SFoo,
         }
 
         m = M()
