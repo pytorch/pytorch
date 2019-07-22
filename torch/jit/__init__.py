@@ -1053,8 +1053,6 @@ def _compile_and_register_class(obj, rcb, qualified_name):
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
-    if _rcb is None:
-        _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
 
     if isinstance(obj, torch.nn.Module):
         return _convert_to_script_module(obj)
@@ -1063,10 +1061,24 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
+        if _rcb is None:
+            _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
         ast = get_jit_def(obj)
+        if _rcb is None:
+            closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+            stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+
+            def _rcb(name):
+                # since type comments aren't captured in the function's closures,
+                # we still need to try to the rcb based on stack frames if the
+                # closure rcb fails
+                result = closure_rcb(name)
+                if result:
+                    return result
+                return stack_rcb(name)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
