@@ -14,52 +14,52 @@ def _extend_to_list(val, length=2):
     return val
 
 def relu(input, inplace=False):
-  # type: (Tensor, bool) -> Tensor
-  r"""relu(input, inplace=False) -> Tensor
+    # type: (Tensor, bool) -> Tensor
+    r"""relu(input, inplace=False) -> Tensor
 
-  .. note::
-    :attr:`inplace` is not supported for the quantized relu.
+    .. note::
+      :attr:`inplace` is not supported for the quantized relu.
 
-  Applies the rectified linear unit function element-wise. See
-  :class:`~torch.nn.quantized.ReLU` for more details.
-  """
-  if inplace:
-    raise NotImplementedError("`inplace` is not implemented in quantized relu")
-  return _ops.quantized.relu(input)
+    Applies the rectified linear unit function element-wise. See
+    :class:`~torch.nn.quantized.ReLU` for more details.
+    """
+    if inplace:
+      raise NotImplementedError("`inplace` is not implemented in quantized relu")
+    return _ops.quantized.relu(input)
 
 def linear(input, weight, bias=None, scale=None, zero_point=None):
-  # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
-  r"""
-  Applies a linear transformation to the incoming quantized data:
-  :math:`y = xA^T + b`.
-  See :class:`~torch.nn.quantized.Linear`
+    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
+    r"""
+    Applies a linear transformation to the incoming quantized data:
+    :math:`y = xA^T + b`.
+    See :class:`~torch.nn.quantized.Linear`
 
-  .. note::
+    .. note::
 
-    Current implementation uses packed weights. This has penalty on performance.
-    If you want to avoid the overhead, use :class:`~torch.nn.quantized.Linear`.
+      Current implementation uses packed weights. This has penalty on performance.
+      If you want to avoid the overhead, use :class:`~torch.nn.quantized.Linear`.
 
-  Args:
-    input (Tensor): Quantized input of type `torch.quint8`
-    weight (Tensor): Quantized weight of type `torch.qint8`
-    bias (Tensor): None or Quantized bias of type `torch.qint32`
-    scale (double): output scale. If None, derived from the input scale
-    zero_point (long): output zero point. If None, derived from the input zero_point
+    Args:
+      input (Tensor): Quantized input of type `torch.quint8`
+      weight (Tensor): Quantized weight of type `torch.qint8`
+      bias (Tensor): None or Quantized bias of type `torch.qint32`
+      scale (double): output scale. If None, derived from the input scale
+      zero_point (long): output zero point. If None, derived from the input zero_point
 
-  Shape:
-      - Input: :math:`(N, *, in\_features)` where `*` means any number of
-        additional dimensions
-      - Weight: :math:`(out\_features, in\_features)`
-      - Bias: :math:`(out\_features)`
-      - Output: :math:`(N, *, out\_features)`
-  """
-  if scale is None:
-    scale = input.q_scale()
-  if zero_point is None:
-    zero_point = input.q_zero_point()
-  _packed_weight = torch.ops.quantized.fbgemm_linear_prepack(weight)
-  return torch.ops.quantized.fbgemm_linear(input, _packed_weight, bias, scale,
-                                           zero_point)
+    Shape:
+        - Input: :math:`(N, *, in\_features)` where `*` means any number of
+          additional dimensions
+        - Weight: :math:`(out\_features, in\_features)`
+        - Bias: :math:`(out\_features)`
+        - Output: :math:`(N, *, out\_features)`
+    """
+    if scale is None:
+        scale = input.q_scale()
+    if zero_point is None:
+        zero_point = input.q_zero_point()
+    _packed_weight = torch.ops.quantized.fbgemm_linear_prepack(weight)
+    return torch.ops.quantized.fbgemm_linear(input, _packed_weight, bias, scale,
+                                             zero_point)
 
 def conv2d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
