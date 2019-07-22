@@ -6,6 +6,7 @@ from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
+from torch._jit_internal import _qualified_name
 from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
     string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -153,7 +154,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             if self.base_module is None:
                 self.base_module = ScriptModule(_qualified_name=names[0], _compilation_unit=self.cu)
             curr = self.base_module
-            qualified_name = names[0]
+            qualified_name = self.base_module._c.name
+            assert(qualified_name == names[0])
 
             # Skip the first name as we already used it to initialize `curr`
             for name in names[1:]:
@@ -168,9 +170,9 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(module_lookup, f, map_location, _extra_files)
+        torch._C.import_ir_module(cu, module_lookup, f, map_location, _extra_files)
     else:
-        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location, _extra_files)
+        torch._C.import_ir_module_from_buffer(cu, module_lookup, f.read(), map_location, _extra_files)
 
     return module_lookup.base_module
 
@@ -1051,40 +1053,6 @@ def whichmodule(obj):
         except AttributeError:
             pass
     return '__main__'
-
-
-# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj):
-    # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.Function):
-        return obj.qualified_name
-
-    name = obj.__name__
-    module_name = obj.__module__
-
-    # The Python docs are very clear that `__module__` can be None, but I can't
-    # figure out when it actually would be.
-    if module_name is None:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "__module__ can't be None.".format(name))
-
-    # if getattr(sys.modules[module_name], name) is not obj:
-    #     raise RuntimeError("Could not get qualified name for class '{}': "
-    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
-
-    # __main__ is a builtin module, so rewrite it to "__torch__".
-    if module_name == "__main__":
-        module_name = "__torch__"
-    else:
-        # Everything else gets a "__torch__" prefix to avoid name collisions
-        # with the names of user values.
-        module_name = "__torch__." + module_name
-
-    if "." in name:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "'{}' is not a valid identifier".format(name, name))
-
-    return module_name + "." + name
 
 
 def _compile_and_register_class(obj, rcb, qualified_name):
@@ -2037,6 +2005,7 @@ _script_classes = {}
 
 
 def _add_script_class(cls, name):
+    cls.__torch_script_class__ = True
     global _script_classes
     _script_classes[name] = cls
 

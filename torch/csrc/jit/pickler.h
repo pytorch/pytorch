@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
@@ -148,7 +149,9 @@ class Pickler {
       const IValue& ivalue,
       PicklerClass cls,
       const std::function<void(const IValue&)>& item_pusher);
-  void pushGlobal(const std::string& name);
+  void pushGlobal(
+      const std::string& module_name,
+      const std::string& class_name);
   // raw string data is appended directly to the byte stream
   void pushBytes(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);
@@ -196,35 +199,6 @@ class Pickler {
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
 };
 
-// An item in the unpickler stack. There needs to be a way to differentiate
-// between a GLOBAL item (PicklerClass) and a normal value item (IValue)
-struct StackItem {
-  StackItem(IValue ivalue)
-      : pickler_class_(c10::nullopt), ivalue_(std::move(ivalue)) {}
-  StackItem(PicklerClass pickler_class)
-      : pickler_class_(pickler_class), ivalue_(c10::nullopt) {}
-
-  IValue ivalue() const {
-    return *ivalue_;
-  }
-
-  PicklerClass pickler_class() const {
-    return *pickler_class_;
-  }
-
-  c10::optional<IValue> ivalue_opt() const {
-    return ivalue_;
-  }
-
-  c10::optional<PicklerClass> pickler_class_opt() const {
-    return pickler_class_;
-  }
-
- private:
-  c10::optional<PicklerClass> pickler_class_;
-  c10::optional<IValue> ivalue_;
-};
-
 // [unpickler refactor] there is some cruft around OpCode::BUILD,
 // OpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
 // some point, the Pickler doesn't produce it and it's only around to support
@@ -236,11 +210,13 @@ class Unpickler {
   Unpickler(
       const void* data,
       size_t size,
-      const std::vector<at::Tensor>* tensor_table)
+      const std::vector<at::Tensor>* tensor_table,
+      std::function<c10::StrongTypePtr(const c10::QualifiedName&)>
+          class_resolver)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
         tensor_table_(tensor_table),
-        last_opcode_(OpCode::STOP) {}
+        class_resolver_(class_resolver) {}
 
   std::vector<IValue> parse_ivalue_list();
 
@@ -263,17 +239,22 @@ class Unpickler {
   OpCode readOpCode();
   std::string readString();
   void readList();
+  void setInput(size_t memo_id);
   void run();
 
-  std::vector<StackItem> stack_;
-  std::vector<StackItem> memo_table_;
+  std::vector<IValue> stack_;
+  // globals are represented on the stack as IValue integer indices
+  // into this list
+  std::vector<std::function<void(void)>> globals_;
+  std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>* tensor_table_;
 
-  // [unpickler refactor]
-  OpCode last_opcode_;
+  // optionally nullptr, needs to be present for creating classes
+  std::function<c10::StrongTypePtr(const c10::QualifiedName&)> class_resolver_;
+  IValue empty_tuple_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

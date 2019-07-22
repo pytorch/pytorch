@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
@@ -23,8 +24,8 @@ void spatial_dilated_max_pooling(const T* iData,
     int64_t oH, int64_t oW,  // output sizes
     int64_t kH, int64_t kW,  // kernel size
     int64_t sH, int64_t sW,  // strides
-    int64_t dH, int64_t dW,  // dilation
     int64_t pH, int64_t pW,  // padding
+    int64_t dH, int64_t dW,  // dilation
     T* oData, int64_t* index) {  // output arrays (data and max-index)
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (auto p = start; p < end; ++p) {
@@ -70,12 +71,13 @@ template <typename Q>
 Tensor q_maxpool_2d(Tensor qx,                  // Input Tensor (Quantized)
                     int64_t kH, int64_t kW,     // kernel size
                     int64_t sH, int64_t sW,     // strides
-                    int64_t dH, int64_t dW,     // dilation
-                    int64_t pH, int64_t pW) {   // padding
+                    int64_t pH, int64_t pW,     // padding
+                    int64_t dH, int64_t dW) {   // dilation
   // Check input dimensions.
   TORCH_CHECK(kH > 0 && kW > 0, "kernel_size should be greater than zero.");
   TORCH_CHECK(sH > 0 && sW > 0, "strides should be greater than zero.");
-  TORCH_CHECK(dH > 0 && dW > 0, "dilation should be greater than zero.");
+  TORCH_CHECK(dH > 0 && dW > 0, "dilation should be greater than zero. "
+                                "Got (", dH, ", ", dW, ")");
 
   int ndim = qx.dim();
   TORCH_CHECK(ndim == 3 || ndim == 4,
@@ -131,7 +133,7 @@ Tensor q_maxpool_2d(Tensor qx,                  // Input Tensor (Quantized)
     auto* oData = qyd;
     int64_t* indData = index.data();
     spatial_dilated_max_pooling<Q>(iData, iC, iH, iW, oH, oW, kH, kW,
-                                   sH, sW, dH, dW, pH, pW, oData, indData);
+                                   sH, sW, pH, pW, dH, dW, oData, indData);
   } else {
     at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
       for (auto p = start; p < end; ++p) {
@@ -139,40 +141,60 @@ Tensor q_maxpool_2d(Tensor qx,                  // Input Tensor (Quantized)
         auto* oData = qyd + p * oC * oW * oH;
         int64_t* indData = index.data() + p * oC * oW * oH;
         spatial_dilated_max_pooling<Q>(iData, iC, iH, iW, oH, oW, kH, kW,
-                                       sH, sW, dH, dW, pH, pW,
+                                       sH, sW, pH, pW, dH, dW,
                                        oData, indData);
       }
     });
   }
   return qy;
 }
+}  // namespace
 
-class QMaxPool2D_arr_args final : public c10::OperatorKernel {
+// at::native functions for the native_functions.yaml
+Tensor quantized_max_pool2d(const Tensor& qx,
+                            IntArrayRef kernel_size,
+                            IntArrayRef stride,
+                            IntArrayRef padding,
+                            IntArrayRef dilation) {
+    TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+                (stride.empty() || stride.size() == 2) &&
+                (padding.size() == 1 || padding.size() == 2) &&
+                (dilation.size() == 1 || dilation.size() == 2),
+                "Can I haz proper args for the quantized_max_pool2d?");
+  if (stride.empty()) {
+    stride = kernel_size;
+  }
+  Tensor qy;
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d", [&]() {
+    qy = q_maxpool_2d<scalar_t>(qx,
+                                kernel_size[0], kernel_size[1],
+                                stride[0], stride[1],
+                                padding[0], padding[1],
+                                dilation[0], dilation[1]);
+  });
+  return qy;
+}
+
+// Keep the registry in the anonymous namespace.
+namespace {
+class QMaxPool2D_arr_args final : public torch::OperatorKernel {
  public:
   Tensor operator()(Tensor qx,
-                    torch::List<int64_t> kernel_size,
-                    torch::List<int64_t> stride,
-                    torch::List<int64_t> dilation,
-                    torch::List<int64_t> padding) {
-    Tensor qy;
-    AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d", [&]() {
-      qy = q_maxpool_2d<scalar_t>(qx,
-                                  kernel_size[0], kernel_size[1],
-                                  stride[0], stride[1],
-                                  dilation[0], dilation[1],
-                                  padding[0], padding[1]);
-    });
-    return qy;
+                    std::vector<int64_t> kernel_size,
+                    std::vector<int64_t> stride,
+                    std::vector<int64_t> padding,
+                    std::vector<int64_t> dilation) {
+    return at::max_pool2d(qx, kernel_size, stride, padding, dilation);
   }
 };
 
-static auto registry = c10::RegisterOperators().op(
+static auto registry = torch::RegisterOperators().op(
   "quantized::max_pool2d(Tensor qx, "
                         "int[] kernel_size, "
                         "int[] stride, "
-                        "int[] dilation, "
-                        "int[] padding) -> Tensor",
-  c10::RegisterOperators::options()
+                        "int[] padding, "
+                        "int[] dilation) -> Tensor",
+  torch::RegisterOperators::options()
     .kernel<QMaxPool2D_arr_args>(QuantizedCPUTensorId()));
 
 }  // namespace

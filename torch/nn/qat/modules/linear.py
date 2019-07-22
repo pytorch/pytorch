@@ -19,21 +19,13 @@ class Linear(NNLinear):
         observer: fake quant module for output activation, it's called observer
             to align with post training flow
         weight: fake quant module for weight
-
-    Examples::
-
-        >>> m = nn.qat.Linear(20, 30)
-        >>> input = torch.randn(128, 20)
-        >>> output = m(input)
-        >>> print(output.size())
-        torch.Size([128, 30])
     """
     __constants__ = ['bias', 'in_features', 'out_features']
     __FLOAT_MODULE__ = NNLinear
 
     def __init__(self, in_features, out_features, bias=True,
-                 activation_fake_quant=default_qat_qconfig.activation(),
-                 weight_fake_quant=default_qat_qconfig.weight()):
+                 activation_fake_quant=default_qat_qconfig.activation,
+                 weight_fake_quant=default_qat_qconfig.weight):
         assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
         self.observer = activation_fake_quant
@@ -56,8 +48,8 @@ class Linear(NNLinear):
             assert mod.qconfig, 'Input float module must has valid qconfig'
             qconfig = mod.qconfig
         qat_linear = cls(mod.in_features, mod.out_features,
-                         activation_fake_quant=qconfig.activation(),
-                         weight_fake_quant=qconfig.weight())
+                         activation_fake_quant=qconfig.activation,
+                         weight_fake_quant=qconfig.weight)
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias
         return qat_linear
