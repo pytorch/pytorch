@@ -167,6 +167,16 @@ TEST(OptimTest, XORConvergence_SGD) {
       SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));
 }
 
+TEST(OptimTest, XORConvergence_AdaBound) {
+  ASSERT_TRUE(test_optimizer_xor<AdaBound>(
+      AdaBoundOptions(0.1).weight_decay(1e-6)));
+}
+
+TEST(OptimTest, XORConvergence_AdamW) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(
+      AdamWOptions(0.1).weight_decay(1e-6)));
+}
+
 TEST(OptimTest, XORConvergence_Adagrad) {
   ASSERT_TRUE(test_optimizer_xor<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
