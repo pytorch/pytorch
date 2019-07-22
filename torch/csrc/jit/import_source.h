@@ -44,7 +44,6 @@ TORCH_API void import_functions(
     std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
-    bool optimize,
     const Self* self = nullptr,
     const std::function<void(const std::string&)>& import_callback = nullptr);
 
