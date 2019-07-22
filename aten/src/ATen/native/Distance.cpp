@@ -88,7 +88,7 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, c
   IntArrayRef batch_tensor1(x1.sizes().data(), std::max<int64_t>(x1.dim() - 2, 0));
   int batch_product = std::accumulate(batch_tensor1.begin(), batch_tensor1.end(), 1, std::multiplies<int64_t>());
   Tensor grad_x1 = at::empty_like(x1, x1.options()).view({batch_product, n, m});
-  cdist_backward_stub(device1, grad_x1, grad, x1, x2, p, cdist);
+  cdist_backward_stub(device1, grad_x1, grad.contiguous(), x1, x2, p, cdist);
   return grad_x1;
 }
 
