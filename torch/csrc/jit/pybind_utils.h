@@ -295,7 +295,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  auto elems = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto elems = c10::impl::GenericList(elem_type);
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
