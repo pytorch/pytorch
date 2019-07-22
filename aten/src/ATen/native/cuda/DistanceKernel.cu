@@ -149,7 +149,7 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   int64_t i = k / r2;
   int64_t j = k % r2;
 
-  printf("===> CDIST: y = %d l = %d k = %d init = %d stride = %d l_size = %d i = %lld j = %lld gs = %lld\n", y, l, k, init, stride, l_size, i, j, gs);
+  printf("----> CDIST: y = %d l = %d k = %d init = %d stride = %d l_size = %d i = %lld j = %lld gs = %lld\n", y, l, k, init, stride, l_size, i, j, gs);
 
   const scalar_t grad_k = grad[y * gs];
   const scalar_t dist_k = dist[y];
@@ -343,7 +343,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
 
-  printf("===> CDIST: d = %lld r2 = %lld r1 = %lld m = %lld grid_x = %d grid_y = %d count = %lld p = %f\n", d, r2, r1, m, grid_x, grid_y, count, p);
+  //printf("===> CDIST: d = %lld r2 = %lld r1 = %lld m = %lld grid_x = %d grid_y = %d count = %lld p = %f\n", d, r2, r1, m, grid_x, grid_y, count, p);
   Tensor buffer = at::empty({d, r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
