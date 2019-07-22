@@ -10,6 +10,25 @@
 namespace torch {
 namespace jit {
 
+static std::unordered_set<Value*> collectLoopCounts(Node* n) {
+
+std::unordered_set<Value*> loopCounts;
+  Block* it = n->owningBlock();
+  while (it->owningNode())
+  {
+    auto outerNode = it->owningNode();
+    if (outerNode->kind() == prim::Loop)
+    {
+      LoopView lv(outerNode);
+      std::cout << "adding a loop count " << lv.currentTripCount() << std::endl;
+      loopCounts.insert(lv.currentTripCount());
+    }
+    it = outerNode->owningBlock();
+  }
+
+  return std::move(loopCounts);
+}
+
 struct BailOutGraphBuilderForNode {
   explicit BailOutGraphBuilderForNode(
       std::shared_ptr<Graph> graph,
@@ -46,6 +65,12 @@ struct BailOutGraphBuilderForNode {
     } else {
       return this->old_to_new_[v];
     }
+  }
+
+  Value* getInputForValue(Value* v)
+  {
+    TORCH_INTERNAL_ASSERT(this->old_to_new_.count(v));
+    return this->old_to_new_[v];
   }
 
   // buildBailOutBlockFrom builds a bailout graph from
@@ -96,7 +121,7 @@ struct BailOutGraphBuilderForNode {
   void buildBailOutLoop(Node* outer_node) {
     LoopView lv(outer_node);
     auto old_max_count = getOrAddInputForValue(lv.maxTripCount());
-    auto cur_iter = addNewInputForValue(lv.currentTripCount());
+    auto cur_iter = getInputForValue(lv.currentTripCount());
     auto block_outputs = lv.bodyBlock()->outputs();
     auto carried_deps = lv.carriedInputsWithCond();
     mapValues(block_outputs, carried_deps);
@@ -117,7 +142,30 @@ struct BailOutGraphBuilderForNode {
     buildBailOutBlockFrom(outer_node->next());
   }
 
+  void mapLoopCounts(Node* n) {
+
+    auto loopCounts = collectLoopCounts(n);
+    for (auto lc : loopCounts)
+    {
+      std::cout << "adding new input for a loop cout " << lc->debugName() << std::endl;
+      getOrAddInputForValue(lc);
+    }
+  }
+
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
+
+
+    // add graph inputs for guard's input 
+    // and loop counts this node is in 
+    // to make sure we can line them up properly
+    // with arguments to this BailOut node.
+
+    std::cout << "n = " << *n << std::endl;
+    std::cout << "adding a new value " << n->input(0)->debugName() << std::endl;
+    getOrAddInputForValue(n->input(0));
+    mapLoopCounts(n);
+    std::cout << "buildBailOutGraphFrom:\n";
+    copy_graph_->dump();
     buildBailOutBlockFrom(n);
     // add graph outputs
     for (auto ov : graph_->outputs()) {
@@ -194,6 +242,9 @@ struct BailOutInserter {
     }
   }
 
+
+
+
   // Inserts prim::BailOut nodes for every prim::Guard
   // Each BailOut point takes the set of inputs live
   // at that particular execution point.
@@ -208,15 +259,25 @@ struct BailOutInserter {
         const auto& live_inputs = liveness_sets_[*it];
 
         // guarded inputs come first
-        // currently, there's always one  guaded input
+        // currently, there's always one guaded input
         bailout_node->addInput(it->input());
 
+        // pass loop counts in the same order
+        // a bailout graph expects them
+        auto loopCounts = collectLoopCounts(*it);
+        for (auto lc : loopCounts)
+        {
+          bailout_node->addInput(lc);
+        }
+        
         for (auto li : live_inputs) {
           // Guarded inputs have already been added
-          // Also, BailOutGraphBuilder materializes constants into a bailout
+          // BailOutGraphBuilder materializes constants into a bailout
           // graph rather than captures them as arguments,
           // so there's no need to add them to inputs
-          if (li->node()->kind() == prim::Constant || li == it->input()) {
+          // Also, skip loop counts as they are added in advance right after
+          // the guarded input
+          if (li->node()->kind() == prim::Constant || li == it->input() || loopCounts.count(li) != 0) {
             continue;
           }
 
@@ -302,6 +363,8 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
   removeBailouts(bailout_graph->block());
   ConstantPooling(bailout_graph);
+  std::cout << "bailout graph:\n";
+  bailout_graph->dump();
   return bailout_graph;
 }
 

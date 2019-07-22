@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
-    : profiled_graph_(std::move(g)), profiling_count_(3) {}
+    : profiled_graph_(std::move(g)), profiling_count_(1) {}
 
 ProfileOp* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,
@@ -18,14 +18,34 @@ ProfileOp* ProfilingRecord::createProfileNode(
   return pn;
 }
 
-void ProfilingRecord::instrumentBlock(Block* block) {
+static void unprofileGraphInputs(const std::shared_ptr<Graph>& graph)
+{
+  for (auto i : graph->inputs())
+  {
+    if (i->type()->isSubtypeOf(TensorType::get())) {
+      i->setType(TensorType::get());
+    }
+  }
+}
+
+
+static void unprofileBlock(Block* block)
+{
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
-    for (auto i : n->inputs()) {
-      if (!i->type()->isSubtypeOf(TensorType::get()) ||
-          i->node()->kind() == prim::profile) {
-        continue;
+    for (auto o : n->outputs()) {
+      if (o->type()->isSubtypeOf(TensorType::get())) {
+        o->setType(TensorType::get());
       }
+    }
+
+    for (auto b : n->blocks()) {
+      unprofileBlock(b);
+    }
+  }
+}
+
+void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
 
       auto pn = createProfileNode(nullptr, {i});
       auto pno = pn->addOutput();
@@ -36,6 +56,8 @@ void ProfilingRecord::instrumentBlock(Block* block) {
             IValue t;
             pop(stack, t);
             if (t.isTensor()) {
+
+              if (t.toTensor().defined()) {
               auto pttp = TensorType::create(t.toTensor());
               std::lock_guard<std::mutex> lock(this->mutex_);
               if (auto type = pno->type()->cast<TensorType>()) {
@@ -46,13 +68,33 @@ void ProfilingRecord::instrumentBlock(Block* block) {
                 first = false;
               }
             }
+          else 
+            {
+              pno->setType(TensorType::get()->withAutogradZero());
+            }
+
+          }
+
             // passing t through
             push(stack, t);
+ 
           };
 
       pn->setCallback(shape_profiler);
       pn->insertBefore(n);
       n->replaceInputWith(i, pn->output());
+}
+
+void ProfilingRecord::instrumentBlock(Block* block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+    auto n = *it;
+    for (auto i : n->inputs()) {
+      if (!i->type()->isSubtypeOf(TensorType::get()) ||
+          i->node()->kind() == prim::profile) {
+        continue;
+      }
+
+      insertShapeProfile(n, i);
     }
 
     for (auto b : n->blocks()) {
@@ -66,8 +108,25 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   auto new_g = graph->copy();
   auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
   auto raw_pr = pr.get();
-
+  
+  std::cout << "before unprofiling\n";
+  new_g->dump();
+  unprofileGraphInputs(new_g);
+  unprofileBlock(new_g->block());
+  std::cout << "after unprofiling\n";
+  new_g->dump();
   pr->instrumentBlock(new_g->block());
+
+
+
+  std::cout << "return node = " << *new_g->return_node() << std::endl;
+
+  for (auto i : new_g->return_node()->inputs()) {
+    if (i->type()->isSubtypeOf(TensorType::get()))
+    {
+      pr->insertShapeProfile(new_g->return_node(), i);
+    }
+  }
   std::function<void(Stack&)> counter = [raw_pr](Stack&) {
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
     if (raw_pr->profiling_count_ > 0)

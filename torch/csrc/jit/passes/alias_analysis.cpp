@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/memory.h>
+#include <sstream>
 
 namespace torch {
 namespace jit {
@@ -127,12 +128,23 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
     return false;
   }
 
+  if (jit_log_level() == JitLoggingLevels::GRAPH_DEBUG &&
+      aten::add_ == n->kind()) {
+    std::stringstream ss;
+    for (const auto& v : vs)
+    {
+          ss << v->debugName() << ", ";
+    }
+    GRAPH_DEBUG("Live values at a write to ", *n, " : ", ss.str(), "\n");
+  }
+
   MemoryLocations locs;
   for (const auto v : vs) {
     auto it = elementMap_.find(v);
     if (it != elementMap_.end()) {
       const auto& vlocs = it->second->getMemoryLocations();
       if (writtenTo.intersects(vlocs)) {
+        GRAPH_DEBUG("node ", *n, " writes to ", v->debugName());
         return true;
       }
     }
@@ -232,6 +244,12 @@ std::string AliasDb::toString() const {
     ss << *node;
     ss << "  ";
     for (const auto value : values) {
+
+      if (indexToElementMap.count(value) == 0)
+      {
+        ss << "undef " << value << ", ";
+        continue;
+      }
       ss << indexToElementMap[value]->value->debugName() << ", ";
     }
     ss << "\n";
@@ -289,6 +307,8 @@ void AliasDb::analyzeImpl(Node* node) {
           node->kind().toDisplayString(),
           " is registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but doesn't have a special case.");
     } else if (C10_UNLIKELY(!registeredAsSpecialCase && hasSpecialCase)) {
+
+      std::cout << "hitting this assert!\n";
       TORCH_INTERNAL_ASSERT(
           false,
           "Op ",
@@ -349,12 +369,18 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      AT_ERROR("Analyzing prim::profile isn't yet implemented");
-      // TODO: simply mapping inputs' aliases to outputs'
-      // should work but a) we should probably avoid exposing
-      // prim::profile to optimizations b) the alias semantics
-      // might be more complicated than just mapAliases
-      // mapAliases(node->inputs(), node->outputs());
+      if (node->inputs().size() > 0)
+      {
+        makePointerTo(node->output(), node->inputs().at(0));
+      }
+      return;
+    case prim::BailOut:
+      TORCH_INTERNAL_ASSERT(
+          node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
+      makePointerTo(node->output(), node->inputs().at(1));
+      return;
+    case prim::Guard:
+      makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::CallFunction:
     case prim::CallMethod:
@@ -775,6 +801,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   auto fromEl = getOrCreateElement(from);
   auto toEl = getOrCreateElement(to);
 
+  GRAPH_DEBUG("makePointerTo: ", from->debugName(), " -> ", to->debugName());
   memoryDAG_->makePointerTo(fromEl, toEl);
 }
 
@@ -1263,9 +1290,15 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Drop,
       at::onnx::Reshape,
       at::onnx::Shape,
-      prim::AutogradAnyNonZero,
       prim::AutogradAdd,
   };
+
+
+  if (symbol == prim::AutogradAnyNonZero)
+  {
+    std::cout << "in handled" << handled.count(symbol) << std::endl;
+    std::cout << "in purposefully_not_handled" << purposefully_not_handled.count(symbol) << std::endl;
+  }
 
   return handled.count(symbol) || purposefully_not_handled.count(symbol);
 }
@@ -1312,6 +1345,24 @@ void AliasDb::setWildcard(const Value* v) {
   }
   auto e = getOrCreateWildcard(v->type());
   TORCH_INTERNAL_ASSERT(e != nullptr);
+
+  std::string eltDebugName;
+  if (e->value == nullptr) {
+    // not the most efficient way, but given the fact there are
+    // not too many types and even fewer of them will end up in
+    // wildcardIndex_, we should be fine with a linear search
+    // each time we hit a wildcard leaf
+    eltDebugName = "WILDCARD";
+    for (const auto& ent : wildcardIndex_) {
+      if (ent.second == e) {
+        eltDebugName = std::string("WILDCARD for type ") + typeKindToString(ent.first);
+      }
+    }
+  } else {
+    eltDebugName = e->value->debugName();
+  }
+
+  GRAPH_DEBUG("Mapping ", v->debugName(), " to ", eltDebugName);
   memoryDAG_->makePointerTo(getOrCreateElement(v), e);
 }
 

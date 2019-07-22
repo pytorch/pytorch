@@ -50,6 +50,12 @@ namespace jit {
 
 namespace {
 
+c10::OperatorOptions aliasAnalysisPure() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::PURE);
+  return result;
+}
+
 template<class T>
 c10::List<T> make_result_list() {
   return c10::List<T>();
@@ -871,7 +877,8 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AutogradAnyNonZero,
+         //prim::AutogradAnyNonZero,
+         "prim::AutogradAnyNonZero(...) -> int",
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
            return [=](Stack& stack) {
@@ -886,14 +893,14 @@ RegisterOperators reg(
              stack.emplace_back(result);
              return 0;
            };
-         },
-         aliasAnalysisSpecialCase()),
+         }, aliasAnalysisFromSchema()),
      Operator(
          prim::AutogradAdd,
          [](const Node* node) {
            return [=](Stack& stack) {
              at::Tensor a, b;
              pop(stack, a, b);
+             TORCH_INTERNAL_ASSERT(a.defined() || b.defined());
              if (!a.defined())
                stack.emplace_back(b);
              else if (!b.defined())

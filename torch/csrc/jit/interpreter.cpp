@@ -228,7 +228,8 @@ struct CanEmitInline {
     scanBlock(graph->block());
   }
   bool canInline(Value* v) {
-    return v->node()->kind() != prim::Param && v->uses().size() == 1 &&
+    return v->node()->kind() != prim::Param &&
+        v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
         v->node()->outputs().size() == 1;
   }
 
@@ -653,6 +654,8 @@ struct CodeImpl {
 
     auto build_bailout_graph = [bailout_index,
                                 unoptimized_graph](Function& func) {
+      
+      std::cout << "BailOut built!\n";
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
@@ -866,8 +869,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+        std::cout << "RUNNING ";
+        frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
@@ -1001,15 +1004,30 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
-            auto actual = TensorType::create(stack.back().toTensor());
-            const TypePtr& expected = af.types[inst.X];
-            push(stack, *expected == *actual);
+            auto t = stack.back().toTensor();
+            if (t.defined())
+            {
+              auto actual = TensorType::create(stack.back().toTensor());
+              const TypePtr& expected = af.types[inst.X];
+              std::cout << "running guard:\n";
+              std::cout << "actual = " << *actual << std::endl;
+              std::cout << "expected = " << *expected << std::endl;
+              push(stack, *expected == *actual);
+            }
+            else
+            {
+              // TODO: comparison should work like a mask and a c-tor
+              // should handle undefined tensors
+              push(stack, false);
+            }
             ++af.pc;
           } break;
           case TAIL_CALL: {
-            af.functions[inst.X]->ensure_defined();
+            std::cout << "BailOut triggered!\n";
+            // multiple outputs should be okay
+            af.functions[inst.X]->ensure_defined(/*multiple_output=*/true);
             const Code& code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+                af.functions[inst.X]->get_executor(true).getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);

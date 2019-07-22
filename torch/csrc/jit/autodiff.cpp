@@ -200,6 +200,53 @@ class GradientHelper {
  private:
   Node* node;
 
+   SymbolicVariable gradSumToSizeOf(
+      SymbolicVariable v,
+      Symbol input_name,
+      SymbolicVariable fw_output) {
+    Value* size;
+    {
+      // We insert after the current node because we want to use
+      // its output.
+      WithInsertPoint insert_guard{node->next()};
+      std::cout << "gradSumToSizeOf222:\n";
+      std::cout << "fw_output = " << fw_output.value()->debugName() << " type = " << *fw_output.value()->type() << std::endl;
+      std::cout << "input = " << node->namedInput(input_name)->debugName() << " type = " << *node->namedInput(input_name)->type() << std::endl;
+
+      auto ptt_input = node->namedInput(input_name)->type()->cast<TensorType>();
+      auto ptt_output = fw_output.value()->type()->cast<TensorType>();
+      auto dynamic_size = c10::optional<std::vector<int64_t>>{};
+      auto input_size = ptt_input ? ptt_input->sizes().concrete_sizes() : dynamic_size;
+      auto output_size = ptt_output ? ptt_output->sizes().concrete_sizes() : dynamic_size;
+
+      if (input_size && output_size) 
+      {
+        IValue ival{};
+        if (input_size != output_size)
+        {
+          size = node->owningGraph()->insertConstant(IValue(input_size), OptionalType::create(ListType::ofInts()));
+        }
+        else
+        {
+          size = node->owningGraph()->insertConstant(IValue(), OptionalType::create(ListType::ofInts()) /*NoneType::get()*/);
+        }
+
+        std::cout << "int[] is a subtype of int[]? = "  <<  (ListType::ofInts()->isSubtypeOf(OptionalType::create(ListType::ofInts()))) << std::endl;
+        std::cout << "int[]? is subtype of int[] = "  <<  (OptionalType::create(ListType::ofInts())->isSubtypeOf(ListType::ofInts())) << std::endl;
+        std::cout << "inserted node = " << *size->node() << std::endl;
+      }
+      else
+      {
+        std::cout << "333444\n";
+        std::cout << "no profiling information to constant fold gradSumToSizeOf\n";
+        size = SymbolicVariable(node->namedInput(input_name))
+                  .size_if_not_equal(fw_output);
+      }
+    }
+    return v.gradSumToSize(size);
+  };
+
+
   std::vector<SymbolicVariable> buildSymbolicGradient(const std::vector<SymbolicVariable>& grads) {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
@@ -363,6 +410,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   const auto set_grad = [&](Value* x, Value* dx) {
     if (Value* prev_grad = grad_map[x]) {
       GRAPH_DEBUG("grad_map[", x->debugName(), "] = ", *grad_map[x]->node());
+      std::cout << "grad_map for  " << x->debugName() << " is already set to " << prev_grad->debugName() << std::endl;
       grad_map[x] = createAutogradAdd(prev_grad, dx);
     } else {
       GRAPH_DEBUG("grad_map[", x->debugName(), "] = ", dx->debugName());
@@ -370,6 +418,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     }
   };
 
+  std::cout << "autodiffing graph = \n";
+  graph.dump();
   auto outputs = graph.outputs();
   for (size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value* output = outputs[i];
@@ -381,6 +431,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
         output_grad->debugName(),
         " for ",
         output->debugName());
+    std::cout << "autodiff setting " << output->debugName() << " to " << output_grad->debugName() << std::endl;
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
   }
@@ -409,6 +460,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
       // aten::type_as case.
       if (!grad_inputs[i])
         continue;
+      std::cout << "autodiff setting " << inputs[i]->debugName() << " to " << grad_inputs[i]->debugName() << std::endl;
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
@@ -500,6 +552,79 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
   }
 }
 
+
+// Any temporary value from the primal graphs needs to be captured for later use
+// in the reverse graph, to avoid costly recomputations. However, a lot of the
+// nodes we have in our graphs are simply constants, which are cheap to execute
+// and replicate, and so it's better to just copy them into the reverse graph,
+// without polluting the output lists unnecessarily.
+static void constantsizeSizes(Gradient& grad_desc, ReverseDetails& rev_info) {
+
+  static const auto err = [](Value*) -> Value* {
+    throw std::runtime_error("unexpected input");
+  };
+  auto& graph = *grad_desc.f;
+
+  std::cout << "forward:\n";
+  graph.dump();
+  std::cout << "reverse_block:\n"; 
+  std::cout << *rev_info.reverse_block->owningNode();
+  
+  Block* reverse_block = rev_info.reverse_block;
+
+  for (Node* top_node : reverse_block->nodes()) {
+    AT_ASSERT(
+        top_node->kind() == prim::GradOf ||
+        top_node->kind() == prim::AutogradAdd ||
+        top_node->kind() == prim::AutogradZero);
+    if (top_node->kind() != prim::GradOf)
+      continue;
+    Block* grad_body = top_node->blocks().at(0);
+    for (Node* node : grad_body->nodes()) {
+      for (Value* input : node->inputs()) {
+
+        if (input->node()->kind() != aten::_size_if_not_equal)
+        {
+          continue;
+        }
+      
+
+        std::cout << "hit_size_if_not_equal\n";
+        auto ptt_input = input->node()->input(0)->node()->input()->type()->cast<TensorType>();
+        auto ptt_output = input->node()->input(1)->node()->input()->type()->cast<TensorType>();
+        if (!ptt_input || !ptt_output)
+        {
+          std::cout << "no profiling info on " << input->node()->input(0)->debugName() << std::endl;
+          std::cout << "no profiling info on " << input->node()->input(1)->debugName() << std::endl;
+          continue;
+        }
+        auto input_size = ptt_input->sizes().concrete_sizes();
+        auto output_size = ptt_output->sizes().concrete_sizes();
+
+        if (!input_size || !output_size)
+        {
+          std::cout << "no size information\n";
+          continue;
+        }
+        //insert in front of _grad_sum_to_size
+        WithInsertPoint guard(node);
+        IValue ival{};
+        Value* size;
+        if (input_size != output_size)
+        {
+          size = node->owningGraph()->insertConstant(IValue(input_size), OptionalType::create(ListType::ofInts()));
+        }
+        else
+        {
+          size = node->owningGraph()->insertConstant(IValue(), OptionalType::create(ListType::ofInts()) /*NoneType::get()*/);
+        }
+        std::cout << "Replacing _size_if_not_equal " << input->debugName() << " with " << size->debugName() << std::endl;
+        node->replaceInputWith(input, size);
+      }
+    }
+  }
+}
+
 static void deduplicateSizeCaptures(
     Gradient& grad_desc,
     ReverseDetails& rev_info) {
@@ -566,6 +691,10 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
   // derivative. I guess a smart analysis could implement this, but I didn't
   // have time before the 1.0 release, so I put this only as a peephole
   // optimization.
+
+  // TODO: see if this pass can be replaced with peephole pass
+
+  constantsizeSizes(grad_desc, rev_info);
   liftConstants(grad_desc, rev_info);
   // We generally add a lot of aten::size calls (for derivatives of broadcasting
   // operators), and they often end up duplicated, and would get captured
@@ -668,8 +797,12 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     // f's outputs that we differentiate).
     if (rev_info.grad_map.count(tmp) == 0)
       continue;
+
+      
     Value* tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
+    std::cout << "autodiff: temp " << tmp->debugName() << " receives gradient " << tmp_vjp_in->debugName() << std::endl;
     Value* tmp_vjp_prev = rev_info.grad_map.at(tmp);
+    std::cout << "autodiff: temp " << tmp->debugName() << " was set to " << tmp_vjp_prev->debugName() << " before\n";
     // This is quite weird because we can't first make a sum and then replace
     // all uses of tmp_vjp_prev (that would replace its use in the sum too!), so
     // we create an incorrect sum that doesn't use prev vjp, replace uses, and

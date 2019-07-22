@@ -199,8 +199,10 @@ std::shared_ptr<FusedKernel> compileKernel(
     const at::Device device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
-  auto graph = spec.graph()->copy();
+  std::cout << "compiling kernel222 :\n";
+  spec.graph()->dump();
 
+  auto graph = spec.graph()->copy();
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
 

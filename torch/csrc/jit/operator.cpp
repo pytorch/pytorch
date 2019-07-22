@@ -198,34 +198,68 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
 
 bool Operator::matches(const Node* node) const {
   // wrong name
+
+  bool track_result = false;
+  if (schema().name() == "prim::AutogradAnyNonZero")
+  {
+    std::cout << "found prim::AutogradAnyNonZero\n";
+    track_result = true;
+  }
   if (node->kind().toQualString() != schema().name()) {
+    if (track_result)
+    {
+      std::cout << "node->kind().toQualString() != schema().name()\n";
+    }
     return false;
   }
   at::ArrayRef<const Value*> actuals = node->inputs();
   const auto& formals = schema().arguments();
 
   // not enough inputs
-  if (actuals.size() < formals.size())
+  if (actuals.size() < formals.size()) {
+
+    if (track_result)
+    {
+      std::cout << "node->kind().toQualString() != schema().name()\n";
+    }
     return false;
+  }
 
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
     const MatchTypeReturn matched_type =
         matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
     if (!matched_type.type) {
+      if (track_result)
+      {
+        std::cout << "!matched_type.type\n";
+      }
       return false;
     }
     TypePtr formal = *matched_type.type;
     if (!actuals[i]->type()->isSubtypeOf(formal)) {
+      if (track_result)
+      {
+        std::cout << "!!actuals[i]->type()->isSubtypeOf(formal) formal = " << *formal << " actual" << *actuals[i]->type();
+      }
       return false;
     }
   }
 
   // too many inputs
   if (!schema().is_vararg() && actuals.size() != formals.size()) {
+    if (track_result)
+    {
+      std::cout << "!schema().is_vararg() && actuals.size() != formals.size()\n";
+    }
     return false;
   }
 
+
+  if (track_result)
+  {
+    std::cout << "matched!!!\n";
+  }
   return true;
 }
 

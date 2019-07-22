@@ -539,11 +539,15 @@ struct CAFFE2_API TensorType : public Type {
         scalar_type_(tensor.scalar_type()),
         device_(tensor.device()),
         sizes_(tensor.sizes().size()),
-        strides_(tensor.sizes().size()),
         requires_grad_(tensor.requires_grad()) {
           if (!tensor.is_mkldnn()) {
             sizes_ = tensor.sizes().vec();
-            strides_ = tensor.strides().vec();
+            if (!tensor.is_sparse())
+            {
+              strides_ = tensor.strides().vec();
+            }
+            // 
+            // strides_(tensor.is_sparse() ? VaryingShape(c10::nullopt) : tensor.strides().size()),
           }
         }
   TensorType(

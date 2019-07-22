@@ -9,11 +9,16 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/remove_expands.h>
+#include <torch/csrc/jit/passes/canonicalize_ops.h>
+
 
 namespace torch {
 namespace jit {
 
-thread_local bool profiling_mode = false;
+static bool profiling_mode = false;
 bool& getProfilingMode() {
   return profiling_mode;
 }
@@ -22,25 +27,6 @@ std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
     const std::shared_ptr<Graph>& graph,
     Stack& stack) {
   auto g = graph->copy();
-  ArgumentSpec spec =
-      arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
-  arg_spec_creator_.specializeTypes(*g, spec);
-  runRequiredPasses(g);
-  PropagateRequiresGrad(g);
-  if (needsGradient(g)) {
-    auto diff_nodes = CreateAutodiffSubgraphs(
-        g, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-    for (Node* dnode : diff_nodes) {
-      auto diff_graph = std::move(dnode->g(attr::Subgraph));
-      Gradient gradient = differentiate(diff_graph);
-      // do not optimize DifferentiableGraphs, since
-      // ideally they will be profiled and then optimized separetely
-      // when their corresponding DifferentiableGraphOp is called
-      packGradient(gradient, dnode);
-    }
-    InlineAutodiffSubgraphs(
-        g, getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-  }
   return g;
 }
 
@@ -49,39 +35,92 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
+  std::cout << "in ProfilingGraphExecutorImpl::getPlanFor " << this << std::endl;
   if (optimized_plan_) {
+    std::cout << "returning optimized_plan for " << this << std::endl;
     return *optimized_plan_;
   }
 
   if (!pr_) {
     pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
-    profiling_plan_ = ExecutionPlan(pr_->profiled_graph_);
+    auto copy = pr_->graph()->copy();
+    // to lower GradOf
+    copy->dump();
+    std::cout << "getProfilingMode() = " << getProfilingMode() << std::endl;
+    //runRequiredPasses(copy);
+    LowerGradOf(*copy);
+    std::cout << "after LowerGradOf\n";
+    copy->dump();
+    RemoveExpands(copy);
+    CanonicalizeOps(copy);
+    EliminateDeadCode(copy);
+    profiling_plan_ = ExecutionPlan(copy);
+    std::cout << "setting profiling_plan_ for " << this << std::endl;
+    copy->dump();
     // fall-through
   }
 
   if (!pr_->ready()) {
+    std::cout << "still profiling for " << this << std::endl;
     return *profiling_plan_;
   }
-
   // copy already has differentiableGraphs
   auto copy = pr_->graph()->copy();
   // insert bailouts
   InsertGuards(copy);
+  runRequiredPasses(copy);
   EliminateRedundantGuards(copy);
   InsertBailOuts(copy);
-  // regular optimizations
+  // TODO: this runs specializeAutogradZero ??
+  GRAPH_DUMP("After InsertBailOuts: ", copy);
+  std::cout << "before running runRequiredPasses\n";
+  copy->dump();
+  runRequiredPasses(copy);
+  if (needsGradient(copy)) {
+    GRAPH_DEBUG("needs grad");
+    auto diff_nodes = CreateAutodiffSubgraphs(
+        copy, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+    for (Node* dnode : diff_nodes) {
+      auto diff_graph = std::move(dnode->g(attr::Subgraph));
+      Gradient gradient = differentiate(diff_graph);
+      std::cout << "gradient.f = \n";
+      gradient.f->dump();
+      runOptimization(gradient.f);
+       // run non diff optimization on the forward graph
+      runNondiffOptimization(gradient.f);
+      packGradient(gradient, dnode);
+    }
+    InlineAutodiffSubgraphs(
+        copy, getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
+  }
+  GRAPH_DUMP("InlineAutodiffSubgraphs: ", copy);
   ConstantPropagation(copy);
   runOptimization(copy);
   runNondiffOptimization(copy);
   EliminateDeadCode(copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy);
+  std::cout << "setting optimized_plan for " << this << std::endl;
+  copy->dump();
+  GRAPH_DUMP("ExecutionPlan: ", copy);
   return *optimized_plan_;
 }
 
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
-  AT_ERROR("not supported");
+  GraphExecutorState state;
+
+  std::cout << "graph in debugstate\n";
+  graph->dump();
+  if (this->pr_)
+  {
+    std::cout << "pr_ set\n";
+  }
+  std::cout << "getDebugState: optimized_plan for " << this << std::endl;
+  TORCH_INTERNAL_ASSERT(optimized_plan_);
+  auto opt_plan = *optimized_plan_;
+  state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
+  return state;
 }
 
 } // namespace jit

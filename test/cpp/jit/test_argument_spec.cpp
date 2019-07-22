@@ -95,7 +95,7 @@ size_t hashCode(const TensorTypePtr& ptr) {
   return std::hash<TensorType>()(*ptr.get());
 }
 
-void testProfiledTensorTypeHashing() {
+void testTensorTypeHashing() {
   c10::VaryingShape vs(c10::optional<size_t>{});
   auto ptt_empty1 = TensorType::create({}, {}, vs, vs, false);
   auto ptt_empty2 = TensorType::create({}, {}, vs, vs, false);

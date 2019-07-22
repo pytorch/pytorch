@@ -192,7 +192,26 @@ RegisterOperators reg({
               push(stack, IValue());
               return 0;
             };
-          } else {
+          } else if ( type->isSubtypeOf(OptionalType::create(ListType::ofInts()) ) ) {
+              std::cout << "optional list of ints constant = " << *node << std::endl;
+              if (node->hasAttribute(attr::value))
+              {
+                const auto& is = node->is(attr::value);
+                std::cout << "getting the value list\n";
+                return [is](Stack& stack) {
+                  push(stack, is);
+                  return 0;
+                };
+              }
+              else
+              {
+                return [](Stack& stack) {
+                  std::cout << "getting none\n";
+                  push(stack, IValue());
+                  return 0;
+                };
+              }
+           } else {
             std::stringstream ss;
             ss << "constant literal not supported for: " << type->str();
             throw std::runtime_error(ss.str());

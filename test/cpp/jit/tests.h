@@ -55,7 +55,7 @@ namespace jit {
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
-  _(ProfiledTensorTypeHashing)         \
+  _(TensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
   _(InsertConstant)                    \
