@@ -308,7 +308,13 @@ void ScriptModuleDeserializer::moduleSetState(
 
   // TODO: once modules are first class in the interpreter and methods are not
   // lowered, change this to `module->run_method("__setstate__", {state});`
-  setstate->run({module.module_object(), state});
+  if (setstate->num_inputs() == 1) {
+    setstate->run({module.module_object()});
+  } else if (setstate->num_inputs() == 2) {
+    setstate->run({module.module_object(), state});
+  } else {
+    AT_ERROR("Unexpected schema on '__setstate__'");
+  }
 }
 
 void ScriptModuleDeserializer::convertModule(
