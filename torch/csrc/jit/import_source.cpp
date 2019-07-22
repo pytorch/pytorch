@@ -184,7 +184,9 @@ struct SourceImporter {
     }
   }
 
-  void importLibs(std::shared_ptr<CompilationUnit> owner, const std::string& class_qualifier) {
+  void importLibs(
+      std::shared_ptr<CompilationUnit> owner,
+      const std::string& class_qualifier) {
     checkVersionNumber();
     auto& L = p_.lexer();
 
@@ -211,7 +213,14 @@ struct SourceImporter {
             ClassType::create(c10::QualifiedName(qualified_classname), owner);
         owner->register_class(class_type);
         const auto self = SimpleSelf(class_type);
-        owner->define(qualified_classname, definitions, resolvers, &self);
+        // TODO we don't currently export class optimization settings, so just
+        // set to true for now.
+        owner->define(
+            qualified_classname,
+            definitions,
+            resolvers,
+            &self,
+            /*optimize=*/true);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
         auto named_tuple_def = NamedTupleDef(parsed_treeref);
 
@@ -251,7 +260,8 @@ struct SourceImporter {
 
   void importFunctions(
       const c10::optional<c10::QualifiedName>& prefix,
-      const Self* self) {
+      const Self* self,
+      bool optimize) {
     checkVersionNumber();
     parseImportsAndDoCallback();
 
@@ -262,7 +272,7 @@ struct SourceImporter {
       definitions.emplace_back(def);
       resolvers.emplace_back(resolver_);
     }
-    cu_->define(prefix, definitions, resolvers, self);
+    cu_->define(prefix, definitions, resolvers, self, optimize);
   }
 
   size_t parseVersionNumber() {
@@ -319,10 +329,11 @@ void import_functions(
     std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
+    bool optimize,
     const Self* self,
     const std::function<void(const std::string&)>& import_callback) {
   SourceImporter importer(cu, src, constant_table, import_callback);
-  importer.importFunctions(prefix, self);
+  importer.importFunctions(prefix, self, optimize);
 }
 
 void import_methods(
@@ -336,6 +347,7 @@ void import_methods(
       mod.class_compilation_unit(),
       src,
       constant_table,
+      mod.is_optimized(),
       &self,
       import_callback);
 }

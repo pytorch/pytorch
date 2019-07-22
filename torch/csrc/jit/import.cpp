@@ -266,7 +266,11 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      compilation_unit_, qualifier, src, tensor_table_, import_callback);
+      compilation_unit_,
+      qualifier,
+      src,
+      tensor_table_,
+      import_callback);
 }
 
 void ScriptModuleDeserializer::moduleSetState(

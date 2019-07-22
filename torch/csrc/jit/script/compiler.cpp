@@ -591,8 +591,7 @@ struct to_ir {
 
     CompilationUnit cu;
     // set optimize to false since we don't need to run it in optimize mode
-    cu.set_optimized(false);
-    cu.define(c10::nullopt, {def}, {resolver}, nullptr);
+    cu.define(c10::nullopt, {def}, {resolver}, nullptr, /*optimize=*/false);
     Stack stack;
     cu.get_function(def.name().name()).run(stack);
     return stack.at(0).toTuple()->elements();
@@ -2939,7 +2938,7 @@ struct FunctionResolver : public Resolver {
 CompilationUnit::CompilationUnit(const std::string& source)
     : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
-  define(c10::nullopt, source, nativeResolver(), nullptr);
+  define(c10::nullopt, source, nativeResolver(), nullptr, true);
 }
 
 // Mangle a qualified name so that it is globally unique.
@@ -2966,6 +2965,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
+    bool optimize,
     bool shouldMangle) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
@@ -3000,7 +3000,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     }
   }
   auto fn = torch::make_unique<Function>(
-      std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
+      std::move(name), optimize, std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
     self->getClassType()->addMethod(fn.get());
@@ -3013,6 +3013,7 @@ std::vector<Function*> CompilationUnit::define(
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
     const Self* self,
+    bool optimize,
     bool shouldMangle) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   // We need to compile `__init__` first, since it can determine what attributes
@@ -3036,6 +3037,7 @@ std::vector<Function*> CompilationUnit::define(
         resolvers[*init_idx],
         self,
         function_table,
+        optimize,
         shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
@@ -3055,6 +3057,7 @@ std::vector<Function*> CompilationUnit::define(
         resolvers[i],
         self,
         function_table,
+        optimize,
         shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
@@ -3072,7 +3075,8 @@ std::vector<Function*> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
-    const Self* self) {
+    const Self* self,
+    bool optimize) {
   Parser p(std::make_shared<Source>(source, "<string>", 1));
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
@@ -3081,7 +3085,7 @@ std::vector<Function*> CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  return define(prefix, definitions, resolvers, self);
+  return define(prefix, definitions, resolvers, self, optimize);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {

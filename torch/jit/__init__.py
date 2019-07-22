@@ -920,14 +920,14 @@ def trace_module(mod,
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True, _frames_up=0):
         self._c = torch._C.CompilationUnit()
-        self._c.set_optimized(optimize)
+        self.optimize = optimize
         if lang is not None:
             self.define(lang, _frames_up=_frames_up + 1)
 
     def define(self, lang, rcb=None, _frames_up=0):
         if not rcb:
             rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-        self._c.define(lang, rcb)
+        self._c.define(lang, rcb, self.optimize)
 
     def __getattr__(self, attr):
         r = self._c.find_function(attr)
@@ -1074,11 +1074,12 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
+        # TODO: we don't currently persist class optimization settings
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
         ast = get_jit_def(obj)
-        fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
+        fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj), optimize)
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn

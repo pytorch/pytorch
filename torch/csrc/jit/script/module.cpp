@@ -225,7 +225,11 @@ static void clearMethods(c10::ivalue::Object* self) {
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
   const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
-      name(), src, resolver ? resolver : script::nativeResolver(), &self);
+      name(),
+      src,
+      resolver ? resolver : script::nativeResolver(),
+      &self,
+      is_optimized());
 }
 
 void Module::copy_into(
@@ -280,8 +284,8 @@ void Module::clone_method(
   graph->remapTypes(type_remap_fn);
   auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
   const auto this_method_name = getNameForMethod(orig_method_name.name());
-  auto copied =
-      class_compilation_unit()->create_function(this_method_name, graph);
+  auto copied = class_compilation_unit()->create_function(
+      this_method_name, graph, orig.is_optimized());
   copied->setSchema(std::move(schema));
 }
 

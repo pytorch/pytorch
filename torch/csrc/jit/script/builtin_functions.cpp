@@ -67,7 +67,11 @@ struct BuiltinFunctionRegistry {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
     cu->define(
-        c10::nullopt, source, script::nativeResolver(), /*self=*/nullptr);
+        c10::nullopt,
+        source,
+        script::nativeResolver(),
+        /*self=*/nullptr,
+        /*optimize=*/true);
     for (auto& method : cu->get_functions()) {
       builtins_by_name_[Symbol::fromQualString("aten::" + method->name())]
           .push_back(method);
