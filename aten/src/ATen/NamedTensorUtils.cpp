@@ -6,16 +6,18 @@
 
 namespace at {
 
-void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
+Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names);
+  return tensor;
 }
 
-void internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
+Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
 #ifdef DEBUG
   validate_names = true;
 #endif
   impl::internal_set_names_inplace(
       tensor.unsafeGetTensorImpl(), std::move(names), validate_names);
+  return tensor;
 }
 
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
