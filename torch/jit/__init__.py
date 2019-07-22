@@ -151,41 +151,15 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if (str(map_location).startswith('cuda')):
         validate_cuda_device(map_location)
 
-    # A functor that sets up the module hierarchy lazily during the import process.
-    class ModuleLookup:
-        def __init__(self, cu):
-            self.cu = cu
-            self.base_module = None
-
-        def __call__(self, names):
-            if len(names) == 0:
-                raise RuntimeError("Can't ask for an empty module path")
-            if self.base_module is None:
-                self.base_module = ScriptModule(_qualified_name=names[0], _compilation_unit=self.cu)
-            curr = self.base_module
-            qualified_name = self.base_module._c.name
-            print(qualified_name)
-            print(names)
-            assert(qualified_name == names[0])
-
-            # Skip the first name as we already used it to initialize `curr`
-            for name in names[1:]:
-                qualified_name += "." + name
-                if not hasattr(curr, name):
-                    setattr(curr, name, ScriptModule(_qualified_name=qualified_name,
-                                                     _compilation_unit=cu))
-                curr = getattr(curr, name)
-            return curr._c
     cu = torch._C.CompilationUnit()
-    module_lookup = ModuleLookup(cu)
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(cu, module_lookup, f, map_location, _extra_files)
+        cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
     else:
-        torch._C.import_ir_module_from_buffer(cu, module_lookup, f.read(), map_location, _extra_files)
+        cpp_module = torch._C.import_ir_module_from_buffer(cu, f.read(), map_location, _extra_files)
 
-    return module_lookup.base_module
+    return ScriptModule(_cpp_module=cpp_module)
 
 
 def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
@@ -510,7 +484,7 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func,  traced_func, check_tolerance,
+def _check_trace(check_inputs, func, traced_func, check_tolerance,
                  force_outplace, is_trace_module, _module_class):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -1069,8 +1043,6 @@ def _compile_and_register_class(obj, rcb, qualified_name):
 def script(obj, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
-    if _rcb is None:
-        _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
 
     if isinstance(obj, torch.nn.Module):
         return _convert_to_script_module(obj)
@@ -1079,10 +1051,24 @@ def script(obj, _frames_up=0, _rcb=None):
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
+        if _rcb is None:
+            _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
         ast = get_jit_def(obj)
+        if _rcb is None:
+            closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+            stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+
+            def _rcb(name):
+                # since type comments aren't captured in the function's closures,
+                # we still need to try to the rcb based on stack frames if the
+                # closure rcb fails
+                result = closure_rcb(name)
+                if result:
+                    return result
+                return stack_rcb(name)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
@@ -1462,18 +1448,30 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, _qualified_name=None, _compilation_unit=None):
+        def __init__(self, _qualified_name=None, _compilation_unit=None, _cpp_module=None):
             if _qualified_name is None:
-                _qualified_name = type(self).__name__
+                _qualified_name = _jit_internal._qualified_name(self.__class__)
             if _compilation_unit is None:
                 _compilation_unit = _python_cu
 
-            self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
+            # If we were give a _cpp_module, use that one as the backing cpp
+            # module instead of creating a fresh one.
+            if _cpp_module is not None:
+                self.__dict__['_c'] = _cpp_module
+            else:
+                self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
             Module.__init__(self)
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
             self._modules = OrderedModuleDict(self._c)
+
+            # If we were given a _cpp_module, recursively create Python
+            # ScriptModules that mirror the submodule hierarchy.
+            # This has to go last due to quirks in module initialization.
+            if _cpp_module is not None:
+                for (name, cpp_mod) in self._c._get_modules():
+                    setattr(self, name, ScriptModule(_cpp_module=cpp_mod))
 
         @property
         def graph(self):

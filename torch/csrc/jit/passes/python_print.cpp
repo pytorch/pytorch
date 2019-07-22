@@ -1189,7 +1189,6 @@ struct PythonPrintPass {
         continue;
       }
       // TODO we try to print a def for TestLinear in TestLinear.forward
-      LOG(ERROR) << c->qualname();
       ret << "import " << c->qualifier() << "\n";
       already_printed.insert(c->qualifier());
     }

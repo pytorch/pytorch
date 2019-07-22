@@ -19,11 +19,14 @@ from common_utils import TestCase, IS_WINDOWS, \
 from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
+from torch._six import StringIO
+
 import inspect
 import io
 import math
 import os
 import pickle
+import sys
 import tempfile
 import textwrap
 
@@ -38,6 +41,21 @@ def execWrapper(code, glob, loc):
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
+
+    class capture_stdout(list):
+        """
+        Replace sys.stdout with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stdout = sys.stdout
+            self.stringio = StringIO()
+            sys.stdout = self.stringio
+            return self
+
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stdout = self.sys_stdout
 
     def setHooks(self):
         torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
@@ -72,13 +90,16 @@ class JitTestCase(TestCase):
         return False
 
     def _compared_saved_loaded(self, m):
-        import zipfile
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with torch.jit._disable_emit_hooks():
             try:
+                # short-circuit if this is an empty function or module
                 if len(m.code) == 0:
-                    # short-circuit if this is an empty module
                     return
+                if isinstance(m, torch._C.ScriptModule):
+                    if len(m._method_names()) == 0:
+                        return
+
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(m, buffer)
@@ -88,13 +109,16 @@ class JitTestCase(TestCase):
                 buffer_copy = buffer.getvalue()
 
                 # crack open the zip format to get at the main module code
-                archive = zipfile.ZipFile(buffer)
+                # archive = zipfile.ZipFile(buffer)
                 # check that we have no duplicate names
-                self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
-                main_module = archive.open('archive/code/archive.py')
-                main_module_code = "".join([line.decode() for line in main_module])
-                main_module_debug_file = archive.open('archive/debug/archive.pkl')
-                main_module_debug = pickle.load(main_module_debug_file)
+                # self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
+                buffer.seek(0)
+                main_module_code = torch.jit.load(buffer)._c.code
+
+                # main_module_code = torch.jit.load(buffer).code
+                # main_module = archive.open('archive/libs/__torch__.py')
+                # main_module_debug_file = archive.open('archive/debug/archive.pkl')
+                # main_module_debug = pickle.load(main_module_debug_file)
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -110,14 +134,12 @@ class JitTestCase(TestCase):
             torch.jit.save(imported, saved_module_buffer_2)
 
             saved_module_buffer_2.seek(0)
-            archive2 = zipfile.ZipFile(saved_module_buffer_2)
-            main_module_2 = archive2.open('archive/code/archive.py')
-            main_module_2_code = "".join([line.decode() for line in main_module_2])
-            main_module_2_debug_file = archive.open('archive/debug/archive.pkl')
-            main_module_2_debug = pickle.load(main_module_2_debug_file)
+            main_module_2_code = torch.jit.load(saved_module_buffer_2)._c.code
+            # main_module_2_debug_file = archive.open('archive/debug/archive.pkl')
+            # main_module_2_debug = pickle.load(main_module_2_debug_file)
 
             self.assertMultiLineEqual(main_module_code, main_module_2_code)
-            self.assertEqual(main_module_debug, main_module_2_debug)
+            # self.assertEqual(main_module_debug, main_module_2_debug)
 
 
     def emitFunctionHook(self, func):

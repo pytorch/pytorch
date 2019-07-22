@@ -59,13 +59,11 @@ class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
       std::shared_ptr<script::CompilationUnit> cu,
-      std::unique_ptr<PyTorchStreamReader> reader,
-      script::ModuleLookup module_lookup)
+      std::unique_ptr<PyTorchStreamReader> reader)
       : compilation_unit_(cu),
-        reader_(std::move(reader)),
-        moduleLookup_(module_lookup) {}
+        reader_(std::move(reader)) {}
 
-  void deserialize(
+  script::Module deserialize(
       c10::optional<at::Device> device,
       script::ExtraFilesMap& extra_files);
 
@@ -74,7 +72,7 @@ class ScriptModuleDeserializer final {
       const torch::TensorDef& tensor_proto,
       std::unordered_map<std::string, at::Storage>& storageMap);
 
-  void convertModule(const torch::ModuleDef& module_def);
+  script::Module convertModule(const torch::ModuleDef& module_def);
 
   void loadTensorTable(torch::ModelDef* model_def);
   std::vector<IValue> loadPickleArchive(const std::string& name);
@@ -84,9 +82,6 @@ class ScriptModuleDeserializer final {
   std::shared_ptr<script::CompilationUnit> compilation_unit_;
 
   std::unique_ptr<PyTorchStreamReader> reader_;
-  // this is a hack to make sure the script module created in C++ is the
-  // same as created in Python
-  script::ModuleLookup moduleLookup_;
   c10::optional<at::Device> device_;
   std::vector<std::string> moduleStack_;
 
@@ -96,7 +91,7 @@ class ScriptModuleDeserializer final {
   std::unordered_set<std::string> imported_libs_;
 };
 
-void ScriptModuleDeserializer::deserialize(
+script::Module ScriptModuleDeserializer::deserialize(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   C10_LOG_API_USAGE_ONCE("torch.script.load");
@@ -151,9 +146,7 @@ void ScriptModuleDeserializer::deserialize(
     pickled_ivalues_ = loadPickleArchive("attributes.pkl");
   }
 
-  // TODO: this can be simplified when C++/Python interop lands,
-  // and the submodules would be created as the same in either C++ or Python
-  convertModule(module_def);
+  return convertModule(module_def);
 }
 
 void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
@@ -252,13 +245,10 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
 }
 
 void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
-  LOG(ERROR) << "Calling import callback on: " << qualifier;
   if (imported_libs_.count(qualifier)) {
     return;
   }
-  LOG(ERROR) << "importing";
   imported_libs_.insert(qualifier);
-  LOG(ERROR) << std::vector<std::string>(imported_libs_.begin(), imported_libs_.end());
   std::function<void(const std::string&)> import_callback =
       [this](const std::string& qualifier) { importCallback(qualifier); };
   const std::string path = ImportExportHelpers::qualifierToPath(qualifier);
@@ -283,10 +273,16 @@ void ScriptModuleDeserializer::moduleSetState(
 
   // TODO: once modules are first class in the interpreter and methods are not
   // lowered, change this to `module->run_method("__setstate__", {state});`
-  setstate->run({module.module_object(), state});
+  if (setstate->num_inputs() == 1) {
+    setstate->run({module.module_object()});
+  } else if (setstate->num_inputs() == 2) {
+    setstate->run({module.module_object(), state});
+  } else {
+    AT_ERROR("Unexpected schema on '__setstate__'");
+  }
 }
 
-void ScriptModuleDeserializer::convertModule(
+script::Module ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
   // If present, load in the table of source ranges from the original
   // generating code.
@@ -314,145 +310,59 @@ void ScriptModuleDeserializer::convertModule(
         return c10::StrongTypePtr(
             compilation_unit_, compilation_unit_->get_class(qn));
       });
-  auto module = script::Module(unpickler.parseModule().toObject());
+  return script::Module(unpickler.parseModule().toObject());
 
-  // if (module_def.has_torchscript_arena()) {
-  //   at::DataPtr data;
-  //   size_t size;
-  //   std::tie(data, size) =
-  //       reader_->getRecord(module_def.torchscript_arena().key());
-  //   std::string data_str(static_cast<const char*>(data.get()), size);
-  //   auto src = std::make_shared<Source>(
-  //       std::string(static_cast<const char*>(data.get()), size),
-  //       module_def.torchscript_arena().key(),
-  //       1,
-  //       std::move(gen_ranges));
-
-  //   std::function<void(const std::string&)> import_callback =
-  //       [&, this](const std::string& qualifier) {
-  //         importCallback(module.class_compilation_unit(), qualifier);
-  //       };
-  //   LOG(ERROR) << "am I calling this tho?";
-  //   LOG(ERROR) << src->text();
-  //   // script::import_module(module, src, tensor_table_, import_callback);
+  // if (module_def.has_get_state_attribute_id()) {
+  //   moduleSetState(
+  //       module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
   // }
 
-  // script::Module module = moduleLookup_(moduleStack_);
-  // module.set_optimized(module_def.optimize());
-  // for (int i = 0; i < module_def.submodules_size(); ++i) {
-  //   const torch::ModuleDef& sub_def = module_def.submodules(i);
-  //   moduleStack_.emplace_back(sub_def.name());
-  //   convertModule(sub_def);
-  //   moduleStack_.pop_back();
-  // }
-  // for (int i = 0; i < module_def.parameters_size(); ++i) {
-  //   const torch::ParameterDef& param_def = module_def.parameters(i);
-  //   at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
-  //   if (param_def.is_buffer()) {
-  //     module.register_buffer(param_def.name(), tensor);
-  //   } else {
-  //     module.register_parameter(param_def.name(), tensor,
-  //     /*is_buffer=*/false);
+  // for (const auto& slot : module.get_attributes()) {
+  //   // Verify that all the non-optional attributes have been initialized
+  //   // TODO: Issue #20497
+  //   if (slot.type()->kind() != TypeKind::OptionalType) {
+  //     TORCH_CHECK(
+  //         !slot.value().isNone(),
+  //         "The field '",
+  //         slot.name(),
+  //         "' was left unitialized after __setstate__, but expected a ",
+  //         "value of type '",
+  //         slot.type()->python_str(),
+  //         "'");
   //   }
   // }
-  // script::ScriptTypeParser typeParser;
-  // for (int i = 0; i < module_def.attributes_size(); ++i) {
-  //   const torch::AttributeDef& attr_def = module_def.attributes(i);
-  //   if (module.find_buffer(attr_def.name())) {
-  //     // TODO: handle this above so this can be removed
-  //     continue;
-  //   }
-
-  //   IValue ivalue;
-  //   if (attr_def.id() >= 0) {
-  //     // attribute has no value in the table, set it to None for now. After
-  //     // __getstate__, check that all the attributes that are not Optional
-  //     // can't be None
-  //     ivalue = pickled_ivalues_.at(attr_def.id());
-  //   }
-
-  //   module.register_attribute(
-  //       attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
-  // }
-
-  // if (module_def.has_torchscript_arena()) {
-  //   at::DataPtr data;
-  //   size_t size;
-  //   std::tie(data, size) =
-  //       reader_.getRecord(module_def.torchscript_arena().key());
-  //   std::string data_str(static_cast<const char*>(data.get()), size);
-  //   auto src = std::make_shared<Source>(
-  //       std::string(static_cast<const char*>(data.get()), size),
-  //       module_def.torchscript_arena().key(),
-  //       1,
-  //       std::move(gen_ranges));
-
-  //   std::function<void(const std::string&)> import_callback =
-  //       [this](const std::string& qualifier) { importCallback(qualifier); };
-  //   script::import_methods(
-  //       module,
-  //       src,
-  //       tensor_table_,
-  //       import_callback);
-  // }
-
-  if (module_def.has_get_state_attribute_id()) {
-    moduleSetState(
-        module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
-  }
-
-  for (const auto& slot : module.get_attributes()) {
-    // Verify that all the non-optional attributes have been initialized
-    // TODO: Issue #20497
-    if (slot.type()->kind() != TypeKind::OptionalType) {
-      TORCH_CHECK(
-          !slot.value().isNone(),
-          "The field '",
-          slot.name(),
-          "' was left unitialized after __setstate__, but expected a ",
-          "value of type '",
-          slot.type()->python_str(),
-          "'");
-    }
-  }
 }
 
 } // namespace
 
-void import_ir_module(
+script::Module import_ir_module(
     std::shared_ptr<script::CompilationUnit> cu,
-    script::ModuleLookup module_lookup,
     std::istream& in,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(&in);
-  ScriptModuleDeserializer deserializer(
-      std::move(cu), std::move(reader), module_lookup);
-  deserializer.deserialize(device, extra_files);
+  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+  return deserializer.deserialize(device, extra_files);
 }
 
-void import_ir_module(
+script::Module import_ir_module(
     std::shared_ptr<script::CompilationUnit> cu,
-    script::ModuleLookup module_lookup,
     const std::string& filename,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(filename);
-  ScriptModuleDeserializer deserializer(
-      std::move(cu), std::move(reader), module_lookup);
-  deserializer.deserialize(device, extra_files);
+  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+  return deserializer.deserialize(device, extra_files);
 }
 
-void import_ir_module(
+script::Module import_ir_module(
     std::shared_ptr<script::CompilationUnit> cu,
-    script::ModuleLookup module_lookup,
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  ScriptModuleDeserializer deserializer(
-      std::move(cu), std::move(reader), module_lookup);
-  deserializer.deserialize(device, extra_files);
+  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+  return deserializer.deserialize(device, extra_files);
 }
 
 script::Module load(
@@ -474,51 +384,14 @@ script::Module load(
   return module;
 }
 
-namespace {
-// A functor that sets up the module hierarchy lazily during the import process.
-struct LazyModuleLookup {
-  LazyModuleLookup(std::shared_ptr<script::CompilationUnit> cu)
-      : cu_(std::move(cu)) {}
-
-  script::Module operator()(const std::vector<std::string>& module_path) {
-    TORCH_INTERNAL_ASSERT(!module_path.empty());
-    if (!base_module_) {
-      base_module_ = script::Module(module_path[0], cu_);
-    }
-
-    auto curr = *base_module_;
-    auto qualname = curr.name();
-    TORCH_INTERNAL_ASSERT(qualname.qualifiedName() == module_path[0]);
-    // Skip the first name as we already used it to initialize `curr`
-    for (size_t i = 1; i < module_path.size(); i++) {
-      const auto& name = module_path.at(i);
-      qualname = c10::QualifiedName(qualname, name);
-      if (!curr.find_module(name)) {
-        curr.register_module(name, script::Module(qualname, cu_));
-      }
-      curr = curr.get_module(name);
-    }
-    return curr;
-  }
-
-  std::shared_ptr<script::CompilationUnit> cu_;
-  c10::optional<script::Module> base_module_;
-};
-} // namespace
-
 script::Module load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   auto cu = std::make_shared<script::CompilationUnit>();
-  LazyModuleLookup module_lookup(cu);
-
-  ScriptModuleDeserializer deserializer(
-      std::move(cu), std::move(reader), std::ref(module_lookup));
-  deserializer.deserialize(device, extra_files);
-
-  return *module_lookup.base_module_;
+  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+  return deserializer.deserialize(device, extra_files);
 }
 
 } // namespace jit

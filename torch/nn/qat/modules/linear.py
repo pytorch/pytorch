@@ -28,8 +28,8 @@ class Linear(NNLinear):
                  weight_fake_quant=default_qat_qconfig.weight):
         assert bias, 'nobias is not supported in Quantized Linear module yet'
         super(Linear, self).__init__(in_features, out_features, bias)
-        self.observer = activation_fake_quant
-        self.weight_fake_quant = weight_fake_quant
+        self.observer = activation_fake_quant()
+        self.weight_fake_quant = weight_fake_quant()
 
     def forward(self, input):
         return self.observer(F.linear(input, self.weight_fake_quant(self.weight), self.bias))

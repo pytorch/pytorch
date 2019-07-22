@@ -195,10 +195,9 @@ struct SourceImporter {
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
         bool is_module = class_def.superclass().present();
-        if (is_module) {
-          TORCH_INTERNAL_ASSERT(
-              class_def.superclass().get().name() == "Module",
-              "Only Module is supported a fake-superclass");
+        if (is_module && Var(class_def.superclass()).name().name() != "Module") {
+          throw ErrorReport(class_def.range())
+              << "Torchscript does not support class inheritance.";
         }
         const auto qualified_classname = QualifiedName(
             QualifiedName(class_qualifier), class_def.name().name());
@@ -383,8 +382,6 @@ void import_libs(
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback) {
-  LOG(ERROR) << "Calling import_libs:" << class_qualifier;
-  LOG(ERROR) << "source:" << src->text();
   SourceImporter importer(cu, src, tensor_table, import_callback);
   importer.importLibs(cu, class_qualifier);
 }
