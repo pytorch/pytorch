@@ -113,6 +113,11 @@ Algorithms
     :members:
 .. autoclass:: AdamW
     :members:
+.. autoclass:: AdamW2
+    :members:
+.. autoclass:: SGDW
+    :members:
+.. autofunction:: extend_with_decoupled_weight_decay
 .. autoclass:: SparseAdam
     :members:
 .. autoclass:: Adamax
