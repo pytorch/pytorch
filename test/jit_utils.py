@@ -19,11 +19,14 @@ from common_utils import TestCase, IS_WINDOWS, \
 from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
+from torch._six import StringIO
+
 import inspect
 import io
 import math
 import os
 import pickle
+import sys
 import tempfile
 import textwrap
 
@@ -38,6 +41,21 @@ def execWrapper(code, glob, loc):
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
+
+    class capture_stdout(list):
+        """
+        Replace sys.stdout with a temporary StringIO
+        """
+        def __enter__(self):
+            self.sys_stdout = sys.stdout
+            self.stringio = StringIO()
+            sys.stdout = self.stringio
+            return self
+
+        def __exit__(self, *args):
+            self.append(str(self.stringio.getvalue()))
+            del self.stringio
+            sys.stdout = self.sys_stdout
 
     def setHooks(self):
         torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)

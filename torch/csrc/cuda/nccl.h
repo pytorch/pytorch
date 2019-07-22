@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THC.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Optional.h>
 
 #include <nccl.h>
@@ -28,6 +29,7 @@ static inline void NCCL_CHECK(ncclResult_t status) {
 
 struct AutoNcclGroup {
   AutoNcclGroup() {
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclGroupStart());
 #endif
@@ -36,6 +38,7 @@ struct AutoNcclGroup {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclGroupEnd());
 #endif
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
 };
 
