@@ -264,7 +264,15 @@ static int THPFunction_clear(THPFunction *self)
   // (otherwise the condition is trivially true).  Then there is a PyFunction
   // which contains an owning reference to this object.  But we are only
   // allowed to clear if all owning references are gone!  Contradiction.
-  TORCH_INTERNAL_ASSERT(!self->cdata.lock());
+  //
+  // However, note that THPFunction_clear is typically called in the shared_ptr
+  // destructor of PyFunction; in that case, per
+  // https://cplusplus.github.io/LWG/lwg-active.html#2751 it's not currently
+  // specified in the standard that this is guaranteed.  If you see this
+  // assert triggering in the wild, feel free to comment it out.  They're
+  // likely to standardize that you ARE guaranteed to see the weak pointers
+  // as expired in the destructor in the future, so we'll keep this for now.
+  TORCH_INTERNAL_ASSERT(self->cdata.expired());
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -631,9 +639,8 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
   bool is_executable = input_info.is_executable;
-  Py_INCREF(self);
-  std::shared_ptr<PyFunction> cdata;
-  if (cdata = self->cdata.lock()) {
+  std::shared_ptr<PyFunction> cdata = self->cdata.lock();
+  if (cdata) {
     // In some pathological cases, self->cdata can already be set on entry to
     // this function.  This occurs on misuse of the legacy autograd API in the
     // following way:
@@ -654,6 +661,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
       "in the modern style; for information on the new format, please see: "
       "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd");
   } else {
+    Py_INCREF(self);
     cdata = std::shared_ptr<PyFunction>(new PyFunction(THPObjectPtr((PyObject*)self)), deleteFunction);
     self->cdata = cdata;
   }
@@ -712,6 +720,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   // Prepend ctx to input_tuple, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(inputs);
   THPObjectPtr ctx_input_tuple(PyTuple_New(num_args + 1));
+  if (!ctx_input_tuple) return nullptr;
   Py_INCREF(ctx);
   PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
   for (int i = 0; i < num_args; ++i) {
