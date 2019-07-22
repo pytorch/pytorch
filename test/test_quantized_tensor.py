@@ -164,9 +164,7 @@ class TestQuantizedTensor(TestCase):
                 torch.save(qr, f)
                 f.seek(0)
                 qr2 = torch.load(f)
-                self.assertEqual(qr.int_repr(), qr2.int_repr())
-                self.assertEqual(qr.q_scale(), qr2.q_scale())
-                self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
+                self.assertEqual(qr, qr2)
 
     def test_qtensor_copy(self):
         scale = 0.5
@@ -189,9 +187,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(q.q_zero_point(), zero_point)
         q.copy_(q2)
         # check scale and zero_points has been copied
-        self.assertEqual(q.int_repr(), q2.int_repr())
-        self.assertEqual(q.q_scale(), q2.q_scale())
-        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
+        self.assertEqual(q, q2)
 
     def test_qtensor_clone(self):
         numel = 10
@@ -201,6 +197,56 @@ class TestQuantizedTensor(TestCase):
         q = q2.clone()
         # Check to make sure the scale and zero_point has been copied.
         self.assertEqual(q, q2)
+
+    def test_qtensor_view(self):
+        scale, zero_point, dtype = 1.0, 2, torch.quint8
+        q = torch._empty_affine_quantized(1, 2, 3, scale=scale, zero_point=zero_point, dtype=dtype)
+        q2 = q.view(1, 3, 2)
+        self.assertEqual(q.numel(), q2.numel())
+        # testing -1
+        self.assertEqual(q, q2.view(1, -1, 3))
+
+        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = a.view(1, 3, 2, 4)  # does not change tensor layout
+        self.assertEqual(b.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+
+
+        # a case can't view non-contiguos Tensor
+        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        err_str = "view size is not compatible with input tensor's size and stride*"
+        with self.assertRaisesRegex(RuntimeError, err_str):
+            b.view(1, 4, 2, 3)
+        # view on contiguous tensor is fine
+        b.contiguous().view(1, 4, 2, 3)
+
+
+    def test_qtensor_reshape(self):
+        scale, zero_point, dtype = 1.0, 2, torch.quint8
+        q = torch._empty_affine_quantized([3, 5], scale=scale, zero_point=zero_point, dtype=dtype)
+        q2 = q.reshape([15])
+        self.assertEqual(q.numel(), q2.numel())
+        self.assertEqual(q2.size(), [15])
+        # testing -1
+        self.assertEqual(q, q2.reshape([3, -1]))
+
+        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = a.reshape(1, 3, 2, 4)  # does not change tensor layout
+        self.assertEqual(b.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+
+        # we can use reshape for non-contiguous Tensor
+        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = b.reshape(1, 4, 2, 3)
+        self.assertEqual(b, c.reshape(1, 3, 2, 4))
 
 if __name__ == "__main__":
     run_tests()
