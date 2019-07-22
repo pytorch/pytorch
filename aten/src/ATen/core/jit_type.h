@@ -605,7 +605,6 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
 
   static const TypeKind Kind = TypeKind::ProfiledTensorType;
 
-private:
   ProfiledTensorType(const at::Tensor& tensor)
     : TensorType()
     , scalar_type_(tensor.scalar_type())
@@ -613,7 +612,8 @@ private:
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec())
     , requires_grad_(tensor.requires_grad()) {}
-    ProfiledTensorType(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
+private:
+  ProfiledTensorType(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
     : TensorType()
     , scalar_type_(scalar_type)
     , device_(device)
@@ -621,7 +621,6 @@ private:
     , strides_(strides)
     , requires_grad_(requires_grad)
     {}
-
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
   VaryingShape sizes_;

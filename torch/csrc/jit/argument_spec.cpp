@@ -284,5 +284,18 @@ void ArgumentSpecCreator::specializeTypes(
   }
 }
 
+ProfiledTensorSpec::ProfiledTensorSpec(at::ArrayRef<IValue> inputs) {
+  for (const auto& i : inputs) {
+    if (i.isTensor()) {
+      types_.emplace_back(c10::ProfiledTensorType(i.toTensor()));
+    }
+  }
+  hash_code_ = get_hash<std::vector<c10::ProfiledTensorType>>(types_);
+}
+
+bool ProfiledTensorSpec::operator==(const ProfiledTensorSpec& spec) const {
+  return this->types_ == spec.types_;
+}
+
 } // namespace jit
 } // namespace torch

@@ -426,6 +426,19 @@ inline c10::optional<int8_t> convertOptional(
                 : c10::optional<int8_t>{};
 }
 
+struct ProfiledTensorSpec {
+  ProfiledTensorSpec(at::ArrayRef<IValue> inputs);
+  size_t hashCode() const {
+    return hash_code_;
+  }
+
+  bool operator==(const ProfiledTensorSpec& spec) const;
+
+ private:
+  size_t hash_code_; // precomputed on construction
+  std::vector<c10::ProfiledTensorType> types_;
+};
+
 } // namespace jit
 } // namespace torch
 
@@ -467,4 +480,12 @@ struct hash<torch::jit::CompleteArgumentSpec> {
     return spec.hashCode();
   }
 };
+
+template <>
+struct hash<torch::jit::ProfiledTensorSpec> {
+  size_t operator()(const torch::jit::ProfiledTensorSpec& spec) const {
+    return spec.hashCode();
+  }
+};
+
 } // namespace std
