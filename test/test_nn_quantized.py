@@ -47,17 +47,17 @@ class ModuleAPITest(TestCase):
         X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
         B = torch.rand(out_features).float() if use_bias else None
         B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32) if use_bias else None
-        out_scale = 0.5
-        out_zero_point = 3
+        scale = 0.5
+        zero_point = 3
         qlinear = nnq.Linear(in_features, out_features)
         qlinear._packed_weight = W_pack
         qlinear.bias = B_q if use_bias else None
-        qlinear.out_scale = torch.tensor([out_scale])
-        qlinear.out_zero_point = torch.tensor([out_zero_point])
+        qlinear.scale = torch.tensor([scale], dtype=torch.double)
+        qlinear.zero_point = torch.tensor([zero_point], dtype=torch.long)
         Z_q = qlinear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, out_scale, out_zero_point)
+        Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, scale, zero_point)
         self.assertEqual(Z_ref, Z_q)
 
         # Test serialization of quantized Linear Module using state_dict
@@ -79,8 +79,8 @@ class ModuleAPITest(TestCase):
                          linear_unpack(loaded_qlinear._packed_weight))
         if use_bias:
             self.assertEqual(qlinear.bias, loaded_qlinear.bias)
-        self.assertEqual(qlinear.out_scale, loaded_qlinear.out_scale)
-        self.assertEqual(qlinear.out_zero_point, loaded_qlinear.out_zero_point)
+        self.assertEqual(qlinear.scale, loaded_qlinear.scale)
+        self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertTrue(hasattr(qlinear, '_packed_weight'))
         self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
@@ -99,8 +99,8 @@ class ModuleAPITest(TestCase):
         # state = qLinear.__getstate__()
         # compareUnpackedWeight(qLinear._packed_weight, loaded._packed_weight)
         # self.assertEqual(qLinear.bias, loaded.bias)
-        # self.assertEqual(qLinear.out_scale, loaded.out_scale)
-        # self.assertEqual(qLinear.out_zero_point, loaded.out_zero_point)
+        # self.assertEqual(qLinear.scale, loaded.scale)
+        # self.assertEqual(qLinear.zero_point, loaded.zero_point)
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -131,7 +131,7 @@ class ModuleAPITest(TestCase):
         qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
-        w = w.permute([0, 2, 3, 1]).contiguous()
+
         qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32)
@@ -148,27 +148,27 @@ class ModuleAPITest(TestCase):
                                  padding_mode='zeros')
         conv_under_test.weight = qw
         conv_under_test.bias = qb
-        conv_under_test.scale = scale
-        conv_under_test.zero_point = zero_point
+        conv_under_test.scale = torch.tensor([scale], dtype=torch.double)
+        conv_under_test.zero_point = torch.tensor([zero_point], dtype=torch.long)
 
         # Test members
         self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
-        self.assertTrue(hasattr(conv_under_test, '_scale'))
-        self.assertTrue(hasattr(conv_under_test, '_zero_point'))
+        self.assertTrue(hasattr(conv_under_test, 'scale'))
+        self.assertTrue(hasattr(conv_under_test, 'zero_point'))
 
         # Test properties
-        # self.assertEqual(qw, conv_under_test.weight)
+        self.assertEqual(qw, conv_under_test.weight)
         self.assertEqual(qb, conv_under_test.bias)
         self.assertEqual(scale, conv_under_test.scale)
         self.assertEqual(zero_point, conv_under_test.zero_point)
 
         # Test forward
         result_under_test = conv_under_test(qX)
-        result_reference = qF.conv2d(qX, qw, bias=qb,
+        result_reference = qF.conv2d(qX.permute([0, 2, 3, 1]), qw.permute([0, 2, 3, 1]), bias=qb,
                                      scale=scale, zero_point=zero_point,
                                      stride=1, padding=0,
                                      dilation=1, groups=g,
-                                     prepacked=False, dtype=torch.quint8)
+                                     prepacked=False, dtype=torch.quint8).permute([0, 3, 1, 2])
 
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
