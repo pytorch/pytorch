@@ -288,7 +288,14 @@ class JitTestCase(TestCase):
             cu = torch.jit.CompilationUnit(source, optimize)
             ge = getattr(cu, script.__name__)
             ge(*inputs)
+        with self.assertRaisesRegex(exception, regex):
+            cu = torch.jit.CompilationUnit(source, optimize)
+            ge = getattr(cu, script.__name__)
+            ge(*inputs)
         # python AST frontend
+        with self.assertRaisesRegex(exception, regex):
+            ge = torch.jit.script(script, optimize)
+            ge(*inputs)
         with self.assertRaisesRegex(exception, regex):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
@@ -302,7 +309,8 @@ class JitTestCase(TestCase):
                     frames_up=1):
         if isinstance(script, str):
             # Compile the string to a Script function
-            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
+            with enable_profiling_mode():
+                cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
 
             # Execute the Python function so we can run it later and get its
             # outputs
@@ -326,7 +334,8 @@ class JitTestCase(TestCase):
                 frames_up=2)
 
             # Continue checking the Python frontend
-            scripted_fn = torch.jit.script(script, optimize, _frames_up=1)
+            with enable_profiling_mode():
+                scripted_fn = torch.jit.script(script, optimize, _frames_up=1)
             python_fn = script
 
         if capture_output:
@@ -337,6 +346,8 @@ class JitTestCase(TestCase):
             if not IS_WINDOWS:
                 self.assertExpected(script_stdout[0], subname='stdout')
         else:
+            # profile
+            scripted_fn(*inputs)
             script_outputs = scripted_fn(*inputs)
             python_outputs = python_fn(*inputs)
         self.assertEqual(python_outputs, script_outputs)

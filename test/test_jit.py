@@ -4197,13 +4197,9 @@ a")
         a = torch.rand(2, 3)
 
         with enable_profiling_mode():
-            # the first calls are profiled
-            def_in_one_branch(a, False)
             # check prim::profile are inserted
             profiled_graph_str = str(def_in_one_branch.graph_for(a, True))
             FileCheck().check_count("prim::profile", 4).run(profiled_graph_str)
-            def_in_one_branch(a, False)
-            def_in_one_branch(a, False)
             # this call is optimized for
             # the given shape of (2, 3)
             def_in_one_branch(a, False)

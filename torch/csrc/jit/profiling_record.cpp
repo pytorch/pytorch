@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
-    : profiled_graph_(std::move(g)), profiling_count_(3) {}
+    : profiled_graph_(std::move(g)), profiling_count_(1) {}
 
 ProfileOp* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,

@@ -22,25 +22,6 @@ std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
     const std::shared_ptr<Graph>& graph,
     Stack& stack) {
   auto g = graph->copy();
-  ArgumentSpec spec =
-      arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
-  arg_spec_creator_.specializeTypes(*g, spec);
-  runRequiredPasses(g);
-  PropagateRequiresGrad(g);
-  if (needsGradient(g)) {
-    auto diff_nodes = CreateAutodiffSubgraphs(
-        g, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-    for (Node* dnode : diff_nodes) {
-      auto diff_graph = std::move(dnode->g(attr::Subgraph));
-      Gradient gradient = differentiate(diff_graph);
-      // do not optimize DifferentiableGraphs, since
-      // ideally they will be profiled and then optimized separetely
-      // when their corresponding DifferentiableGraphOp is called
-      packGradient(gradient, dnode);
-    }
-    InlineAutodiffSubgraphs(
-        g, getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-  }
   return g;
 }
 
@@ -63,14 +44,28 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   if (!pr_->ready()) {
     return *profiling_plan_;
   }
-
   // copy already has differentiableGraphs
   auto copy = pr_->graph()->copy();
   // insert bailouts
   InsertGuards(copy);
   EliminateRedundantGuards(copy);
   InsertBailOuts(copy);
-  // regular optimizations
+  // TODO: this runs specializeAutogradZero ??
+  runRequiredPasses(copy);
+  if (needsGradient(copy)) {
+    auto diff_nodes = CreateAutodiffSubgraphs(
+        copy, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+    for (Node* dnode : diff_nodes) {
+      auto diff_graph = std::move(dnode->g(attr::Subgraph));
+      Gradient gradient = differentiate(diff_graph);
+      // do not optimize DifferentiableGraphs, since
+      // ideally they will be profiled and then optimized separetely
+      // when their corresponding DifferentiableGraphOp is called
+      packGradient(gradient, dnode);
+    }
+    InlineAutodiffSubgraphs(
+        copy, getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
+  }
   ConstantPropagation(copy);
   runOptimization(copy);
   runNondiffOptimization(copy);
