@@ -118,6 +118,7 @@ variable_list CFunction<T>::apply(Args&&... args) {
   auto next_edges = collect_next_edges(input_vars);
 
   std::shared_ptr<CustomFunc<T>> grad_fn(new CustomFunc<T>, deleteFunction);
+  grad_fn->ctx.cdata = grad_fn;
   grad_fn->set_next_edges(std::move(next_edges));
   grad_fn->clear_input_metadata();
 
@@ -128,7 +129,7 @@ variable_list CFunction<T>::apply(Args&&... args) {
     outputs = T::forward(&grad_fn->ctx, std::forward<Args>(args)...);
   }
 
-  return _wrap_outputs(input_vars, grad_fn->ctx.non_differentiable, grad_fn->ctx.dirty_inputs, outputs, is_executable ? grad_fn : nullptr);
+  return _wrap_outputs(input_vars, grad_fn->ctx.get_non_differentiable(), grad_fn->ctx.get_dirty(), outputs, is_executable ? grad_fn : nullptr);
 }
 
 template<class T>
@@ -164,6 +165,52 @@ variable_list CustomFunc<T>::apply(variable_list&& inputs) {
 
 template<class T>
 void CustomFunc<T>::release_variables() {
-  ctx.saved_variables.clear();
+  ctx.clear_saved();
 }
+
+void AutogradContext::save_for_backward(const variable_list &to_save) {
+  saved_variables.clear();
+  saved_variables.reserve(to_save.size());
+  for(auto& var : to_save) {
+    saved_variables.emplace_back(var, (var.grad_fn().get() == grad_fn.get()));
+  }
+}
+
+void AutogradContext::mark_dirty(const variable_list &inputs) {
+  dirty_inputs.clear();
+  dirty_inputs.reserve(inputs.size());
+  for(auto& var : inputs) {
+    dirty_inputs.insert(var.unsafeGetTensorImpl());
+  }
+}
+
+void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
+  non_differentiable.clear();
+  non_differentiable.reserve(outputs.size());
+  for(auto& var : outputs) {
+    non_differentiable.insert(var.unsafeGetTensorImpl());
+  }
+}
+
+void AutogradContext::clear_saved() {
+  saved_variables.clear();
+}
+
+variable_list AutogradContext::get_saved_variables() const {
+  variable_list saved;
+  saved.reserve(saved_variables.size());
+  for (auto& var : saved_variables) {
+    saved.push_back(var.unpack(grad_fn));
+  }
+  return saved;
+}
+
+const std::unordered_set<at::TensorImpl*>& AutogradContext::get_dirty() const {
+  return dirty_inputs;
+}
+
+const std::unordered_set<at::TensorImpl*>& AutogradContext::get_non_differentiable() const {
+  return non_differentiable;
+}
+
 }} // namespace torch::autograd
