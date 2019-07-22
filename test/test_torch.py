@@ -2046,10 +2046,10 @@ class _TestTorchMixin(object):
             self.assertTrue("Passing RHS tensor with number of dimensions = 2 is deprecated" in str(w[-1].message))
 
         from common_utils import random_fullrank_matrix_distinct_singular_value
-        for b in [2, 5]:
+        for batches in [2, 5]:
             for k, n in zip([2, 3, 5], [3, 5, 7]):
-                A = cast(random_fullrank_matrix_distinct_singular_value(n, b))
-                b = cast(torch.randn(b, n, k))
+                A = cast(random_fullrank_matrix_distinct_singular_value(n, batches))
+                b = cast(torch.randn(batches, n, k))
                 LU_data, LU_pivots, infos = A.lu(get_infos=True)
                 self.assertEqual(infos, torch.zeros_like(infos))
                 x = torch.lu_solve(b, LU_data, LU_pivots)
