@@ -131,7 +131,7 @@ class ModuleAPITest(TestCase):
         qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
-        # w = w.permute([0, 2, 3, 1]).contiguous()
+
         qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32)
