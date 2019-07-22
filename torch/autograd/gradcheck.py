@@ -286,7 +286,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             if a.numel() != 0 or n.numel() != 0:
                 if not torch.allclose(a, n, rtol, atol):
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
-                                     'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
+                                     'output:%s\ntupled_inputs:%s\n'
+                                     'numerical:%s\nanalytical:%s\n' % (i, j, o, tupled_inputs, n, a))
 
         if not reentrant:
             return fail_test('Backward is not reentrant, i.e., running backward with same '
