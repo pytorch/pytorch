@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -11,8 +12,8 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/script/convert_to_ssa.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -306,20 +307,21 @@ struct Environment {
       }
       if (!as_simple_value->type()->isSubtypeOf(
               unshapedType(simple_parent->type()))) {
-        std::stringstream errMsg;
-        errMsg << "variable '" << name << "' previously has type "
+        auto error = ErrorReport(loc);
+        error << "Variable '" << name << "' previously has type "
                << simple_parent->type()->python_str()
                << " but is now being assigned to a value of type "
                << as_simple_value->type()->python_str();
+
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
-          errMsg << "\n. (Note: empty lists are constructed as Tensor[]; "
+          error << "\n. (Note: empty lists are constructed as Tensor[]; "
                  << "if you want an empty list of a different type, "
                  << "use `torch.jit.annotate(List[T], [])`, "
                  << "where `T` is the type of elements in the list)";
         }
-        throw ErrorReport(loc) << errMsg.str();
+        throw error;
       }
     }
     if (as_simple_value) {
@@ -492,7 +494,7 @@ struct to_ir {
   to_ir(
       const Def& def,
       ResolverPtr resolver_,
-      const Self& self,
+      const Self* self,
       Function& method) // method being constructed
       : method(method),
         graph(method.graph()),
@@ -542,7 +544,7 @@ struct to_ir {
     return old_frame;
   }
 
-  FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
+  FunctionSchema emitDef(const Def& def, const Self* self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
@@ -591,13 +593,13 @@ struct to_ir {
     CompilationUnit cu;
     // set optimize to false since we don't need to run it in optimize mode
     cu.set_optimized(false);
-    cu.define({def}, {resolver}, nullptr);
+    cu.define(c10::nullopt, {def}, {resolver}, nullptr);
     Stack stack;
-    cu.get_function("defaults").run(stack);
+    cu.get_function(def.name().name()).run(stack);
     return stack.at(0).toTuple()->elements();
   }
 
-  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self* self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -678,7 +680,7 @@ struct to_ir {
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false)};
   }
-  FunctionSchema extractSchemaFromDef(const Def& def, const Self& self) {
+  FunctionSchema extractSchemaFromDef(const Def& def, const Self* self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -688,7 +690,7 @@ struct to_ir {
 
   std::vector<Argument> emitFormalArguments(
       const Def& def,
-      const Self& self,
+      const Self* self,
       const FunctionSchema& schema,
       Block* block) {
     std::vector<Argument> arguments; // for schema
@@ -712,7 +714,7 @@ struct to_ir {
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
-          (*it).ident().range(), name, self(new_input));
+          (*it).ident().range(), name, self->makeSugared(new_input));
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
@@ -789,6 +791,18 @@ struct to_ir {
     auto closure_value = emitClosure(emit_body);
     environment_stack->setSugaredVar(
         def.name().range(), def.name().name(), closure_value);
+  }
+
+  void emitBreak(const Break& stmt) {
+    auto break_node =
+        graph->create(prim::BreakStmt, {}, 0)->setSourceRange(stmt.range());
+    graph->insertNode(break_node);
+  }
+
+  void emitContinue(const Continue& stmt) {
+    auto continue_node =
+        graph->create(prim::ContinueStmt, {}, 0)->setSourceRange(stmt.range());
+    graph->insertNode(continue_node);
   }
 
   void emitReturn(const Return& stmt) {
@@ -874,6 +888,12 @@ struct to_ir {
           break;
         case TK_RETURN: {
           emitReturn(Return(stmt));
+        } break;
+        case TK_CONTINUE: {
+          emitContinue(Continue(stmt));
+        } break;
+        case TK_BREAK: {
+          emitBreak(Break(stmt));
         } break;
         case TK_PASS:
           // Emit nothing for pass
@@ -1293,13 +1313,17 @@ struct to_ir {
 
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     auto* body_block = n->addBlock();
-
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
-      WithInsertPoint insert(condition_block);
-      Value* out = cond ? emitCond(cond.value())
-                        : graph->insertConstant(true, nullptr, range);
+      Value* out;
+      if (cond) {
+        WithInsertPoint insert(condition_block);
+        out = emitCond(cond.value());
+      } else {
+        WithInsertPoint insert(n);
+        out = graph->insertConstant(true, nullptr, range);
+      }
       condition_block->registerOutput(out);
       popFrame();
     }
@@ -1339,7 +1363,7 @@ struct to_ir {
     auto body = stmt.body();
     if (stmt.itrs().size() != 1) {
       throw ErrorReport(stmt)
-          << "List of iterables is not supported currently.";
+          << "List of iterables is not supported currently";
     }
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
@@ -1441,19 +1465,19 @@ struct to_ir {
         num_starred++;
       } else {
         throw ErrorReport(assignee) << "lhs of assignment must be a variable, "
-                                    << "subscript, or starred expression.";
+                                    << "subscript, or starred expression";
       }
     }
 
     if (num_starred > 1) {
       throw ErrorReport(r)
-          << "Only one starred expression is allowed on the lhs.";
+          << "Only one starred expression is allowed on the lhs";
     }
 
     if (num_starred > 0 && num_normal_assign == 0) {
       throw ErrorReport(r) << "A Starred expression may only appear on the "
                            << "lhs within the presence of another non-starred"
-                           << " expression.";
+                           << " expression";
     }
 
     return num_starred;
@@ -1500,7 +1524,7 @@ struct to_ir {
       default:
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on "
-            << "left-hand side of augmented assignment.";
+            << "left-hand side of augmented assignment";
     }
   }
 
@@ -1642,7 +1666,7 @@ struct to_ir {
         throw ErrorReport(subscriptExprs)
             << "Sliced expression not yet supported for"
             << " subscripted list augmented assignment. "
-            << "File a bug if you want this.";
+            << "File a bug if you want this";
       }
       const auto idxValue = emitExpr(subscriptExprs[0]);
 
@@ -1712,7 +1736,7 @@ struct to_ir {
         throw ErrorReport(subscript)
             << "Sliced expression not yet supported for"
             << " subscripted list assignment. "
-            << "File a bug if you want this.";
+            << "File a bug if you want this";
       }
 
       std::vector<NamedValue> args;
@@ -1775,7 +1799,7 @@ struct to_ir {
           auto var = Starred(assignee).expr();
           if (var.kind() != TK_VAR) {
             throw ErrorReport(var)
-                << "Cannot pack a tuple into a non-variable.";
+                << "Cannot pack a tuple into a non-variable";
           }
           size_t n_matched = outputs.size() - n_binders;
           ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
@@ -1827,7 +1851,7 @@ struct to_ir {
         break;
       default:
         throw ErrorReport(stmt.lhs())
-            << "unexpected expression on left-hand side of assignment.";
+            << "unexpected expression on left-hand side of assignment";
     }
   }
 
@@ -2420,7 +2444,7 @@ struct to_ir {
       }
       case TK_STARRED: {
         throw ErrorReport(tree)
-            << "Unexpected starred expansion. File a bug report.";
+            << "Unexpected starred expansion. File a bug report";
       }
       case TK_CONST: {
         return emitConst(Const(tree));
@@ -2432,7 +2456,7 @@ struct to_ir {
         return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
-        return graph->insertConstant(IValue(), nullptr, tree->range());
+        return graph->insertConstant(IValue(), type_hint, tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2519,7 +2543,6 @@ struct to_ir {
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
-        break;
     }
   }
 
@@ -2671,7 +2694,11 @@ struct to_ir {
         ++dim;
         continue;
       }
-      auto index = emitExpr(subscript_expr, OptionalType::ofTensor());
+      TypePtr type_hint = OptionalType::ofTensor();
+      if (subscript_expr.kind() == TK_NONE) {
+        type_hint = NoneType::get();
+      }
+      auto index = emitExpr(subscript_expr, type_hint);
       if (index->type() == IntType::get()) {
         // NB: note, select squeezes out a dimension,
         // so dim is **not** incremented
@@ -2728,7 +2755,7 @@ struct to_ir {
     if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
       throw ErrorReport(loc)
           << "Unsupported operation: attempted to use multidimensional "
-          << "indexing on a non-tensor type.";
+          << "indexing on a non-tensor type";
     }
 
     std::vector<Value*> tensor_indices;
@@ -2909,16 +2936,34 @@ struct FunctionResolver : public Resolver {
 CompilationUnit::CompilationUnit(const std::string& source)
     : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
-  define(source, nativeResolver(), nullptr);
+  define(c10::nullopt, source, nativeResolver(), nullptr);
+}
+
+// Mangle a qualified name so that it is globally unique.
+std::string CompilationUnit::mangle(const std::string& name) const {
+  static const std::string manglePrefix = "___torch_mangle_";
+
+  std::string mangledName;
+  auto pos = name.find(manglePrefix);
+  if (pos != std::string::npos) {
+    // If the name is already mangled, avoid re-appending the prefix.
+    mangledName.reserve(name.size());
+    // Append the part of the name up to the end of the prefix
+    mangledName.append(name, 0, pos);
+    mangledName.append(std::to_string(mangleIndex_++));
+  } else {
+    mangledName = c10::str(name, manglePrefix, std::to_string(mangleIndex_++));
+  }
+  return mangledName;
 }
 
 std::unique_ptr<Function> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
-    const Self& self,
-    const std::unordered_map<std::string, Function*>&
-        function_table) const {
-  const std::string& name = def.name().name();
+    const Self* self,
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -2931,20 +2976,42 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    ErrorReport::CallStack::push_function(def.name().name());
+    if (self) {
+      // Include the fully qualified name if this is a method
+      ErrorReport::CallStack::push_function(method.qualname().qualifiedName());
+    } else {
+      ErrorReport::CallStack::push_function(method.qualname().name());
+    }
     to_ir(def, _resolver, self, method);
     // Compilation was successful, so remove the function def info
     ErrorReport::CallStack::pop_function();
   };
-  return torch::make_unique<Function>(
-      name, is_optimized(), std::make_shared<Graph>(), creator);
+  auto name = prefix ? QualifiedName(*prefix, def.name().name())
+                     : QualifiedName(def.name().name());
+  if (shouldMangle) {
+    // If `shouldMangle` is set, we should generate a unique name for this
+    // function if there is already an existing one.
+    if (auto fn = find_function(name)) {
+      auto newBase = mangle(name.name());
+      name = QualifiedName(name.prefix(), newBase);
+    }
+  }
+  auto fn = torch::make_unique<Function>(
+      std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
+  if (self) {
+    // Register this as a method on `self`'s type
+    self->getClassType()->addMethod(fn.get());
+  }
+  return fn;
 }
 
-void CompilationUnit::define(
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
-    const Self& self) {
-  AT_ASSERT(definitions.size() == resolvers.size());
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
   c10::optional<size_t> init_idx;
@@ -2956,15 +3023,20 @@ void CompilationUnit::define(
     }
   }
 
-  std::vector<Function*> methods;
+  std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
   if (init_idx.has_value()) {
     // if we have an init, do it first.
     auto fn = define(
-        definitions[*init_idx], resolvers[*init_idx], self, function_table);
+        prefix,
+        definitions[*init_idx],
+        resolvers[*init_idx],
+        self,
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
-    methods.push_back(fn.get());
+    functions.push_back(fn.get());
     register_function(std::move(fn));
   }
 
@@ -2974,22 +3046,30 @@ void CompilationUnit::define(
       continue;
     }
 
-    auto fn = define(definitions[i], resolvers[i], self, function_table);
+    auto fn = define(
+        prefix,
+        definitions[i],
+        resolvers[i],
+        self,
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
-    methods.push_back(fn.get());
+    functions.push_back(fn.get());
     register_function(std::move(fn));
   }
 
-  for (Function* method : methods) {
-    method->ensure_defined();
+  for (Function* function : functions) {
+    function->ensure_defined();
   }
+  return functions;
 }
 
-void CompilationUnit::define(
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<QualifiedName>& prefix,
     const std::string& source,
     const ResolverPtr& resolver,
-    const Self& self) {
+    const Self* self) {
   Parser p(std::make_shared<Source>(source, "<string>", 1));
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
@@ -2998,7 +3078,7 @@ void CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  define(definitions, resolvers, self);
+  return define(prefix, definitions, resolvers, self);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
@@ -3006,6 +3086,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   // so subsequent cleanups do not need reconvert it
   if (convert_ssa) {
     ConvertToSSA(to_clean);
+    // convert loops with an iter and body condition specified to
+    // python-recognize while loops. we do this so they can be exported,
+    // and run the pass early to avoid jitter. Like conversion to SSA,
+    // it only needs to run once.
+    CanonicalizeModifiedLoops(to_clean);
   }
   // NB ORDERING: SSA conversion has to occur before
   // lifting of closures and forks, this way closures are converted

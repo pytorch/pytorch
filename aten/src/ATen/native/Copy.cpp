@@ -86,7 +86,7 @@ namespace native {
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
-  TORCH_CHECK(self.defined(), "src is undefined");
+  TORCH_CHECK(src.defined(), "src is undefined");
 
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
