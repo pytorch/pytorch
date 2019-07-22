@@ -249,39 +249,38 @@ TEST_F(RNNTest, BidirectionalFlattenParameters) {
   gru->flatten_parameters();
 }
 
+template <typename Impl>
+void copyParameters(torch::nn::ModuleHolder<Impl>& target, size_t t_i,
+                    const torch::nn::ModuleHolder<Impl>& source, size_t s_i) {
+  at::NoGradGuard guard;
+  target->w_ih[t_i].copy_(source->w_ih[s_i]);
+  target->w_hh[t_i].copy_(source->w_hh[s_i]);
+  target->b_ih[t_i].copy_(source->b_ih[s_i]);
+  target->b_hh[t_i].copy_(source->b_hh[s_i]);
+}
+
 // This test is a port of python code introduced here:
 // https://towardsdatascience.com/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
 // Reverse forward of bidrectional GRU should act
 // as regular forward of unidirectional GRU
 void BidirectionalGRUReverseForward(bool cuda) {
-  auto options = torch::TensorOptions()
-                        .dtype(torch::kFloat32).requires_grad(false);
-  auto input =
-              torch::tensor({1, 2, 3, 4, 5}, options).reshape({5, 1, 1});
-  auto input_reversed =
-              torch::tensor({5, 4, 3, 2, 1}, options).reshape({5, 1, 1});
+  auto opt = torch::TensorOptions().dtype(torch::kFloat32).requires_grad(false)
+                                   .device(cuda ? torch::kCUDA : torch::kCPU);
+  auto input = torch::tensor({1, 2, 3, 4, 5}, opt).reshape({5, 1, 1});
+  auto input_reversed = torch::tensor({5, 4, 3, 2, 1}, opt).reshape({5, 1, 1});
 
-  GRU bi_grus {GRUOptions(1, 1)
-                  .layers(1).batch_first(false).bidirectional(true)};
-  GRU reverse_gru {GRUOptions(1, 1)
-                  .layers(1).batch_first(false).bidirectional(false)};
+  auto gru_options = GRUOptions(1, 1).layers(1).batch_first(false);
+  GRU bi_grus {gru_options.bidirectional(true)};
+  GRU reverse_gru {gru_options.bidirectional(false)};
 
   if (cuda) {
     bi_grus->to(torch::kCUDA);
     reverse_gru->to(torch::kCUDA);
-    input = input.to(torch::kCUDA);
-    input_reversed = input_reversed.to(torch::kCUDA);
   }
 
   // Now make sure the weights of the reverse gru layer match
   // ones of the (reversed) bidirectional's:
-  {
-    at::NoGradGuard guard;
-    reverse_gru->w_ih[0].copy_(bi_grus->w_ih[1]);
-    reverse_gru->w_hh[0].copy_(bi_grus->w_hh[1]);
-    reverse_gru->b_ih[0].copy_(bi_grus->b_ih[1]);
-    reverse_gru->b_hh[0].copy_(bi_grus->b_hh[1]);
-  }
+  copyParameters(reverse_gru, 0, bi_grus, 1);
 
   auto bi_output = bi_grus->forward(input);
   auto reverse_output = reverse_gru->forward(input_reversed);
@@ -316,34 +315,24 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward_CUDA) {
 // Reverse forward of bidrectional LSTM should act
 // as regular forward of unidirectional LSTM
 void BidirectionalLSTMReverseForwardTest(bool cuda) {
-  auto options = torch::TensorOptions()
-                        .dtype(torch::kFloat32).requires_grad(false);
-  auto input =
-              torch::tensor({1, 2, 3, 4, 5}, options).reshape({5, 1, 1});
-  auto input_reversed =
-              torch::tensor({5, 4, 3, 2, 1}, options).reshape({5, 1, 1});
+  auto opt = torch::TensorOptions().dtype(torch::kFloat32).requires_grad(false)
+                                   .device(cuda ? torch::kCUDA : torch::kCPU);
+  auto input = torch::tensor({1, 2, 3, 4, 5}, opt).reshape({5, 1, 1});
+  auto input_reversed = torch::tensor({5, 4, 3, 2, 1}, opt).reshape({5, 1, 1});
 
-  LSTM bi_lstm {LSTMOptions(1, 1)
-                  .layers(1).batch_first(false).bidirectional(true)};
-  LSTM reverse_lstm {LSTMOptions(1, 1)
-                  .layers(1).batch_first(false).bidirectional(false)};
+  auto lstm_opt = GRUOptions(1, 1).layers(1).batch_first(false);
+
+  LSTM bi_lstm {lstm_opt.bidirectional(true)};
+  LSTM reverse_lstm {lstm_opt.bidirectional(false)};
 
   if (cuda) {
     bi_lstm->to(torch::kCUDA);
     reverse_lstm->to(torch::kCUDA);
-    input = input.to(torch::kCUDA);
-    input_reversed = input_reversed.to(torch::kCUDA);
   }
 
   // Now make sure the weights of the reverse lstm layer match
   // ones of the (reversed) bidirectional's:
-  {
-    at::NoGradGuard guard;
-    reverse_lstm->w_ih[0].copy_(bi_lstm->w_ih[1]);
-    reverse_lstm->w_hh[0].copy_(bi_lstm->w_hh[1]);
-    reverse_lstm->b_ih[0].copy_(bi_lstm->b_ih[1]);
-    reverse_lstm->b_hh[0].copy_(bi_lstm->b_hh[1]);
-  }
+  copyParameters(reverse_lstm, 0, bi_lstm, 1);
 
   auto bi_output = bi_lstm->forward(input);
   auto reverse_output = reverse_lstm->forward(input_reversed);
@@ -379,10 +368,9 @@ TEST_F(RNNTest, BidirectionalLSTMReverseForward_CUDA) {
 
 TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   // Create two GRUs with the same options
-  GRU gru_cpu {GRUOptions(2, 4)
-                  .layers(3).batch_first(false).bidirectional(true)};
-  GRU gru_cuda {GRUOptions(2, 4)
-                  .layers(3).batch_first(false).bidirectional(true)};
+  auto opt = GRUOptions(2, 4).layers(3).batch_first(false).bidirectional(true);
+  GRU gru_cpu {opt};
+  GRU gru_cuda {opt};
 
   // Copy weights and biases from CPU GRU to CUDA GRU
   {
@@ -391,10 +379,7 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
     for (int64_t layer = 0; layer < gru_cpu->options.layers_; layer++) {
       for (auto direction = 0; direction < num_directions; direction++) {
         const auto layer_idx = (layer * num_directions) + direction;
-        gru_cuda->w_ih[layer_idx] = gru_cpu->w_ih[layer_idx];
-        gru_cuda->w_hh[layer_idx] = gru_cpu->w_hh[layer_idx];
-        gru_cuda->b_ih[layer_idx] = gru_cpu->b_ih[layer_idx];
-        gru_cuda->b_hh[layer_idx] = gru_cpu->b_hh[layer_idx];
+        copyParameters(gru_cuda, layer_idx, gru_cpu, layer_idx);
       }
     }
   }
@@ -406,13 +391,12 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   gru_cuda->to(torch::kCUDA);
 
   // Create the same inputs
-  auto options = torch::TensorOptions()
-                        .dtype(torch::kFloat32).requires_grad(false);
-  auto input_cpu =
-              torch::tensor({1, 2, 3, 4, 5, 6}, options).reshape({3, 1, 2});
-  auto input_cuda =
-              torch::tensor({1, 2, 3, 4, 5, 6}, options).reshape({3, 1, 2})
-              .to(torch::kCUDA);
+  auto input_opt = torch::TensorOptions()
+                    .dtype(torch::kFloat32).requires_grad(false);
+  auto input_cpu = torch::tensor({1, 2, 3, 4, 5, 6}, input_opt)
+                    .reshape({3, 1, 2});
+  auto input_cuda = torch::tensor({1, 2, 3, 4, 5, 6}, input_opt)
+                    .reshape({3, 1, 2}).to(torch::kCUDA);
 
   // Call forward on both GRUs
   auto output_cpu = gru_cpu->forward(input_cpu);
@@ -439,10 +423,9 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
 
 TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   // Create two LSTMs with the same options
-  LSTM lstm_cpu {LSTMOptions(2, 4)
-                  .layers(3).batch_first(false).bidirectional(true)};
-  LSTM lstm_cuda {LSTMOptions(2, 4)
-                  .layers(3).batch_first(false).bidirectional(true)};
+  auto opt = LSTMOptions(2, 4).layers(3).batch_first(false).bidirectional(true);
+  LSTM lstm_cpu {opt};
+  LSTM lstm_cuda {opt};
 
   // Copy weights and biases from CPU LSTM to CUDA LSTM
   {
@@ -451,10 +434,7 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
     for (int64_t layer = 0; layer < lstm_cpu->options.layers_; layer++) {
       for (auto direction = 0; direction < num_directions; direction++) {
         const auto layer_idx = (layer * num_directions) + direction;
-        lstm_cuda->w_ih[layer_idx] = lstm_cpu->w_ih[layer_idx];
-        lstm_cuda->w_hh[layer_idx] = lstm_cpu->w_hh[layer_idx];
-        lstm_cuda->b_ih[layer_idx] = lstm_cpu->b_ih[layer_idx];
-        lstm_cuda->b_hh[layer_idx] = lstm_cpu->b_hh[layer_idx];
+        copyParameters(lstm_cuda, layer_idx, lstm_cpu, layer_idx);
       }
     }
   }
@@ -466,12 +446,11 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   lstm_cuda->to(torch::kCUDA);
 
   auto options = torch::TensorOptions()
-                        .dtype(torch::kFloat32).requires_grad(false);
-  auto input_cpu =
-              torch::tensor({1, 2, 3, 4, 5, 6}, options).reshape({3, 1, 2});
-  auto input_cuda =
-              torch::tensor({1, 2, 3, 4, 5, 6}, options).reshape({3, 1, 2})
-              .to(torch::kCUDA);
+                  .dtype(torch::kFloat32).requires_grad(false);
+  auto input_cpu = torch::tensor({1, 2, 3, 4, 5, 6}, options)
+                  .reshape({3, 1, 2});
+  auto input_cuda = torch::tensor({1, 2, 3, 4, 5, 6}, options)
+                  .reshape({3, 1, 2}).to(torch::kCUDA);
 
   // Call forward on both LSTMs
   auto output_cpu = lstm_cpu->forward(input_cpu);
