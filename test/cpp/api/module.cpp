@@ -309,6 +309,28 @@ TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_CUDA) {
   testDistinctParameters(module, module2);
 }
 
+TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_MultiCUDA) {
+  auto module = std::make_shared<TestDistinctParametersModule>();
+  torch::NoGradGuard no_grad;
+  torch::Device d0(torch::kCUDA, 0);
+  torch::Device d1(torch::kCUDA, 1);
+  module->to(d0);
+  auto module2 = module->clone(d1);
+
+  for (auto& param : module->parameters()) {
+    ASSERT_EQ(param.device(), d0);
+  }
+
+  for (auto& param : module2->parameters()) {
+    ASSERT_EQ(param.device(), d1);
+  }
+
+  // need to move the module back to d0 as allclose expects two tensors on
+  // the same device.
+  module2->to(d0);
+  testDistinctParameters(module, module2);
+}
+
 TEST_F(ModuleTest, ClonePreservesExternalReferences) {
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
