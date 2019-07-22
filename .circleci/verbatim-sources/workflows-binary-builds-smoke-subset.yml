@@ -11,11 +11,11 @@
       - binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_2.7_cpu_build:
+      - binary_linux_conda_2.7_cpu_devtoolset7_build:
           requires:
             - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
-      # - binary_linux_conda_3.6_cu90_build
+      # - binary_linux_conda_3.6_devtoolset7_cu90_build
       - binary_linux_libtorch_2.7m_cpu_devtoolset7_build:
           requires:
             - setup
@@ -39,13 +39,13 @@
           requires:
             - setup
             - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
-      - binary_linux_conda_2.7_cpu_test:
+      - binary_linux_conda_2.7_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_2.7_cpu_build
+            - binary_linux_conda_2.7_cpu_devtoolset7_build
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
-      # - binary_linux_conda_3.6_cu90_test:
+      # - binary_linux_conda_3.6_devtoolset7_cu90_test:
       #     requires:
       #       - setup
-      #       - binary_linux_conda_3.6_cu90_build
+      #       - binary_linux_conda_3.6_devtoolset7_cu90_build
 
