@@ -99,12 +99,14 @@ class Conv2d(_ConvNd):
         qweight = torch.quantize_linear(
             mod.weight.float().permute([0, 2, 3, 1]).contiguous(),
             wt_scale, wt_zp.long().item(), torch.qint8)
-        qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         qconv = Conv2d(mod.in_channels, mod.out_channels, mod.kernel_size,
                        mod.stride, mod.padding, mod.dilation, mod.groups,
                        mod.bias is not None, mod.padding_mode)
         qconv._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(qweight, qconv.groups)
-        qconv.bias = qbias
+        if mod.bias is not None:
+            qconv.bias = torch.quantize_linear(mod.bias, bias_scale, 0, torch.qint32)
+        else:
+            qconv.bias = None
         qconv.scale = torch.tensor([act_scale], dtype=torch.double)
         qconv.zero_point = torch.tensor([act_zp], dtype=torch.long)
         return qconv
