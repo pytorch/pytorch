@@ -19,8 +19,6 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.custom_scalar import layout_pb2
-from tensorboard.plugins.hparams.plugin_data_pb2 import HParamsPluginData, SessionEndInfo, SessionStartInfo
-from tensorboard.plugins.hparams.api_pb2 import Experiment, HParamInfo, MetricInfo, MetricName, Status
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
@@ -75,6 +73,23 @@ def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', 
 
 
 def hparams(hparam_dict=None, metric_dict=None):
+    # pylint: disable=line-too-long
+    """Returns three `Summary` protocol buffer needed by HyperParameter plugin.
+    `Experiment` keeps the metadata of an experiment, such as the name of the hyper parameters
+    and the name of the metrics.
+    `Session_start_info` keeps the key-value pair of the hyper-parameter.
+    `Session_end_info` describes the status of the experiment. e.g. STATUS_SUCCESS
+
+    Args:
+      hparam_dict: A dictionary that saves the name of the hyper parameter and its value.
+      metric_dict: A dictionary that saves the name of the metric and its value.
+
+    Returns:
+      The `Summary` proto buffer of Experiment, Session_start_info and Session_end_info
+    """
+
+    from tensorboard.plugins.hparams.plugin_data_pb2 import HParamsPluginData, SessionEndInfo, SessionStartInfo
+    from tensorboard.plugins.hparams.api_pb2 import Experiment, HParamInfo, MetricInfo, MetricName, Status
 
     PLUGIN_NAME = 'hparams'
     PLUGIN_DATA_VERSION = 0
