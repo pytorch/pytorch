@@ -150,9 +150,6 @@ static void VisitNode(Node* n, Node* insert_point) {
       ++i;
     }
   }
-  if (n->outputs().size() == 0) {
-    n->destroy();
-  }
 }
 
 static void LowerAllTuples(Block* block) {
@@ -190,6 +187,7 @@ static void EnsureNoTuples(Block* block) {
 
 void LowerAllTuples(std::shared_ptr<Graph>& graph) {
   LowerAllTuples(graph->block());
+  EliminateDeadCode(graph->block());
   EnsureNoTuples(graph->block());
 }
 
