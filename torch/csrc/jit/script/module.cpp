@@ -17,16 +17,11 @@ static ModulePtr create_module_object(
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle = false) {
   if (shouldMangle && cu->get_class(class_name) != nullptr) {
-    // TODO some unnecessary copies
-    const auto mangleNamespace = cu->getMangleNamespace();
+    const auto mangleString = cu->getMangleString();
     auto newPrefix = class_name.prefix().empty()
-        ? QualifiedName(mangleNamespace)
-        : QualifiedName(class_name.prefix(), mangleNamespace);
+        ? QualifiedName(mangleString)
+        : QualifiedName(class_name.prefix(), mangleString);
     class_name = QualifiedName(newPrefix, class_name.name());
-    // auto newBase = cu->mangle(class_name.name());
-    // class_name = class_name.prefix().empty()
-    //     ? QualifiedName(newBase)
-    //     : QualifiedName(class_name.prefix(), newBase);
   }
   auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
   cu->register_class(cls);

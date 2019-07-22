@@ -220,8 +220,7 @@ struct TORCH_API CompilationUnit {
   // Module is a singleton class instance, different instances of the same
   // Python Module will have different types but the same qualified name.
   std::string mangle(const std::string& name) const;
-  // TODO this is weird
-  std::string getMangleNamespace() const;
+  std::string getMangleString() const;
 
  private:
   std::unique_ptr<Function> define(
