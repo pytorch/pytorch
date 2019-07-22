@@ -14,9 +14,48 @@ from torch.nn import Conv2d as NNConv2d
 
 
 class Conv2d(_ConvNd):
+    r"""Applies a 2D convolution over a quantized input signal composed of
+    several quantized input planes.
+
+    For details on input arguments, parameters, and implementation see
+    :class:`~torch.nn.quantized.Conv2d`.
+
+    .. note::
+        Only `zeros` is supported for the :attr:`padding_mode` argument.
+
+    .. note::
+        Only `torch.quint8` is supported for the input data type.
+
+    .. note::
+        The :attr:`weight` is stored as a packed tensor, and can be accessed
+        using :attr:`_packed_weight` attribute.
+
+
+    Attributes:
+        _packed_weight (Tensor): packed tensor derived from the learnable weight
+                                 parameter.
+        scale (Tensor):          scalar for the output scale
+        zero_point (Tensor):     scalar for the output zero point
+
+    See :class:`~torch.nn.quantized.Conv2d` for other attributes.
+
+    Examples::
+
+        >>> # With square kernels and equal stride
+        >>> m = nn.quantized.Conv2d(16, 33, 3, stride=2)
+        >>> # non-square kernels and unequal stride and with padding
+        >>> m = nn.quantized.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
+        >>> # non-square kernels and unequal stride and with padding and dilation
+        >>> m = nn.quantized.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+        >>> input = torch.randn(20, 16, 50, 100)
+        >>> # quantize input to qint8
+        >>> q_input = torch.quantize_linear(input, scale=1.0, zero_point=0, dtype=torch.qint32)
+        >>> output = m(input)
+
+    """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros'):
+                 padding=0, dilation=1, groups=1, bias=True,
+                 padding_mode='zeros'):
         if padding_mode == 'circular':
             raise NotImplementedError("Circular padding is not implemented!")
         stride = _pair(stride)

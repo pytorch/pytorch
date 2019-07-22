@@ -76,17 +76,18 @@ class Linear(NNLinear):
         module creation time and will be overwritten later
 
     Attributes:
-        weight: the non-learnable quantized weights of the
+        weight(Tensor): the non-learnable quantized weights of the
                 module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
-        bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
+        bias (Tensor):   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
-        out_scale: `scale` parameter of output Quantized Tensor, type: double
-        out_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
+        scale: `scale` parameter of output Quantized Tensor, type: double
+        zero_point: `zero_point` parameter for output Quantized Tensor, type: long
 
     Examples::
 
         >>> m = nn.quantized.Linear(20, 30)
         >>> input = torch.randn(128, 20)
+        >>> input = torch.quantize_linear(input, 1.0, 0, torch.quint8)
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])
