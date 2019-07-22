@@ -459,9 +459,6 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
-#ifdef BUILD_NAMEDTENSOR
-  const auto outnames = namedinference::erase_name(self.names(), dim);
-#endif
   if (index < 0) {
     index += size;
   }
@@ -472,9 +469,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   strides.erase(strides.begin() + dim);
   auto result = self.as_strided(sizes, strides, storage_offset);
 #ifdef BUILD_NAMEDTENSOR
-  if (outnames) {
-    internal_set_names_inplace(result, *outnames);
-  }
+  namedinference::propagate_names_except(result, self, {dim});
 #endif
   return result;
 }
