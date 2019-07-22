@@ -605,10 +605,12 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 
 
 def _avg_pool(name, tuple_fn):
-    @parse_args('v', 'is', 'is', 'is', 'i', 'i')
-    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
+    @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
+    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and input.type().kind() != "CompleteTensorType":
             return _unimplemented(name, "input size not accesible")
+        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
+            return _unimplemented(name, "divisor_override")
         if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))
@@ -1664,3 +1666,9 @@ def gather(g, self, dim, index, sparse_grad=False):
 @parse_args('v', 'is', 'i')
 def logsumexp(g, input, dim, keepdim):
     return g.op('ReduceLogSumExp', input, axes_i=dim, keepdims_i=keepdim)
+
+
+def masked_fill(g, self, mask, value):
+    mask = _cast_Bool(g, mask, False)
+    value = sym_help._maybe_get_scalar(value)
+    return g.op('Where', mask, sym_help._if_scalar_type_as(g, value, self), self)

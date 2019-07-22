@@ -7,6 +7,15 @@ namespace at { namespace native {
 
 namespace {
 
+// Check if pytorch is compiled with MIOpen.
+bool use_miopen(const at::Tensor& input, const double dropout_state) {
+    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) && 
+                                (detail::getCUDAHooks().compiledWithMIOpen()) &&
+                                (input.is_cuda()) &&
+                                (dropout_state == 0.0);
+    return is_miopen_acceptable;
+}
+
 template<typename T>
 using pair_of = std::pair<T, T>;
 
@@ -236,15 +245,27 @@ template<typename hidden_type_tmpl, typename cell_params_tmpl>
 struct Cell {
   using hidden_type = hidden_type_tmpl;
   using cell_params = cell_params_tmpl;
-  virtual ~Cell() {} // This is really dumb, but enables projects with -Wnon-virtual-dtor to compile...
-  virtual hidden_type operator()(const Tensor& input, const hidden_type& hidden, const cell_params& params) const = 0;
+
+  virtual ~Cell() {} // This is really dumb, but enables projects with
+                     // -Wnon-virtual-dtor to compile...
+
+  virtual hidden_type operator()(
+      const Tensor& input,
+      const hidden_type& hidden,
+      const cell_params& params,
+      bool pre_compute_input = false) const = 0;
 };
 
 template<typename nonlinearity, typename cell_params>
 struct SimpleCell : Cell<Tensor, cell_params> {
   using hidden_type = Tensor;
-  Tensor operator()(const Tensor& input, const Tensor& hidden, const cell_params& params) const override {
-    return nonlinearity{}(params.linear_ih(input) + params.linear_hh(hidden));
+  Tensor operator()(
+      const Tensor& input,
+      const Tensor& hidden,
+      const cell_params& params,
+      bool pre_compute_input = false) const override {
+    return nonlinearity{}(params.linear_hh(hidden).add_(
+        pre_compute_input ? input : params.linear_ih(input)));
   }
 };
 
@@ -252,55 +273,68 @@ struct SimpleCell : Cell<Tensor, cell_params> {
 template <typename cell_params>
 struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
   using hidden_type = std::tuple<Tensor, Tensor>;
-  hidden_type operator()(const Tensor& input, const hidden_type& hidden, const cell_params& params) const override {
-    auto hx = std::get<0>(hidden);
-    auto cx = std::get<1>(hidden);
+
+  hidden_type operator()(
+      const Tensor& input,
+      const hidden_type& hidden,
+      const cell_params& params,
+      bool pre_compute_input = false) const override {
+    const auto& hx = std::get<0>(hidden);
+    const auto& cx = std::get<1>(hidden);
 
     if (input.is_cuda()) {
+      TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hx);
-      auto result = at::_thnn_fused_lstm_cell(igates, hgates, cx, params.b_ih, params.b_hh);
+      auto result = at::_thnn_fused_lstm_cell(
+          igates, hgates, cx, params.b_ih, params.b_hh);
       // Slice off the workspace argument (it's needed only for AD).
       return std::make_tuple(std::get<0>(result), std::get<1>(result));
     }
 
-    auto gates = params.linear_ih(input) + params.linear_hh(hx);
+    const auto gates = params.linear_hh(hx).add_(
+        pre_compute_input ? input : params.linear_ih(input));
     auto chunked_gates = gates.chunk(4, 1);
-
-    auto ingate = chunked_gates[0].sigmoid();
-    auto forgetgate = chunked_gates[1].sigmoid();
-    auto cellgate = chunked_gates[2].tanh();
-    auto outgate = chunked_gates[3].sigmoid();
-
-    auto cy = (forgetgate * cx) + (ingate * cellgate);
+    auto ingate = chunked_gates[0].sigmoid_();
+    auto forgetgate = chunked_gates[1].sigmoid_();
+    auto cellgate = chunked_gates[2].tanh_();
+    auto outgate = chunked_gates[3].sigmoid_();
+    auto cy = (forgetgate * cx).add_(ingate * cellgate);
     auto hy = outgate * cy.tanh();
-
     return std::make_tuple(hy, cy);
   }
+
 };
 
 template <typename cell_params>
 struct GRUCell : Cell<Tensor, cell_params> {
   using hidden_type = Tensor;
-  hidden_type operator()(const Tensor& input, const hidden_type& hidden, const cell_params& params) const override {
+
+  hidden_type operator()(
+      const Tensor& input,
+      const hidden_type& hidden,
+      const cell_params& params,
+      bool pre_compute_input = false) const override {
     if (input.is_cuda()) {
+      TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hidden);
-      auto result = at::_thnn_fused_gru_cell(igates, hgates, hidden, params.b_ih, params.b_hh);
+      auto result = at::_thnn_fused_gru_cell(
+          igates, hgates, hidden, params.b_ih, params.b_hh);
       // Slice off the workspace argument (it's needed only for AD).
       return std::get<0>(result);
     }
-
-    auto igates = params.linear_ih(input);
-    auto hgates = params.linear_hh(hidden);
-    auto chunked_igates = igates.chunk(3, 1);
-    auto chunked_hgates = hgates.chunk(3, 1);
-
-    auto reset_gate = at::sigmoid(chunked_igates[0] + chunked_hgates[0]);
-    auto input_gate = at::sigmoid(chunked_igates[1] + chunked_hgates[1]);
-    auto new_gate = at::tanh(chunked_igates[2] + reset_gate * chunked_hgates[2]);
-
-    return new_gate + input_gate * (hidden - new_gate);
+    const auto chunked_igates = pre_compute_input
+        ? input.chunk(3, 1)
+        : params.linear_ih(input).chunk(3, 1);
+    auto chunked_hgates = params.linear_hh(hidden).chunk(3, 1);
+    const auto reset_gate =
+        chunked_hgates[0].add_(chunked_igates[0]).sigmoid_();
+    const auto input_gate =
+        chunked_hgates[1].add_(chunked_igates[1]).sigmoid_();
+    const auto new_gate =
+        chunked_igates[2].add(chunked_hgates[2].mul_(reset_gate)).tanh_();
+    return (hidden - new_gate).mul_(input_gate).add_(new_gate);
   }
 };
 
@@ -324,38 +358,60 @@ struct LayerOutput {
 template<typename io_type, typename hidden_type, typename param_type>
 struct Layer {
   using output_type = LayerOutput<io_type, hidden_type>;
-  virtual ~Layer() {} // This is really dumb, but enables projects with -Wnon-virtual-dtor to compile...
-  virtual output_type operator()(const io_type& input, const hidden_type& input_hidden, const param_type& params) const = 0;
+
+  virtual ~Layer() {} // This is really dumb, but enables projects with
+                      // -Wnon-virtual-dtor to compile...
+  virtual output_type operator()(
+      const io_type& input,
+      const hidden_type& input_hidden,
+      const param_type& params) const = 0;
 };
 
 template<typename hidden_type, typename cell_params>
 struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
-  using output_type = typename Layer<Tensor, hidden_type, cell_params>::output_type;
+  using output_type =
+      typename Layer<Tensor, hidden_type, cell_params>::output_type;
   using unstacked_output_type = LayerOutput<std::vector<Tensor>, hidden_type>;
 
   FullLayer(Cell<hidden_type, cell_params>& cell)
     : cell_(cell) {};
 
-  unstacked_output_type operator()(std::vector<Tensor> step_inputs, const hidden_type& input_hidden, const cell_params& params) const {
+  unstacked_output_type operator()(
+      const std::vector<Tensor>& step_inputs,
+      const hidden_type& input_hidden,
+      const cell_params& params,
+      bool pre_compute_input = false) const {
     std::vector<Tensor> step_outputs;
     auto hidden = input_hidden;
-    for (size_t i = 0; i < step_inputs.size(); i++) {
-      hidden = cell_(step_inputs[i], hidden, params);
-      step_outputs.push_back(hidden_as_output(hidden));
+    for (const auto& input : step_inputs) {
+      hidden = cell_(input, hidden, params, pre_compute_input);
+      step_outputs.emplace_back(hidden_as_output(hidden));
     }
     return {step_outputs, hidden};
   }
 
-  output_type operator()(const Tensor& inputs, const hidden_type& input_hidden, const cell_params& params) const override {
+  output_type operator()(
+      const Tensor& inputs,
+      const hidden_type& input_hidden,
+      const cell_params& params) const override {
+    if (inputs.device().is_cpu()) {
+      const auto inputs_w = params.linear_ih(inputs);
+      auto unstacked_output =
+          (*this)(inputs_w.unbind(0), input_hidden, params, true);
+      return {at::stack(unstacked_output.outputs, 0),
+              unstacked_output.final_hidden};
+    }
     auto unstacked_output = (*this)(inputs.unbind(0), input_hidden, params);
-    return {at::stack(unstacked_output.outputs, 0), unstacked_output.final_hidden};
+    return {at::stack(unstacked_output.outputs, 0),
+            unstacked_output.final_hidden};
   }
 
   Cell<hidden_type, cell_params>& cell_;
 };
 
-template<typename dir_hidden_type, typename cell_params>
-struct FullBidirectionalLayer : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<cell_params>> {
+template <typename dir_hidden_type, typename cell_params>
+struct FullBidirectionalLayer
+    : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<cell_params>> {
   using hidden_type = pair_of<dir_hidden_type>;
   using param_type = pair_of<cell_params>;
   using output_type = typename Layer<Tensor, hidden_type, param_type>::output_type;
@@ -363,16 +419,36 @@ struct FullBidirectionalLayer : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<
   FullBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
     : layer_(cell) {};
 
-  output_type operator()(const Tensor& input, const hidden_type& input_hidden, const param_type& params) const override {
-    auto step_inputs = input.unbind(0);
+  output_type operator()(
+      const Tensor& input,
+      const hidden_type& input_hidden,
+      const param_type& params) const override {
+    std::vector<Tensor> step_inputs;
+    if (input.device().is_cpu()) {
+      auto input_w = params.first.linear_ih(input);
+      step_inputs = input_w.unbind(0);
+      auto fw_result = layer_(
+          step_inputs, input_hidden.first, params.first, true);
+      auto fw_output = at::stack(fw_result.outputs, 0);
+      input_w = params.second.linear_ih(input);
+      step_inputs = input_w.unbind(0);
+      auto rev_step_inputs = reverse(std::move(step_inputs));
+      auto rev_result =
+          layer_(rev_step_inputs, input_hidden.second, params.second, true);
+      std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
+      auto rev_output = at::stack(rev_result.outputs, 0);
+      return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
+              std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+    }
+
+    step_inputs = input.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
     auto fw_output = at::stack(fw_result.outputs, 0);
-
     auto rev_step_inputs = reverse(std::move(step_inputs));
-    auto rev_result = layer_(rev_step_inputs, input_hidden.second, params.second);
+    auto rev_result =
+        layer_(rev_step_inputs, input_hidden.second, params.second);
     std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
     auto rev_output = at::stack(rev_result.outputs, 0);
-
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
             std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
   }
@@ -387,18 +463,32 @@ struct FullBidirectionalLayer : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<
 
 template<typename hidden_type, typename cell_params>
 struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
-  using output_type = typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
+  using output_type =
+      typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
   PackedLayer(Cell<hidden_type, cell_params>& cell)
     : cell_(cell) {};
 
-  output_type operator()(const PackedSequence& input, const hidden_type& input_hidden, const cell_params& params) const override {
+  output_type operator()(
+      const PackedSequence& input,
+      const hidden_type& input_hidden,
+      const cell_params& params) const override {
+
     std::vector<at::Tensor> step_outputs;
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
     int64_t num_steps = input.batch_sizes.size(0);
     int64_t* batch_sizes = input.batch_sizes.data<int64_t>();
     int64_t last_batch_size = batch_sizes[0];
+
+    const Tensor* input_ptr = &input.data;
+    bool pre_compute_input = false;
+    Tensor input_w;
+    if (input.data.device().is_cpu()) {
+      input_w = params.linear_ih(input.data);
+      input_ptr = &input_w;
+      pre_compute_input = true;
+    }
 
     // Batch sizes is a sequence of decreasing lengths, which are offsets
     // into a 1D list of inputs. At every step we slice out batch_size elements,
@@ -408,24 +498,25 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     // to return a tensor of final hidden state.
     auto hidden = input_hidden;
     for (int64_t i = 0; i < num_steps; ++i) {
-      int64_t batch_size = batch_sizes[i];
-      auto step_input = input.data.narrow(0, input_offset, batch_size);
+      const int64_t batch_size = batch_sizes[i];
+      auto step_input = input_ptr->narrow(0, input_offset, batch_size);
       input_offset += batch_size;
-
-      int64_t dec = last_batch_size - batch_size;
+      const int64_t dec = last_batch_size - batch_size;
       if (dec > 0) {
-        hiddens.push_back(hidden_slice(hidden, last_batch_size - dec, last_batch_size));
+        hiddens.emplace_back(
+            hidden_slice(hidden, last_batch_size - dec, last_batch_size));
         hidden = hidden_slice(hidden, 0, last_batch_size - dec);
       }
 
       last_batch_size = batch_size;
-      hidden = cell_(step_input, hidden, params);
+      hidden = cell_(step_input, hidden, params, pre_compute_input);
       step_outputs.push_back(hidden_as_output(hidden));
     }
-    hiddens.push_back(hidden);
+    hiddens.emplace_back(hidden);
     std::reverse(hiddens.begin(), hiddens.end());
 
-    return { PackedSequence{ at::cat(step_outputs, 0), input.batch_sizes }, hidden_concat(hiddens) };
+    return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
+            hidden_concat(hiddens)};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -433,17 +524,30 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
 
 template<typename hidden_type, typename cell_params>
 struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
-  using output_type = typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
+  using output_type =
+      typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
   ReversedPackedLayer(Cell<hidden_type, cell_params>& cell)
     : cell_(cell) {};
 
-  output_type operator()(const PackedSequence& input, const hidden_type& input_hidden, const cell_params& params) const override {
+  output_type operator()(
+      const PackedSequence& input,
+      const hidden_type& input_hidden,
+      const cell_params& params) const override {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
     int64_t* batch_sizes = input.batch_sizes.data<int64_t>();
     int64_t last_batch_size = batch_sizes[num_steps - 1];
+
+    const Tensor* input_ptr = &input.data;
+    bool pre_compute_input = false;
+    Tensor input_w;
+    if (input.data.device().is_cpu()) {
+      input_w = params.linear_ih(input.data);
+      input_ptr = &input_w;
+      pre_compute_input = true;
+    }
 
     // Here the situation is similar to that above, except we start out with
     // the smallest batch size (and a small set of hidden states we actually use),
@@ -451,40 +555,49 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     // 1D list of inputs.
     auto hidden = hidden_slice(input_hidden, 0, batch_sizes[num_steps - 1]);
     for (int64_t i = num_steps - 1; i >= 0; --i) {
-      int64_t batch_size = batch_sizes[i];
-      int64_t inc = batch_size - last_batch_size;
+      const int64_t batch_size = batch_sizes[i];
+      const int64_t inc = batch_size - last_batch_size;
       if (inc > 0) {
-        hidden = hidden_concat(ArrayRef<hidden_type>{hidden, hidden_slice(input_hidden, last_batch_size, batch_size)});
+        hidden = hidden_concat(ArrayRef<hidden_type>{
+            hidden, hidden_slice(input_hidden, last_batch_size, batch_size)});
       }
-
-      auto step_input = input.data.narrow(0, input_offset - batch_size, batch_size);
+      auto step_input =
+          input_ptr->narrow(0, input_offset - batch_size, batch_size);
       input_offset -= batch_size;
-
       last_batch_size = batch_size;
-      hidden = cell_(step_input, hidden, params);
-      step_outputs.push_back(hidden_as_output(hidden));
+      hidden = cell_(step_input, hidden, params, pre_compute_input);
+      step_outputs.emplace_back(hidden_as_output(hidden));
     }
     std::reverse(step_outputs.begin(), step_outputs.end());
-    return { PackedSequence{ at::cat(step_outputs, 0), input.batch_sizes }, hidden };
+    return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
+            hidden};
   }
 
   Cell<hidden_type, cell_params>& cell_;
 };
 
-template<typename dir_hidden_type, typename cell_params>
-struct PackedBidirectionalLayer : Layer<PackedSequence, pair_of<dir_hidden_type>, pair_of<cell_params>> {
+template <typename dir_hidden_type, typename cell_params>
+struct PackedBidirectionalLayer
+    : Layer<PackedSequence, pair_of<dir_hidden_type>, pair_of<cell_params>> {
   using hidden_type = pair_of<dir_hidden_type>;
   using param_type = pair_of<cell_params>;
-  using output_type = typename Layer<PackedSequence, hidden_type, param_type>::output_type;
+  using output_type =
+      typename Layer<PackedSequence, hidden_type, param_type>::output_type;
 
   PackedBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
     : layer_(cell), rev_layer_(cell) {};
 
-  output_type operator()(const PackedSequence& input, const hidden_type& input_hidden, const param_type& params) const override {
+  output_type operator()(
+      const PackedSequence& input,
+      const hidden_type& input_hidden,
+      const param_type& params) const override {
     auto fw_result = layer_(input, input_hidden.first, params.first);
     auto rev_result = rev_layer_(input, input_hidden.second, params.second);
-    PackedSequence output { at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1), input.batch_sizes };
-    return { output, std::make_pair(fw_result.final_hidden, rev_result.final_hidden) };
+    PackedSequence output{
+        at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1),
+        input.batch_sizes};
+    return {output,
+            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
   }
 
   PackedLayer<dir_hidden_type, cell_params> layer_;
@@ -600,38 +713,66 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
 
 #define ONE_HIDDEN_RNN(NAME, CELL)                                             \
 DEFINE_DISPATCH(NAME##_cudnn_stub);                                            \
+DEFINE_DISPATCH(NAME##_miopen_stub);                                           \
 DEFINE_DISPATCH(NAME##_packed_cudnn_stub);                                     \
+DEFINE_DISPATCH(NAME##_packed_miopen_stub);                                    \
 REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub, rnn_fn);                           \
+REGISTER_NO_CPU_DISPATCH(NAME##_miopen_stub, rnn_fn);                          \
 REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub, rnn_packed_fn);             \
+REGISTER_NO_CPU_DISPATCH(NAME##_packed_miopen_stub, rnn_packed_fn);            \
                                                                                \
 std::tuple<Tensor, Tensor> NAME(                                               \
-      const Tensor& _input, const Tensor& hx,                                  \
-      TensorList _params, bool has_biases,                                     \
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
+    const Tensor& _input, \
+    const Tensor& hx, \
+    TensorList _params, \
+    bool has_biases, \
+    int64_t num_layers, \
+    double dropout_p, \
+    bool train, \
+    bool bidirectional, \
+    bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
     NAME##_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
-  check_device(_input, _params, hx);                                        \
+  if (use_miopen(_input, dropout_p)) {                                         \
+    Tensor output, hy;                                                         \
+    NAME##_miopen_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+            num_layers, dropout_p, train, bidirectional, batch_first);         \
+    return std::make_tuple(output, hy);                                        \
+  }                                                                            \
+  check_device(_input, _params, hx);                                           \
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
   auto params = gather_params(_params, has_biases);                            \
   auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
           input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
   if (batch_first) {                                                           \
-    std::get<0>(results) = std::get<0>(results).transpose(0, 1);               \
+    std::get<0>(results).transpose_(0, 1);               \
   }                                                                            \
   return results;                                                              \
 }                                                                              \
                                                                                \
 std::tuple<Tensor, Tensor> NAME(                                               \
-      const Tensor& data, const Tensor& batch_sizes, const Tensor& hx,         \
-      TensorList _params, bool has_biases,                                     \
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {  \
+    const Tensor& data, \
+    const Tensor& batch_sizes, \
+    const Tensor& hx, \
+    TensorList _params, \
+    bool has_biases, \
+    int64_t num_layers, \
+    double dropout_p, \
+    bool train, \
+    bool bidirectional) {  \
   if (at::cudnn_is_acceptable(data)) {                                         \
     Tensor output, hy;                                                         \
     NAME##_packed_cudnn_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
+            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
+    return std::make_tuple(output, hy);                                        \
+  }                                                                            \
+  if (use_miopen(data, dropout_p)) {                                           \
+    Tensor output, hy;                                                         \
+    NAME##_packed_miopen_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
             _params, has_biases, num_layers, dropout_p, train, bidirectional); \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
@@ -643,7 +784,60 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   return std::make_tuple(packed_output.data, std::get<1>(result));             \
 }
 
+#define ONE_HIDDEN_QRNN(NAME, CELL)                                             \
+std::tuple<Tensor, Tensor> NAME(                                               \
+    const Tensor& _input, \
+    const Tensor& hx, \
+    TensorList _params, \
+    bool has_biases, \
+    int64_t num_layers, \
+    double dropout_p,  \
+    bool train, \
+    bool bidirectional, \
+    bool batch_first) { \
+  if (at::cudnn_is_acceptable(_input)) {                                       \
+    Tensor output, hy;                                                         \
+    gru_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+            num_layers, dropout_p, train, bidirectional, batch_first);         \
+    return std::make_tuple(output, hy);                                        \
+  }                                                                            \
+  check_device(_input, _params, hx); \
+  auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
+  auto params = gather_quantized_params(_params);                            \
+  auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
+      input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
+  if (batch_first) {                                                           \
+    std::get<0>(results).transpose_(0, 1);               \
+  }                                                                            \
+  return results;                                                              \
+}                                                                              \
+                                                                               \
+std::tuple<Tensor, Tensor> NAME(                                               \
+    const Tensor& data, \
+    const Tensor& batch_sizes, \
+    const Tensor& hx, \
+    TensorList _params, \
+    bool has_biases, \
+    int64_t num_layers, \
+    double dropout_p, \
+    bool train, \
+    bool bidirectional) {  \
+  if (at::cudnn_is_acceptable(data)) {                                         \
+    Tensor output, hy;                                                         \
+    gru_packed_cudnn_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
+            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
+    return std::make_tuple(output, hy);                                        \
+  }                                                                            \
+  PackedSequence input { data, batch_sizes };                                  \
+  auto params = gather_quantized_params(_params);                            \
+  auto result = _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
+          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
+  auto & packed_output = std::get<0>(result);                                  \
+  return std::make_tuple(packed_output.data, std::get<1>(result));             \
+}
+
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
+ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QuantizedCellParams>)
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
@@ -651,8 +845,12 @@ ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
 
 DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
+DEFINE_DISPATCH(lstm_miopen_stub);
+DEFINE_DISPATCH(lstm_packed_miopen_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
+REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
+REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -663,6 +861,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
+    return std::make_tuple(output, hy, cy);
+  } 
+
+  if (use_miopen(_input, dropout_p)) {
+    Tensor output, hy, cy;
+    lstm_miopen_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
+              num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
   }
   check_device(_input, _params, hx);
@@ -686,7 +891,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
+  } 
+
+  if (use_miopen(data, dropout_p)) {
+    Tensor output, hy, cy;
+    lstm_packed_miopen_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
+            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+    return std::make_tuple(output, hy, cy);
   }
+  
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(

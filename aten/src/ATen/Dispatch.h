@@ -37,6 +37,17 @@ struct ScalarTypeToCType<at::ScalarType::Half> {
 };
 
 template<>
+struct ScalarTypeToCType<at::ScalarType::BFloat16> {
+  using type = at::BFloat16;
+
+  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
+  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
+  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
+  // TODO: remove once the bug is fixed.
+  static at::BFloat16 t;
+};
+
+template<>
 struct ScalarTypeToCType<at::ScalarType::Bool> {
   using type = bool;
 
@@ -45,6 +56,17 @@ struct ScalarTypeToCType<at::ScalarType::Bool> {
   // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
   // TODO: remove once the bug is fixed.
   static bool t;
+};
+
+template<>
+struct ScalarTypeToCType<at::ScalarType::Long> {
+  using type = int64_t;
+
+  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
+  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
+  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
+  // TODO: remove once the bug is fixed.
+  static int64_t t;
 };
 
 inline at::ScalarType scalar_type(at::ScalarType s) {
@@ -148,6 +170,20 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                        \
   }()
 
+#define AT_DISPATCH_FLOATING_TYPES_AND(SCALARTYPE, TYPE, NAME, ...)                                       \
+  [&] {                                                                                                   \
+    const auto& the_type = TYPE;                                                                          \
+    /* don't use TYPE again in case it is an expensive or side-effect op */                               \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                                                 \
+    switch (_st) {                                                                                        \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)                                   \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                                     \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE, decltype(::detail::ScalarTypeToCType<SCALARTYPE>::t), __VA_ARGS__) \
+      default:                                                                                            \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                   \
+    }                                                                                                     \
+  }()
+
 #define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(TYPE, NAME, ...)              \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
@@ -222,11 +258,11 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     const auto& SCALAR_TYPE C10_UNUSED = TYPE;                          \
     switch (TYPE) {                                                     \
       AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          kQInt8, qint8, kChar, int8_t, __VA_ARGS__)                    \
+          at::kQInt8, at::qint8, at::kChar, int8_t, __VA_ARGS__)                    \
       AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          kQUInt8, quint8, kByte, uint8_t, __VA_ARGS__)                 \
+          at::kQUInt8, at::quint8, at::kByte, uint8_t, __VA_ARGS__)                 \
       AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          kQInt32, qint32, kInt, int, __VA_ARGS__)                      \
+          at::kQInt32, at::qint32, at::kInt, int, __VA_ARGS__)                      \
       default:                                                          \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'"); \
     }                                                                   \
@@ -287,7 +323,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                                                       \
   }()
 
-#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)                    \
+#define AT_DISPATCH_ALL_TYPES_AND3(SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)                  \
   [&] {                                                                                                     \
     switch (TYPE) {                                                                                         \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)                                      \
@@ -299,6 +335,25 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)                                     \
       AT_PRIVATE_CASE_TYPE(SCALARTYPE1, decltype(::detail::ScalarTypeToCType<SCALARTYPE1>::t), __VA_ARGS__) \
       AT_PRIVATE_CASE_TYPE(SCALARTYPE2, decltype(::detail::ScalarTypeToCType<SCALARTYPE2>::t), __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE3, decltype(::detail::ScalarTypeToCType<SCALARTYPE3>::t), __VA_ARGS__) \
+      default:                                                                                              \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                     \
+    }                                                                                                       \
+  }()
+
+#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)       \
+  [&] {                                                                                                     \
+    switch (TYPE) {                                                                                         \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)                                      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)                                       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)                                     \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                                       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)                                       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)                                      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)                                     \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE1, decltype(::detail::ScalarTypeToCType<SCALARTYPE1>::t), __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE2, decltype(::detail::ScalarTypeToCType<SCALARTYPE2>::t), __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE3, decltype(::detail::ScalarTypeToCType<SCALARTYPE3>::t), __VA_ARGS__) \
       AT_PRIVATE_CASE_TYPE(                                                                                 \
           at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)                                   \
       AT_PRIVATE_CASE_TYPE(                                                                                 \

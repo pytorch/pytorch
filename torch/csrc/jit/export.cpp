@@ -209,7 +209,7 @@ EncoderBase::EncoderBase(
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(4);
   // TODO: set the producer version using appropriate function call
-  model_proto_.set_producer_version("1.1");
+  model_proto_.set_producer_version("1.2");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -745,18 +745,25 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
   // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.class_compilation_unit()->find_function("__setstate__");
-  if (setstate == nullptr) {
+  auto setstate = module.find_method("__setstate__");
+  if (!setstate) {
     return false;
   }
-  auto set_schema = setstate->getSchema();
+  auto set_schema = setstate->function().getSchema();
 
-  TORCH_CHECK(
-      set_schema.arguments().size() == 2,
-      "'__setstate__' must have 'self' and the state as its "
-      "only arguments, but found ",
-      set_schema.arguments().size(),
-      " arguments");
+  if (set_schema.arguments().size() == 1) {
+    TORCH_CHECK(
+        get_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
+        "For '__setstate__' to have no state"
+        " param, '__getstate__' must return None");
+  } else {
+    TORCH_CHECK(
+        set_schema.arguments().size() == 2,
+        "'__setstate__' must have 'self' and the state as its "
+        "only arguments, but found ",
+        set_schema.arguments().size(),
+        " arguments");
+  }
   TORCH_CHECK(
       set_schema.returns().size() == 1,
       "'__setstate__' must return None, but found ",
@@ -770,7 +777,9 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   // Check that the return type of __getstate__ matches the input to
   // __setstate__
   auto get_type = get_schema.returns().at(0).type();
-  auto set_type = set_schema.arguments().at(1).type();
+  auto set_type = set_schema.arguments().size() == 1
+      ? NoneType::get()
+      : set_schema.arguments().at(1).type();
 
   TORCH_CHECK(
       set_type->isSubtypeOf(get_type),
@@ -908,15 +917,14 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.class_compilation_unit()->get_functions().size() > 0) {
+  if (module.type()->methods().size() > 0) {
     std::ostringstream methods;
     SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
         source_ranges,
-        *module.class_compilation_unit(),
-        /*is_method=*/true,
+        module,
         tensor_table_,
         class_table_,
         /*enforce_importable=*/true);

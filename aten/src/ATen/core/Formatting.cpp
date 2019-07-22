@@ -238,10 +238,15 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else {
-    Tensor tensor = tensor_.to(kCPU, kDouble).contiguous();
+    Tensor tensor;
+    if (tensor_.is_quantized()) {
+      Tensor tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
+    } else {
+      tensor = tensor_.to(kCPU, kDouble).contiguous();
+    }
     if(tensor.ndimension() == 0) {
       stream << defaultfloat << tensor.data<double>()[0] << std::endl;
-      stream << "[ " << tensor_.toString() << "{} ]";
+      stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
         double scale;
@@ -255,12 +260,12 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
       }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "} ]";
+      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "}";
     } else if(tensor.ndimension() == 2) {
       if (tensor.numel() > 0) {
         __printMatrix(stream, tensor, linesize, 0);
       }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "} ]";
+      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "}";
     } else {
       if (tensor.numel() > 0) {
         __printTensor(stream, tensor, linesize);
@@ -269,8 +274,14 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       for(int64_t i = 1; i < tensor.ndimension(); i++) {
         stream << "," << tensor.size(i);
       }
-      stream << "} ]";
+      stream << "}";
     }
+    if (tensor_.is_quantized()) {
+      stream << ", qscheme: " << toString(tensor_.qscheme());
+      stream << ", scale: " << tensor_.q_scale();
+      stream << ", zero_point: " << tensor_.q_zero_point();
+    }
+    stream << " ]";
   }
   return stream;
 }

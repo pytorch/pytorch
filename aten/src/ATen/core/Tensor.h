@@ -382,6 +382,8 @@ class CAFFE2_API Tensor {
   Tensor & bernoulli_(double p=0.5, Generator * generator=nullptr);
   Tensor bernoulli(double p, Generator * generator=nullptr) const;
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
+  Tensor bitwise_not() const;
+  Tensor & bitwise_not_();
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
   Tensor & ceil_();
@@ -404,6 +406,7 @@ class CAFFE2_API Tensor {
   Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;
   Tensor diagonal(int64_t offset=0, int64_t dim1=0, int64_t dim2=1) const;
+  Tensor & fill_diagonal_(Scalar fill_value, bool wrap=false);
   Tensor div(const Tensor & other) const;
   Tensor & div_(const Tensor & other);
   Tensor div(Scalar other) const;
@@ -513,6 +516,9 @@ class CAFFE2_API Tensor {
   Tensor detach() const;
   Tensor & detach_();
   int64_t size(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  int64_t size(Dimname dim) const;
+  #endif
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
@@ -526,6 +532,9 @@ class CAFFE2_API Tensor {
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  int64_t stride(Dimname dim) const;
+  #endif
   Tensor sum(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor sum(IntArrayRef dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor sum_to_size(IntArrayRef size) const;
@@ -722,7 +731,6 @@ class CAFFE2_API Tensor {
   Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
   std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
   Tensor cholesky_inverse(bool upper=false) const;
-  std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr(bool some=true) const;
   std::tuple<Tensor,Tensor> geqrf() const;
   Tensor orgqr(const Tensor & input2) const;

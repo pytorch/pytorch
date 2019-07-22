@@ -738,6 +738,20 @@ inline vector<string> OperatorBase::GetVectorFromIValueList<string>(
   vector<string> out;
   return out;
 }
+
+// We need this specialisation because IValue based lists don't support
+// int16_t. We need to load it as List<int64_t> and transform to int16_t.
+template <>
+inline vector<int16_t> OperatorBase::GetVectorFromIValueList<int16_t>(
+    const c10::IValue& value) const {
+  auto list = value.template to<c10::List<int64_t>>();
+  std::vector<int16_t> result;
+  result.reserve(list.size());
+  for (int64_t elem : list) {
+    result.push_back(static_cast<int16_t>(elem));
+  }
+  return result;
+}
 #endif
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
@@ -983,7 +997,7 @@ class Operator : public OperatorBase {
 #ifdef __GNU_LIBRARY__
       // If glibc is available, use feenableexcept that will raise exception
       // right away.
-      int old_enabled_exceptions;
+      int old_enabled_exceptions = 0;
       if (FLAGS_caffe2_operator_throw_on_first_occurrence_if_fp_exceptions) {
         if (FLAGS_caffe2_operator_throw_if_fp_exceptions ||
             FLAGS_caffe2_operator_throw_if_fp_overflow_exceptions) {
@@ -1576,6 +1590,7 @@ class ExternalTensorFunctionsBase {
  public:
   explicit ExternalTensorFunctionsBase() {}
   virtual ~ExternalTensorFunctionsBase() {}
+  virtual bool isQuantized() const = 0;
   virtual bool IsSameMetaType(TypeIdentifier id) = 0;
   virtual void SetupExternalTensorDescriptor(
       const Blob* blob,
