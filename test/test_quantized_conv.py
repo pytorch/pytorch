@@ -6,12 +6,12 @@ from __future__ import unicode_literals
 import numpy as np
 import torch
 import torch.nn.quantized.functional as qF
-from torch.nn.quantized.modules.conv import _conv_output_shape
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
 
+from common_quantized import _conv_output_shape
 from common_utils import TestCase, run_tests
 
 

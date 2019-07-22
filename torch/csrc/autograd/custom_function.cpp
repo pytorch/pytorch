@@ -3,11 +3,18 @@
 
 namespace torch { namespace autograd {
 
-std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &inputs,
+variable_list _wrap_outputs(const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const at::ArrayRef<Variable> raw_outputs,
   const std::shared_ptr<Function> &cdata) {
+
+  std::unordered_set<at::TensorImpl*> inputs;
+  inputs.reserve(input_vars.size());
+  for (auto& var : input_vars) {
+    inputs.emplace(var.unsafeGetTensorImpl());
+  }
+
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {

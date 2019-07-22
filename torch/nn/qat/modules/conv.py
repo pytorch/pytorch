@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn import Conv2d as NNConv2d
-from torch.nn.modules.conv import conv2d_forward
 from torch.quantization.QConfig import default_qat_qconfig
 
 class Conv2d(NNConv2d):
@@ -19,36 +18,24 @@ class Conv2d(NNConv2d):
         observer: fake quant module for output activation, it's called observer
             to align with post training flow
         weight_fake_quant: fake quant module for weight
-
-    Examples::
-
-        >>> # With square kernels and equal stride
-        >>> m = nn.qat.Conv2d(16, 33, 3, stride=2)
-        >>> # non-square kernels and unequal stride and with padding
-        >>> m = nn.qat.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
-        >>> # non-square kernels and unequal stride and with padding and dilation
-        >>> m = nn.qat.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
-        >>> input = torch.randn(20, 16, 50, 100)
-        >>> output = m(input)
     """
 
-    __FLOAT_MODULE__
+    __FLOAT_MODULE__ = NNConv2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros',
-                 activation_fake_quant=default_qat_qconfig.activation(),
-                 weight_fake_quant=default_qat_qconfig.weight()):
+                 activation_fake_quant=default_qat_qconfig.activation,
+                 weight_fake_quant=default_qat_qconfig.weight):
         super(Conv2d, self).__init__(in_channels, out_channels, kernel_size,
                                      stride=stride, padding=padding, dilation=dilation,
                                      groups=groups, bias=bias, padding_mode=padding_mode)
-        self.observer = activation_fake_quant
-        self.weight_fake_quant = weight_fake_quant
+        self.observer = activation_fake_quant()
+        self.weight_fake_quant = weight_fake_quant()
 
     def forward(self, input):
-        return self.observer(conv2d_forward(input, self.padding_mode, self.padding,
-                             self.weight_fake_quant(self.weight), self.bias,
-                             self.stride, self.dilation, self.groups))
+        return self.observer(
+            self.conv2d_forward(input, self.weight_fake_quant(self.weight)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -67,8 +54,8 @@ class Conv2d(NNConv2d):
                        stride=mod.stride, padding=mod.padding, dilation=mod.dilation,
                        groups=mod.groups, bias=mod.bias is not None,
                        padding_mode=mod.padding_mode,
-                       activation_fake_quant=qconfig.activation(),
-                       weight_fake_quant=qconfig.weight())
+                       activation_fake_quant=qconfig.activation,
+                       weight_fake_quant=qconfig.weight)
         qat_conv.weight = mod.weight
         qat_conv.bias = mod.bias
         return qat_conv
