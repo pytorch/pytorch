@@ -3653,8 +3653,8 @@
 
 - func: masked_select(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_masked_select_out
-    CUDA: legacy::cuda::_th_masked_select_out
+    CPU: masked_select_out_cpu
+    CUDA: masked_select_out_cuda
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function

@@ -4947,7 +4947,7 @@ class _TestTorchMixin(object):
                   (3, 0), (0, 3, 3), (3, 3, 0, 0),  # no numel matrices
                   (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
                   (1, 3), (5, 1, 3), (7, 5, 1, 3),  # very thin matrices
-                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions 
+                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions
         for s, d in product(shapes, diagonals):
             run_test(s, cast, d)
 
@@ -8112,16 +8112,21 @@ class _TestTorchMixin(object):
             self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
     def test_masked_select(self):
-        for dtype in [torch.uint8, torch.bool]:
-            num_src = 10
-            src = torch.randn(num_src)
-            mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().to(dtype)
-            dst = src.masked_select(mask)
-            dst2 = []
-            for i in range(num_src):
-                if mask[i]:
-                    dst2 += [src[i]]
-            self.assertEqual(dst, torch.Tensor(dst2), 0)
+        for device in torch.testing.get_all_device_types():
+            for dtype in [torch.uint8, torch.bool]:
+                num_src = 10
+                src = torch.randn(num_src, device=device)
+                mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(dtype)
+                dst = src.masked_select(mask)
+                dst2 = []
+                for i in range(num_src):
+                    if mask[i]:
+                        dst2 += [src[i]]
+                self.assertEqual(dst, torch.tensor(dst2), 0)
+
+                dst3 = torch.empty_like(src, device=device)
+                torch.masked_select(src, mask, out=dst3)
+                self.assertEqual(dst3, torch.Tensor(dst2), 0)
 
     def test_masked_fill(self):
         for dtype in [torch.uint8, torch.bool]:
