@@ -142,7 +142,10 @@ void registerOperator(Operator&& op) {
     }
     if (aliasAnalysisHasSpecialCaseFor(s) &&
         op.aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA) {
-      AT_ERROR("The operator ", op.schema().name(), " is special cased and cannot use explicit alias analysis.");
+      AT_ERROR(
+          "The operator ",
+          op.schema().name(),
+          " is special cased and cannot use explicit alias analysis.");
     }
   }
   getRegistry().registerOperator(std::move(op));

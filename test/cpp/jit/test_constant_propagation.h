@@ -20,7 +20,7 @@ inline c10::OperatorOptions _aliasAnalysisFromSchema() {
   result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
   return result;
 }
-}
+} // namespace
 
 void testConstantPropagation() {
   {
@@ -85,7 +85,8 @@ graph():
                         tup, TupleType::create({ListType::ofFloats()})));
                 return 0;
               };
-            }, _aliasAnalysisFromSchema()),
+            },
+            _aliasAnalysisFromSchema()),
         Operator(
             "prim::run_float_list(float[] a) -> (int)",
             [](const Node* node) {
@@ -94,7 +95,8 @@ graph():
                 push(stack, 1);
                 return 0;
               };
-            }, _aliasAnalysisFromSchema()),
+            },
+            _aliasAnalysisFromSchema()),
     });
     auto graph = std::make_shared<Graph>();
     script::parseIR(

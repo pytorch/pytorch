@@ -54,7 +54,7 @@ c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
   options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
   return options;
 }
-}
+} // namespace
 
 // for debugging it is helpful to be able to force autodiff subgraphs
 // to be created, to check their correctness, even when the
@@ -437,10 +437,12 @@ Gradient getGradient(const Node* n) {
 }
 } // anonymous namespace
 
-RegisterOperators reg_graph_executor_ops(
-    {Operator(prim::DifferentiableGraph, [](const Node* n) -> Operation {
+RegisterOperators reg_graph_executor_ops({Operator(
+    prim::DifferentiableGraph,
+    [](const Node* n) -> Operation {
       return DifferentiableGraphOp(getGradient(n));
-    }, aliasAnalysisInternalSpecialCase())});
+    },
+    aliasAnalysisInternalSpecialCase())});
 
 namespace detail {
 

@@ -78,7 +78,10 @@ c10::OperatorOptions aliasAnalysisIsSpecialCase() {
   return options;
 }
 
-RegisterOperators reg({Operator(prim::PythonOp, createPythonOperation, aliasAnalysisIsSpecialCase())});
+RegisterOperators reg({Operator(
+    prim::PythonOp,
+    createPythonOperation,
+    aliasAnalysisIsSpecialCase())});
 
 } // namespace
 } // namespace jit

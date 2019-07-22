@@ -574,8 +574,8 @@ RegisterOperators reg(
            pop(stack, a);
            push(stack, a.is_cuda());
            return 0;
-        },
-        aliasAnalysisFromSchema()),
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack& stack) {
@@ -1112,7 +1112,10 @@ RegisterOperators reg(
      // This op can be removed in preprocessing before being run in the
      // interpreter (but is currently not removed), even when it is removed it
      // needs to remain a registered op so that constant prop can run.
-     Operator("prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)", noop, aliasAnalysisFromSchema()),
+     Operator(
+         "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
+         noop,
+         aliasAnalysisFromSchema()),
      Operator(
          prim::fork,
          [](const Node* node) {
@@ -1181,18 +1184,20 @@ RegisterOperators reg(
            };
          },
          aliasAnalysisSpecialCase()),
-     Operator(prim::SetAttr, [](const Node* node) {
-       const auto type = node->inputs().at(0)->type()->expect<ClassType>();
-       const auto& field = node->s(attr::name);
-       const auto slot = type->getAttributeSlot(field);
-       return [slot](Stack& stack) {
-         auto v = pop(stack);
-         auto userObj = pop(stack).toObject();
-         userObj->setSlot(slot, std::move(v));
-         return 0;
-       };
-     },
-     aliasAnalysisSpecialCase())});
+     Operator(
+         prim::SetAttr,
+         [](const Node* node) {
+           const auto type = node->inputs().at(0)->type()->expect<ClassType>();
+           const auto& field = node->s(attr::name);
+           const auto slot = type->getAttributeSlot(field);
+           return [slot](Stack& stack) {
+             auto v = pop(stack);
+             auto userObj = pop(stack).toObject();
+             userObj->setSlot(slot, std::move(v));
+             return 0;
+           };
+         },
+         aliasAnalysisSpecialCase())});
 
 RegisterOperators logging_operators(
     {Operator(
@@ -1217,24 +1222,27 @@ RegisterOperators logging_operators(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     Operator("prim::TimePoint() -> int", [](Stack& stack) {
-       auto schema = parseSchema("prim::TimePoint() -> int");
-       Node* node = nullptr;
-       // TODO: remove this custom tracing code once the custom op bugfix lands
-       if (jit::tracer::isTracing()) {
-         const auto& graph = tracer::getTracingState()->graph;
-         Node* node = graph->create(prim::TimePoint, /*num_outputs=*/0);
-         tracer::recordSourceLocation(node);
-         graph->insertNode(node);
-       }
-       auto output = autograd::profiler::getTime();
-       push(stack, output);
-       if (jit::tracer::isTracing()) {
-         jit::tracer::addOutput(node, output);
-       }
-       return 0;
-     },
-     aliasAnalysisFromSchema())});
+     Operator(
+         "prim::TimePoint() -> int",
+         [](Stack& stack) {
+           auto schema = parseSchema("prim::TimePoint() -> int");
+           Node* node = nullptr;
+           // TODO: remove this custom tracing code once the custom op bugfix
+           // lands
+           if (jit::tracer::isTracing()) {
+             const auto& graph = tracer::getTracingState()->graph;
+             Node* node = graph->create(prim::TimePoint, /*num_outputs=*/0);
+             tracer::recordSourceLocation(node);
+             graph->insertNode(node);
+           }
+           auto output = autograd::profiler::getTime();
+           push(stack, output);
+           if (jit::tracer::isTracing()) {
+             jit::tracer::addOutput(node, output);
+           }
+           return 0;
+         },
+         aliasAnalysisFromSchema())});
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
@@ -1248,7 +1256,8 @@ RegisterOperators logging_operators(
       },                                                                       \
       aliasAnalysisFromSchema()),                                              \
       Operator(                                                                \
-          #aten_op "(float a, float b) -> " #float_result, [](Stack& stack) {  \
+          #aten_op "(float a, float b) -> " #float_result,                     \
+          [](Stack& stack) {                                                   \
             double a, b;                                                       \
             pop(stack, a, b);                                                  \
             push(stack, float_op);                                             \
@@ -1256,43 +1265,49 @@ RegisterOperators logging_operators(
           },                                                                   \
           aliasAnalysisFromSchema())
 
-#define DEFINE_INT_FLOAT_OP(aten_op, op, result)                           \
-  Operator(                                                                \
-      #aten_op "(int a, float b) -> " #result,                             \
-      [](Stack& stack) {                                                   \
-        int64_t a;                                                         \
-        double b;                                                          \
-        pop(stack, a, b);                                                  \
-        push(stack, op);                                                   \
-        return 0;                                                          \
-      },                                                                   \
-      aliasAnalysisFromSchema()),                                          \
-      Operator(#aten_op "(float a, int b) -> " #result, [](Stack& stack) { \
-        double a;                                                          \
-        int64_t b;                                                         \
-        pop(stack, a, b);                                                  \
-        push(stack, op);                                                   \
-        return 0;                                                          \
-      },                                                                   \
+#define DEFINE_INT_FLOAT_OP(aten_op, op, result)   \
+  Operator(                                        \
+      #aten_op "(int a, float b) -> " #result,     \
+      [](Stack& stack) {                           \
+        int64_t a;                                 \
+        double b;                                  \
+        pop(stack, a, b);                          \
+        push(stack, op);                           \
+        return 0;                                  \
+      },                                           \
+      aliasAnalysisFromSchema()),                  \
+      Operator(                                    \
+          #aten_op "(float a, int b) -> " #result, \
+          [](Stack& stack) {                       \
+            double a;                              \
+            int64_t b;                             \
+            pop(stack, a, b);                      \
+            push(stack, op);                       \
+            return 0;                              \
+          },                                       \
+          aliasAnalysisFromSchema())
+
+#define DEFINE_INT_OP(aten_op, op)                          \
+  Operator(                                                 \
+      #aten_op "(int a, int b) -> int",                     \
+      [](Stack& stack) {                                    \
+        int64_t a, b;                                       \
+        pop(stack, a, b);                                   \
+        push(stack, op); /* NOLINT(hicpp-signed-bitwise) */ \
+        return 0;                                           \
+      },                                                    \
       aliasAnalysisFromSchema())
 
-#define DEFINE_INT_OP(aten_op, op)                              \
-  Operator(#aten_op "(int a, int b) -> int", [](Stack& stack) { \
-    int64_t a, b;                                               \
-    pop(stack, a, b);                                           \
-    push(stack, op); /* NOLINT(hicpp-signed-bitwise) */         \
-    return 0;                                                   \
-  },                                                            \
-  aliasAnalysisFromSchema())
-
-#define DEFINE_STR_CMP_OP(aten_op, op)                           \
-  Operator(#aten_op "(str a, str b) -> bool", [](Stack& stack) { \
-    auto b = pop(stack).toStringRef();                           \
-    auto a = pop(stack).toStringRef();                           \
-    push(stack, op);                                             \
-    return 0;                                                    \
-  },                                                             \
-  aliasAnalysisFromSchema())
+#define DEFINE_STR_CMP_OP(aten_op, op)     \
+  Operator(                                \
+      #aten_op "(str a, str b) -> bool",   \
+      [](Stack& stack) {                   \
+        auto b = pop(stack).toStringRef(); \
+        auto a = pop(stack).toStringRef(); \
+        push(stack, op);                   \
+        return 0;                          \
+      },                                   \
+      aliasAnalysisFromSchema())
 
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
@@ -1306,36 +1321,42 @@ RegisterOperators logging_operators(
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
       DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
 
-#define DEFINE_UNARY_INT_OP(aten_op, op, result)              \
-  Operator(#aten_op "(int a) -> " #result, [](Stack& stack) { \
-    int64_t a;                                                \
-    pop(stack, a);                                            \
-    push(stack, op);                                          \
-    return 0;                                                 \
-  },                                                          \
-  aliasAnalysisFromSchema())
+#define DEFINE_UNARY_INT_OP(aten_op, op, result) \
+  Operator(                                      \
+      #aten_op "(int a) -> " #result,            \
+      [](Stack& stack) {                         \
+        int64_t a;                               \
+        pop(stack, a);                           \
+        push(stack, op);                         \
+        return 0;                                \
+      },                                         \
+      aliasAnalysisFromSchema())
 
-#define DEFINE_UNARY_FLOAT_OP(aten_op, op, result)              \
-  Operator(#aten_op "(float a) -> " #result, [](Stack& stack) { \
-    double a;                                                   \
-    pop(stack, a);                                              \
-    push(stack, op);                                            \
-    return 0;                                                   \
-  },                                                            \
-  aliasAnalysisFromSchema())
+#define DEFINE_UNARY_FLOAT_OP(aten_op, op, result) \
+  Operator(                                        \
+      #aten_op "(float a) -> " #result,            \
+      [](Stack& stack) {                           \
+        double a;                                  \
+        pop(stack, a);                             \
+        push(stack, op);                           \
+        return 0;                                  \
+      },                                           \
+      aliasAnalysisFromSchema())
 
 #define DEFINE_UNARY_OP(aten_op, op, int_result, float_result) \
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                \
       DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result)
 
-#define DEFINE_BOOL_OP(aten_op, op)                                \
-  Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
-    bool a, b;                                                     \
-    pop(stack, a, b);                                              \
-    push(stack, op);                                               \
-    return 0;                                                      \
-  },                                                               \
-  aliasAnalysisFromSchema())
+#define DEFINE_BOOL_OP(aten_op, op)        \
+  Operator(                                \
+      #aten_op "(bool a, bool b) -> bool", \
+      [](Stack& stack) {                   \
+        bool a, b;                         \
+        pop(stack, a, b);                  \
+        push(stack, op);                   \
+        return 0;                          \
+      },                                   \
+      aliasAnalysisFromSchema())
 
 // Equivalent to list.at(idx)
 template <typename T>
@@ -1958,14 +1979,16 @@ int hashValue(Stack& stack) {
 
 RegisterOperators reg2({
 
-#define DEFINE_STRING_OP(op_name, string_op, result)                \
-  Operator(#op_name "(str a, str b) ->" #result, [](Stack& stack) { \
-    auto b = pop(stack).toStringRef();                              \
-    auto a = pop(stack).toStringRef();                              \
-    push(stack, string_op);                                         \
-    return 0;                                                       \
-  },                                                                \
-  aliasAnalysisFromSchema())
+#define DEFINE_STRING_OP(op_name, string_op, result) \
+  Operator(                                          \
+      #op_name "(str a, str b) ->" #result,          \
+      [](Stack& stack) {                             \
+        auto b = pop(stack).toStringRef();           \
+        auto a = pop(stack).toStringRef();           \
+        push(stack, string_op);                      \
+        return 0;                                    \
+      },                                             \
+      aliasAnalysisFromSchema())
 
     DEFINE_STRING_OP(aten::eq, a == b, bool),
     DEFINE_STRING_OP(aten::ne, a != b, bool),
@@ -2015,46 +2038,57 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
 // Mutable ops for lists containing mutable types.
-#define CREATE_MUTABLE_LIST_OPS(decl_type, value_type)                              \
-  Operator(                                                                         \
-      "aten::select(" decl_type "[](a) list, int idx) -> " decl_type "(*)",         \
-      listSelect<value_type>, aliasAnalysisFromSchema()),                           \
-  Operator(                                                                         \
-      "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type "(*)",    \
-      listSelect<value_type>, aliasAnalysisFromSchema()),                           \
-      Operator(                                                                     \
-          "aten::append( " decl_type "[](a!) self, " decl_type                      \
-          "(c -> *) el) -> " decl_type "[](a!)",                                    \
-          listAppend<value_type>, aliasAnalysisFromSchema()),                       \
-      Operator(                                                                     \
-          "aten::reverse( " decl_type "[](a!) self) -> ()",                         \
-          listReverse<value_type>, aliasAnalysisFromSchema()),                      \
-      Operator(                                                                     \
-          "aten::extend(" decl_type "[](a!) self, " decl_type                       \
-          " [] other) -> ()",                                                       \
-          listExtend<value_type>, aliasAnalysisFromSchema()),                       \
-      Operator(                                                                     \
-          "aten::copy(" decl_type                                                   \
-          "[](a) self)"                                                             \
-          " -> " decl_type "[]",                                                    \
-          listCopy<value_type>, aliasAnalysisFromSchema()),                         \
-      Operator(                                                                     \
-          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type              \
-          "(b -> *) el) -> " decl_type "[](a!)",                                    \
-          listSetItem<value_type>, aliasAnalysisFromSchema()),                      \
-      Operator(                                                                     \
-          "aten::clear( " decl_type "[](a!) self) -> ()",                           \
-          listClear<value_type>, aliasAnalysisFromSchema()),                        \
-      Operator(                                                                     \
-          "aten::insert( " decl_type                                                \
+#define CREATE_MUTABLE_LIST_OPS(decl_type, value_type)                        \
+  Operator(                                                                   \
+      "aten::select(" decl_type "[](a) list, int idx) -> " decl_type "(*)",   \
+      listSelect<value_type>,                                                 \
+      aliasAnalysisFromSchema()),                                             \
+      Operator(                                                               \
+          "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type \
+          "(*)",                                                              \
+          listSelect<value_type>,                                             \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::append( " decl_type "[](a!) self, " decl_type                \
+          "(c -> *) el) -> " decl_type "[](a!)",                              \
+          listAppend<value_type>,                                             \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::reverse( " decl_type "[](a!) self) -> ()",                   \
+          listReverse<value_type>,                                            \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::extend(" decl_type "[](a!) self, " decl_type                 \
+          " [] other) -> ()",                                                 \
+          listExtend<value_type>,                                             \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::copy(" decl_type                                             \
+          "[](a) self)"                                                       \
+          " -> " decl_type "[]",                                              \
+          listCopy<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type        \
+          "(b -> *) el) -> " decl_type "[](a!)",                              \
+          listSetItem<value_type>,                                            \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::clear( " decl_type "[](a!) self) -> ()",                     \
+          listClear<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::insert( " decl_type                                          \
           "[](a!) self, int idx,                                                    \
-          " decl_type "(b -> *) el) -> ()",                                         \
-          listInsert<value_type>, aliasAnalysisFromSchema()),                       \
-      Operator(                                                                     \
-          "aten::pop(" decl_type                                                    \
+          " decl_type "(b -> *) el) -> ()",                                   \
+          listInsert<value_type>,                                             \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::pop(" decl_type                                              \
           "[](a!) self, int idx=-1)                                                 \
-        -> " decl_type "(*)",                                                       \
-          listPop<value_type>, aliasAnalysisFromSchema())
+        -> " decl_type "(*)",                                                 \
+          listPop<value_type>,                                                \
+          aliasAnalysisFromSchema())
 
     CREATE_MUTABLE_LIST_OPS("Tensor", at::Tensor),
 
@@ -2072,61 +2106,74 @@ RegisterOperators reg2({
         aliasAnalysisFromSchema()),
 
 // Mutable ops for lists containing immutable types.
-#define CREATE_IMMUTABLE_LIST_OPS(decl_type, value_type)                          \
-  Operator(                                                                       \
-      "aten::select(" decl_type "[] a, int b) -> " decl_type,                     \
-      listSelect<value_type>, aliasAnalysisFromSchema()),                         \
-  Operator(                                                                       \
-      "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type,        \
-      listSelect<value_type>, aliasAnalysisFromSchema()),                         \
-      Operator(                                                                   \
-          "aten::append(" decl_type "[](a!) self, " decl_type                     \
-          " el) -> " decl_type "[](a!)",                                          \
-          listAppend<value_type>, aliasAnalysisFromSchema()),                     \
-      Operator(                                                                   \
-          "aten::reverse(" decl_type "[](a!) self) -> ()",                        \
-          listReverse<value_type>, aliasAnalysisFromSchema()),                    \
-      Operator(                                                                   \
-          "aten::extend(" decl_type "[](a!) self, " decl_type                     \
-          " [] other) -> ()",                                                     \
-          listExtend<value_type>, aliasAnalysisFromSchema()),                     \
-      Operator(                                                                   \
-          "aten::copy(" decl_type                                                 \
-          "[](a) self)"                                                           \
-          " -> " decl_type "[]",                                                  \
-          listCopy<value_type>, aliasAnalysisFromSchema()),                       \
-      Operator(                                                                   \
-          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type            \
-          " el) -> " decl_type "[](a!)",                                          \
-          listSetItem<value_type>, aliasAnalysisFromSchema()),                    \
-      Operator(                                                                   \
-          "aten::clear( " decl_type "[](a!) self) -> ()",                         \
-          listClear<value_type>, aliasAnalysisFromSchema()),                      \
-      Operator(                                                                   \
-          "aten::insert( " decl_type                                              \
+#define CREATE_IMMUTABLE_LIST_OPS(decl_type, value_type)                       \
+  Operator(                                                                    \
+      "aten::select(" decl_type "[] a, int b) -> " decl_type,                  \
+      listSelect<value_type>,                                                  \
+      aliasAnalysisFromSchema()),                                              \
+      Operator(                                                                \
+          "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type, \
+          listSelect<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::append(" decl_type "[](a!) self, " decl_type                  \
+          " el) -> " decl_type "[](a!)",                                       \
+          listAppend<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",                     \
+          listReverse<value_type>,                                             \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::extend(" decl_type "[](a!) self, " decl_type                  \
+          " [] other) -> ()",                                                  \
+          listExtend<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::copy(" decl_type                                              \
+          "[](a) self)"                                                        \
+          " -> " decl_type "[]",                                               \
+          listCopy<value_type>,                                                \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type         \
+          " el) -> " decl_type "[](a!)",                                       \
+          listSetItem<value_type>,                                             \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::clear( " decl_type "[](a!) self) -> ()",                      \
+          listClear<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::insert( " decl_type                                           \
           "[](a!) self, int idx,                                                  \
-          " decl_type " el) -> ()",                                               \
-          listInsert<value_type>, aliasAnalysisFromSchema()),                     \
-      Operator(                                                                   \
-          "aten::remove(" decl_type                                               \
+          " decl_type " el) -> ()",                                            \
+          listInsert<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::remove(" decl_type                                            \
           "[](a!) self,                                                           \
-          " decl_type " el) -> ()",                                               \
-          listRemove<value_type>, aliasAnalysisFromSchema()),                     \
-      Operator(                                                                   \
-          "aten::index(" decl_type                                                \
+          " decl_type " el) -> ()",                                            \
+          listRemove<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::index(" decl_type                                             \
           "[] self,                                                               \
-          " decl_type " el) -> int",                                              \
-          listIndex<value_type>, aliasAnalysisFromSchema()),                      \
-      Operator(                                                                   \
-          "aten::count(" decl_type                                                \
+          " decl_type " el) -> int",                                           \
+          listIndex<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::count(" decl_type                                             \
           "[] self,                                                               \
-          " decl_type " el) -> int",                                              \
-          listCount<value_type>, aliasAnalysisFromSchema()),                      \
-      Operator(                                                                   \
-          "aten::pop(" decl_type                                                  \
+          " decl_type " el) -> int",                                           \
+          listCount<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::pop(" decl_type                                               \
           "[](a!) self, int idx=-1)                                               \
-          -> " decl_type,                                                         \
-          listPop<value_type>, aliasAnalysisFromSchema())
+          -> " decl_type,                                                      \
+          listPop<value_type>,                                                 \
+          aliasAnalysisFromSchema())
 
     CREATE_IMMUTABLE_LIST_OPS("int", int64_t),
     CREATE_IMMUTABLE_LIST_OPS("float", double),
@@ -2139,16 +2186,18 @@ RegisterOperators reg2({
 #undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-  Operator("aten::len(" decl_type "[] a) -> int", listLen<c_type::value_type>,      \
-  aliasAnalysisFromSchema()),                                                       \
+  Operator(                                                                         \
+      "aten::len(" decl_type "[] a) -> int",                                        \
+      listLen<c_type::value_type>,                                                  \
+      aliasAnalysisFromSchema()),                                                   \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \
           listAdd<c_type::value_type>,                                              \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
-          "aten::add_(" decl_type "[](a!) self, " decl_type "[] b) -> " decl_type   \
-          "[]",                                                                     \
+          "aten::add_(" decl_type "[](a!) self, " decl_type                         \
+          "[] b) -> " decl_type "[]",                                               \
           listInplaceAdd<c_type::value_type>,                                       \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
@@ -2157,7 +2206,8 @@ RegisterOperators reg2({
           "[]",                                                                     \
           listSlice<c_type::value_type>,                                            \
           aliasAnalysisFromSchema()),                                               \
-      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]",                  \
+      Operator(                                                                     \
+          "aten::list(" decl_type "[] l) -> " decl_type "[]",                       \
           listList<c_type::value_type>,                                             \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
@@ -2175,33 +2225,71 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("Tensor", c10::List<at::Tensor>),
     CREATE_LIST_OPS("t", c10::List<IValue>),
 #undef CREATE_LIST_OPS
-    Operator("aten::sort(int[](a!) self) -> ()", listSort<int64_t>, aliasAnalysisFromSchema()),
-    Operator("aten::sort(float[](a!) self) -> ()", listSort<double>, aliasAnalysisFromSchema()),
-    Operator("aten::sort(Tensor[](a!) self) -> ()", listSort<at::Tensor>, aliasAnalysisFromSchema()),
-    Operator("aten::sort(bool[](a!) self) -> ()", listSort<bool>, aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sort(int[](a!) self) -> ()",
+        listSort<int64_t>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sort(float[](a!) self) -> ()",
+        listSort<double>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sort(Tensor[](a!) self) -> ()",
+        listSort<at::Tensor>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sort(bool[](a!) self) -> ()",
+        listSort<bool>,
+        aliasAnalysisFromSchema()),
 
-    Operator("aten::eq(int[] a, int[] b) -> bool", listEq<int64_t>, aliasAnalysisFromSchema()),
-    Operator("aten::eq(float[] a, float[] b) -> bool", listEq<double>, aliasAnalysisFromSchema()),
-    Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<at::Tensor>, aliasAnalysisFromSchema()),
-    Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<bool>, aliasAnalysisFromSchema()),
-    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<int64_t>, aliasAnalysisFromSchema()),
-    Operator("aten::ne(float[] a, float[] b) -> bool", listNe<double>, aliasAnalysisFromSchema()),
-    Operator("aten::ne(Tensor[] a, Tensor[] b) -> bool", listNe<at::Tensor>, aliasAnalysisFromSchema()),
-    Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<bool>, aliasAnalysisFromSchema()),
+    Operator(
+        "aten::eq(int[] a, int[] b) -> bool",
+        listEq<int64_t>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::eq(float[] a, float[] b) -> bool",
+        listEq<double>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::eq(Tensor[] a, Tensor[] b) -> bool",
+        listEq<at::Tensor>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::eq(bool[] a, bool[] b) -> bool",
+        listEq<bool>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne(int[] a, int[] b) -> bool",
+        listNe<int64_t>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne(float[] a, float[] b) -> bool",
+        listNe<double>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne(Tensor[] a, Tensor[] b) -> bool",
+        listNe<at::Tensor>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne(bool[] a, bool[] b) -> bool",
+        listNe<bool>,
+        aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
-  Operator(#op_name "(int i) -> str", [](Stack& stack) { \
-    auto i = pop(stack).toInt();                         \
-    std::stringstream ss;                                \
-    if (i < 0) {                                         \
-      ss << "-";                                         \
-      i = -i;                                            \
-    }                                                    \
-    ss << "0" << prefix << char_op << i;                 \
-    push(stack, ss.str());                               \
-    return 0;                                            \
-  },                                                     \
-  aliasAnalysisFromSchema())
+  Operator(                                              \
+      #op_name "(int i) -> str",                         \
+      [](Stack& stack) {                                 \
+        auto i = pop(stack).toInt();                     \
+        std::stringstream ss;                            \
+        if (i < 0) {                                     \
+          ss << "-";                                     \
+          i = -i;                                        \
+        }                                                \
+        ss << "0" << prefix << char_op << i;             \
+        push(stack, ss.str());                           \
+        return 0;                                        \
+      },                                                 \
+      aliasAnalysisFromSchema())
 
     DEFINE_CONVERT_BASE_OP(aten::hex, "x", std::hex),
     DEFINE_CONVERT_BASE_OP(aten::oct, "o", std::oct),
@@ -2235,8 +2323,8 @@ RegisterOperators reg2({
           char c = string.at(index);
           push(stack, std::string(&c, 1));
           return 0;
-      },
-      aliasAnalysisFromSchema()),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::ord(str string) -> int",
         [](Stack& stack) {
@@ -2305,7 +2393,8 @@ RegisterOperators reg2({
           }
           push(stack, min_element);
           return 0;
-        }, aliasAnalysisFromSchema()),
+        },
+        aliasAnalysisFromSchema()),
 
     // Pass in two ops for handling int and float separately as % in C++ only
     // works for int The modulus calculation is different between C++ and Python
@@ -2543,14 +2632,17 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
 #define CREATE_DICT_OPS(key_type)                                             \
-  Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen,           \
-        aliasAnalysisFromSchema()),                                           \
+  Operator(                                                                   \
+      "aten::len(Dict(" key_type ", t) self) -> int",                         \
+      dictLen,                                                                \
+      aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
           "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",      \
           dictKeys,                                                           \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues,   \
+          "aten::values(Dict(" key_type ", t) self) -> t[](*)",               \
+          dictValues,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::__getitem__(Dict(" key_type ", t) self, " key_type           \
@@ -2587,7 +2679,8 @@ RegisterOperators reg2({
           dictPopItem,                                                        \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::clear(Dict(" key_type ", t)(a!) self) -> ()", dictClear,     \
+          "aten::clear(Dict(" key_type ", t)(a!) self) -> ()",                \
+          dictClear,                                                          \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::update(Dict(" key_type ", t)(a!) self, Dict(" key_type       \
@@ -2654,31 +2747,40 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
-#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                              \
-    Operator(                                                               \
-        "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",      \
-        [](Stack& stack) {                                                  \
-          type_a a;                                                         \
-          type_b b;                                                         \
-          pop(stack, a, b);                                                 \
-          if (b == 0) {                                                     \
-            throw std::runtime_error("ZeroDivisionError: float divmod()");  \
-          }                                                                 \
-          double quot = floor(a / b);                                       \
-          double rem = a - (quot * b);                                      \
-          push(stack, quot, rem);                                           \
-          return 0;                                                         \
-        },                                                                  \
-        aliasAnalysisFromSchema())
+#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                           \
+  Operator(                                                              \
+      "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",     \
+      [](Stack& stack) {                                                 \
+        type_a a;                                                        \
+        type_b b;                                                        \
+        pop(stack, a, b);                                                \
+        if (b == 0) {                                                    \
+          throw std::runtime_error("ZeroDivisionError: float divmod()"); \
+        }                                                                \
+        double quot = floor(a / b);                                      \
+        double rem = a - (quot * b);                                     \
+        push(stack, quot, rem);                                          \
+        return 0;                                                        \
+      },                                                                 \
+      aliasAnalysisFromSchema())
 
     DEFINE_DIVMOD_MIXED_OP(int, float),
     DEFINE_DIVMOD_MIXED_OP(float, int),
 
 #undef DEFINE_DIVMOD_MIXED_OP
 
-    Operator("aten::hash(str t) -> int", hashValue<std::string>, aliasAnalysisFromSchema()),
-    Operator("aten::hash(int t) -> int", hashValue<int>, aliasAnalysisFromSchema()),
-    Operator("aten::hash(float t) -> int", hashValue<double>, aliasAnalysisFromSchema()),
+    Operator(
+        "aten::hash(str t) -> int",
+        hashValue<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::hash(int t) -> int",
+        hashValue<int>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::hash(float t) -> int",
+        hashValue<double>,
+        aliasAnalysisFromSchema()),
 });
 
 bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {

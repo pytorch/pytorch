@@ -183,10 +183,10 @@ public:
   }
   bool is_mutable() const {
     return std::any_of(
-            arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-              const auto& aliasInfo = arg.alias_info();
-              return aliasInfo && aliasInfo.value().isWrite();
-            });
+        arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+          const auto& aliasInfo = arg.alias_info();
+          return aliasInfo && aliasInfo.value().isWrite();
+        });
   }
 
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
