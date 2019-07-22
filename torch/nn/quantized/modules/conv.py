@@ -54,11 +54,11 @@ class Conv2d(_ConvNd):
 
     @property
     def weight(self):
-        return self._packed_weight
+        return torch.ops.quantized.fbgemm_conv_unpack(self._packed_weight).permute([0, 3, 1, 2])
 
     @weight.setter
     def weight(self, w):
-        self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(w, self.groups)
+        self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(w.permute([0, 2, 3, 1]), self.groups)
 
     def forward(self, input):
         return qF.conv2d(input=input.permute([0, 2, 3, 1]).contiguous(),
