@@ -136,20 +136,17 @@ template <typename scalar_t, typename F>
 __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * x1, const scalar_t * x2, const scalar_t * dist, int64_t gs,
                                                        const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t count, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
   const int y = blockIdx.y * blockDim.y + threadIdx.y;
+  if (y >= count) {
+    return;
+  }
   const int l = y / r_size;
   const int k = y % r_size;
   const int init = blockIdx.x * blockDim.x + threadIdx.x;
   const int stride = blockDim.x * gridDim.x;
   const int l_size = r_size * m;
 
-  if (y >= count) {
-    return;
-  }
-
   int64_t i = k / r2;
   int64_t j = k % r2;
-
-  printf("----> CDIST: y = %d l = %d k = %d init = %d stride = %d l_size = %d i = %lld j = %lld gs = %lld\n", y, l, k, init, stride, l_size, i, j, gs);
 
   const scalar_t grad_k = grad[y * gs];
   const scalar_t dist_k = dist[y];
@@ -163,6 +160,9 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 
   for (; self_i < end; self_i += stride, self_j += stride, buff_i += stride) {
     const scalar_t res = F::backward(*self_i - *self_j, grad_k, dist_k, p);
+
+    printf("CDIST: x = %d y = %d i = %f j = %f grad = %f dist = %f p = %f res = %f\n", init, y, *self_i, *self_j, grad_k, dist_k, p, res);
+
     *buff_i = res;
   }
 }
@@ -343,7 +343,6 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
 
-  //printf("===> CDIST: d = %lld r2 = %lld r1 = %lld m = %lld grid_x = %d grid_y = %d count = %lld p = %f\n", d, r2, r1, m, grid_x, grid_y, count, p);
   Tensor buffer = at::empty({d, r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
