@@ -329,16 +329,18 @@ class Conv2d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias, padding_mode)
 
-    def forward(self, input):
+    def conv2d_forward(self, input, weight):
         if self.padding_mode == 'circular':
             expanded_padding = ((self.padding[1] + 1) // 2, self.padding[1] // 2,
                                 (self.padding[0] + 1) // 2, self.padding[0] // 2)
             return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
-                            self.weight, self.bias, self.stride,
+                            weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
-        return F.conv2d(input, self.weight, self.bias, self.stride,
+        return F.conv2d(input, weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
+    def forward(self, input):
+        return self.conv2d_forward(input, self.weight)
 
 class Conv3d(_ConvNd):
     r"""Applies a 3D convolution over an input signal composed of several input
