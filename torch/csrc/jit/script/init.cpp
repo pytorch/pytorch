@@ -365,7 +365,6 @@ void initJitScriptBindings(PyObject* module) {
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
-      .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
           [](Module& m,
@@ -578,7 +577,6 @@ void initJitScriptBindings(PyObject* module) {
             auto& fn = self->get_function(QualifiedName(name));
             return StrongFunctionPtr(std::move(self), &fn);
           })
-      .def("set_optimized", &CompilationUnit::set_optimized)
       .def(
           "define",
           [](CompilationUnit& cu,
@@ -919,6 +917,12 @@ void initJitScriptBindings(PyObject* module) {
       "_logging_set_logger",
       [](logging::LoggerBase* logger) { return logging::setLogger(logger); },
       py::return_value_policy::reference);
+  m.def("set_graph_executor_optimize", [](bool optimize) {
+    setGraphExecutorOptimize(optimize);
+  });
+
+  m.def("get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
   py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")

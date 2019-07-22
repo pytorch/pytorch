@@ -68,14 +68,6 @@ struct TORCH_API CompilationUnit {
     TORCH_CHECK(false, "attempted to get undefined function ", name.name());
   }
 
-  void set_optimized(bool o) {
-    optimized_ = o;
-  }
-
-  bool is_optimized() const {
-    return optimized_;
-  }
-
   // for historic reasons, these are defined in compiler.cpp
   // Returns the list of Function's just defined.
   std::vector<Function*> define(
@@ -106,7 +98,7 @@ struct TORCH_API CompilationUnit {
       name = c10::QualifiedName(name.prefix(), mangle(name.name()));
     }
     auto fn = torch::make_unique<Function>(
-        std::move(name), is_optimized(), std::move(graph), nullptr);
+        std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));
     return ret;
@@ -228,8 +220,6 @@ struct TORCH_API CompilationUnit {
   // for fast lookup
   std::unordered_map<c10::QualifiedName, size_t> dict_;
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
-  bool optimized_ = true;
-
 
   // [class ownership] Right now there aree two relationships between classes
   // and compilation units:

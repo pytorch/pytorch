@@ -119,16 +119,6 @@ struct TORCH_API Module {
     return *module_object()->type()->qualified_name_obj();
   }
 
-  // note this doesn't change the flags of existing methods just ones
-  // added afterward.
-  void set_optimized(bool o) {
-    class_compilation_unit()->set_optimized(o);
-  }
-
-  bool is_optimized() const {
-    return class_compilation_unit()->is_optimized();
-  }
-
   IValue forward(std::vector<IValue> inputs) {
     return get_method("forward")(std::move(inputs));
   }

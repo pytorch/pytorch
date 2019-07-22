@@ -287,7 +287,7 @@ void ScriptModuleDeserializer::moduleSetState(
 void ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
   script::Module module = moduleLookup_(moduleStack_);
-  module.set_optimized(module_def.optimize());
+  // module.set_optimized(module_def.optimize());
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     moduleStack_.emplace_back(sub_def.name());

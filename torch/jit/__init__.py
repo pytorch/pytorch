@@ -79,6 +79,15 @@ def scope(scope_name):
         if tracing_state:
             tracing_state.pop_scope()
 
+@contextlib.contextmanager
+def optimized_execution(should_optimize):
+    stored_flag = torch._C.get_graph_executor_optimize()
+    torch._C.set_graph_executor_optimize(should_optimize)
+    try:
+        yield
+    finally:
+        torch._C.set_graph_executor_optimize(stored_flag)
+
 
 DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
@@ -499,10 +508,9 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance,
+def _check_trace(check_inputs, func,  traced_func, check_tolerance,
                  force_outplace, is_trace_module, _module_class):
     # Note: tracing is independent of optimizations, which consume the trace
-    executor_options['optimize'] = False
     for inputs in check_inputs:
 
         if isinstance(inputs, torch.Tensor):
@@ -518,7 +526,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 check_trace=False,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
-                **executor_options)
+            )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
             if isinstance(inputs, (torch.Tensor, dict)):
@@ -530,7 +538,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 check_trace=False,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
-                **executor_options)
+            )
             check_mod_func = check_mod
 
         def graph_diagnostic_info():
@@ -666,10 +674,10 @@ def make_tuple(example_inputs):
     return example_inputs
 
 
-def make_module(mod, _module_class, executor_options):
+def make_module(mod, _module_class):
     if _module_class is None:
         _module_class = TopLevelTracedModule
-    return _module_class(mod, **executor_options)
+    return _module_class(mod)
 
 def wrap_check_inputs(check_inputs):
     if check_inputs is None:
@@ -679,7 +687,6 @@ def wrap_check_inputs(check_inputs):
 
 def trace(func,
           example_inputs,
-          optimize=True,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
@@ -712,7 +719,6 @@ def trace(func,
                                  Tensor in which case it is automatically wrapped in a tuple
 
     Keyword arguments:
-        optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
         check_trace (bool, optional): check if the same inputs run through
                                       traced code produce the same outputs. Default: ``True``. You might want
                                       to disable this if, for example, your network contains non-
@@ -768,18 +774,17 @@ def trace(func,
         return func
 
     if isinstance(func, torch.nn.Module):
-        return trace_module(func, {'forward': example_inputs}, optimize,
+        return trace_module(func, {'forward': example_inputs},
                             check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
 
-        return trace_module(func.__self__, {'forward': example_inputs}, optimize,
+        return trace_module(func.__self__, {'forward': example_inputs},
                             check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
 
-    executor_options = {'optimize': bool(optimize)}
     # Special case for common case of passing a single Tensor
     if isinstance(example_inputs, (torch.Tensor, dict)):
         example_inputs = (example_inputs,)
@@ -803,16 +808,15 @@ def trace(func,
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace, False, _module_class)
+            _check_trace(check_inputs, func, traced, check_tolerance, _force_outplace, False, _module_class)
         else:
-            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False, _module_class)
+            _check_trace([example_inputs], func, traced, check_tolerance, _force_outplace, False, _module_class)
 
     return traced
 
 
 def trace_module(mod,
                  inputs,
-                 optimize=True,
                  check_trace=True,
                  check_inputs=None,
                  check_tolerance=1e-5,
@@ -841,7 +845,6 @@ def trace_module(mod,
                                          keys while tracing.
                                          ``{ 'forward' : example_forward_input, 'method2': example_method2_input}``
     Keyword arguments:
-        optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
         check_trace (bool, optional): check if the same inputs run through
                                       traced code produce the same outputs. Default: ``True``. You might want
                                       to disable this if, for example, your network contains non-
@@ -887,7 +890,6 @@ def trace_module(mod,
 
     if not _enabled:
         return mod
-    executor_options = {'optimize': bool(optimize)}
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
 
     if not isinstance(mod, torch.nn.Module):
@@ -896,7 +898,7 @@ def trace_module(mod,
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
-    module = make_module(mod, _module_class, executor_options)
+    module = make_module(mod, _module_class)
 
     for method_name, example_inputs in inputs.items():
         # this is needed since Module.__call__ sets up some extra tracing
@@ -908,19 +910,18 @@ def trace_module(mod,
         # Check the trace against new traces created from user-specified inputs
         if check_trace:
             if check_inputs is not None:
-                _check_trace(check_inputs, func, executor_options, check_trace_method,
+                _check_trace(check_inputs, func, check_trace_method,
                              check_tolerance, _force_outplace, True, _module_class)
             else:
-                _check_trace([inputs], func, executor_options, check_trace_method,
+                _check_trace([inputs], func, check_trace_method,
                              check_tolerance, _force_outplace, True, _module_class)
 
         return module
 
 
 class CompilationUnit(object):
-    def __init__(self, lang=None, optimize=True, _frames_up=0):
+    def __init__(self, lang=None, _frames_up=0):
         self._c = torch._C.CompilationUnit()
-        self._c.set_optimized(optimize)
         if lang is not None:
             self.define(lang, _frames_up=_frames_up + 1)
 
@@ -1061,7 +1062,7 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     _add_script_class(obj, qualified_name)
 
 
-def script(obj, optimize=True, _frames_up=0, _rcb=None):
+def script(obj, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
     if _rcb is None:
@@ -1457,7 +1458,7 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, optimize=True, _qualified_name=None, _compilation_unit=None):
+        def __init__(self, _qualified_name=None, _compilation_unit=None):
             if _qualified_name is None:
                 _qualified_name = type(self).__name__
             if _compilation_unit is None:
@@ -1465,7 +1466,6 @@ if _enabled:
             self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit)
 
             Module.__init__(self)
-            self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
             self._modules = OrderedModuleDict(self._c)
@@ -1705,7 +1705,7 @@ if _enabled:
 
 else:
     class ScriptModule(torch.nn.Module):
-        def __init__(self, optimize=True):
+        def __init__(self):
             super(ScriptModule, self).__init__()
 
 
@@ -1777,9 +1777,9 @@ for name, method in _get_methods(torch.nn.Module):
 class TracedModule(ScriptModule):
     __frozen = False
 
-    def __init__(self, orig, id_set=None, optimize=True):
+    def __init__(self, orig, id_set=None):
         # XXX: orig can be a nn.Module or a function!
-        super(TracedModule, self).__init__(optimize=optimize)
+        super(TracedModule, self).__init__()
         if id_set is None:
             id_set = set()
 
@@ -1809,7 +1809,7 @@ class TracedModule(ScriptModule):
             if isinstance(submodule, ScriptModule):
                 self._modules[name] = submodule
             else:
-                self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
+                self._modules[name] = TracedModule(submodule, id_set)
 
         self._freeze()
 
