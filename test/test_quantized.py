@@ -280,7 +280,7 @@ class TestQuantizedOps(TestCase):
     " well with UBSAN at the moment, so we skip the test if"
     " we are in a UBSAN environment.",
 )
-class TestDynamicQuantizedLinear(unittest.TestCase):
+class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
     @given(
         use_bias=st.booleans(),
@@ -297,9 +297,9 @@ class TestDynamicQuantizedLinear(unittest.TestCase):
         else:
             qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
 
+        X_fp32 = torch.tensor([[100, -150]], dtype=torch.float)
         W_fp32 = torch.tensor([[-150, 100], [100, -150]], dtype=torch.float)
         b_fp32 = torch.tensor([13, -20], dtype=torch.float) if use_bias else None
-        X_fp32 = torch.tensor([[100, -150]], dtype=torch.float)
 
         W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
         W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
@@ -313,7 +313,8 @@ class TestDynamicQuantizedLinear(unittest.TestCase):
         if use_relu:
             Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
 
-        torch.testing.assert_allclose(Y_fp32, Y_fp32_ref, rtol=0.0001, atol=1e-3)
+        self.assertEqual(Y_fp32, Y_fp32_ref,
+                         message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
 
 @unittest.skipIf(
