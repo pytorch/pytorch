@@ -1,6 +1,6 @@
 ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.2"
 graph {
   node {
     input: "0"
@@ -13,8 +13,14 @@ graph {
     output: "2"
     op_type: "ReduceMean"
     attribute {
+      name: "axes"
+      ints: 0
+      ints: 1
+      type: INTS
+    }
+    attribute {
       name: "keepdims"
-      i: 0
+      i: 1
       type: INT
     }
   }
@@ -23,8 +29,14 @@ graph {
     output: "3"
     op_type: "ReduceMean"
     attribute {
+      name: "axes"
+      ints: 0
+      ints: 1
+      type: INTS
+    }
+    attribute {
       name: "keepdims"
-      i: 0
+      i: 1
       type: INT
     }
   }
@@ -46,8 +58,44 @@ graph {
     op_type: "Abs"
   }
   node {
-    input: "6"
     output: "7"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\300@"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "6"
+    input: "7"
+    output: "8"
+    op_type: "Mul"
+  }
+  node {
+    output: "9"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\240@"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "8"
+    input: "9"
+    output: "10"
+    op_type: "Div"
+  }
+  node {
+    input: "10"
+    output: "11"
     op_type: "Sqrt"
   }
   name: "torch-jit-export"
@@ -71,11 +119,20 @@ graph {
     }
   }
   output {
-    name: "7"
+    name: "11"
     type {
       tensor_type {
         elem_type: 1
         shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 4
+          }
         }
       }
     }
