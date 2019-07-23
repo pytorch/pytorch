@@ -254,6 +254,42 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// their keys.
   OrderedDict<std::string, std::shared_ptr<Module>> named_children() const;
 
+  /// Registers a submodule with this `Module`.
+  ///
+  /// Registering a module makes it available to methods such as `modules()`,
+  /// `clone()` or `to()`.
+  ///
+  /// \rst
+  /// .. code-block:: cpp
+  ///
+  ///   MyModule::MyModule() {
+  ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
+  ///   }
+  /// \endrst
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> register_module(
+      std::string name,
+      std::shared_ptr<ModuleType> module);
+
+  /// Registers a submodule with this `Module`.
+  ///
+  /// This method deals with `ModuleHolder`s.
+  ///
+  /// Registering a module makes it available to methods such as `modules()`,
+  /// `clone()` or `to()`.
+  ///
+  /// \rst
+  /// .. code-block:: cpp
+  ///
+  ///   MyModule::MyModule() {
+  ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
+  ///   }
+  /// \endrst
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> register_module(
+      std::string name,
+      ModuleHolder<ModuleType> module_holder);
+
   /// Enables "training" mode.
   virtual void train(bool on = true);
 
@@ -439,42 +475,6 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///   }
   /// \endrst
   Tensor& register_buffer(std::string name, Tensor tensor);
-
-  /// Registers a submodule with this `Module`.
-  ///
-  /// Registering a module makes it available to methods such as `modules()`,
-  /// `clone()` or `to()`.
-  ///
-  /// \rst
-  /// .. code-block:: cpp
-  ///
-  ///   MyModule::MyModule() {
-  ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
-  ///   }
-  /// \endrst
-  template <typename ModuleType>
-  std::shared_ptr<ModuleType> register_module(
-      std::string name,
-      std::shared_ptr<ModuleType> module);
-
-  /// Registers a submodule with this `Module`.
-  ///
-  /// This method deals with `ModuleHolder`s.
-  ///
-  /// Registering a module makes it available to methods such as `modules()`,
-  /// `clone()` or `to()`.
-  ///
-  /// \rst
-  /// .. code-block:: cpp
-  ///
-  ///   MyModule::MyModule() {
-  ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
-  ///   }
-  /// \endrst
-  template <typename ModuleType>
-  std::shared_ptr<ModuleType> register_module(
-      std::string name,
-      ModuleHolder<ModuleType> module_holder);
 
  private:
   // Friend classes.

@@ -77,9 +77,7 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_module;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_module("name.with.dot", torch::nn::Linear(3, 4)),
       "Submodule name must not contain a dot (got 'name.with.dot')");
@@ -89,9 +87,7 @@ TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_module;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_module("linear", torch::nn::Linear(3, 4));
   ASSERT_THROWS_WITH(
