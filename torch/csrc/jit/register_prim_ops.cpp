@@ -997,9 +997,10 @@ RegisterOperators reg(
                return 0;
              };
            } else {
+             TypePtr elementType = lt->getElementType();
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               auto vals = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+               auto vals = c10::impl::GenericList(elementType);
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
