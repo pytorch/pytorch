@@ -224,6 +224,7 @@ def quantize_qat(model, run_fn, run_args, qconfig_dict=None):
 DEFAULT_MODULE_MAPPING = {
     torch.nn.Linear: nnq.Linear,
     torch.nn.ReLU: nnq.ReLU,
+    torch.nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # QAT modules:

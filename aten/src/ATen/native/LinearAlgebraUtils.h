@@ -141,10 +141,10 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
       if (strstr(name, "svd")) {
-        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
+        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
       } else if (strstr(name, "symeig")) {
         AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
-                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.")
+                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
       } else {
         AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
       }
@@ -178,10 +178,10 @@ static inline void singleCheckErrors(int64_t info, const char* name) {
     AT_ERROR(name, ": Argument ", -info, " has illegal value");
   } else if (info > 0) {
     if (strstr(name, "svd")) {
-      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
+      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
     } else if (strstr(name, "symeig")) {
       AT_ERROR(name, ": the algorithm failed to converge; ", info,
-               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.")
+               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
     } else {
       AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
     }
