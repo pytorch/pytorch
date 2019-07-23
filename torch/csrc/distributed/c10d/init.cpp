@@ -463,7 +463,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
             if (ifnameEnv) {
-              for (auto iface : split(',', ifnameEnv)) {
+              for (const auto& iface : split(',', ifnameEnv)) {
                 options.devices.push_back(createDeviceForInterface(iface));
               }
             } else {
