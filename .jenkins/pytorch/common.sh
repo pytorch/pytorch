@@ -25,7 +25,7 @@ SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
 # Figure out which Python to use
 PYTHON="$(which python)"
-if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]] && [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
   PYTHON=$(which "python${BASH_REMATCH[1]}")
 fi
 
