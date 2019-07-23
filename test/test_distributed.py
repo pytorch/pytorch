@@ -1607,6 +1607,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             super(TestDistBackend, self).setUp()
             # We rely on the manager process to delete the temporary file.
             global INIT_METHOD
+            self.temporary_file = None
             if INIT_METHOD.startswith("file://"):
                 self.temporary_file = tempfile.NamedTemporaryFile(delete=False)
                 INIT_METHOD = "file://{}".format(self.temporary_file.name)
@@ -1620,7 +1621,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         def tearDown(self):
             super(TestDistBackend, self).tearDown()
 
-            # Clean up temporary file if we used one
+            # Clean up temporary file if we used one.
             if self.temporary_file:
                 try:
                     os.unlink(self.temporary_file.name)
