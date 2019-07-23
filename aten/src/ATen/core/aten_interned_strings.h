@@ -526,7 +526,6 @@ _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
 _(aten, prod) \
-_(aten, pstrf) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, rand) \

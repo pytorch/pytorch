@@ -115,6 +115,9 @@ class Int8DNNLowpPackedWeightBlobShapeFunctions
   explicit Int8DNNLowpPackedWeightBlobShapeFunctions()
       : ExternalTensorFunctionsBase() {}
   ~Int8DNNLowpPackedWeightBlobShapeFunctions() override {}
+  bool isQuantized() const override {
+    return true;
+  }
   bool IsSameMetaType(TypeIdentifier id) override;
   void SetupExternalTensorDescriptor(
       const Blob* blob,

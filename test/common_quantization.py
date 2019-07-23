@@ -222,7 +222,6 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.fc2(x)
-        # print('after net:', x.shape)
         return self.dequant(x)
 
 

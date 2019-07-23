@@ -22,7 +22,7 @@ def fuse_conv_bn(conv, bn):
         "Conv and BN both must be in the same mode (train or eval)."
 
     if conv.training:
-        fused_conv = torch.nn._intrinsic.modules.ConvBn2d(conv, bn)
+        return torch.nn._intrinsic.ConvBn2d(conv, bn)
     else:
         fused_conv = copy.deepcopy(conv)
 
@@ -43,7 +43,7 @@ def fuse_conv_bn(conv, bn):
 
         fused_conv.weight = torch.nn.Parameter(w_conv)
         fused_conv.bias = torch.nn.Parameter(b_conv)
-    return fused_conv
+        return fused_conv
 
 
 def fuse_conv_bn_relu(conv, bn, relu):
@@ -68,9 +68,14 @@ def fuse_conv_bn_relu(conv, bn, relu):
         return torch_fused.ConvReLU2d(fuse_conv_bn(conv, bn), relu)
 
 
-def _fuse_modules(model, named_module_dict, modules_to_fuse):
+def _fuse_modules(model, named_module_dict, modules_to_fuse, fuser_func=None):
     assert(len(modules_to_fuse) == 2 or len(modules_to_fuse) == 3),\
         "Can fuse only 2 or 3 modules."
+
+    OP_LIST_TO_FUSER_FUNC = {
+        (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn,
+        (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu
+    }
 
     mod = []
     parent_mod = []
@@ -80,13 +85,12 @@ def _fuse_modules(model, named_module_dict, modules_to_fuse):
         parent_mod.append(named_module_dict.get(parent_module_name, model))
 
     new_mod = mod[0]
-    types = [type(m) for m in mod]
-    if types == [torch.nn.Conv2d, torch.nn.BatchNorm2d]:
-        new_mod = fuse_conv_bn(mod[0], mod[1])
-    elif types == [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU]:
-        new_mod = fuse_conv_bn_relu(mod[0], mod[1], mod[2])
-    else:
-        raise NotImplementedError("Cannot fuse modules: {}".format(types))
+    if fuser_func is None:
+        types = tuple(type(m) for m in mod)
+        fuser_func = OP_LIST_TO_FUSER_FUNC.get(types, None)
+        if fuser_func is None:
+            raise NotImplementedError("Cannot fuse modules: {}".format(types))
+    new_mod = fuser_func(*mod)
 
     # Assign new_mod to module and set remaining modules to identity
     if new_mod is not mod[0]:
