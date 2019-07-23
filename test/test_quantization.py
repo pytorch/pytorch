@@ -4,9 +4,7 @@ import torch
 import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
     default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
-    quantize, prepare, convert, prepare_qat, quantize_qat
-
-from torch.nn.utils.fuse_modules import fuse_modules
+    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
