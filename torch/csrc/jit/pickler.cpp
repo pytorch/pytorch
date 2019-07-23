@@ -51,10 +51,6 @@ const char* getClassName(PicklerClass cls) {
   }
 }
 
-const std::vector<char>& Pickler::stack() {
-  return stack_;
-}
-
 void Pickler::start() {
   push<OpCode>(OpCode::PROTO);
   push<uint8_t>(PROTOCOL_VERSION);
@@ -102,13 +98,13 @@ void Pickler::pushTensorData(const at::Tensor& tensor) {
   // first dump size
   auto numel = tensor.numel();
   auto numel_ptr = reinterpret_cast<const char*>(&numel);
-  stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
+  out_.write(numel_ptr, sizeof(numel));
 
   uint64_t record_size;
   at::Tensor storage_tensor;
   std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
-  auto storage_byte_ptr = reinterpret_cast<uint8_t*>(storage_tensor.storage().data());
-  stack_.insert(stack_.end(), storage_byte_ptr, storage_byte_ptr + record_size);
+  auto storage_byte_ptr = reinterpret_cast<const char*>(storage_tensor.storage().data());
+  out_.write(storage_byte_ptr, record_size);
 }
 
 void Pickler::pushMetadata() {
@@ -278,7 +274,7 @@ void Pickler::pushString(const std::string& string) {
 }
 
 void Pickler::pushBytes(const std::string& string) {
-  stack_.insert(stack_.end(), string.begin(), string.end());
+  out_.write(string.data(), string.size());
 }
 
 void Pickler::pushGlobal(
@@ -503,32 +499,32 @@ std::vector<IValue> Unpickler::parse_ivalue_list() {
 
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
-  AT_ASSERT(bytes_ + 8 < end_ptr_);
-  double result;
+  auto big_endian = read<double>();
+  double little_endian;
 
   // Pickle floats are big endian, so reverse the bytes
   std::reverse_copy(
-      reinterpret_cast<const char*>(bytes_),
-      reinterpret_cast<const char*>(bytes_ + 8),
-      reinterpret_cast<char*>(&result));
+      reinterpret_cast<const char*>(&big_endian),
+      reinterpret_cast<const char*>(&big_endian + sizeof(big_endian)),
+      reinterpret_cast<char*>(&little_endian));
 
-  bytes_ += 8;
-  return result;
+  return little_endian;
 }
 
 void Unpickler::run() {
   // Expect a PROTO opcode and protocol number at the start of blob
+  auto opcode = readOpCode();
   TORCH_CHECK(
-      readOpCode() == OpCode::PROTO,
+      opcode == OpCode::PROTO,
       "Expected PROTO opcode at the start"
-      " of pickle archive");
+      " of pickle archive, found ", static_cast<uint8_t>(opcode));
   uint8_t protocol = read<uint8_t>();
   TORCH_CHECK(
       protocol == 2,
       "Only Pickle protocol 2 is supported, found protocol = ",
       protocol);
 
-  while (bytes_ < end_ptr_) {
+  while (!in_.eof()) {
     OpCode opcode = readInstruction();
     if (opcode == OpCode::STOP) {
       return;
@@ -626,10 +622,10 @@ OpCode Unpickler::readInstruction() {
     } break;
     case OpCode::BINUNICODE: {
       uint32_t length = read<uint32_t>();
-      const char* characters = reinterpret_cast<const char*>(bytes_);
-      AT_ASSERT(bytes_ + length < end_ptr_);
-      bytes_ += length;
-      stack_.emplace_back(std::string(characters, /*n=*/length));
+      char buffer[length];
+      in_.read(buffer, length);
+      TORCH_CHECK(!in_.eof(), "Overran buffer while reading a string");
+      stack_.emplace_back(std::string(buffer, /*n=*/length));
     } break;
     case OpCode::BINFLOAT:
       stack_.emplace_back(readFloat());
@@ -813,14 +809,14 @@ inline bool is_valid_python_id_char(char c) {
 
 // Read a newline terminated string
 std::string Unpickler::readString() {
-  const char* chars = reinterpret_cast<const char*>(bytes_);
-  const char* char_end_ptr = reinterpret_cast<const char*>(end_ptr_);
-  size_t n = 0;
+  std::stringstream ss;
   while (true) {
-    char c = chars[n];
+    char c = read<char>();
     if (c == '\n') {
       break;
     }
+
+    ss << c;
 
     // Simple check just in case there is no terminating '\n'
     TORCH_CHECK(
@@ -829,17 +825,8 @@ std::string Unpickler::readString() {
         uint8_t(c),
         "' in string, "
         "strings must be qualified Python identifiers");
-
-    // Increment after to exclude newline from string
-    ++n;
-    TORCH_CHECK(
-        chars + n < char_end_ptr,
-        "Unpickler overran buffer while reading a string (expected a newline)");
   }
-
-  // Increment by string length + newline char
-  bytes_ += n + 1;
-  return std::string(chars, n);
+  return ss.str();
 }
 
 OpCode Unpickler::readOpCode() {
@@ -874,6 +861,35 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
 uint64_t getStorageKey(const at::Tensor& tensor) {
   at::StorageImpl* storage_key = tensor.storage().unsafeGetStorageImpl();
   return reinterpret_cast<intptr_t>(storage_key);
+}
+
+std::string Pickle(std::vector<IValue> ivalues) {
+  std::stringstream ss;
+
+  Pickler pickler(ss);
+  pickler.start();
+  pickler.startTuple();
+  for (const auto& ivalue : ivalues) {
+    pickler.addIValue(ivalue);
+  }
+  pickler.endTuple();
+  pickler.finish();
+
+  return ss.str();
+}
+
+
+std::vector<IValue> Unpickle(const char* data, size_t size) {
+  // TODO: don't double copy here
+  std::string str(std::string(data, size));
+  std::stringstream ss(str);
+  Unpickler unpickler(ss, size, nullptr, nullptr);
+  return unpickler.parse_ivalue_list();
+}
+
+std::vector<IValue> Unpickle(const void* data, size_t size) {
+  // TODO: don't double copy here
+  return Unpickle(reinterpret_cast<const char*>(data), size);
 }
 
 } // namespace jit

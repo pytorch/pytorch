@@ -576,18 +576,14 @@ RegisterOperators reg(
          "aten::save(t item, str filename) -> ()",
          [](Stack& stack) {
            auto filename = pop(stack).toStringRef();
-           auto value = pop(stack);
+           auto ivalue = pop(stack);
 
            // Pickle the tensor
-           Pickler p;
-           p.pushMetadata();
-           p.start();
-           p.addIValue(value);
-           p.finish();
+           auto data = Pickle({ivalue});
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
-           output.write(p.stack().data(), p.stack().size());
+           output.write(data.data(), data.size());
            return 0;
          }),
      Operator(

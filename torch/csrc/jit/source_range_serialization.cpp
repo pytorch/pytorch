@@ -79,23 +79,21 @@ c10::IValue SourceRangeSerializer::serialize_source(
 }
 
 SourceRangePickler::SourceRangePickler()
-    : p(new Pickler()), srs(new SourceRangeSerializer()) {}
+    : srs(new SourceRangeSerializer()) {}
 
-void SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
-  p->start();
-  p->startTuple();
+std::string SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
+  std::vector<c10::IValue> ivalues;
   for (const auto& range : ranges) {
     std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
                                        srs->serialize(range.range)};
-    p->addIValue(c10::ivalue::Tuple::create(std::move(row_elems)));
+    ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
-  p->endTuple();
-  p->finish();
+  return Pickle(ivalues);
 }
 
-const std::vector<char>& SourceRangePickler::get_data() {
-  return p->stack();
-}
+// const std::vector<char>& SourceRangePickler::get_data() {
+//   return p->stack();
+// }
 
 ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
     at::DataPtr&& data,
@@ -110,8 +108,7 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  Unpickler up(data.get(), size, nullptr, nullptr);
-  auto ivalues = up.parse_ivalue_list();
+  auto ivalues = Unpickle(data.get(), size);
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {

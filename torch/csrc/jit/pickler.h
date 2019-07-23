@@ -4,12 +4,24 @@
 #include <vector>
 
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
 namespace jit {
+
+// struct PointerStream : public std::streambuf {
+//   PointerStream(const void* data, size_t size) : data_(data), size_(size) {}
+//
+//   std::istream& read(char* s, std::streamsize n) override {
+//
+//   }
+//
+//   const void* data_;
+//   size_t size_;
+// };
 
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class OpCode : char {
@@ -105,10 +117,10 @@ class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
-  Pickler(std::vector<at::Tensor>* tensor_table = nullptr)
-      : tensor_table_(tensor_table) {}
+  Pickler(std::ostream& out, std::vector<at::Tensor>* tensor_table = nullptr)
+      : out_(out), tensor_table_(tensor_table) {}
 
-  const std::vector<char>& stack();
+  // const std::vector<char>& stack();
 
   // Push protocol onto the stack
   void start();
@@ -168,11 +180,12 @@ class Pickler {
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
-    stack_.insert(stack_.end(), begin, begin + sizeof(T));
+    out_.write(begin, sizeof(T));
   }
 
   // Stack of opcodes/data
-  std::vector<char> stack_;
+  // std::vector<char> stack_;
+  std::ostream& out_;
 
   // External table of tensors to serialize. If this is missing, then tensors
   // are serialized directly into the pickle
@@ -208,13 +221,14 @@ class Unpickler {
 
  public:
   Unpickler(
-      const void* data,
+      std::istream& in,
       size_t size,
       const std::vector<at::Tensor>* tensor_table,
       std::function<c10::StrongTypePtr(const c10::QualifiedName&)>
           class_resolver)
-      : bytes_(static_cast<const uint8_t*>(data)),
-        end_ptr_(bytes_ + size),
+      // : bytes_(static_cast<const uint8_t*>(data)),
+      //   end_ptr_(bytes_ + size),
+        : in_(in),
         tensor_table_(tensor_table),
         class_resolver_(class_resolver) {}
 
@@ -225,12 +239,11 @@ class Unpickler {
   // so that the number of bytes read / type read is explicit
   template <typename T>
   T read() {
-    TORCH_CHECK(
-        bytes_ + sizeof(T) <= end_ptr_,
-        "Unpickler overran buffer while reading a value");
     T item;
-    std::memcpy(&item, bytes_, sizeof(T));
-    bytes_ += sizeof(T);
+    in_.get(reinterpret_cast<char*>(&item), sizeof(item));
+    if (in_.eof()) {
+      AT_ASSERT("Unpickler overran buffer while reading a value");
+    }
     return item;
   }
 
@@ -248,8 +261,9 @@ class Unpickler {
   std::vector<std::function<void(void)>> globals_;
   std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
-  const uint8_t* bytes_;
-  const uint8_t* end_ptr_;
+  // const uint8_t* bytes_;
+  // const uint8_t* end_ptr_;
+  std::istream& in_;
   const std::vector<at::Tensor>* tensor_table_;
 
   // optionally nullptr, needs to be present for creating classes
@@ -263,6 +277,14 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor);
 
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);
+
+
+TORCH_API std::string Pickle(std::vector<IValue> ivalues);
+
+TORCH_API std::vector<IValue> Unpickle(const char* data, size_t size);
+
+TORCH_API std::vector<IValue> Unpickle(const void* data, size_t size);
+
 
 } // namespace jit
 } // namespace torch

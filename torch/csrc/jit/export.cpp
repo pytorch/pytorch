@@ -851,7 +851,8 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
-  Pickler pickler(&tensor_table_);
+  std::stringstream ss;
+  Pickler pickler(ss, &tensor_table_);
   pickler.start();
   pickler.startTuple();
   for (const IValue& ivalue : ivalues) {
@@ -859,7 +860,7 @@ void ScriptModuleSerializer::writePickleArchive(
   }
   pickler.endTuple();
   pickler.finish();
-  writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size());
+  writer_.writeRecord(name, ss.str().data(), ss.str().size());
 }
 
 void ScriptModuleSerializer::convertModule(
@@ -942,8 +943,8 @@ void ScriptModuleSerializer::convertModule(
         module_def->mutable_torchscript_debug_arena();
 
     SourceRangePickler source_range_pickler;
-    source_range_pickler.pickle(source_ranges);
-    const auto& range_data = source_range_pickler.get_data();
+    // source_range_pickler.pickle(source_ranges);
+    const auto& range_data = source_range_pickler.pickle(source_ranges);
     std::stringstream debug_filename;
     debug_filename << "debug/" << module_name.str() << ".pkl";
     writer_.writeRecord(

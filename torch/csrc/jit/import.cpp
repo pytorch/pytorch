@@ -191,16 +191,7 @@ std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::strin
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_.getRecord(name);
-  Unpickler unpickler(
-      attributes_ptr.get(),
-      attributes_size,
-      &tensor_table_,
-      [&](const c10::QualifiedName& qn) {
-        importCallback(qn.prefix());
-        auto cu = main_module_.class_compilation_unit();
-        return c10::StrongTypePtr(cu, cu->get_class(qn));
-      });
-  return unpickler.parse_ivalue_list();
+  return Unpickle(attributes_ptr.get(), attributes_size);
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
