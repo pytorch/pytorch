@@ -911,6 +911,8 @@ Tensor view(const Tensor& self, IntArrayRef size) {
   auto stride_value = *stride;
   Tensor self_;
   if (self.is_quantized()) {
+    TORCH_CHECK(self.qscheme() == kPerTensorAffine,
+                "Only PerTensorAffine quantization is supported right now");
     self_ = at::_empty_affine_quantized({0}, self.options(), self.q_scale(),
                                         self.q_zero_point());
   } else {
