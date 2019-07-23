@@ -4734,6 +4734,32 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i, device_ids=(cuda0, cuda1), output_device=cuda0)
         self.assertEqual(out, l(i))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_function_deletion(self):
+        # this test case is originated from #16532
+        def gradient_penalty(net, x):
+            output = net(x)
+            loss = torch.autograd.grad(
+                outputs=output, inputs=x,
+                grad_outputs=x.new_ones(output.size()),
+                create_graph=True, retain_graph=True)[0].mean()
+            return loss
+
+        net = nn.Linear(4, 1).cuda()
+        dpn = nn.DataParallel(net, [0, 1])
+        x = torch.ones(2, 4, requires_grad=True).cuda()
+
+        dpn.zero_grad()
+        loss = gradient_penalty(dpn, x)
+        loss.backward()
+        grads = [p.grad for p in net.parameters()]
+        self.assertEqual(2, len(grads))
+        self.assertEqual(
+            torch.tensor([[0.25, 0.25, 0.25, 0.25]], device='cuda:0'),
+            grads[0])
+        self.assertEqual(torch.tensor([0.0], device='cuda:0'), grads[1])
+
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
