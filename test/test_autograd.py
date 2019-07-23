@@ -2242,7 +2242,7 @@ class TestAutograd(TestCase):
                     run_functional_checks(self, "test_cdist", "cdist", f,
                                           True, f_args_variable, f_args_tensor)
 
-        _test_cdist_for_size((3, 3))
+        _test_cdist_for_size((2, 2))
         #_test_cdist_for_size((S, S, S))
 
     def test_var_mean_differentiable(self):
