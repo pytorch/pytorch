@@ -193,7 +193,6 @@ class _TestTorchMixin(object):
 
         # FIXME: fix all the skipped ones below!
         test_namespace(torch.randn(1),
-                       'as_strided',
                        'as_strided_',
                        re.compile('^clamp_(min|max)_?$'),
                        'coalesce',
