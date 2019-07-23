@@ -138,7 +138,7 @@
 #   MIOPEN_LIBRARY
 #     specify where MIOpen is installed
 #
-#   NCCL_ROOT_DIR
+#   NCCL_ROOT
 #   NCCL_LIB_DIR
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
@@ -187,7 +187,6 @@ from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
-from tools.setup_helpers.nccl import NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
 
 try:
     FileNotFoundError
@@ -387,7 +386,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using MKLDNN')
         if cmake_cache_vars['USE_NCCL'] and cmake_cache_vars['USE_SYSTEM_NCCL']:
-            report('-- Using system provided NCCL library at ' + NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
+            report('-- Using system provided NCCL library at {}, {}'.format(cmake_cache_vars['NCCL_LIBRARIES'],
+                                                                            cmake_cache_vars['NCCL_INCLUDE_DIRS']))
         elif cmake_cache_vars['USE_NCCL']:
             report('-- Building NCCL library')
         else:
