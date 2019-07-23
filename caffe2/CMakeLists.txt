@@ -359,6 +359,10 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
+    ${TORCH_SRC_DIR}/csrc/distributed/rpc/BuiltinOp.cpp
+    ${TORCH_SRC_DIR}/csrc/distributed/rpc/BuiltinRet.cpp
+    ${TORCH_SRC_DIR}/csrc/distributed/rpc/FutureMessage.cpp
+    ${TORCH_SRC_DIR}/csrc/distributed/rpc/Message.cpp
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
