@@ -11,7 +11,7 @@ inline int start_index(int a, int b, int c) {
 }
 
 inline int end_index(int a, int b, int c) {
-  return (int)std::ceil((float)((a + 1) * c) / b);
+  return (int)std::ceil((double)((a + 1) * c) / b);
 }
 
 template <typename scalar_t>
