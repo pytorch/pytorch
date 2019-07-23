@@ -13,6 +13,11 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
 
+CAFFE2_API c10::intrusive_ptr<ConstantU32String> ConstantU32String::create(
+    std::u32string u32str_) {
+  return c10::make_intrusive<ConstantU32String>(std::move(u32str_));
+}
+
 } // namespace ivalue
 
 namespace {
@@ -98,6 +103,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toBoolList(), "[", "]");
     case IValue::Tag::String:
       return out << v.toStringRef();
+    case IValue::Tag::U32String:
+      return out << v.toU32StringRef();
     case IValue::Tag::TensorList:
       return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:

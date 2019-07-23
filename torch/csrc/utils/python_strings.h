@@ -14,6 +14,10 @@ inline bool THPUtils_checkString(PyObject* obj) {
   return PyBytes_Check(obj) || PyUnicode_Check(obj);
 }
 
+inline bool THPUtils_checkU32String(PyObject* obj) {
+  return PyBytes_Check(obj) || PyUnicode_Check(obj);
+}
+
 // Unpacks PyBytes (PyString) or PyUnicode as std::string
 // PyBytes are unpacked as-is. PyUnicode is unpacked as UTF-8.
 // NOTE: this method requires the GIL
@@ -82,4 +86,32 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
 #else
   PyUnicode_InternInPlace(obj);
 #endif
+}
+
+inline std::u32string THPUtils_unpackU32String(PyObject* obj) {
+  if (PyBytes_Check(obj)) {
+    size_t size = PyBytes_GET_SIZE(obj);
+    if ((size & 3) != 0) {
+      throw std::runtime_error("error unpacking string as utf-32: wrong size");
+    }
+    std::u32string str = std::u32string(
+      reinterpret_cast<char32_t*>(PyBytes_AS_STRING(obj)), size / 4);
+    str = str.erase(0, 1);      // remove the BOM mark
+    return str;
+  }
+  if (PyUnicode_Check(obj)) {
+    THPObjectPtr bytes(PyUnicode_AsUTF32String(obj));
+    if (!bytes) {
+      throw std::runtime_error("error unpacking string as utf-32");
+    }
+    size_t size = PyBytes_GET_SIZE(bytes.get());
+    if ((size & 3) != 0) {
+      throw std::runtime_error("error unpacking string as utf-32: wrong size");
+    }
+    std::u32string str = std::u32string(
+      reinterpret_cast<char32_t*>(PyBytes_AS_STRING(bytes.get())), size / 4);
+    str = str.erase(0, 1);      // remove the BOM mark
+    return str;
+  }
+  throw std::runtime_error("unpackU32String: expected bytes or unicode object");
 }

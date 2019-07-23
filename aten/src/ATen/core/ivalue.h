@@ -21,6 +21,7 @@ namespace ivalue {
 struct Tuple;
 struct Future;
 struct ConstantString;
+struct ConstantU32String;
 struct GenericDict;
 struct Object;
 }
@@ -43,6 +44,7 @@ struct Object;
   _(DoubleList) \
   _(BoolList) \
   _(String) \
+  _(U32String) \
   _(TensorList) \
   _(Blob) \
   _(GenericList) \
@@ -219,6 +221,14 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::ConstantString> toString() &&;
   c10::intrusive_ptr<ivalue::ConstantString> toString() const &;
   const std::string& toStringRef() const;
+
+  // ConstantU32String
+  IValue(c10::intrusive_ptr<ivalue::ConstantU32String> v);
+  IValue(std::u32string v);
+  bool isU32String() const { return Tag::U32String == tag; }
+  c10::intrusive_ptr<ivalue::ConstantU32String> toU32String() &&;
+  c10::intrusive_ptr<ivalue::ConstantU32String> toU32String() const &;
+  const std::u32string& toU32StringRef() const;
 
   // DoubleList
   IValue(c10::List<double> v);

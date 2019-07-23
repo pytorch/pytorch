@@ -32,6 +32,7 @@ using ::c10::IValue;
 using ::c10::ivalue::Future;
 
 using ::c10::ivalue::ConstantString;
+using ::c10::ivalue::ConstantU32String;
 using ::c10::TupleTypePtr;
 using ::c10::TupleType;
 using ::c10::ArrayRef;
@@ -268,6 +269,7 @@ TORCH_API void addInputs(
     const char* name,
     const std::vector<double>& value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
+TORCH_API void addInputs(Node* n, const char* name, const std::u32string& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,

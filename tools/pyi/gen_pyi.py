@@ -128,6 +128,7 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
+        'std::u32string': 'u32str',
         'Dimname': 'Union[str, None]',
         'DimnameList': 'List[Union[str, None]]',
         'QScheme': '_qscheme',
@@ -317,9 +318,9 @@ def generate_type_hints(fname, decls, is_tensor=False):
 def gen_nn_modules(out):
     def replace_forward(m):
         # We instruct mypy to not emit errors for the `forward` and `__call__` declarations since mypy
-        # would otherwise correctly point out that Module's descendants' `forward` declarations 
-        # conflict with `Module`s. Specificlaly, `Module` defines `forward(self, *args)` while the 
-        # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which 
+        # would otherwise correctly point out that Module's descendants' `forward` declarations
+        # conflict with `Module`s. Specificlaly, `Module` defines `forward(self, *args)` while the
+        # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which
         # violates Liskov substitutability. The 'mypy' team recommended this solution for now.
         forward_def = m.group(0) + "  # type: ignore"
         call_def = re.sub(r'def forward', 'def __call__', forward_def)

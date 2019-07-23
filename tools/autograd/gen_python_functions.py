@@ -302,6 +302,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'bool': 'toBool',
         'double': 'toDouble',
         'std::string': 'string',
+        'std::u32string': 'u32string',
     }
 
     unpack_with_default_methods = {

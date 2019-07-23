@@ -442,6 +442,9 @@ void addInputs(
 void addInputs(Node* n, const char* name, const std::string& value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(Node* n, const char* name, const std::u32string& value) {
+  detail::genericAddInput(n, value);
+}
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }

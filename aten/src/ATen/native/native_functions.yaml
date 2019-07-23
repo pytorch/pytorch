@@ -676,7 +676,7 @@
 
 - func: dot(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: einsum(str equation, Tensor[] tensors) -> Tensor
+- func: einsum(str32 equation, Tensor[] tensors) -> Tensor
 
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
 

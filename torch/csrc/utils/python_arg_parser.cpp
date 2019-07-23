@@ -33,6 +33,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"QScheme", ParameterType::QSCHEME},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
+  {"std::u32string", ParameterType::U32STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
 };
@@ -183,6 +184,7 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
+    case ParameterType::U32STRING: return THPUtils_checkU32String(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -205,6 +207,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
+    case ParameterType::U32STRING: return "str";
 #ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";

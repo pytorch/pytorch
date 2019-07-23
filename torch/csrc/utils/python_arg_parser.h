@@ -78,7 +78,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME
+  U32STRING, DIMNAME, DIMNAME_LIST, QSCHEME
 };
 
 struct FunctionParameter;
@@ -150,6 +150,7 @@ struct PythonArgs {
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
   inline std::string string(int i);
+  inline std::u32string u32string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -430,6 +431,11 @@ inline at::QScheme PythonArgs::toQScheme(int i) {
 inline std::string PythonArgs::string(int i) {
   if (!args[i]) return "";
   return THPUtils_unpackString(args[i]);
+}
+
+inline std::u32string PythonArgs::u32string(int i) {
+  if (!args[i]) return U"";
+  return THPUtils_unpackU32String(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {

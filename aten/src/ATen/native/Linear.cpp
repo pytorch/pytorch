@@ -130,21 +130,18 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
-Tensor einsum(std::string eqn, TensorList tensors) {
-  constexpr size_t number_of_letters = 26;
-  std::string in_eqn;
+Tensor einsum(std::u32string eqn, TensorList tensors) {
+  std::u32string in_eqn;
   size_t pos;
-  // The equation is given in terms of single lowercase letters ('a'..'z') and potentially an ellipsis.
+  // The equation is given in terms of single letters and potentially an ellipsis.
   // Internally, we represent it using indices from 0 to num_total_dimensions, with each letter
   // mapped to an index and the ellipsis ('...') being mapped to a number of consequtive indices.
-  // The mapping of letters to internal indices is given in letter_mapping. A value of -1 means that
-  // the letter has not been assigned an index yet (because it has not been seen).
+  // The mapping of letters to internal indices is given in letter_mapping.
   // The ellipsis is defined by first_ell_idx (the first index) and num_ell_idxes (the number of indices).
   // A value of -1 for num_ell_idxes specifies that we have not seen an ellipsis yet.
   // Note: The internal indices are NOT the dimensions used internally. There is a mapping to them below.
 
-  std::array<std::int64_t, number_of_letters> letter_mapping; // map letter to internal (numerical) label
-  letter_mapping.fill(-1);
+  std::map<char32_t, std::int64_t> letter_mapping; // map letter to internal (numerical) label
   int64_t num_ell_idxes = -1;
   int64_t first_ell_idx = 0;
 
@@ -153,11 +150,10 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // We also keep track of the number of occurrences for each letter (to infer a right hand side if not given) and
   // of the last occurence of each index.
   std::vector<std::vector<int64_t>> input_op_idxes;                   // the parsed operand indices
-  std::array<std::int64_t, number_of_letters> num_letter_occurrences; // number of occurrence in the equation of this letter
-  num_letter_occurrences.fill(0);
+  std::map<char32_t, std::int64_t> num_letter_occurrences; // number of occurrence in the equation of this letter
   std::vector<std::int64_t> last_idx_occurrence;                      // the last operator (left to right) using this index
 
-  if ((pos = eqn.find("->")) != std::string::npos) { // check whether we have a right hand side. in_eq is the left hand side
+  if ((pos = eqn.find(U"->")) != std::u32string::npos) { // check whether we have a right hand side. in_eq is the left hand side
     in_eqn = eqn.substr(0, pos);
   } else {
     in_eqn = eqn;
@@ -167,11 +163,11 @@ Tensor einsum(std::string eqn, TensorList tensors) {
 
   // next we parse in_eq (the left hand side) by iterating. It is a string of comma separated terms per index
   int64_t operand = 0;
-  std::stringstream eqn_stream(in_eqn);
-  std::string term;
+  std::basic_stringstream<char32_t> eqn_stream(in_eqn);
+  std::u32string term;
   int64_t num_total_idxes = 0;
   while (! eqn_stream.eof()) {
-    std::getline(eqn_stream, term, ',');  // term = string with indices of current term
+    std::getline(eqn_stream, term, U',');  // term = string with indices of current term
     TORCH_CHECK((int64_t) tensors.size()>operand, "more operands in equation than tensors"); // we cannot have a longer equation than operands. We need to check here before we use the dimension
 
     int64_t ell_char_count = 0;            // handling of ellipsis '...' is a bit tedious, we count the '.'
@@ -180,7 +176,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     int64_t dims_in_term = 0;              // dimensions we have seen
     std::vector<int64_t> current_op_idxes; // mapping of operand dimensions to indices for current term
     for (auto &c : term) {                 // c = character with a single letter or '.'
-      if (c == '.') {
+      if (c == U'.') {
         ell_char_count++;
         TORCH_CHECK(ell_char_count <= 3, "can only have '.' in one ellispis '...' in term ", operand, " of the equation");
         if (ell_char_count == 3) {        // this completes the ellipsis
@@ -201,17 +197,16 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         }
       } else {                                          // a letter (hopefully)
         TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis, operand ", operand);
-        TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
-        int64_t letter_num = c-'a';                     // letter_num  = position in letter_mapping
-        if (letter_mapping[letter_num] == -1) {         // new letter, add internal index and mapping
-          letter_mapping[letter_num] = num_total_idxes;
+        TORCH_CHECK(U'A' <= c, "lowest character allowed is 'A'");
+        if (letter_mapping.count(c) == 0) {         // new letter, add internal index and mapping
+          letter_mapping[c] = num_total_idxes;
           num_total_idxes++;
           last_idx_occurrence.push_back(operand);
         } else {                                        // letter we have already seen
-          last_idx_occurrence[letter_mapping[letter_num]] = operand;
+          last_idx_occurrence[letter_mapping[c]] = operand;
         }
-        num_letter_occurrences[letter_num]++;
-        current_op_idxes.push_back(letter_mapping[letter_num]);
+        num_letter_occurrences[c]++;
+        current_op_idxes.push_back(letter_mapping[c]);
         dims_in_term++;
       }
     }
@@ -227,10 +222,10 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // for the output indices. -1 means that the index has not been assigned a dimension yet
   std::vector<int64_t> idxes_to_preprocessed_dims(num_total_idxes, -1);     // the position of the index in the tensor dimensions
   int64_t num_output_dims = 0;
-  if (pos != std::string::npos) {            // parse the user provided right hand side
+  if (pos != std::u32string::npos) {            // parse the user provided right hand side
     int64_t ell_char_count = 0;
     for (auto &c : eqn.substr(pos+2)) {
-      if (c == '.') {                        // '.' as part of ellipsis
+      if (c == U'.') {                        // '.' as part of ellipsis
         ell_char_count++;
         TORCH_CHECK(ell_char_count <= 3, "can only have '.' in one ellispis '...' in right hand side of the equation");
         if (ell_char_count == 3) {           // ellipsis complete
@@ -242,10 +237,9 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         }
       } else if (! isspace(c)) {                              // letter (hopefully)
         TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis in the right hand side");
-        TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
-        int64_t letter_num = c-'a';
-        TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, " occurs twice in output");
-        idxes_to_preprocessed_dims[letter_mapping[letter_num]] = num_output_dims;
+        TORCH_CHECK(U'A' <= c, "lowest character allowed is 'A'");
+        TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[c]] == -1, "index ", c, "occurs twice in output");
+        idxes_to_preprocessed_dims[letter_mapping[c]] = num_output_dims;
         num_output_dims++;
       }
     }
@@ -257,10 +251,10 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         num_output_dims++;
       }
     }
-    // then the indices that occur exactly once in alphabetic order
-    for (size_t idx = 0; idx < number_of_letters; idx++) {
-      if (num_letter_occurrences[idx] == 1) {
-        idxes_to_preprocessed_dims[letter_mapping[idx]] = num_output_dims;
+    // then the indices that occur exactly once
+    for (auto const& kv : num_letter_occurrences) {
+      if (kv.second == 1) {
+        idxes_to_preprocessed_dims[letter_mapping[kv.first]] = num_output_dims;
         num_output_dims++;
       }
     }

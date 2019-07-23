@@ -54,6 +54,14 @@ inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() const & {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
   return toIntrusivePtr<ivalue::ConstantString>();
 }
+inline c10::intrusive_ptr<ivalue::ConstantU32String> IValue::toU32String() && {
+  AT_ASSERT(isU32String(), "Expected U32String but got ", tagKind());
+  return moveToIntrusivePtr<ivalue::ConstantU32String>();
+}
+inline c10::intrusive_ptr<ivalue::ConstantU32String> IValue::toU32String() const & {
+  AT_ASSERT(isU32String(), "Expected U32String but got ", tagKind());
+  return toIntrusivePtr<ivalue::ConstantU32String>();
+}
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() && {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return toIntrusivePtr<ivalue::Object>();
@@ -101,6 +109,25 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const ConstantString& v);
+};
+
+// u32string
+struct CAFFE2_API ConstantU32String final : c10::intrusive_ptr_target {
+ private:
+  const std::u32string u32str_;
+ public:
+  ConstantU32String(std::u32string u32str)
+  : u32str_(std::move(u32str)) {}
+  static c10::intrusive_ptr<ConstantU32String> create(std::u32string u32str_);
+  const std::u32string & u32string() const {
+    return u32str_;
+  }
+  operator const std::u32string & () const {
+    return u32string();
+  }
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const ConstantU32String& v);
 };
 
 struct Future;
@@ -384,6 +411,7 @@ DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
+DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantU32String>, toU32String)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(c10::List<int64_t>, toIntList)
@@ -394,6 +422,7 @@ DEFINE_TO(c10::impl::GenericList, toGenericList)
 DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
+DEFINE_TO(std::u32string, toU32StringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
@@ -571,6 +600,13 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 inline IValue::IValue(std::string v)
 : IValue(ivalue::ConstantString::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantU32String> v)
+: tag(Tag::U32String), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(std::u32string v)
+: IValue(ivalue::ConstantU32String::create(std::move(v))) {}
+
 inline IValue::IValue(c10::List<double> v)
 : tag(Tag::DoubleList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.impl_.release();
@@ -647,6 +683,9 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 
 inline const std::string& IValue::toStringRef() const {
   return toString()->string();
+}
+inline const std::u32string& IValue::toU32StringRef() const {
+  return toU32String()->u32string();
 }
 
 template<typename T>
