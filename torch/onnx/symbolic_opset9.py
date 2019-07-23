@@ -1698,9 +1698,11 @@ def _std(g, input, dim, unbiased, keepdim):
 # torch.std(input, dim, keepdim=False, unbiased=True)
 def std(g, input, *args):
     if args[0].type().isSubtypeOf(ListType.ofInts()):
-        return _std(g, input, args[0], args[1], args[2])
+        return _std(g, input, *args)
     else:
         return _std(g, input, None, args[0], None)
+
+
 @parse_args('v', 'is', 'i')
 def logsumexp(g, input, dim, keepdim):
     return g.op('ReduceLogSumExp', input, axes_i=dim, keepdims_i=keepdim)
