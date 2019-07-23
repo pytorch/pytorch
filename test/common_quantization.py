@@ -1,7 +1,12 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 import torch.nn.quantized as nnq
 from common_utils import TestCase
@@ -218,3 +223,32 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.fc1(x)
         x = self.fc2(x)
         return self.dequant(x)
+
+
+class SubModForFusion(torch.nn.Module):
+    def __init__(self):
+        super(SubModForFusion, self).__init__()
+        self.conv = torch.nn.Conv2d(20, 20, 1)
+        self.bn = torch.nn.BatchNorm2d(20)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return x
+
+class ModForFusion(torch.nn.Module):
+    def __init__(self):
+        super(ModForFusion, self).__init__()
+        self.conv1 = torch.nn.Conv2d(10, 20, 5)
+        self.bn1 = torch.nn.BatchNorm2d(20)
+        self.relu1 = torch.nn.ReLU()
+        self.sub1 = SubModForFusion()
+        self.sub2 = SubModForFusion()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.sub1(x)
+        x = self.sub2(x)
+        return x
