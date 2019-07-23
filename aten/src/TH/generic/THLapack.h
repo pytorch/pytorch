@@ -11,8 +11,6 @@ TH_API void THLapack_(getrs)(char trans, int n, int nrhs, scalar_t *a, int lda, 
 /* Positive Definite matrices */
 /* Matrix inverse based on Cholesky factorization */
 TH_API void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info);
-/* Cholesky factorization with complete pivoting. */
-TH_API void THLapack_(pstrf)(char uplo, int n, scalar_t *a, int lda, int *piv, int *rank, scalar_t tol, scalar_t *work, int *info);
 
 /* QR decomposition */
 TH_API void THLapack_(geqrf)(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);

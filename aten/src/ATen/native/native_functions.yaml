@@ -1256,6 +1256,11 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
 
+- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_max_pool2d
+
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
@@ -3022,9 +3027,10 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_view
-    CUDA: legacy::cuda::_th_view
+    CPU: view
+    CUDA: view
     MkldnnCPU: mkldnn_view
+    QuantizedCPU: view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
@@ -3683,8 +3689,8 @@
 
 - func: masked_select(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_masked_select_out
-    CUDA: legacy::cuda::_th_masked_select_out
+    CPU: masked_select_out_cpu
+    CUDA: masked_select_out_cuda
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function
@@ -3839,15 +3845,6 @@
   dispatch:
     CPU: legacy::cpu::_th_potri
     CUDA: legacy::cuda::_th_potri
-
-- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) -> (Tensor(a!) u, Tensor(b!) pivot)
-  dispatch:
-    CPU: legacy::cpu::_th_pstrf_out
-
-- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
-  variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_pstrf
 
 - func: qr(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
 
@@ -4147,14 +4144,11 @@
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    CPU: legacy::cpu::_th_topk_out
+    CPU: topk_out_cpu
     CUDA: legacy::cuda::_th_topk_out
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_topk
-    CUDA: legacy::cuda::_th_topk
 
 - func: all(Tensor self) -> Tensor
   variants: method, function
