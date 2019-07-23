@@ -16414,6 +16414,12 @@ class TestDict(JitTestCase):
 
         self.assertEqual(set(keys(self.dict())), set(self.dict().keys()))
 
+        @torch.jit.script
+        def specialized_list():
+            return {1: 1, 2: 2}.keys()
+
+        self.assertTrue(set(specialized_list()) == set([1, 2]))
+
     def test_values(self):
         @torch.jit.script
         def values(x):
