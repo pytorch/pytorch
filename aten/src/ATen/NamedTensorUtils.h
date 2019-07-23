@@ -34,10 +34,14 @@ unify_from_right(optional<DimnameList> names, optional<DimnameList> other);
 
 namespace namedinference {
 
+// Propagates all names from src to result.
 void propagate_names(Tensor& result, const Tensor& src);
 void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
+// Propagates all names except for those at the excluded_idxs.
 void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
+
+// Used for reduction ops that have a `keepdim` arg.
 void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
 
 } // namespace namedinference
