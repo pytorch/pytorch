@@ -16971,7 +16971,7 @@ class TestClassType(JitTestCase):
         input = (f, f2, (f, f3))
         sfoo = self.checkScript(use_foo, input)
         graphstr = str(sfoo.graph_for(*input))
-        FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
+        FileCheck().check_count("prim::GetAttr", 4).run(graphstr)
 
     def test_class_sorting(self):
         @torch.jit.script  # noqa: B903

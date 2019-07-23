@@ -283,21 +283,25 @@ class JitTestCase(TestCase):
         with self.assertRaisesRegex(exception, regex):
             script(*inputs)
         # string frontend
+        # profiling run
         with self.assertRaisesRegex(exception, regex):
             source = textwrap.dedent(inspect.getsource(script))
             cu = torch.jit.CompilationUnit(source, optimize)
             ge = getattr(cu, script.__name__)
             ge(*inputs)
         with self.assertRaisesRegex(exception, regex):
-            cu = torch.jit.CompilationUnit(source, optimize)
+            with enable_profiling_mode():
+                cu = torch.jit.CompilationUnit(source, optimize)
             ge = getattr(cu, script.__name__)
             ge(*inputs)
         # python AST frontend
+        # profiling run
         with self.assertRaisesRegex(exception, regex):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
         with self.assertRaisesRegex(exception, regex):
-            ge = torch.jit.script(script, optimize)
+            with enable_profiling_mode():
+                ge = torch.jit.script(script, optimize)
             ge(*inputs)
 
     def checkScript(self,
@@ -339,19 +343,22 @@ class JitTestCase(TestCase):
             python_fn = script
 
         if capture_output:
-            with self.capture_stdout() as script_stdout:
-                script_outputs = scripted_fn(*inputs)
-            with self.capture_stdout() as _python_stdout:
-                python_outputs = python_fn(*inputs)
-            if not IS_WINDOWS:
-                self.assertExpected(script_stdout[0], subname='stdout')
+            with enable_profiling_mode():
+                with self.capture_stdout() as script_stdout:
+                    script_outputs = scripted_fn(*inputs)
+                with self.capture_stdout() as _python_stdout:
+                    python_outputs = python_fn(*inputs)
+                if not IS_WINDOWS:
+                    self.assertExpected(script_stdout[0], subname='stdout')
         else:
-            # profile
-            scripted_fn(*inputs)
-            script_outputs = scripted_fn(*inputs)
-            python_outputs = python_fn(*inputs)
-        self.assertEqual(python_outputs, script_outputs)
-
+            with enable_profiling_mode():
+                python_outputs = python_fn(*inputs)
+                # profiling run
+                script_outputs = scripted_fn(*inputs)
+                self.assertEqual(python_outputs, script_outputs)
+                # optimized run
+                opt_script_outputs = scripted_fn(*inputs)
+                self.assertEqual(script_outputs, opt_script_outputs)
         return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,

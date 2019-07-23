@@ -294,6 +294,10 @@ void AliasDb::analyzeImpl(Node* node) {
       // might be more complicated than just mapAliases
       // mapAliases(node->inputs(), node->outputs());
       return;
+    case prim::BailOut:
+      TORCH_INTERNAL_ASSERT(
+          node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
+      makePointerTo(node->inputs().at(1), node->output());
     case prim::CallFunction:
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does

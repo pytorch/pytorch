@@ -228,7 +228,8 @@ struct CanEmitInline {
     scanBlock(graph->block());
   }
   bool canInline(Value* v) {
-    return v->node()->kind() != prim::Param && v->uses().size() == 1 &&
+    return v->node()->kind() != prim::Param &&
+        v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
         v->node()->outputs().size() == 1;
   }
 
