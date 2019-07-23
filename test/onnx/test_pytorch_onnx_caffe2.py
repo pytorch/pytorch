@@ -652,11 +652,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             lambda input: input[:, torch.tensor([[0, 2], [1, 1]]), :, torch.tensor([2, 1]), torch.tensor([0, 3])])
 
     @skipIfUnsupportedOpsetVersion([10])
-    def test_tensor_index_advanced_indexing2(self):
+    def test_tensor_index_advanced_indexing_with_slice(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), None, 2:4, torch.tensor([[1, 3], [4, 0]])])
-
-    @skipIfUnsupportedOpsetVersion([10])
-    def test_tensor_index_advanced_indexing3(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([1]), 2:4, torch.tensor([[1], [4]])])
 
     def test_tensor_index_advanced_indexing_consecutive(self):
