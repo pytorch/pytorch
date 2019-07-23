@@ -12507,6 +12507,24 @@ a")
 
         self.assertEqual(eager_out, script_out)
 
+    def test_nn_GRU(self):
+        from torch.nn.utils.rnn import PackedSequence
+        input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.x = torch.nn.GRU(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:
+                return self.x(input)
+
+        eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (input,))[0]
+        script_out = self.runAndSaveRNG(lambda x: S()(x), (input,))[0]
+
+        self.assertEqual(eager_out, script_out)
+
     def test_torchscript_multi_head_attn(self):
         @torch.jit.script
         def jit_multihead_attn_forward(query,                   # type: Tensor
