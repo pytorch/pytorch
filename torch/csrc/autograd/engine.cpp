@@ -58,7 +58,7 @@ static thread_local int total_depth = 0;
 
 struct FunctionTask {
   GraphTask* base_;
-  std::shared_ptr<Function> fn_;
+  std::shared_ptr<Node> fn_;
   // This buffer serves as an implicit "addition" node for all of the
   // gradients flowing here.  Once all the dependencies are finished, we
   // use the contents of this buffer to run the function.
@@ -69,7 +69,7 @@ struct FunctionTask {
 
   int getReentrantDepth() const;
 
-  FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
+  FunctionTask(GraphTask* base, std::shared_ptr<Node> fn, InputBuffer inputs, bool isShutdownTask = false)
     : base_(base)
     , fn_(std::move(fn))
     , inputs_(std::move(inputs))
@@ -153,13 +153,13 @@ struct GraphTask {
   // Notified when a task finishes executing.  Check outstanding_tasks_ to see
   // if all tasks are done.
   std::condition_variable not_done_;
-  std::unordered_map<Function*, InputBuffer> not_ready_;
-  std::unordered_map<Function*, int> dependencies_;
+  std::unordered_map<Node*, InputBuffer> not_ready_;
+  std::unordered_map<Node*, int> dependencies_;
 
   struct ExecInfo {
     struct Capture {
       Capture(int input_idx, int output_idx) : input_idx_(input_idx), output_idx_(output_idx) {}
-      int input_idx_; // within Function inputs
+      int input_idx_; // within Node inputs
       int output_idx_; // within the output vector of a GraphTask
     };
 
@@ -176,10 +176,10 @@ struct GraphTask {
   // has needed == True should be executed.
   // exec_info_.empty() means it's .backward(), otherwise it's .grad().
   // exec_info_ is safe to read without synchronization
-  std::unordered_map<Function*, ExecInfo> exec_info_;
+  std::unordered_map<Node*, ExecInfo> exec_info_;
   std::vector<Variable> captured_vars_;
 
-  void init_to_execute(Function& graph_root, const edge_list& outputs);
+  void init_to_execute(Node& graph_root, const edge_list& outputs);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -399,14 +399,14 @@ auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void 
   }
 }
 
-static variable_list call_pre_hooks(Function& fn, variable_list inputs) {
+static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
   for (const auto& hook : fn.pre_hooks()) {
     inputs = (*hook)(inputs);
   }
   return inputs;
 }
 
-static variable_list call_post_hooks(Function& fn, variable_list outputs, const variable_list& inputs) {
+static variable_list call_post_hooks(Node& fn, variable_list outputs, const variable_list& inputs) {
   for (const auto& hook : fn.post_hooks()) {
     outputs = (*hook)(outputs, inputs);
   }
@@ -604,10 +604,10 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
 }
 
 /* Computes the number of dependencies for each function which requires grad */
-auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
+auto Engine::compute_dependencies(Node* root, GraphTask& task) -> void {
   // Just to make sure that they will never be added to the queue again
-  std::unordered_set<Function*> seen;
-  std::vector<Function*> queue { root };
+  std::unordered_set<Node*> seen;
+  std::vector<Node*> queue { root };
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -808,12 +808,12 @@ void Engine::add_thread_pool_task(GraphTask *graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) {
+void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs) {
   exec_info_[&graph_root].needed_ = true;
 
   int output_idx = 0;
   for (auto & output_edge : outputs) {
-    Function *output = output_edge.function.get();
+    Node *output = output_edge.function.get();
     auto & info = exec_info_[output];
     if (!info.captures_)
       info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
@@ -829,11 +829,11 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
   //                         for next_edge in fn.next_edges)
   //   return is_needed[fn]
   struct Frame {
-    Frame (Function *fn) : fn_(fn), next_next_fn_(0) {}
-    Function *fn_;
+    Frame (Node *fn) : fn_(fn), next_next_fn_(0) {}
+    Node *fn_;
     size_t next_next_fn_;
 
-    Function* get_next_fn() {
+    Node* get_next_fn() {
       const auto & next = fn_->next_edges();
       auto num_next = next.size();
       while (next_next_fn_ < num_next) {
@@ -844,13 +844,13 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     }
   };
   std::vector<Frame> stack;
-  std::unordered_set<Function*> seen;
+  std::unordered_set<Node*> seen;
   for (const auto & input : graph_root.next_edges()) {
     if (seen.count(input.function.get()) > 0) continue;
     stack.emplace_back(input.function.get());
     while (!stack.empty()) {
       auto &frame = stack.back();
-      if (Function *next_fn = frame.get_next_fn()) {
+      if (Node *next_fn = frame.get_next_fn()) {
         if (/* bool unseen = */ seen.emplace(next_fn).second) {
           stack.emplace_back(next_fn);
           continue; // recurse

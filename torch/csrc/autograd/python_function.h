@@ -32,7 +32,7 @@ struct VariableInfo {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
-struct PyFunction : public Function {
+struct PyFunction : public Node {
   PyFunction(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
@@ -102,7 +102,7 @@ struct THPFunction {
     // it is guaranteed that cdata.lock()->obj == this
     //
     // In most ordinary use, this field should always be non-NULL; e.g.,
-    // when we allocate a THPFunction because we are running Function.apply,
+    // when we allocate a THPFunction because we are running Node.apply,
     // after constructing a THPFunction, we immediately allocate a PyFunction
     // for it.  We can't enforce this directly in the constructor of
     // THPFunction though, because there's no way to keep it live long enough

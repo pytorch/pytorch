@@ -106,7 +106,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from
-// C++'s Function::apply to a Python method "apply".
+// C++'s Node::apply to a Python method "apply".
 auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
   at::OptionalDeviceGuard _device_guard;
@@ -513,7 +513,7 @@ static void _assert_not_tracing(const char* name, const variable_list& input_var
   }
 }
 
-static Node* _trace_pre_record(
+static torch::jit::Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject *input_objects,
     const variable_list& input_vars) {
@@ -545,7 +545,7 @@ static Node* _trace_pre_record(
 }
 
 static void _trace_post_record(
-    Node* node,
+    torch::jit::Node* node,
     PyObject* op_obj,
     const variable_list& input_vars,
     PyObject *output_objects,
@@ -582,7 +582,7 @@ static void _trace_post_record(
 PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyFunction>& cdata,
                           THPFunction* grad_fn, const UnpackedInput& unpacked,
                           PyObject *inputs, THPObjectPtr&& raw_output, bool is_executable,
-                          Node* node) {
+                          torch::jit::Node* node) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -631,7 +631,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   RECORD_FUNCTION(
     Py_TYPE(self)->tp_name,
     std::vector<c10::IValue>(),
-    autograd::Function::peek_at_next_sequence_nr());
+    autograd::Node::peek_at_next_sequence_nr());
 
   TORCH_WARN("Legacy autograd function with non-static forward method is deprecated and will be removed in 1.3. ",
              "Please use new-style autograd function with static forward method. ",
@@ -694,7 +694,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
     std::vector<c10::IValue>(),
-    autograd::Function::peek_at_next_sequence_nr());
+    autograd::Node::peek_at_next_sequence_nr());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
@@ -1043,7 +1043,7 @@ PyObject* getMember(PyObject* obj, void* _unused) {
   return Convert(self->*ptr);
 }
 
-template<typename M, M autograd::Function::*ptr, PyObject* (*Convert)(long)>
+template<typename M, M autograd::Node::*ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);

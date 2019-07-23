@@ -34,10 +34,10 @@ struct TORCH_API Engine {
   Engine();
   virtual ~Engine();
 
-  using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, InputBuffer>>;
-  using dependencies_type = std::unordered_map<Function*, int>;
+  using ready_queue_type = std::deque<std::pair<std::shared_ptr<Node>, InputBuffer>>;
+  using dependencies_type = std::unordered_map<Node*, int>;
 
-  // Given a list of (Function, input number) pairs computes the value of the graph
+  // Given a list of (Node, input number) pairs computes the value of the graph
   // by following next_edge references.
   virtual variable_list execute(
       const edge_list& roots,
@@ -54,7 +54,7 @@ struct TORCH_API Engine {
   bool is_checkpoint_valid();
 
 protected:
-  void compute_dependencies(Function* root, GraphTask& task);
+  void compute_dependencies(Node* root, GraphTask& task);
   void evaluate_function(FunctionTask& task);
   ReadyQueue& ready_queue(at::Device device);
   ReadyQueue& ready_queue_by_index(int device_index);
