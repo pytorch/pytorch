@@ -3241,7 +3241,7 @@ for shape in [(1,), ()]:
         # This will cause stack overflow if reentrant calls are handled
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
-        
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_advanced_indexing_backwards_large(self):
         # See https://github.com/pytorch/pytorch/issues/22843
