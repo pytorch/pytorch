@@ -285,7 +285,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
                 if not torch.allclose(a, n, rtol, atol):
-                    sign = (-1 * (n < 0)) + (n > 0)
+                    sign = (-1 * (n < 0).double()) + (n > 0).double()
                     diff = a.abs() - n.abs()
                     err = diff.abs() > eps
                     signs = (sign.double() - a)
