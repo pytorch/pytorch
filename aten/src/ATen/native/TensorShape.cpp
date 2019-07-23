@@ -915,19 +915,6 @@ Tensor view(const Tensor& self, IntArrayRef size) {
                 "Only PerTensorAffine quantization is supported right now");
     self_ = at::_empty_affine_quantized({0}, self.options(), self.q_scale(),
                                         self.q_zero_point());
-  } else if (self.is_cuda()) {
-    // NOTE: This path of constructing the Tensor directly with the viewed
-    // Storage is necessary to allow `view` not to have a device_guard.
-    // Taking the common TH path of allocating a storage on the current device
-    // [via THCTensor_(new)] and then swapping out the storage later can change
-    // the device out from under the tensor.  Having the device be consistent
-    // through a Tensor's lifetime is an invariant we wish to keep to support
-    // caching, simplicity, etc.
-    auto storage = self.storage();
-    self_ = Tensor(c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-              std::move(storage),
-              at::CUDATensorId()
-            ));
   } else {
     self_ = at::empty({0}, self.options());
   }
