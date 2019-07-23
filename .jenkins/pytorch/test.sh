@@ -53,11 +53,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-
-  # Temporarily skip mypy-0.720, with that our type hints checks failed with
-  # ```torch/__init__.pyi:1307: error: Name 'pstrf' already defined (possibly by an import)```
-  # https://circleci.com/api/v1.1/project/github/pytorch/pytorch/2185641/output/105/0?file=true
-  pip_install --user mypy!=0.720 || true
+  pip_install --user mypy || true
 fi
 
 # faulthandler become built-in since 3.3
@@ -142,7 +138,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@487c9bf4b7750e779fac31c35d930381baa60a4a
+  pip_install --user git+https://github.com/pytorch/vision.git@2b73a4846773a670632b29fb2fc2ac57df7bce5d
 }
 
 test_libtorch() {

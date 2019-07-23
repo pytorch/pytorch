@@ -399,6 +399,12 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('as_strided', r"""
+as_strided(size, stride, storage_offset=0) -> Tensor
+
+See :func:`torch.as_strided`
+""")
+
 add_docstr_all('atan',
                r"""
 atan() -> Tensor

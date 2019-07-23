@@ -44,6 +44,14 @@ Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
   }
 }
 
+Tensor & masked_select_out_cuda(Tensor & result, const Tensor & self, const Tensor & mask) {
+  if (mask.dtype() == at::ScalarType::Bool) {
+    return legacy::cuda::_th_masked_select_bool_out(result, self, mask);
+  } else {
+    return legacy::cuda::_th_masked_select_out(result, self, mask);
+  }
+}
+
 Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   return legacy::cuda::_th_gather_out(result, self, dim, index);
 }
