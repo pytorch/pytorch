@@ -789,8 +789,12 @@ struct CAFFE2_API DictType : public Type {
     }
   }
 
+  // aligned with the format in FunctionSchema
   std::string str() const override {
-    return python_str();
+    std::stringstream ss;
+    ss << "Dict(" << getKeyType()->str() << ", "
+       << getValueType()->str() << ")";
+    return ss.str();
   }
 
   std::string python_str() const override {
