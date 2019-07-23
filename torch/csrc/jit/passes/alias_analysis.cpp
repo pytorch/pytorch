@@ -59,6 +59,9 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
 }
 
 bool AliasDb::isInPlace(Node* n) const {
+  if (!hasWriters(n)) {
+    return false;
+  }
   auto reads = getReads(const_cast<Node*>(n));
   return !(reads |= getWrites(const_cast<Node*>(n)));
 }
