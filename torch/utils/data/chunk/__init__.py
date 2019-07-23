@@ -1,7 +1,5 @@
 from ..dataset import IterableDataset  # noqa: F401
-from torch._C.data.chunk import ChunkDatasetOptions, SamplerWrapper  # noqa: F401
-from torch._C.data.chunk import Sampler, RandomSampler, SequentialSampler  # noqa: F401
-from torch._C.data.chunk import DistributedSampler, DistributedRandomSampler, DistributedSequentialSampler  # noqa: F401
+from torch._C.data.chunk import ChunkDatasetOptions  # noqa: F401
 from torch._C.data.chunk import ChunkDataReaderUint8T, ChunkDataReaderInt8T, ChunkDataReaderInt16T, ChunkDataReaderInt32T  # noqa: F401
 from torch._C.data.chunk import ChunkDataReaderInt64T, ChunkDataReaderFloat, ChunkDataReaderDouble  # noqa: F401
 
