@@ -846,7 +846,7 @@ void testModuleDefine() {
       return self.foo + x + b
   )");
   auto result = m.run_method("add_it", torch::ones({}));
-  AT_ASSERT(result.toTensor().item<float>() == 6)
+  AT_ASSERT(result.toTensor().item<float>() == 6);
 }
 
 void testModuleConversion() {
