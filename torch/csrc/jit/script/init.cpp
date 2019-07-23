@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_source.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -800,7 +801,17 @@ void initJitScriptBindings(PyObject* module) {
             nullptr,
             nullptr);
       });
-
+  m.def("_jit_import_tensor", [](std::string filename) {
+    const void* data = nullptr;
+    size_t size = 0;
+    Unpickler p(data, size, nullptr, nullptr);
+    auto ivalues = p.parse_ivalues();
+    std::cout << "Read " << ivalues.size() << " values\n";
+    for (auto i : ivalues) {
+      std::cout << i << "\n";
+    }
+    return ivalues;
+  });
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
   m.def("_jit_clear_class_registry", []() {

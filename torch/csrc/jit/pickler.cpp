@@ -486,6 +486,11 @@ void Pickler::pushTuple(const IValue& ivalue) {
   push<OpCode>(OpCode::TUPLE);
 }
 
+std::vector<IValue> Unpickler::parse_ivalues() {
+  run();
+  return stack_;
+}
+
 std::vector<IValue> Unpickler::parse_ivalue_list() {
   run();
   TORCH_CHECK(
