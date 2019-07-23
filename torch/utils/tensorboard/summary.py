@@ -73,35 +73,44 @@ def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', 
 
 
 def hparams(hparam_dict=None, metric_dict=None):
-    # pylint: disable=line-too-long
-    """Returns three `Summary` protocol buffer needed by HyperParameter plugin.
-    `Experiment` keeps the metadata of an experiment, such as the name of the hyper parameters
-    and the name of the metrics.
-    `Session_start_info` keeps the key-value pair of the hyper-parameter.
-    `Session_end_info` describes the status of the experiment. e.g. STATUS_SUCCESS
+    """Outputs three `Summary` protocol buffers needed by hparams plugin.
+    `Experiment` keeps the metadata of an experiment, such as the name of the
+      hyperparameters and the name of the metrics.
+    `SessionStartInfo` keeps key-value pairs of the hyperparameters
+    `SessionEndInfo` describes status of the experiment e.g. STATUS_SUCCESS
 
     Args:
-      hparam_dict: A dictionary that saves the name of the hyper parameter and its value.
-      metric_dict: A dictionary that saves the name of the metric and its value.
+      hparam_dict: A dictionary that contains names of the hyperparameters
+        and their values.
+      metric_dict: A dictionary that contains names of the metrics
+        and their values.
 
     Returns:
-      The `Summary` proto buffer of Experiment, Session_start_info and Session_end_info
+      The `Summary` protobufs for Experiment, SessionStartInfo and
+        SessionEndInfo
     """
-
-    from tensorboard.plugins.hparams.plugin_data_pb2 import HParamsPluginData, SessionEndInfo, SessionStartInfo
-    from tensorboard.plugins.hparams.api_pb2 import Experiment, HParamInfo, MetricInfo, MetricName, Status
-
-    PLUGIN_NAME = 'hparams'
-    PLUGIN_DATA_VERSION = 0
-
-    EXPERIMENT_TAG = '_hparams_/experiment'
-    SESSION_START_INFO_TAG = '_hparams_/session_start_info'
-    SESSION_END_INFO_TAG = '_hparams_/session_end_info'
+    from tensorboard.plugins.hparams.api_pb2 import (
+        Experiment, HParamInfo, MetricInfo, MetricName, Status
+    )
+    from tensorboard.plugins.hparams.metadata import (
+        PLUGIN_NAME,
+        PLUGIN_DATA_VERSION,
+        EXPERIMENT_TAG,
+        SESSION_START_INFO_TAG,
+        SESSION_END_INFO_TAG
+    )
+    from tensorboard.plugins.hparams.plugin_data_pb2 import (
+        HParamsPluginData, SessionEndInfo, SessionStartInfo
+    )
 
     # TODO: expose other parameters in the future.
-    # hp = HParamInfo(name='lr',display_name='learning rate', type=DataType.DATA_TYPE_FLOAT64, domain_interval=Interval(min_value=10, max_value=100))  # noqa E501
-    # mt = MetricInfo(name=MetricName(tag='accuracy'), display_name='accuracy', description='', dataset_type=DatasetType.DATASET_VALIDATION)  # noqa E501
-    # exp = Experiment(name='123', description='456', time_created_secs=100.0, hparam_infos=[hp], metric_infos=[mt], user='tw')  # noqa E501
+    # hp = HParamInfo(name='lr',display_name='learning rate',
+    # type=DataType.DATA_TYPE_FLOAT64, domain_interval=Interval(min_value=10,
+    # max_value=100))
+    # mt = MetricInfo(name=MetricName(tag='accuracy'), display_name='accuracy',
+    # description='', dataset_type=DatasetType.DATASET_VALIDATION)
+    # exp = Experiment(name='123', description='456', time_created_secs=100.0,
+    # hparam_infos=[hp], metric_infos=[mt], user='tw')
 
     hps = [HParamInfo(name=k) for k in hparam_dict.keys()]
     mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
@@ -109,23 +118,27 @@ def hparams(hparam_dict=None, metric_dict=None):
     exp = Experiment(hparam_infos=hps, metric_infos=mts)
 
     content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
-    smd = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
-                                                                 content=content.SerializeToString()))
+    smd = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()))
     exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
 
     ssi = SessionStartInfo()
     for k, v in hparam_dict.items():
         ssi.hparams[k].number_value = v
 
-    content = HParamsPluginData(session_start_info=ssi, version=PLUGIN_DATA_VERSION)
-    smd = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
-                                                                 content=content.SerializeToString()))
+    content = HParamsPluginData(session_start_info=ssi,
+                                version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()))
     ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
 
     sei = SessionEndInfo(status=Status.STATUS_SUCCESS)
     content = HParamsPluginData(session_end_info=sei, version=PLUGIN_DATA_VERSION)
-    smd = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
-                                                                 content=content.SerializeToString()))
+    smd = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()))
     sei = Summary(value=[Summary.Value(tag=SESSION_END_INFO_TAG, metadata=smd)])
 
     return exp, ssi, sei
