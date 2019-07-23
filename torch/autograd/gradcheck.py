@@ -283,7 +283,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             return _as_tuple(func(*input))[i]
 
         analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
-        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps, printDebug)
+        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps, printDebug=printDebug)
 
         if not correct_grad_sizes:
             return fail_test('Analytical gradient has incorrect size')
