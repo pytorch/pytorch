@@ -157,18 +157,15 @@ class TestONNXOpset(TestCase):
                 super(MyModule, self).__init__()
 
             def forward(self, x):
-                return torch._dim_arange(x, 1)
+                return x - 1
 
         module = MyModule()
-        ops_8 = [{"op_name" : "Shape"}, {"op_name" : "Constant"},
+        ops_8 = [{"op_name" : "Constant"},
                  {"op_name" : "Cast", "attributes": [{"name": "to", "i": 7, "type": 2}]},
-                 {"op_name" : "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
-                 {"op_name" : "Range"}]
-        ops_9 = [{"op_name" : "Shape"}, {"op_name" : "Constant"},
-                 {"op_name" : "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
-                 {"op_name" : "Range"}]
+                 {"op_name" : "Sub"}]
+        ops_9 = [{"op_name" : "Constant"}, {"op_name" : "Sub"}]
         ops = {8 : ops_8, 9 : ops_9}
-        x = torch.ones(5, 6)
+        x = torch.ones(5, 6, dtype=torch.long)
         check_onnx_opsets_operator(module, x, ops, opset_versions=[8, 9])
 
     def test_slice(self):
