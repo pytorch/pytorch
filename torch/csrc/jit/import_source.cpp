@@ -199,8 +199,8 @@ struct SourceImporter {
 
         std::vector<Def> definitions;
         std::vector<ResolverPtr> resolvers;
-        for (const auto& method_def : class_def.defs()) {
-          definitions.emplace_back(method_def);
+        for (const auto& method_def : class_def.body()) {
+          definitions.emplace_back(Def(method_def));
           resolvers.emplace_back(resolver_);
         }
 
