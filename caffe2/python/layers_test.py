@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
-import unittest
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -35,6 +34,40 @@ logger = logging.getLogger(__name__)
 
 
 class TestLayers(LayersTestCase):
+    def testSparseDropoutWithReplacement(self):
+        input_record = schema.NewRecord(self.model.net, IdList)
+        self.model.output_schema = schema.Struct()
+
+        lengths_blob = input_record.field_blobs()[0]
+        values_blob = input_record.field_blobs()[1]
+        lengths = np.array([1] * 10).astype(np.int32)
+        values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).astype(np.int64)
+        workspace.FeedBlob(lengths_blob, lengths)
+        workspace.FeedBlob(values_blob, values)
+
+        out = self.model.SparseDropoutWithReplacement(
+            input_record, 0.0, 0.5, 1.0, -1, output_names_or_num=1)
+        self.assertEqual(schema.List(schema.Scalar(np.int64,)), out)
+
+        train_init_net, train_net = self.get_training_nets()
+        eval_net = self.get_eval_net()
+        predict_net = self.get_predict_net()
+
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        out_values = workspace.FetchBlob(out.items())
+        out_lengths = workspace.FetchBlob(out.lengths())
+        self.assertBlobsEqual(out_values, values)
+        self.assertBlobsEqual(out_lengths, lengths)
+
+        workspace.RunNetOnce(eval_net)
+
+        workspace.RunNetOnce(predict_net)
+        predict_values = workspace.FetchBlob("values_auto_0")
+        predict_lengths = workspace.FetchBlob("lengths_auto_0")
+        self.assertBlobsEqual(predict_values, np.array([-1] * 10).astype(np.int64))
+        self.assertBlobsEqual(predict_lengths, lengths)
+
     def testAddLoss(self):
         input_record_LR = self.new_record(
             schema.Struct(
@@ -161,7 +194,7 @@ class TestLayers(LayersTestCase):
             self.model.add_output_schema('scalar', schema.Struct())
 
     def _test_net(self, net, ops_list):
-        """
+        '''
         Helper function to assert the net contains some set of operations and
         then to run the net.
 
@@ -169,7 +202,7 @@ class TestLayers(LayersTestCase):
             net -- the network to test and run
             ops_list -- the list of operation specifications to check for
                         in the net
-        """
+        '''
         ops_output = self.assertNetContainOps(net, ops_list)
         workspace.RunNetOnce(net)
         return ops_output
@@ -1502,7 +1535,7 @@ class TestLayers(LayersTestCase):
     def testRandomFourierFeatures(self, batch_size, input_dims, output_dims, bandwidth):
 
         def _rff_hypothesis_test(rff_output, X, W, b, scale):
-            """
+            '''
             Runs hypothesis test for Semi Random Features layer.
 
             Inputs:
@@ -1511,7 +1544,7 @@ class TestLayers(LayersTestCase):
                 W -- weight parameter from train_init_net
                 b -- bias parameter from train_init_net
                 scale -- value by which to scale the output vector
-            """
+            '''
             output = workspace.FetchBlob(rff_output)
             output_ref = scale * np.cos(np.dot(X, np.transpose(W)) + b)
             npt.assert_allclose(output, output_ref, rtol=1e-3, atol=1e-3)
@@ -1580,7 +1613,7 @@ class TestLayers(LayersTestCase):
                                 set_weight_as_global_constant):
 
         def _arc_cosine_hypothesis_test(ac_output, X, W, b, s):
-            """
+            '''
             Runs hypothesis test for Arc Cosine layer.
 
             Inputs:
@@ -1589,7 +1622,7 @@ class TestLayers(LayersTestCase):
                 W -- weight parameter from train_init_net
                 b -- bias parameter from train_init_net
                 s -- degree parameter
-            """
+            '''
             # Get output from net
             net_output = workspace.FetchBlob(ac_output)
 
@@ -1699,7 +1732,7 @@ class TestLayers(LayersTestCase):
 
         def _semi_random_hypothesis_test(srf_output, X_full, X_random, rand_w,
                                          rand_b, s):
-            """
+            '''
             Runs hypothesis test for Semi Random Features layer.
 
             Inputs:
@@ -1710,7 +1743,7 @@ class TestLayers(LayersTestCase):
                 rand_b -- random-initialized bias parameter from train_init_net
                 s -- degree parameter
 
-            """
+            '''
             # Get output from net
             net_output = workspace.FetchBlob(srf_output)
 

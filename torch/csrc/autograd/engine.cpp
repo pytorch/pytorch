@@ -56,7 +56,7 @@ static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
 
-struct FunctionTask {
+struct NodeTask {
   GraphTask* base_;
   std::shared_ptr<Node> fn_;
   // This buffer serves as an implicit "addition" node for all of the
@@ -69,7 +69,7 @@ struct FunctionTask {
 
   int getReentrantDepth() const;
 
-  FunctionTask(GraphTask* base, std::shared_ptr<Node> fn, InputBuffer inputs, bool isShutdownTask = false)
+  NodeTask(GraphTask* base, std::shared_ptr<Node> fn, InputBuffer inputs, bool isShutdownTask = false)
     : base_(base)
     , fn_(std::move(fn))
     , inputs_(std::move(inputs))
@@ -77,9 +77,9 @@ struct FunctionTask {
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
-// Shutdown tasks are first and then empty FunctionTask are next.
-struct CompareFunctionTaskTime {
-  bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
+// Shutdown tasks are first and then empty NodeTask are next.
+struct CompareNodeTaskTime {
+  bool operator()(NodeTask const & t1, NodeTask const & t2) {
     if (t2.isShutdownTask_) {
       return true;
     } else if (!t1.fn_ || t1.isShutdownTask_) {
@@ -95,15 +95,15 @@ struct CompareFunctionTaskTime {
 };
 
 struct ReadyQueue {
-  std::priority_queue<FunctionTask, std::vector<FunctionTask>, CompareFunctionTaskTime> heap_;
+  std::priority_queue<NodeTask, std::vector<NodeTask>, CompareNodeTaskTime> heap_;
   // To notify threads waiting on the ReadyQueue of available tasks on the heap_
   std::condition_variable not_empty_;
   // To protect read and writes to heap_
   std::mutex mutex_;
 
-  void push(FunctionTask item);
+  void push(NodeTask item);
   void pushShutdownTask();
-  FunctionTask pop();
+  NodeTask pop();
 };
 
 // Note [Reentrant backwards]
@@ -201,11 +201,11 @@ struct GraphTask {
     , reentrant_depth_(reentrant_depth) {}
 };
 
-int FunctionTask::getReentrantDepth() const {
+int NodeTask::getReentrantDepth() const {
   return base_->reentrant_depth_;
 }
 
-auto ReadyQueue::push(FunctionTask item) -> void {
+auto ReadyQueue::push(NodeTask item) -> void {
   {
     // Lock mutex for writing to heap_
     std::lock_guard<std::mutex> lock(mutex_);
@@ -218,17 +218,17 @@ auto ReadyQueue::push(FunctionTask item) -> void {
 auto ReadyQueue::pushShutdownTask() -> void {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    heap_.push(FunctionTask(nullptr, nullptr, InputBuffer(0), true));
+    heap_.push(NodeTask(nullptr, nullptr, InputBuffer(0), true));
   }
   not_empty_.notify_one();
 }
 
-auto ReadyQueue::pop() -> FunctionTask {
+auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this]{ return !heap_.empty(); });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto task = std::move(const_cast<FunctionTask&>(heap_.top())); heap_.pop();
+  auto task = std::move(const_cast<NodeTask&>(heap_.top())); heap_.pop();
   return task;
 }
 
@@ -314,7 +314,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
   while (!graph_task || graph_task->outstanding_tasks_ > 0) {
-    FunctionTask task = queue->pop();
+    NodeTask task = queue->pop();
     // This will only work if the worker is running a non backward task
     // TODO Needs to be fixed this to work in all cases
     if (task.isShutdownTask_) {
@@ -353,7 +353,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         if (--task.base_->outstanding_tasks_ == 0) {
           // Synchronize outstanding_tasks_ with queue mutex
           std::atomic_thread_fence(std::memory_order_release);
-          ready_queue_by_index(base_owner).push(FunctionTask(task.base_, nullptr, InputBuffer(0)));
+          ready_queue_by_index(base_owner).push(NodeTask(task.base_, nullptr, InputBuffer(0)));
         }
       }
     }
@@ -387,7 +387,7 @@ void Engine::reentrant_thread_init() {
   }
 }
 
-auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void {
+auto Engine::thread_on_exception(NodeTask& task, std::exception& e) -> void {
   // Lock mutex for writing to task.base_->exception_
   std::lock_guard<std::mutex> lock(task.base_->mutex_);
   if (!task.base_->has_error_.load()) {
@@ -467,7 +467,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
   }
 }
 
-static variable_list call_function(FunctionTask& task) {
+static variable_list call_function(NodeTask& task) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
   checkpoint_valid = task.base_->can_checkpoint() && prev_checkpoint_valid_state;
   auto& fn = *task.fn_;
@@ -513,7 +513,7 @@ static variable_list call_function(FunctionTask& task) {
   return outputs;
 }
 
-auto Engine::evaluate_function(FunctionTask& task) -> void {
+auto Engine::evaluate_function(NodeTask& task) -> void {
   // If exec_info_ is not empty, we have to instrument the execution
   auto & exec_info_ = task.base_->exec_info_;
   if (!exec_info_.empty()) {
@@ -586,7 +586,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       input_buffer.add(next.input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push(FunctionTask(task.base_, next.function, std::move(input_buffer)));
+        queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
       } else {
         not_ready.emplace(next.function.get(), std::move(input_buffer));
       }
@@ -596,7 +596,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       input_buffer.add(next.input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push(FunctionTask(task.base_, next.function, std::move(input_buffer)));
+        queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
       }
     }
@@ -666,7 +666,7 @@ auto Engine::execute(const edge_list& roots,
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);
   }
-  ready_queue(at::kCPU).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
+  ready_queue(at::kCPU).push(NodeTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {

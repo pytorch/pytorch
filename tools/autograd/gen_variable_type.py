@@ -172,7 +172,7 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 """)
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
+grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 

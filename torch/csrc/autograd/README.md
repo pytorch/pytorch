@@ -24,10 +24,10 @@ classes:
 * `THPFunction` in `python_function.h`, the Python object type.  In
   `python_function.cpp`, you can see the boilerplate that tells the Python
   interpreter about this object.
-* `PyFunction` in `python_function.h`, a subclass of `Node` which forwards
+* `PyNode` in `python_function.h`, a subclass of `Node` which forwards
   `apply` to a Python `THPFunction`. (NOT a Python object, despite its name!)
 
-Outside of `PyFunction`, the C++ objects largely avoid referencing Python
+Outside of `PyNode`, the C++ objects largely avoid referencing Python
 objects (there are a few exceptions, like `pyobj` in `Variable`, and
-`PyFunction`, whose whole point is to let C++ call into Python). And `pyobj`
+`PyNode`, whose whole point is to let C++ call into Python). And `pyobj`
 in `Node` to ensure uniqueness of the associated python wrapper (if it exists).

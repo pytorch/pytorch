@@ -1830,6 +1830,11 @@ struct to_ir {
   }
 
   void emitAssignment(const Assign& stmt) {
+    if (!stmt.rhs().present()) {
+      throw ErrorReport(stmt.range())
+          << "For an assignment, expected an expression on the right-hand side";
+    }
+    const Expr& rhs = stmt.rhs().get();
     switch (stmt.lhs().kind()) {
       case TK_VAR: {
         auto v = Var(stmt.lhs());
@@ -1838,16 +1843,16 @@ struct to_ir {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
         environment_stack->setSugaredVar(
-            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1, type));
+            v.range(), v.name().name(), emitSugaredExpr(rhs, 1, type));
       } break;
       case TK_TUPLE_LITERAL:
-        emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
+        emitTupleAssign(TupleLiteral(stmt.lhs()), rhs);
         break;
       case '.':
         emitSelectAssign(stmt);
         break;
       case TK_SUBSCRIPT:
-        emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), stmt.rhs());
+        emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), rhs);
         break;
       default:
         throw ErrorReport(stmt.lhs())
@@ -1856,10 +1861,13 @@ struct to_ir {
   }
 
   void emitSelectAssign(const Assign& stmt) {
+    if (!stmt.rhs().present()) {
+      throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
+    }
     const auto lhs = Select(stmt.lhs());
     const auto basename = Var(lhs.value()).name();
-    const auto rhsValue =
-        emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
+    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
+                              ->asValue(stmt.rhs().range(), method);
     auto userObject = environment_stack->getSugaredVar(basename);
     userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }

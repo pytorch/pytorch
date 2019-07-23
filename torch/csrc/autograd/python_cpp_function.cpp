@@ -206,7 +206,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
     Py_RETURN_NONE;
   }
 
-  if (auto pfw = dynamic_cast<PyFunction*>(cdata.get())) {
+  if (auto pfw = dynamic_cast<PyNode*>(cdata.get())) {
     PyObject* obj = pfw->obj;
     Py_INCREF(obj);
     return obj;

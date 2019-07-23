@@ -997,9 +997,10 @@ RegisterOperators reg(
                return 0;
              };
            } else {
+             TypePtr elementType = lt->getElementType();
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               auto vals = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+               auto vals = c10::impl::GenericList(elementType);
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -1018,8 +1019,13 @@ RegisterOperators reg(
              throw std::runtime_error(
                  "DictConstruct must have an even number of inputs");
            }
+           TORCH_INTERNAL_ASSERT(node->outputs().size() == 1, "DictConstruct must have exactly one output");
+           TypePtr output_type = node->outputs()[0]->type();
+           TORCH_INTERNAL_ASSERT(output_type->kind() == TypeKind::DictType, "DictConstruct output must be of Dict type.");
+           TypePtr key_type = static_cast<const DictType*>(output_type.get())->getKeyType();
+           TypePtr value_type = static_cast<const DictType*>(output_type.get())->getValueType();
            return [=](Stack& stack) {
-             auto vals = c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
+             auto vals = c10::impl::GenericDict(key_type, value_type);
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);

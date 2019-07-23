@@ -20,7 +20,7 @@
 
 namespace torch { namespace autograd {
 struct ReadyQueue;
-struct FunctionTask;
+struct NodeTask;
 struct GraphTask;
 }} // namespace torch::autograd
 
@@ -55,13 +55,13 @@ struct TORCH_API Engine {
 
 protected:
   void compute_dependencies(Node* root, GraphTask& task);
-  void evaluate_function(FunctionTask& task);
+  void evaluate_function(NodeTask& task);
   ReadyQueue& ready_queue(at::Device device);
   ReadyQueue& ready_queue_by_index(int device_index);
   void start_threads();
   virtual void thread_init(int device);
   virtual void thread_main(GraphTask *graph_task);
-  virtual void thread_on_exception(FunctionTask& task, std::exception& e);
+  virtual void thread_on_exception(NodeTask& task, std::exception& e);
   void reentrant_thread_init();
   void add_thread_pool_task(GraphTask *graph_task);
   void set_device(int device);

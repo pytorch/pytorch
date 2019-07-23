@@ -72,7 +72,7 @@ static void gatherFunctions(
   * converting recursion to a loop, using a heap buffer in place of the
   * recursive call stack.
   */
-void deleteFunction(Node* function) {
+void deleteNode(Node* function) {
   // To avoid stack overflow on large computational graphs,
   // we need to track reference decrementing and freeing
   // on the heap.

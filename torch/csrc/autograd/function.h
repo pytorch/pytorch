@@ -34,7 +34,7 @@ using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
 
 // Custom deleter to prevent stack overflows.
-TORCH_API void deleteFunction(Node* function);
+TORCH_API void deleteNode(Node* function);
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                               Node
@@ -201,7 +201,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return sequence_nr_;
   }
 
-  /// Returns a shared pointer to `this`. `PyFunction`s are not managed by
+  /// Returns a shared pointer to `this`. `PyNode`s are not managed by
   /// `shared_ptr`s by default, but are bound to the lifetime of their Python
   /// object instead.
   virtual std::shared_ptr<Node> get_shared_ptr() {
