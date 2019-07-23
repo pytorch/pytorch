@@ -527,7 +527,11 @@ class ShapePropagator {
         }
         return;
       }
-      case aten::tensor: {
+      case aten::tensor:
+      case aten::as_tensor: {
+        if (node->inputs().at(0)->type()->isSubtypeOf(TensorType::get())) {
+          break;
+        }
         return propagateTorchTensorShape(node);
       }
       case prim::TupleConstruct: {
@@ -1544,6 +1548,27 @@ class ShapePropagator {
           node->matches(
               "aten::as_strided(Tensor self, int[] size, int[] stride, int? storage_offset) -> Tensor")) {
         return reshape_prop(node, attr::size, tensor_types);
+      } else if (node->matches("aten::as_tensor(Tensor data, *, ScalarType? dtype, Device? device) -> Tensor")) {
+        TypePtr input_type = node->inputs().at(0)->type();
+        if (auto type = input_type->cast<DimensionedTensorType>()) {
+          at::ScalarType default_type = type->scalarType();
+          c10::Device default_device = type->device();
+          if (auto dtype_index = node->schema().argumentIndexWithName("dtype")) {
+            auto inp = toIValue(node->inputs().at(*dtype_index));
+            if (!inp->isNone()) {
+              default_type = inp->toScalarType();
+            }
+          }
+          if (auto device_index = node->schema().argumentIndexWithName("device")) {
+              auto inp = toIValue(node->inputs().at(*device_index));
+            if (!inp->isNone()) {
+                default_device = inp->toDevice();
+            }
+          }
+          node->output()->setType(
+            DimensionedTensorType::create(default_type, default_device, type->dim()));
+        }
+        return nullptr;
       } else if (node->matches(
                      "aten::reshape(Tensor self, int[] shape) -> Tensor")) {
         return reshape_prop(node, attr::shape, tensor_types);
