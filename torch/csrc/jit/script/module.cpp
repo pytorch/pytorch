@@ -17,11 +17,7 @@ static ModulePtr create_module_object(
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle = false) {
   if (shouldMangle && cu->get_class(class_name) != nullptr) {
-    const auto mangleString = cu->getMangleString();
-    auto newPrefix = class_name.prefix().empty()
-        ? QualifiedName(mangleString)
-        : QualifiedName(class_name.prefix(), mangleString);
-    class_name = QualifiedName(newPrefix, class_name.name());
+    class_name = cu->mangle(class_name);
   }
   auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
   cu->register_class(cls);

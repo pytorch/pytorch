@@ -365,6 +365,7 @@ void initJitScriptBindings(PyObject* module) {
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
+      .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
           [](Module& m,
@@ -572,6 +573,7 @@ void initJitScriptBindings(PyObject* module) {
             auto& fn = self->get_function(QualifiedName(name));
             return StrongFunctionPtr(std::move(self), &fn);
           })
+      .def("set_optimized", &CompilationUnit::set_optimized)
       .def(
           "define",
           [](CompilationUnit& cu,
