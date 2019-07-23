@@ -96,9 +96,7 @@ TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
 }
 
 TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_parameter;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_parameter("name.with.dot", torch::ones(5)),
       "Parameter name must not contain a dot (got 'name.with.dot')");
@@ -108,9 +106,7 @@ TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_parameter;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_parameter("p", torch::ones(5));
   ASSERT_THROWS_WITH(
@@ -119,9 +115,7 @@ TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
 }
 
 TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_buffer;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_buffer("name.with.dot", torch::ones(5)),
       "Buffer name must not contain a dot (got 'name.with.dot')");
@@ -131,9 +125,7 @@ TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterBufferThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_buffer;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_buffer("p", torch::ones(5));
   ASSERT_THROWS_WITH(

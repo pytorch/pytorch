@@ -56,9 +56,8 @@ namespace nn {
 /// operation, which performs a deepcopy of a cloneable `Module` hierarchy.
 ///
 /// Parameters are registered with a `Module` via `register_parameter`. Buffers
-/// are registered separately via `register_buffer`. These methods are part of
-/// the protected API of `Module` and are typically invoked from within a
-/// concrete `Module`s constructor.
+/// are registered separately via `register_buffer`. These methods are typically
+/// invoked from within a concrete `Module`s constructor.
 class TORCH_API Module : public std::enable_shared_from_this<Module> {
  public:
   using ModuleApplyFunction = std::function<void(Module&)>;
@@ -442,7 +441,6 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Returns whether the `Module` is serializable.
   virtual bool is_serializable() const;
 
- protected:
   /// Registers a parameter with this `Module`.
   ///
   /// A parameter should be any gradient-recording tensor used in the
