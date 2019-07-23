@@ -69,10 +69,12 @@ def conv2d(input, weight, bias,
     padding = _pair(padding)
     dilation = _pair(dilation)
 
-    prepacked_weight = ops.quantized.fbgemm_conv_prepack(weight, groups)
-    return ops.quantized.fbgemm_conv2d(input, prepacked_weight, bias,
+    prepacked_weight = ops.quantized.fbgemm_conv_prepack(
+        weight.permute([0, 2, 3, 1]), groups)
+    return ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
+                                       prepacked_weight, bias,
                                        stride, padding, dilation,
-                                       groups, scale, zero_point)
+                                       groups, scale, zero_point).permute([0, 3, 1, 2])
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
