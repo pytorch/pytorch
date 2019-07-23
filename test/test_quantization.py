@@ -11,9 +11,6 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
     ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
 
-from hypothesis import given
-import hypothesis_utils as hu
-
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -371,31 +368,6 @@ class FusionTest(QuantizationTestCase):
                          "Non-fused submodule Conv")
         self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d,
                          "Non-fused submodule BN")
-
-    @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
-           running_mean=hu.tensor(shapes=(6,)),
-           running_var=hu.tensor(shapes=(6,)))
-    def test_fuse_module_eval_numerics(self, X, running_mean, running_var):
-        from torch.quantization.fuse_modules import fuse_conv_bn
-        inputs, _ = X
-
-        iC, oC = inputs.shape[1], len(running_mean[0])
-        inputs = torch.from_numpy(inputs).to(torch.double)
-        kernel_size = (3, 3)
-
-        conv_ref = torch.nn.Conv2d(iC, oC, bias=True, kernel_size=kernel_size)
-        bn_ref = torch.nn.BatchNorm2d(oC)
-        bn_ref.running_mean = torch.from_numpy(running_mean[0]).to(torch.double)
-        bn_ref.running_var = torch.from_numpy(running_var[0]).to(torch.double)
-
-        conv_ref.eval()
-        bn_ref.eval()
-
-        Y_ref = bn_ref(conv_ref(inputs))
-        conv_bn_fused = fuse_conv_bn(conv_ref, bn_ref)
-        Y_hat = conv_bn_fused(inputs)
-
-        self.assertEqual(Y_ref, Y_hat, message="Conv+BN fusion results are off")
 
 
 if __name__ == '__main__':
