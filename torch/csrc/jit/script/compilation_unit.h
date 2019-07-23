@@ -68,6 +68,19 @@ struct TORCH_API CompilationUnit {
     TORCH_CHECK(false, "attempted to get undefined function ", name.name());
   }
 
+  void set_optimized(bool o) {
+    AT_WARN(
+        "CompilationUnit::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
+  }
+
+   bool is_optimized() const {
+    AT_WARN(
+        "CompilationUnit::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
+  }
+
   // for historic reasons, these are defined in compiler.cpp
   // Returns the list of Function's just defined.
   std::vector<Function*> define(
@@ -95,7 +108,7 @@ struct TORCH_API CompilationUnit {
       std::shared_ptr<Graph> graph,
       bool shouldMangle = false) {
     if (shouldMangle) {
-      name = c10::QualifiedName(name.prefix(), mangle(name.name()));
+      name = mangle(name);
     }
     auto fn = torch::make_unique<Function>(
         std::move(name), std::move(graph), nullptr);
@@ -205,8 +218,7 @@ struct TORCH_API CompilationUnit {
   // We also use mangling to distinguish different Module instances. Since each
   // Module is a singleton class instance, different instances of the same
   // Python Module will have different types but the same qualified name.
-  std::string mangle(const std::string& name) const;
-  std::string getMangleString() const;
+  c10::QualifiedName mangle(const c10::QualifiedName& name) const;
 
  private:
   std::unique_ptr<Function> define(

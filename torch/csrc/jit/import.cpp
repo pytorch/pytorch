@@ -88,6 +88,7 @@ class ScriptModuleDeserializer final {
   std::vector<IValue> LEGACY_loadPickleArchive(const std::string& name);
   script::Module LEGACY_convertModule(const torch::ModuleDef& module_def);
   std::vector<IValue> LEGACY_pickled_ivalues_;
+  size_t proto_version_;
 };
 
 script::Module ScriptModuleDeserializer::deserialize(
@@ -125,6 +126,7 @@ script::Module ScriptModuleDeserializer::deserialize(
       model_def.ParseFromString(binary_string),
       "JSON transcoder produced invalid protobuf output.");
   device_ = device;
+  proto_version_ = model_def.proto_version();
 
   // Load extra files.
   for (const auto& kv : extra_files) {
@@ -140,8 +142,8 @@ script::Module ScriptModuleDeserializer::deserialize(
 
   loadTensorTable(&model_def);
 
-  if (model_def.proto_version() < 6) {
-    if (model_def.proto_version() >= 2) {
+  if (proto_version_ < 6) {
+    if (proto_version_ >= 2) {
       LEGACY_pickled_ivalues_ = LEGACY_loadPickleArchive("attributes.pkl");
     }
     moduleStack_.push_back("__torch__");
@@ -151,7 +153,7 @@ script::Module ScriptModuleDeserializer::deserialize(
     // TODO: getstate/setstate
     at::DataPtr pickle_ptr;
     size_t pickle_size;
-    std::tie(pickle_ptr, pickle_size) = reader_->getRecord("module.pkl");
+    std::tie(pickle_ptr, pickle_size) = reader_->getRecord("data.pkl");
     Unpickler unpickler(
         pickle_ptr.get(),
         pickle_size,
@@ -361,7 +363,8 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   imported_libs_.insert(qualifier);
   std::function<void(const std::string&)> import_callback =
       [this](const std::string& qualifier) { importCallback(qualifier); };
-  const std::string path = ImportExportHelpers::qualifierToPath(qualifier);
+  const std::string path =
+      ImportExportHelpers::qualifierToPath(qualifier, proto_version_);
   at::DataPtr data;
   size_t size;
   std::tie(data, size) = reader_->getRecord(path);

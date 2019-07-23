@@ -622,8 +622,8 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
     auto& class_info = item.value();
 
     // For the type, foo.bar.Baz
-    const std::string filename =
-        ImportExportHelpers::qualifierToPath(class_type->qualifier());
+    const std::string filename = ImportExportHelpers::qualifierToPath(
+        class_type->qualifier(), torch::ProtoVersion::PROTO_VERSION_NEWEST);
     // End state: filename is "foo/bar.py", in which we will define a class
     // named Baz
     auto& stream = fileToSrc[filename];
@@ -719,7 +719,7 @@ void ScriptModuleSerializer::convertModel(
   pickler.start();
   pickler.addIValue(module.module_object());
   pickler.finish();
-  writer_.writeRecord("module.pkl", pickler.stack().data(), pickler.stack().size());
+  writer_.writeRecord("data.pkl", pickler.stack().data(), pickler.stack().size());
 
   writeTensorTable(model_def);
   writeLibs(model_def);
