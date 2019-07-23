@@ -18,18 +18,17 @@ from caffe2.python import (
     workspace,
 )
 from caffe2.python.layers.layers import (
+    AccessedFeatures,
+    get_key,
+    IdList,
     InstantiationContext,
+    is_request_only_scalar,
+    set_request_only,
 )
 from caffe2.python.layers.tags import Tags
 from caffe2.python.layer_test_util import (
     LayersTestCase,
     OpSpec,
-)
-from caffe2.python.layers.layers import (
-    IdList,
-    set_request_only,
-    is_request_only_scalar,
-    get_key,
 )
 import logging
 logger = logging.getLogger(__name__)
@@ -2143,3 +2142,70 @@ class TestLayers(LayersTestCase):
         workspace.RunNetOnce(pred_net)
         output = workspace.FetchBlob(ws_output())
         npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+    def testFeatureSparseToDenseGetAccessedFeatures(self):
+        float_features_column = "float_features"
+        float_features_type = "FLOAT"
+        float_features_ids = [1, 2, 3]
+
+        id_list_features_column = "id_list_features"
+        id_list_features_type = "ID_LIST"
+        id_list_features_ids = [4, 5, 6]
+
+        id_score_list_features_column = "id_score_list_features"
+        id_score_list_features_type = "ID_SCORE_LIST"
+        id_score_list_features_ids = [7, 8 , 9]
+
+        feature_names = ["a", "b", "c"]
+
+        input_record = self.new_record(schema.Struct(
+            (float_features_column, schema.Map(np.int32, np.float32)),
+            (id_list_features_column,
+                schema.Map(np.int32, schema.List(np.int64))),
+            (id_score_list_features_column,
+                schema.Map(np.int32, schema.Map(np.int64, np.float32))),
+        ))
+
+        input_specs = [
+            (
+                float_features_column,
+                schema.FeatureSpec(
+                    feature_type=float_features_type,
+                    feature_ids=float_features_ids,
+                    feature_names=feature_names,
+                ),
+            ),
+            (
+                id_list_features_column,
+                schema.FeatureSpec(
+                    feature_type=id_list_features_type,
+                    feature_ids=id_list_features_ids,
+                    feature_names=feature_names,
+                ),
+            ),
+            (
+                id_score_list_features_column,
+                schema.FeatureSpec(
+                    feature_type=id_score_list_features_type,
+                    feature_ids=id_score_list_features_ids,
+                    feature_names=feature_names,
+                ),
+            ),
+        ]
+
+        self.model.FeatureSparseToDense(input_record, input_specs)
+
+        expected_accessed_features = {
+            float_features_column: AccessedFeatures(
+                float_features_type, set(float_features_ids)),
+            id_list_features_column: AccessedFeatures(
+                id_list_features_type, set(id_list_features_ids)),
+            id_score_list_features_column: AccessedFeatures(
+                id_score_list_features_type, set(id_score_list_features_ids)),
+        }
+
+        self.assertEqual(len(self.model.layers), 1)
+        self.assertEqual(
+            self.model.layers[0].get_accessed_features(),
+            expected_accessed_features
+        )
