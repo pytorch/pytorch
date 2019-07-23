@@ -99,6 +99,26 @@ TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
       "Submodule 'linear' already defined");
 }
 
+TEST_F(ModuleTest, ReplaceModuleThrowsForUnknownModuleName) {
+  torch::nn::Module model;
+  ASSERT_THROWS_WITH(
+      model.replace_module("linear", torch::nn::Linear(3, 4)),
+      "Submodule 'linear' is not defined");
+}
+
+TEST_F(ModuleTest, ReplaceModule) {
+  struct TestModel : public torch::nn::Module {
+    torch::nn::Linear l1{nullptr};
+    TestModel() {
+      l1 = register_module("l1", torch::nn::Linear(3, 4));
+    }
+  };
+  auto model = std::make_shared<TestModel>();
+  model->l1 = model->replace_module("l1", torch::nn::Linear(5, 6));
+  ASSERT_EQ(model->named_parameters()["l1.weight"].size(0), 6);
+  ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
+}
+
 TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
   struct TestModel : public torch::nn::Module {
     using torch::nn::Module::register_parameter;

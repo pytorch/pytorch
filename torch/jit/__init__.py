@@ -484,7 +484,7 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func,  traced_func, check_tolerance,
+def _check_trace(check_inputs, func, traced_func, check_tolerance,
                  force_outplace, is_trace_module, _module_class):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -663,6 +663,7 @@ def wrap_check_inputs(check_inputs):
 
 def trace(func,
           example_inputs,
+          optimize=None,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
@@ -742,6 +743,8 @@ def trace(func,
     """
     if not _enabled:
         return func
+    if optimize is not None:
+        warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
     if isinstance(func, torch.jit.ScriptModule):
         # it is hard to trace it because the forward method on ScriptModule is already defined, so it
@@ -750,14 +753,14 @@ def trace(func,
         return func
 
     if isinstance(func, torch.nn.Module):
-        return trace_module(func, {'forward': example_inputs},
+        return trace_module(func, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
 
-        return trace_module(func.__self__, {'forward': example_inputs},
+        return trace_module(func.__self__, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
 
@@ -793,6 +796,7 @@ def trace(func,
 
 def trace_module(mod,
                  inputs,
+                 optimize=None,
                  check_trace=True,
                  check_inputs=None,
                  check_tolerance=1e-5,
@@ -866,6 +870,9 @@ def trace_module(mod,
 
     if not _enabled:
         return mod
+    if optimize is not None:
+        warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
+
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
 
     if not isinstance(mod, torch.nn.Module):
@@ -1038,9 +1045,11 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     _add_script_class(obj, qualified_name)
 
 
-def script(obj, _frames_up=0, _rcb=None):
+def script(obj, optimize=None, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
+    if optimize is not None:
+        warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
     if isinstance(obj, torch.nn.Module):
         return _convert_to_script_module(obj)
@@ -1446,11 +1455,13 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-        def __init__(self, _qualified_name=None, _compilation_unit=None, _cpp_module=None):
+        def __init__(self, optimize=None, _qualified_name=None, _compilation_unit=None, _cpp_module=None):
             if _qualified_name is None:
                 _qualified_name = type(self).__name__
             if _compilation_unit is None:
                 _compilation_unit = torch._C.CompilationUnit()
+            if optimize is not None:
+                warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
             # If we were give a _cpp_module, use that one as the backing cpp
             # module instead of creating a fresh one.
