@@ -292,9 +292,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             if printDebug:
                 print("=================CDIST=======================")
                 print("analytical:")
-                print(*analytical)
+                print(*a)
                 print("numerical:")
-                print(*numerical)
+                print(*n)
             if a.numel() != 0 or n.numel() != 0:
                 if not torch.allclose(a, n, rtol, atol):
                     sign = (-1 * (n < 0).double()) + (n > 0).double()
