@@ -50,9 +50,6 @@ Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   assert_no_internal_overlap(result, "bitwise_not");
   auto iter = TensorIterator::unary_op(result, self);
   bitwise_not_stub(iter->device_type(), *iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
@@ -164,7 +161,6 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
-    propagate_names_if_namedtensor_enabled(result, self);       \
     return result;                                              \
   }
 

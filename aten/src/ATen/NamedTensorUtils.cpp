@@ -224,12 +224,6 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   at::impl::internal_set_names_inplace(result, names);
 }
 
-std::tuple<Tensor,Tensor,optional<std::vector<Dimname>>>
-unify_names_for_binary_op(const Tensor& tensor, const Tensor& other) {
-  return std::tuple<Tensor,Tensor,optional<std::vector<Dimname>>>(
-      tensor, other, unify_from_right(tensor.names(), other.names()));
-}
-
 } // namespace namedinference
 } // namespace at
 #endif
