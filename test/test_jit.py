@@ -12209,10 +12209,11 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                pass
+                return None
 
             @torch.jit.export
-            def __setstate__(self):
+            def __setstate__(self, _):
+                # type: (None) -> None
                 self.buffer1 = torch.ones(2, 2) + 10
                 self.buffer2 = torch.ones(2, 2) + 10
 
