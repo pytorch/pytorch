@@ -4,7 +4,6 @@
 #include <vector>
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/utils/disallow_copy.h>
@@ -112,8 +111,6 @@ class Pickler {
   Pickler(std::ostream& out, std::vector<at::Tensor>* tensor_table = nullptr)
       : out_(out), tensor_table_(tensor_table) {}
 
-  // const std::vector<char>& stack();
-
   // Push protocol onto the stack
   void start();
 
@@ -175,9 +172,11 @@ class Pickler {
     out_.write(begin, sizeof(T));
   }
 
-  // Stack of opcodes/data
-  // std::vector<char> stack_;
+  // Stream to write binary data to
   std::ostream& out_;
+
+  // Stack of opcodes/data
+  std::vector<char> stack_;
 
   // External table of tensors to serialize. If this is missing, then tensors
   // are serialized directly into the pickle
@@ -214,7 +213,6 @@ class Unpickler {
  public:
   Unpickler(
       std::istream& in,
-      size_t size,
       const std::vector<at::Tensor>* tensor_table,
       ClassResolver
           class_resolver)
@@ -247,13 +245,16 @@ class Unpickler {
   void setInput(size_t memo_id);
   void run();
 
+  // Binary input stream
+  std::istream& in_;
+
   std::vector<IValue> stack_;
+
   // globals are represented on the stack as IValue integer indices
   // into this list
   std::vector<std::function<void(void)>> globals_;
   std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
-  std::istream& in_;
   const std::vector<at::Tensor>* tensor_table_;
 
   // optionally nullptr, needs to be present for creating classes
@@ -271,23 +272,7 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // if the cls has __getstate__/__setstate__
 // assert they have the right schema and return true,
 // otherwise return false
-bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
-
-TORCH_API std::string Pickle(
-    std::vector<IValue> ivalues,
-    std::vector<at::Tensor>* tensor_table = nullptr);
-
-TORCH_API std::vector<IValue> Unpickle(
-    const char* data,
-    size_t size,
-    std::vector<at::Tensor>* tensor_table = nullptr,
-    ClassResolver class_resolver = nullptr);
-
-TORCH_API std::vector<IValue> Unpickle(
-    const void* data,
-    size_t size,
-    std::vector<at::Tensor>* tensor_table = nullptr,
-    ClassResolver class_resolver = nullptr);
+bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);/// Serialize an object in a format compatible with Python's pickle module.
 
 } // namespace jit
 } // namespace torch

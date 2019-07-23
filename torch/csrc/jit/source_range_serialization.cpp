@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/pickle.h>
 
 namespace torch {
 namespace jit {

@@ -575,7 +575,6 @@ static IValue toSpecializedList(const IValue& generic) {
 
 OpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
-  // std::cout << "Read code " << std::hex << int(static_cast<uint8_t>(opcode)) << "\n";
   switch (opcode) {
     case OpCode::EMPTY_LIST: {
       stack_.emplace_back(
@@ -624,10 +623,8 @@ OpCode Unpickler::readInstruction() {
     } break;
     case OpCode::LONG1: {
       // Only read LONG1s with 8 as the length
-      // std::cout << "reading long\n";
       uint8_t length = read<uint8_t>();
       AT_ASSERT(length == 8);
-      // std::cout << "reading data\n";
       stack_.emplace_back(int64_t(read<int64_t>()));
     } break;
     case OpCode::BINUNICODE: {
@@ -773,7 +770,7 @@ OpCode Unpickler::readInstruction() {
           "Unknown opcode for unpickling at ",
           reinterpret_cast<void*>(opcode),
           ": ",
-          int(static_cast<uint8_t>(opcode)), " @ ", in_.tellg());
+          int(static_cast<uint8_t>(opcode)));
   }
   return opcode;
 }
@@ -782,7 +779,7 @@ OpCode Unpickler::readInstruction() {
 std::string Unpickler::readBytes(size_t length) {
   char buffer[length];
   in_.read(buffer, length);
-  TORCH_CHECK(!in_.eof(), "Overran buffer while reading bytes");
+  TORCH_CHECK(in_.good(), "Overran buffer while reading bytes");
   return std::string(buffer, length);
 }
 
@@ -950,45 +947,6 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
       "))");
 
   return true;
-}
-
-std::string Pickle(
-    std::vector<IValue> ivalues,
-    std::vector<at::Tensor>* tensor_table) {
-  std::stringstream ss;
-
-  Pickler pickler(ss, tensor_table);
-  pickler.start();
-  pickler.startTuple();
-  for (const auto& ivalue : ivalues) {
-    pickler.addIValue(ivalue);
-  }
-  pickler.endTuple();
-  pickler.finish();
-
-  return ss.str();
-}
-
-std::vector<IValue> Unpickle(
-    const char* data,
-    size_t size,
-    std::vector<at::Tensor>* tensor_table,
-    ClassResolver class_resolver) {
-  // TODO: don't double copy here
-  std::stringstream ss;
-  ss << std::string(data, size);
-  Unpickler unpickler(ss, size, tensor_table, class_resolver);
-  return unpickler.parse_ivalue_list();
-}
-
-std::vector<IValue> Unpickle(
-    const void* data,
-    size_t size,
-    std::vector<at::Tensor>* tensor_table,
-    ClassResolver class_resolver) {
-  // TODO: don't double copy here
-  return Unpickle(
-      reinterpret_cast<const char*>(data), size, tensor_table, class_resolver);
 }
 
 } // namespace jit

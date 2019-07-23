@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/source_range_serialization_impl.h>
