@@ -191,7 +191,7 @@ std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::strin
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_.getRecord(name);
-  return Unpickle(attributes_ptr.get(), attributes_size);
+  return Unpickle(attributes_ptr.get(), attributes_size, &tensor_table_);
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(

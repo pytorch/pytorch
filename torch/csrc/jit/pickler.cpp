@@ -499,13 +499,14 @@ std::vector<IValue> Unpickler::parse_ivalue_list() {
 
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
-  auto big_endian = read<double>();
+  double big_endian = read<double>();
   double little_endian;
 
   // Pickle floats are big endian, so reverse the bytes
+  auto big_endian_ptr = reinterpret_cast<const char*>(&big_endian);
   std::reverse_copy(
-      reinterpret_cast<const char*>(&big_endian),
-      reinterpret_cast<const char*>(&big_endian + sizeof(big_endian)),
+      big_endian_ptr,
+      big_endian_ptr + sizeof(big_endian),
       reinterpret_cast<char*>(&little_endian));
 
   return little_endian;
@@ -517,7 +518,7 @@ void Unpickler::run() {
   TORCH_CHECK(
       opcode == OpCode::PROTO,
       "Expected PROTO opcode at the start"
-      " of pickle archive, found ", static_cast<uint8_t>(opcode));
+      " of pickle archive, found ", int(static_cast<uint8_t>(opcode)));
   uint8_t protocol = read<uint8_t>();
   TORCH_CHECK(
       protocol == 2,
@@ -695,6 +696,10 @@ OpCode Unpickler::readInstruction() {
           stack_.pop_back();
           switch (pickler_class) {
             case PicklerClass::TENSOR:
+              TORCH_CHECK(
+                  tensor_table_,
+                  "Found a tensor table reference but Pickler"
+                  " has no tensor table\n");
               stack_.emplace_back(tensor_table_->at(data.toInt()));
               break;
             case PicklerClass::INTLIST:
@@ -752,7 +757,7 @@ OpCode Unpickler::readInstruction() {
           "Unknown opcode for unpickling at ",
           reinterpret_cast<void*>(opcode),
           ": ",
-          static_cast<uint8_t>(opcode));
+          int(static_cast<uint8_t>(opcode)));
   }
   return opcode;
 }
@@ -822,8 +827,8 @@ std::string Unpickler::readString() {
     TORCH_CHECK(
         is_valid_python_id_char(c),
         "Found character '",
-        uint8_t(c),
-        "' in string, "
+        int(uint8_t(c)),
+        "' in string, ",
         "strings must be qualified Python identifiers");
   }
   return ss.str();
@@ -863,10 +868,12 @@ uint64_t getStorageKey(const at::Tensor& tensor) {
   return reinterpret_cast<intptr_t>(storage_key);
 }
 
-std::string Pickle(std::vector<IValue> ivalues) {
+std::string Pickle(
+    std::vector<IValue> ivalues,
+    std::vector<at::Tensor>* tensor_table) {
   std::stringstream ss;
 
-  Pickler pickler(ss);
+  Pickler pickler(ss, tensor_table);
   pickler.start();
   pickler.startTuple();
   for (const auto& ivalue : ivalues) {
@@ -878,18 +885,23 @@ std::string Pickle(std::vector<IValue> ivalues) {
   return ss.str();
 }
 
-
-std::vector<IValue> Unpickle(const char* data, size_t size) {
+std::vector<IValue> Unpickle(
+    const char* data,
+    size_t size,
+    std::vector<at::Tensor>* tensor_table) {
   // TODO: don't double copy here
-  std::string str(std::string(data, size));
-  std::stringstream ss(str);
-  Unpickler unpickler(ss, size, nullptr, nullptr);
+  std::stringstream ss;
+  ss << std::string(data, size);
+  Unpickler unpickler(ss, size, tensor_table, nullptr);
   return unpickler.parse_ivalue_list();
 }
 
-std::vector<IValue> Unpickle(const void* data, size_t size) {
+std::vector<IValue> Unpickle(
+    const void* data,
+    size_t size,
+    std::vector<at::Tensor>* tensor_table) {
   // TODO: don't double copy here
-  return Unpickle(reinterpret_cast<const char*>(data), size);
+  return Unpickle(reinterpret_cast<const char*>(data), size, tensor_table);
 }
 
 } // namespace jit

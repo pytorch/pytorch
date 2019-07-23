@@ -240,7 +240,7 @@ class Unpickler {
   template <typename T>
   T read() {
     T item;
-    in_.get(reinterpret_cast<char*>(&item), sizeof(item));
+    in_.get(reinterpret_cast<char*>(&item), sizeof(item) + 1, /*delim=*/EOF);
     if (in_.eof()) {
       AT_ASSERT("Unpickler overran buffer while reading a value");
     }
@@ -278,13 +278,19 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor);
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);
 
+TORCH_API std::string Pickle(
+    std::vector<IValue> ivalues,
+    std::vector<at::Tensor>* tensor_table = nullptr);
 
-TORCH_API std::string Pickle(std::vector<IValue> ivalues);
+TORCH_API std::vector<IValue> Unpickle(
+    const char* data,
+    size_t size,
+    std::vector<at::Tensor>* tensor_table = nullptr);
 
-TORCH_API std::vector<IValue> Unpickle(const char* data, size_t size);
-
-TORCH_API std::vector<IValue> Unpickle(const void* data, size_t size);
-
+TORCH_API std::vector<IValue> Unpickle(
+    const void* data,
+    size_t size,
+    std::vector<at::Tensor>* tensor_table = nullptr);
 
 } // namespace jit
 } // namespace torch
