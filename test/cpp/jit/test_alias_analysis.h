@@ -541,6 +541,7 @@ void testWriteTracking() {
   }
   {
     auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
     script::parseIR(
         R"IR(
   graph(%x: Tensor, %y : Tensor):
@@ -548,11 +549,12 @@ void testWriteTracking() {
     %b : (Tensor) = aten::add_(%x, %y, %c1)
     return (%b)
     )IR",
-        &*graph);
-    auto node_iter = graph->block()->nodes().begin();
-    auto mul = *node_iter;
+        &*graph,
+        vmap);
+    auto add = vmap["b"]->node();
     AliasDb aliasDb(graph);
-    AT_ASSERT(!aliasDb.isInPlace(mul));
+    AT_ASSERT(aliasDb.hasWriters(add));
+    AT_ASSERT(aliasDb.isInPlace(add));
   }
 }
 

@@ -59,11 +59,11 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
 }
 
 bool AliasDb::isInPlace(Node* n) const {
-  if (!hasWriters(n)) {
-    return false;
+  ValueSet vs;
+  for (const auto input : n->inputs()) {
+    vs.insert(input);
   }
-  auto reads = getReads(const_cast<Node*>(n));
-  return !(reads |= getWrites(const_cast<Node*>(n)));
+  return writesToAlias(n, vs);
 }
 
 bool AliasDb::hasWriters(const Node* n) const {
