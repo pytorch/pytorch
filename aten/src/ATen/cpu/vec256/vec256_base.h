@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstring>
 #include <functional>
 #include <cmath>
@@ -45,7 +46,7 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 template <class T>
 struct Vec256 {
 private:
-  T values[32 / sizeof(T)] = {};
+  std::array<T, 32 / sizeof(T)> values = {};
 public:
   using value_type = T;
   // Note [constexpr static function to avoid odr-usage compiler bug]
@@ -143,16 +144,16 @@ public:
   }
   static Vec256<T> loadu(const void* ptr) {
     Vec256 vec;
-    std::memcpy(vec.values, ptr, 32);
+    std::copy((int8_t*) ptr, (int8_t*) ptr + 32, vec.values.begin());
     return vec;
   }
   static Vec256<T> loadu(const void* ptr, int64_t count) {
     Vec256 vec;
-    std::memcpy(vec.values, ptr, count * sizeof(T));
+    std::copy((int8_t*) ptr, (int8_t*) ptr + count * sizeof(T), vec.values.begin());
     return vec;
   }
   void store(void* ptr, int count = size()) const {
-    std::memcpy(ptr, values, count * sizeof(T));
+    std::copy(values.begin(), values.end(), (int8_t*) ptr);
   }
   const T& operator[](int idx) const {
     return values[idx];
@@ -262,17 +263,17 @@ public:
     }
     return ret;
   }
-#define DEFINE_COMP(binary_pred)                                              \
-  Vec256<T> operator binary_pred(const Vec256<T> &other) const {              \
-    Vec256<T> vec;                                                            \
-    for (int64_t i = 0; i != size(); i++) {                                   \
-      if (values[i] binary_pred other.values[i]) {                            \
-        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));     \
-      } else {                                                                \
-        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));        \
-      }                                                                       \
-    }                                                                         \
-    return vec;                                                               \
+#define DEFINE_COMP(binary_pred)                                                 \
+  Vec256<T> operator binary_pred(const Vec256<T> &other) const {                 \
+    Vec256<T> vec;                                                               \
+    for (int64_t i = 0; i != size(); i++) {                                      \
+      if (values[i] binary_pred other.values[i]) {                               \
+        std::memset(static_cast<void*>(vec.values.data() + i), 0xFF, sizeof(T)); \
+      } else {                                                                   \
+        vec.values[i] = T(0);                                                    \
+      }                                                                          \
+    }                                                                            \
+    return vec;                                                                  \
   }
   DEFINE_COMP(==)
   DEFINE_COMP(!=)
