@@ -22,16 +22,12 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
         None, module is modified inplace with qconfig attached
     """
     if not hasattr(module, 'qconfig'):
-        module.qconfig = None
+        module.qconfig = qconfig_parent
         if qconfig_dict:
             if prefix in qconfig_dict:
                 module.qconfig = qconfig_dict[prefix]
             elif type(module) in qconfig_dict:
                 module.qconfig = qconfig_dict[type(module)]
-            else:
-                module.qconfig = qconfig_parent
-        else:
-            module.qconfig = qconfig_parent
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
