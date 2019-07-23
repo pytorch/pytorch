@@ -42,7 +42,7 @@ def iter_tensors(x, only_requiring_grad=False):
                 yield result
 
 
-def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
+def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
     """
     input: input to `fn`
     target: the Tensors wrt whom Jacobians are calculated (default=`input`)
@@ -66,6 +66,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
         # need data here to get around the version check because without .data,
         # the following code updates version but doesn't change content
         if x_tensor.is_sparse:
+            if printDebug:
+                print("==========SPARE===========")
             def get_stride(size):
                 dim = len(size)
                 tmp = 1
@@ -95,6 +97,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     r = (outb - outa) / (2 * eps)
                     d_tensor[d_idx] = r.detach().reshape(-1)
         elif x_tensor.layout == torch._mkldnn:
+            if printDebug:
+                print("==========_mkldnn===========")
             if len(input) != 1:
                 raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
                                  len(input))
@@ -116,6 +120,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 r = (outb - outa) / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
+            if printDebug:
+                print("==========ALL OTHER===========")
             x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
@@ -277,7 +283,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             return _as_tuple(func(*input))[i]
 
         analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
-        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
+        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps, printDebug)
 
         if not correct_grad_sizes:
             return fail_test('Analytical gradient has incorrect size')
