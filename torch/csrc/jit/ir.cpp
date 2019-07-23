@@ -379,15 +379,6 @@ void Node::lint() const {
 
   // Node subclass invariants
   switch (kind()) {
-    case prim::Uninitialized: {
-      AT_ASSERT(inputs_.size() == 0);
-      for (const auto& use : outputs().at(0)->uses()) {
-        auto u_kind = use.user->kind();
-        AT_ASSERT(
-            use.user->blocks().size() > 1 || u_kind == prim::Param ||
-            u_kind == prim::Return);
-      }
-    } break;
     case prim::Constant:
       AT_ASSERT(inputs_.size() == 0);
       break;

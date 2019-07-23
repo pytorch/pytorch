@@ -15,10 +15,9 @@ const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
       {"bool", BoolType::get()},
       {"str", StringType::get()},
       {"Device", DeviceObjType::get()},
-      // technically number & Bottom are not python types but we need it when
-      // parsing serialized methods
+      // technically this is not a python type but we need it when
+      // parsing serialized methods that use implicit converions to Scalar
       {"number", NumberType::get()},
-      {"Bottom", BottomType::get()},
       {"None", NoneType::get()},
   };
   return map;

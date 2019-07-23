@@ -14,7 +14,6 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/script/convert_to_ssa.h>
-#include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
@@ -3100,7 +3099,6 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
     // python-recognize while loops. we do this so they can be exported,
     // and run the pass early to avoid jitter. Like conversion to SSA,
     // it only needs to run once.
-    moveAllReturnsToEnd(to_clean);
     CanonicalizeModifiedLoops(to_clean);
   }
   // NB ORDERING: SSA conversion has to occur before

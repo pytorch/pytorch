@@ -998,27 +998,6 @@ void testInsertBailOuts() {
   }
 }
 
-void testBottomTypeMisuse() {
-  {
-    auto graph = std::make_shared<Graph>();
-    script::parseIR(
-        R"IR(
-  graph():
-    %opt : Bottom = prim::Uninitialized()
-    %tst : Tensor = prim::Print(%opt)
-    return (%tst)
-    )IR",
-        &*graph);
-    bool thrown = false;
-    try {
-      graph->lint();
-    } catch (...) {
-      thrown = true;
-    }
-    AT_ASSERT(thrown);
-  }
-}
-
 void testProfiler() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;

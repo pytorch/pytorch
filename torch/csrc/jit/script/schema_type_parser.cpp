@@ -25,7 +25,6 @@ using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
 using c10::TupleType;
-using c10::BottomType;
 using c10::VarType;
 
 namespace torch {
@@ -46,7 +45,6 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
-      {"Bottom", BottomType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {

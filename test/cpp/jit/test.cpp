@@ -79,7 +79,6 @@ namespace jit {
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
   _(ClassParser)                       \
-  _(BottomTypeMisuse)                  \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
   _(InsertBailOuts)                    \
