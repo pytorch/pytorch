@@ -72,6 +72,14 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       }
     }
   });
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = unify_from_right(self.names(), src.names());
+  if (outnames.has_value()) {
+    at::internal_set_names_inplace(self, *outnames);
+  } else {
+    at::internal_set_names_inplace(self, nullopt);
+  }
+#endif
 }
 
 // Devices directly supported by this copy implementation. Other device types
@@ -85,32 +93,6 @@ bool is_supported_device(Device device) {
 
 namespace at {
 namespace native {
-
-static Tensor& strided_copy_impl(Tensor& self, const Tensor& src, bool non_blocking) {
-  auto builder = TensorIterator::Builder();
-  builder.add_output(self);
-  builder.add_input(src);
-  builder.dont_resize_outputs();
-  builder.dont_compute_common_dtype();
-  auto iter = builder.build();
-
-  if (iter->numel() == 0) {
-    return self;
-  }
-
-  DeviceType device_type = iter->device_type(0);
-  if (iter->device_type(1) == kCUDA) {
-    device_type = kCUDA;
-  }
-
-  if (device_type == kCPU && copy_transpose_valid(self, src)) {
-    copy_same_type_transpose_(self, src);
-    return self;
-  }
-
-  copy_stub(device_type, *iter, non_blocking);
-  return self;
-}
 
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
@@ -148,17 +130,29 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
   }
 
-#ifdef BUILD_NAMEDTENSOR
-  auto should_propagate_names = src.is_named();
-  if (should_propagate_names) {
-    Tensor self_, src_;
-    optional<std::vector<Dimname>> outnames;
-    std::tie(self_, src_, outnames) = namedinference::unify_names_for_binary_op(self, src);
-    return at::internal_set_names_inplace(
-        strided_copy_impl(self_, src_, non_blocking), std::move(outnames.value()));
+  auto builder = TensorIterator::Builder();
+  builder.add_output(self);
+  builder.add_input(src);
+  builder.dont_resize_outputs();
+  builder.dont_compute_common_dtype();
+  auto iter = builder.build();
+
+  if (iter->numel() == 0) {
+    return self;
   }
-#endif
-  return strided_copy_impl(self, src, non_blocking);
+
+  DeviceType device_type = iter->device_type(0);
+  if (iter->device_type(1) == kCUDA) {
+    device_type = kCUDA;
+  }
+
+  if (device_type == kCPU && copy_transpose_valid(self, src)) {
+    copy_same_type_transpose_(self, src);
+    return self;
+  }
+
+  copy_stub(device_type, *iter, non_blocking);
+  return self;
 }
 
 DEFINE_DISPATCH(copy_stub);
