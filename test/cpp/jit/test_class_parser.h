@@ -13,6 +13,8 @@ const auto testSource = R"JIT(
 
     def get_x(self):
       return self.x
+
+    an_attribute : Tensor
 )JIT";
 
 void testClassParser() {
@@ -24,9 +26,13 @@ void testClassParser() {
   p.lexer().expect(TK_EOF);
 
   ASSERT_EQ(classDef.name().name(), "FooTest");
-  ASSERT_EQ(classDef.body().size(), 2);
+  ASSERT_EQ(classDef.body().size(), 3);
   ASSERT_EQ(Def(classDef.body()[0]).name().name(), "__init__");
   ASSERT_EQ(Def(classDef.body()[1]).name().name(), "get_x");
+  ASSERT_EQ(
+      Var(Assign(classDef.body()[2]).lhs()).name().name(), "an_attribute");
+  ASSERT_FALSE(Assign(classDef.body()[2]).rhs().present());
+  ASSERT_TRUE(Assign(classDef.body()[2]).type().present());
 }
 } // namespace script
 } // namespace jit

@@ -186,7 +186,7 @@ struct ParserImpl {
     }
     return prefix;
   }
-  TreeRef parseAssignmentOp() {
+  c10::optional<TreeRef> maybeParseAssignmentOp() {
     auto r = L.cur().range;
     switch (L.cur().kind) {
       case TK_PLUS_EQ:
@@ -196,10 +196,12 @@ struct ParserImpl {
         int modifier = L.next().text()[0];
         return create_compound(modifier, r, {});
       } break;
-      default: {
-        L.expect('=');
+      case '=': {
+        L.next();
         return create_compound('=', r, {}); // no reduction
       } break;
+      default:
+        return c10::nullopt;
     }
   }
   TreeRef parseTrinary(
@@ -435,18 +437,30 @@ struct ParserImpl {
   // first[,other,lhs] = rhs
   TreeRef parseAssign(const Expr& lhs) {
     auto type = maybeParseTypeAnnotation();
-    auto op = parseAssignmentOp();
-    auto rhs = parseExpOrExpTuple();
-    L.expect(TK_NEWLINE);
-    if (op->kind() == '=') {
-      return Assign::create(lhs.range(), lhs, Expr(rhs), type);
-    } else {
-      // this is an augmented assignment
-      if (lhs.kind() == TK_TUPLE_LITERAL) {
-        throw ErrorReport(lhs.range())
-            << " augmented assignment can only have one LHS expression";
+    auto maybeOp = maybeParseAssignmentOp();
+    if (maybeOp) {
+      // There is an assignment operator, parse the RHS and generate the
+      // assignment.
+      auto rhs = parseExpOrExpTuple();
+      L.expect(TK_NEWLINE);
+      if (maybeOp.value()->kind() == '=') {
+        return Assign::create(
+            lhs.range(), lhs, Maybe<Expr>::create(rhs.range(), rhs), type);
+      } else {
+        // this is an augmented assignment
+        if (lhs.kind() == TK_TUPLE_LITERAL) {
+          throw ErrorReport(lhs.range())
+              << " augmented assignment can only have one LHS expression";
+        }
+        return AugAssign::create(
+            lhs.range(), lhs, AugAssignKind(*maybeOp), Expr(rhs));
       }
-      return AugAssign::create(lhs.range(), lhs, AugAssignKind(op), Expr(rhs));
+    } else {
+      // There is no assignment operator, so this is of the form `lhs : <type>`
+      TORCH_INTERNAL_ASSERT(type.present());
+      L.expect(TK_NEWLINE);
+      return Assign::create(
+          lhs.range(), lhs, Maybe<Expr>::create(lhs.range()), type);
     }
   }
 
