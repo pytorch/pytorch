@@ -636,7 +636,7 @@ class TestCase(expecttest.TestCase):
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, prec, prec=prec, message=message,
+                self.assertEqual(x_, y_, prec=prec, message=message,
                                  allow_inf=allow_inf)
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)

@@ -3761,6 +3761,25 @@ a")
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
+    def test_index_ellipses(self):
+        vals = [":", 1, None]
+        for _ in range(100):
+            indices = [random.choice(vals) for _ in range(4)]
+            indices[random.randint(0, len(indices) - 1)] = "..."
+            test_str = dedent("""
+            def f():
+                x = torch.ones(10, 9, 8, 7, 6)
+                return x{indices}.shape
+            """.format(indices=indices))
+            test_str = test_str.replace(r"'", r'')
+            scope = {}
+            execWrapper(test_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(test_str)
+            res1 = cu.f()
+            res2 = scope['f']()
+            self.assertEqual(res1, res2)
+
+
     def test_tensor_item(self):
         def test_scalar_cast(x):
             scalar = x.item()
@@ -9288,7 +9307,6 @@ a")
         FileCheck().check("int = prim::Constant").check("aten::add_").run(str(graph))
         self.run_pass('remove_inplace_ops', graph)
         self.run_pass('erase_number_types', graph)
-        self.run_pass('dce', graph)
         FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
 
     def test_mm_batching(self):
