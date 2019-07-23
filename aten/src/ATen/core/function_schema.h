@@ -243,7 +243,48 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
 
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  return out << arg.type()->str() << " " << arg.name() << (arg.default_value() ? "=<default>" : "");
+  bool optional_type = arg.type()->isSubclass(TypeKind::OptionalType);
+  // for adjusting the ? position.
+  // in schema, we have Tensor?(a!) input, and t(a!)?.
+  // however, t?(a!) doesn't work with schema parser.
+  // so we always use Type(alias)? format
+  std::stringstream oss;
+  if (arg.type()->isSubclass(TypeKind::ListType) && arg.N()) {
+    oss << std::static_pointer_cast<const ListType>(arg.type())->getElementType()->str();
+    oss << "[" << arg.N().value() << "]";
+  } else {
+    oss << arg.type()->str();
+  }
+  if (optional_type) {
+    oss.seekp(oss.str().size() - 1);
+  }
+  if (arg.alias_info()) {
+    oss << arg.alias_info().value();
+  }
+  if (optional_type) {
+    oss << "?";
+  }
+  out << oss.str();
+  if (!arg.name().empty()) {
+    out << " " << arg.name();
+  }
+  if (arg.default_value()) {
+    out << "=";
+    //out << expand_escapes(arg.default_value().value().toStringRef());
+    if (arg.type()->kind() == c10::TypeKind::StringType) {
+        out << "\'";
+        std::ios_base::fmtflags flags(out.flags());
+        for (unsigned char c : arg.default_value().value().toStringRef()) {
+          out << "\\" << std::oct << std::setfill('0') << std::setw(3)
+            << static_cast<uint64_t>(c);
+        }
+        out.flags(flags);
+        out << "\'";
+    } else {
+      out << arg.default_value().value();
+    }
+  }
+  return out;
 }
 
 inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
