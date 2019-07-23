@@ -64,6 +64,10 @@ class AliasDb {
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
 
+  // Is the operation in-place? i.e. doesn't write anywhere but locations it
+  // reads from.
+  TORCH_API bool isInPlace(Node* n) const;
+
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
   // Tries to preserve value dependencies, so other nodes might be moved. We
