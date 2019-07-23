@@ -2850,21 +2850,6 @@ graph(%Ra, %Rb):
 
 
 class TestScript(JitTestCase):
-    class capture_stdout(list):
-        """
-        Replace sys.stdout with a temporary StringIO
-        """
-        def __enter__(self):
-            self.sys_stdout = sys.stdout
-            self.stringio = StringIO()
-            sys.stdout = self.stringio
-            return self
-
-        def __exit__(self, *args):
-            self.append(str(self.stringio.getvalue()))
-            del self.stringio
-            sys.stdout = self.sys_stdout
-
     def test_sequence_parsing(self):
         tests = [
             ("return [x, x,]", True),
@@ -3193,35 +3178,6 @@ def foo(x):
 
         self.checkScript(annotate_none, ())
         self.checkScript(annotate_none_no_optional, ())
-
-    @unittest.skipIf(True, "Python 3 required")
-    def test_type_annotate_py3(self):
-        code = dedent("""
-        import torch
-        def fn():
-            a : List[int] = []
-            b : torch.Tensor = torch.ones(2, 2)
-            for _ in range(10):
-                a.append(4)
-            return a, b
-        """)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            script_path = os.path.join(tmp_dir, 'script.py')
-            with open(script_path, 'w') as f:
-                f.write(code)
-            fn = get_fn('test_type_annotate_py3', script_path)
-
-            self.checkScript(fn, ())
-
-        code = dedent("""
-        def wrong_type():
-            wrong : List[int] = [0.5]
-            return wrong
-        """)
-
-        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
-            cu = torch.jit.CompilationUnit(code)
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
@@ -3804,6 +3760,25 @@ a")
         # dynamic expression usage
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
+
+    def test_index_ellipses(self):
+        vals = [":", 1, None]
+        for _ in range(100):
+            indices = [random.choice(vals) for _ in range(4)]
+            indices[random.randint(0, len(indices) - 1)] = "..."
+            test_str = dedent("""
+            def f():
+                x = torch.ones(10, 9, 8, 7, 6)
+                return x{indices}.shape
+            """.format(indices=indices))
+            test_str = test_str.replace(r"'", r'')
+            scope = {}
+            execWrapper(test_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(test_str)
+            res1 = cu.f()
+            res2 = scope['f']()
+            self.assertEqual(res1, res2)
+
 
     def test_tensor_item(self):
         def test_scalar_cast(x):
@@ -7862,7 +7837,7 @@ a")
         v = torch.rand(10, 3)
         self.checkScript(foo, (v,))
 
-        with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type Tuple"):
+        with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously has type Tuple"):
             @torch.jit.script
             def mixtypes(x):
                 a = (x, x)
@@ -7890,7 +7865,7 @@ a")
                     c0 = 1.0
                 return c0
 
-        with self.assertRaisesRegex(RuntimeError, "variable 'c0' previously has type float"):
+        with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously has type float"):
             @torch.jit.script
             def diff_existing_type(x):
                 c0 = 1.0
@@ -12240,6 +12215,33 @@ a")
         self.assertEqual(loaded.submodule.buffer1, torch.ones(2, 2) + 10)
         self.assertEqual(loaded.submodule.buffer2, torch.ones(2, 2) + 10)
 
+        # Check simpler module
+        class NoArgState(torch.nn.Module):
+            def __init__(self):
+                super(NoArgState, self).__init__()
+                self.register_buffer('buffer1', torch.ones(2, 2))
+                self.register_buffer('buffer2', torch.ones(2, 2))
+
+            def forward(self):
+                pass
+
+            @torch.jit.export
+            def __getstate__(self):
+                pass
+
+            @torch.jit.export
+            def __setstate__(self):
+                self.buffer1 = torch.ones(2, 2) + 10
+                self.buffer2 = torch.ones(2, 2) + 10
+
+        with TemporaryFileName() as fname:
+            m = torch.jit.script(NoArgState())
+            m.save(fname)
+            loaded = torch.jit.load(fname)
+            self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 10)
+            self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
+
+
 
     def test_string_slicing(self):
         def fn1(x):
@@ -12889,6 +12891,9 @@ a")
         self.assertEqual(m.uint32_max, imported.uint32_max)
         self.assertEqual(m.int64_max, imported.int64_max)
         self.assertEqual(m.int64_min, imported.int64_min)
+
+    def test_script_scope(self):
+        scripted = torch.jit.script(torch.nn.functional.pad)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):

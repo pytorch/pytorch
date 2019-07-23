@@ -1061,8 +1061,8 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
   include_directories(${ONNX_INCLUDE_DIRS})
   include_directories(${FOXI_INCLUDE_DIRS})
