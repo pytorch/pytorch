@@ -495,7 +495,7 @@ void initJITBindings(PyObject* module) {
       });
   m.def(
       "_jit_get_all_schemas", []() {
-    auto operations = getAllOperators();
+    const std::vector<std::shared_ptr<Operator>>& operations = getAllOperators();
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
       return op->schema();
     });
