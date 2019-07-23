@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.jit
 import torch.nn.functional as F
+from torch.nn.modules.utils import _pair
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -70,6 +71,8 @@ class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
     def _pool_output_shape(self, input_size, kernel_size, padding, stride,
                            dilation, ceiling_mode=False):
+        if stride is None:
+            stride = kernel_size
         output_size = (
             (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
              + (stride - 1 if ceiling_mode else 0)) // stride + 1)
@@ -100,7 +103,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qY_hat = op(qX)
-            self.assertEqual(qY, qY_hat, "{} relu failed".format(name))
+            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
@@ -171,7 +174,7 @@ class TestQuantizedOps(TestCase):
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
            kernel=st.sampled_from((3, 5, 7)),
-           stride=st.integers(1, 2),
+           stride=st.sampled_from((None, 1, 2)),
            dilation=st.integers(1, 2),
            padding=st.integers(0, 2))
     def test_max_pool2d(self, X, kernel, stride, dilation, padding):
@@ -184,25 +187,34 @@ class TestQuantizedOps(TestCase):
         oW = self._pool_output_shape(iW, kernel, padding, stride, dilation)
         assume(oW > 0)
 
-        k = (kernel, kernel)
-        s = (stride, stride)
-        d = (dilation, dilation)
-        p = (padding, padding)
-
-        q_max_pool = torch.ops.quantized.max_pool2d
-
         a = torch.from_numpy(X)
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding, dilation=dilation)
+        a_ref = torch.quantize_linear(a_pool, scale=scale,
+                                      zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
         qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
 
-        a_hat = qa.dequantize()
-        a_pool = F.max_pool2d(a_hat, kernel_size=k, stride=s, padding=p,
-                              dilation=d)
+        ops_under_test = {
+            "torch": torch.max_pool2d,
+            "nn.functional": torch.nn.functional.max_pool2d,
+            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d
+        }
 
-        qa_pool_hat = q_max_pool(qa, kernel_size=k, stride=s, padding=p,
-                                 dilation=d)
-        a_pool_hat = qa_pool_hat.dequantize()
-        np.testing.assert_equal(a_pool.numpy(), a_pool_hat.numpy())
+        for name, op in ops_under_test.items():
+            a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                       dilation=dilation)
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             message="{} results are off".format(name))
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.max_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding), dilation=_pair(dilation))
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         message="ops.quantized.max_pool2d results are off")
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -217,10 +229,13 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point, torch_type) = X
         assume(axis < X.ndim)
         X = torch.from_numpy(X)
+        new_shape = np.array(X.shape)
+        new_shape[axis] = 0
         for idx in range(num):
             tensors_q.append(torch.quantize_linear(X, scale, zero_point,
                                                    torch_type))
             tensors_ref.append(X)
+            new_shape[axis] += tensors_ref[-1].shape[axis]
 
         cat_ref = torch.cat(tensors_ref, axis=axis)
         cat_ref = torch.quantize_linear(cat_ref, scale, zero_point, torch_type)
@@ -229,23 +244,77 @@ class TestQuantizedOps(TestCase):
         if relu:
             cat_ref = F.relu(cat_ref)
             q_cat_op = torch.ops.quantized.cat_relu
+            q_cat_out_op = torch.ops.quantized.cat_relu_out
         else:
             q_cat_op = torch.ops.quantized.cat
+            q_cat_out_op = torch.ops.quantized.cat_out
+
         cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
                          zero_point=zero_point)
         cat_q = cat_q.dequantize()
-
         np.testing.assert_equal(cat_ref.numpy(), cat_q.numpy())
+
+        cat_q_out = torch._empty_affine_quantized(
+            list(new_shape), scale=scale,
+            zero_point=zero_point, dtype=torch_type)
+        q_cat_out_op(tensors_q, axis=axis, out=cat_q_out)
+        cat_q_out = cat_q_out.dequantize()
+        np.testing.assert_equal(cat_ref.numpy(), cat_q_out.numpy())
 
         # Test the cat on per-channel quantized tensor.
         ch_axis = 1
         scales = torch.from_numpy(np.array([1.0] * X.shape[ch_axis]))
+        scales = scales.to(torch.float64)
         zero_points = torch.from_numpy(np.array([0] * X.shape[ch_axis]))
+        zero_points = zero_points.to(torch.long)
         tensors_q[0] = torch.quantize_linear_per_channel(
             X, scales, zero_points, axis=[ch_axis], dtype=torch_type)
         with self.assertRaisesRegex(RuntimeError, "supported.*cat"):
             cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
                              zero_point=zero_point)
+
+
+@unittest.skipIf(
+    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+    " Quantized Linear requires FBGEMM. FBGEMM does not play"
+    " well with UBSAN at the moment, so we skip the test if"
+    " we are in a UBSAN environment.",
+)
+class TestDynamicQuantizedLinear(unittest.TestCase):
+    """Tests the correctness of the dynamic quantized linear and linear_relu op."""
+    @given(
+        use_bias=st.booleans(),
+        use_relu=st.booleans(),
+    )
+    def test_qlinear(self, use_bias, use_relu):
+        batch_size = 1
+        input_channels = 2
+        output_channels = 2
+
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        if use_relu:
+            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
+        else:
+            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
+
+        W_fp32 = torch.tensor([[-150, 100], [100, -150]], dtype=torch.float)
+        b_fp32 = torch.tensor([13, -20], dtype=torch.float) if use_bias else None
+        X_fp32 = torch.tensor([[100, -150]], dtype=torch.float)
+
+        W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
+        W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+
+        # Weight prepacking operator for dynamic quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Dynamic quantized Linear operator with prepacked weight
+        Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
+
+        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+        if use_relu:
+            Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+
+        torch.testing.assert_allclose(Y_fp32, Y_fp32_ref, rtol=0.0001, atol=1e-3)
+
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
@@ -254,116 +323,6 @@ class TestQuantizedOps(TestCase):
     " we are in a UBSAN environment.",
 )
 class TestQuantizedLinear(unittest.TestCase):
-    """Tests the correctness of the dynamic quantized linear and linear_relu op."""
-    # @given(
-    #     batch_size=st.integers(1, 4),
-    #     input_channels=st.integers(16, 32),
-    #     output_channels=st.integers(4, 8),
-    #     use_bias=st.booleans(),
-    #     use_relu=st.booleans(),
-    # )
-    # def test_qlinear_dynamic(self, batch_size, input_channels, output_channels, use_bias, use_relu):
-    def test_qlinear_dynamic(self):
-        batch_size = 2
-        input_channels = 2
-        output_channels = 2
-        use_bias = True
-        use_relu = False
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        if use_relu:
-            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
-            qlinear = torch.ops.quantized.fbgemm_linear_relu
-        else:
-            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
-            qlinear = torch.ops.quantized.fbgemm_linear
-
-        X_scale = 1.5
-        X_zp = 5
-        X_value_min = 0
-        X_value_max = 225
-        X_q0 = np.round(
-            np.random.rand(batch_size, input_channels) * (X_value_max - X_value_min)
-            + X_value_min
-        ).astype(np.uint8)
-
-        W_scale = 0.4
-        W_zp = 2
-        W_value_min = -128
-        W_value_max = 127
-        W_q0 = np.round(
-            np.random.rand(output_channels, input_channels)
-            * (W_value_max - W_value_min)
-            + W_value_min
-        ).astype(np.int8)
-
-        b_value_min = -10
-        b_value_max = 10
-        b_q0 = np.round(
-            np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
-        ).astype(np.int32) if use_bias else None
-
-        avoid_vpmaddubsw_overflow_linear(
-            batch_size,
-            input_channels,
-            output_channels,
-            X_q0,
-            X_value_min,
-            X_value_max,
-            W_q0,
-            W_value_min,
-            W_value_max,
-        )
-        
-        X_fp32 = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
-        W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
-        b_fp32 = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float) if use_bias else None
-
-        # X_fp32 = torch.rand(batch_size, input_channels).float()
-        # W_fp32 = torch.rand(output_channels, input_channels).float()
-        # b_fp32 = torch.rand(output_channels).float() if use_bias else None
-
-        X_scale, X_zp = _calculate_dynamic_qparams(X_fp32, torch.quint8)
-        W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
-
-        X_q = torch.quantize_linear(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
-        b_q = torch.quantize_linear(b_fp32, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
-        
-        # Reference quantized result from PyTorch Linear operator
-        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-        if use_relu:
-            Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
-        # Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
-
-        Y_scale, Y_zp = _calculate_dynamic_qparams(Y_fp32_ref, torch.quint8)
-
-        # Reference quantized Linear operator
-        Y_q_ref = qlinear_ref(X_q.int_repr().numpy(), X_scale, X_zp, W_q.int_repr().numpy(), W_scale, W_zp, b_q.int_repr().numpy() if use_bias else None, Y_scale, Y_zp)
-        if use_relu:
-            Y_q_ref[Y_q_ref < Y_zp] = Y_zp
-
-        # Weight prepacking operator for quantized Linear
-        W_prepack = qlinear_prepack(W_q)
-        # Quantized Linear operator with prepacked weight
-        Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
-
-        Y_q = qlinear(X_q, W_prepack, b_q, Y_scale, Y_zp)
-
-        Y_q_ref_real = _dequantize(Y_q_ref, Y_scale, Y_zp)
-        Y_q_real = Y_q.dequantize()
-
-        # # Assert equal
-        # np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
-        print(Y_fp32)
-        print(Y_fp32_ref)
-
-        print(Y_q_ref_real)
-        print(Y_q_real)
-
-        # # Assert equal
-        # np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
-        torch.testing.assert_allclose(Y_fp32, Y_fp32_ref, rtol=0.1, atol=0.2)
-
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
@@ -644,6 +603,7 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
         np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
         np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
+
 
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
 @unittest.skipIf(TEST_WITH_UBSAN,

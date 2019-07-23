@@ -11,33 +11,6 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
 
 class PostTrainingQuantTest(QuantizationTestCase):
-
-    def test_single_layer_dynamic(self):
-        r"""Dynamic Quantize SingleLayerLinearModel which has one Linear module,
-        make sure it is swapped to nnq.Linear which is the quantized version of
-        the module
-        """
-        model = SingleLayerLinearModel().eval()
-        qconfig_dict = {
-            '': default_qconfig
-        }
-        model = prepare_dynamic(model, qconfig_dict)
-        # Check if observers are inserted
-        self.checkObservers(model)
-
-        test_only_eval_fn(model, self.calib_data)
-        convert_dynamic(model)
-
-        def checkQuantized(model):
-            self.checkDynamicQuantizedLinear(model.fc1)
-            test_only_eval_fn(model, self.calib_data)
-
-        checkQuantized(model)
-
-        # test one line API
-        model = quantize_dynamic(SingleLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
-        checkQuantized(model)
-
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
@@ -286,6 +259,165 @@ class PostTrainingQuantTest(QuantizationTestCase):
         # test one line API
         model = quantize(ManualQuantModel().eval(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+
+class PostTrainingDynamicQuantTest(QuantizationTestCase):
+    def test_single_layer_dynamic(self):
+        r"""Dynamic Quantize SingleLayerLinearModel which has one Linear module,
+        make sure it is swapped to nnqd.Linear which is the quantized version of
+        the module
+        """
+        model = SingleLayerLinearModel().eval()
+        qconfig_dict = {
+            '': default_qconfig
+        }
+        model = prepare_dynamic(model, qconfig_dict)
+        # Check if observers are inserted
+        self.checkObservers(model)
+
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.fc1)
+            test_only_eval_fn(model, self.calib_data)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(SingleLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        checkQuantized(model)
+
+    def test_two_layers(self):
+        r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
+        `fc2`, and `fc1`is not quantized
+        """
+        model = TwoLayerLinearModel().eval()
+        qconfig_dict = {
+            'fc2': default_qconfig
+        }
+        model = prepare_dynamic(model, qconfig_dict)
+
+        self.checkObservers(model)
+
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.fc1), torch.nn.Linear)
+            self.checkDynamicQuantizedLinear(model.fc2)
+            test_only_eval_fn(model, self.calib_data)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        checkQuantized(model)
+
+    def test_nested1(self):
+        r"""Test quantization for nested model, top level 'fc3' and
+        'fc1' of submodule 'sub2', 'sub2.fc2' is not quantized
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': default_qconfig,
+            'sub2.fc1': default_qconfig
+        }
+
+        def checkPrepModules(model, before_calib=False):
+            if before_calib:
+                self.checkObservers(model)
+
+        model = prepare_dynamic(model, qconfig_dict)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkLinear(model.sub1.fc)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkLinear(model.sub2.fc2)
+            test_only_eval_fn(model, self.calib_data)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        checkQuantized(model)
+
+
+    def test_nested2(self):
+        r"""Another test case for quantized, we will quantize all submodules
+        of submodule sub2
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': default_qconfig,
+            'sub2': default_qconfig
+        }
+        model = prepare_dynamic(model, qconfig_dict)
+
+        def checkPrepModules(model, before_calib=False):
+            if before_calib:
+                self.checkObservers(model)
+
+        checkPrepModules(model)
+
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkLinear(model.sub1.fc)
+            self.assertEqual(type(model.sub1.relu), torch.nn.ReLU)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            test_only_eval_fn(model, self.calib_data)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        checkQuantized(model)
+
+    def test_nested3(self):
+        r"""More complicated nested test case with child qconfig overrides
+        parent qconfig
+        """
+        model = NestedModel().eval()
+        custum_options = {
+            'dtype': torch.quint8,
+            'qscheme': torch.per_tensor_affine
+        }
+        custom_qconfig = QConfig(weight=default_weight_observer(),
+                                 activation=default_observer(**custum_options))
+        qconfig_dict = {
+            'fc3': default_qconfig,
+            'sub2': default_qconfig,
+            'sub2.fc1': custom_qconfig
+        }
+        model = prepare_dynamic(model, qconfig_dict)
+
+        def checkPrepModules(model, before_calib=False):
+            if before_calib:
+                self.checkObservers(model)
+
+        checkPrepModules(model, True)
+
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            test_only_eval_fn(model, self.calib_data)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        checkQuantized(model)
+
 
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):

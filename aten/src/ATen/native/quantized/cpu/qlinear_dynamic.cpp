@@ -53,9 +53,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         "The number of rows in the packB should be equal to K: " +
             std::to_string(K));
 
-    // float input_scale_float = input.q_scale();
-    // int32_t input_zero_point_int32 = input.q_zero_point();
-
     // Calculate statistics for quantization of the input Tensor
     float x_min, x_max;
     fbgemm::FindMinMax(
