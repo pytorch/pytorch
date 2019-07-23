@@ -29,13 +29,17 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   }
 
   out << ") -> ";
-  if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
-  } else if (schema.returns().size() > 1) {
+
+  const auto& returns = schema.returns();
+  if (schema.is_varret()) {
+    out << "...";
+  } else {
     out << "(";
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0) out << ", ";
-      out << schema.returns()[i].type()->str();
+    for(size_t i = 0; i < returns.size(); ++i) {
+      if (i > 0) {
+        out << ", ";
+      }
+      out << returns.at(i);
     }
     out << ")";
   }
