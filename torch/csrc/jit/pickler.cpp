@@ -56,7 +56,7 @@ const std::vector<char>& Pickler::stack() {
   return stack_;
 }
 
-void Pickler::start() {
+void Pickler::protocol() {
   push<OpCode>(OpCode::PROTO);
   push<uint8_t>(PROTOCOL_VERSION);
 }
@@ -71,32 +71,31 @@ void Pickler::endTuple() {
   push<OpCode>(OpCode::TUPLE);
 }
 
-void Pickler::finish() {
+void Pickler::stop() {
   push<OpCode>(OpCode::STOP);
+}
 
-
+void Pickler::torchSaveStop() {
   // Add the binary data for all the tensors to be included in the same binary
   // TODO: The pickler should be refactored to stream out to a stream directly
   // instead of staging in the stack_ array
-  if (literal_tensors_.size() > 0) {
-    // As another pickle program in the same binary archive, add a list of
-    // keys for each tensor (see torch/serialization.py)
-    start();
-    push<OpCode>(OpCode::MARK);
-    for (const auto& tensor : literal_tensors_) {
-      std::string key =
-          std::to_string(int64_t(tensor.storage().unsafeGetStorageImpl()));
-      push<OpCode>(OpCode::BINUNICODE);
-      push<uint32_t>(key.size());
-      pushBytes(key);
-    }
-    push<OpCode>(OpCode::TUPLE);
-    push<OpCode>(OpCode::STOP);
+  // As another pickle program in the same binary archive, add a list of
+  // keys for each tensor (see torch/serialization.py)
+  protocol();
+  push<OpCode>(OpCode::MARK);
+  for (const auto& tensor : literal_tensors_) {
+    std::string key =
+        std::to_string(int64_t(tensor.storage().unsafeGetStorageImpl()));
+    push<OpCode>(OpCode::BINUNICODE);
+    push<uint32_t>(key.size());
+    pushBytes(key);
+  }
+  push<OpCode>(OpCode::TUPLE);
+  push<OpCode>(OpCode::STOP);
 
-    // Now dump the tensor binary data
-    for (const auto& tensor : literal_tensors_) {
-      pushTensorData(tensor);
-    }
+  // Now dump the tensor binary data
+  for (const auto& tensor : literal_tensors_) {
+    pushTensorData(tensor);
   }
 }
 
@@ -110,32 +109,32 @@ void Pickler::pushTensorData(const at::Tensor& tensor) {
   stack_.insert(stack_.end(), data.data(), data.data() + data.sizeInBytes());
 }
 
-void Pickler::pushMetadata() {
+void Pickler::torchSaveStart() {
   // Output data to match torch.save, see torch/serialization.py for details
   // Magic number (0x1950a86a20f9469cfc6c)
-  start();
+  protocol();
   push<OpCode>(OpCode::LONG1);
   // LONG1 size
   pushBytes("\x0a");
   // LONG1 data
   pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
-  push<OpCode>(OpCode::STOP);
+  stop();
 
   // Protocol Version (1001)
-  start();
+  protocol();
   push<OpCode>(OpCode::BININT2);
   pushBytes("\xe9\x03");
-  push<OpCode>(OpCode::STOP);
+  stop();
 
   // sys_info, this isn't actually used in de-serialization so we can leave this
   // one empty
-  start();
+  protocol();
   push<OpCode>(OpCode::EMPTY_DICT);
-  push<OpCode>(OpCode::STOP);
+  stop();
 }
 
-// unmemoized version called by addIValue
-void Pickler::addIValueImpl(const IValue& ivalue) {
+// unmemoized version called by pushIValue
+void Pickler::pushIValueImpl(const IValue& ivalue) {
   if (ivalue.isTensor()) {
     pushTensor(ivalue);
   } else if (ivalue.isTuple()) {
@@ -162,28 +161,28 @@ void Pickler::addIValueImpl(const IValue& ivalue) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
           for (const int64_t item : ivalue.toIntListRef()) {
-            addIValue(item);
+            pushIValue(item);
           }
         });
   } else if (ivalue.isTensorList()) {
     pushSpecializedList(
         ivalue, PicklerClass::TENSORLIST, [=](const IValue& ivalue) {
           for (const at::Tensor& item : ivalue.toTensorListRef()) {
-            addIValue(item);
+            pushIValue(item);
           }
         });
   } else if (ivalue.isDoubleList()) {
     pushSpecializedList(
         ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
           for (double item : ivalue.toDoubleListRef()) {
-            addIValue(item);
+            pushIValue(item);
           }
         });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(
         ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
           for (bool item : ivalue.toBoolList()) {
-            addIValue(item);
+            pushIValue(item);
           }
         });
   } else if (ivalue.isObject()) {
@@ -194,13 +193,13 @@ void Pickler::addIValueImpl(const IValue& ivalue) {
     push<OpCode>(OpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
       Function* getstate = type->getMethod("__getstate__");
-      addIValue((*getstate)({obj}));
+      pushIValue((*getstate)({obj}));
     } else {
       push<OpCode>(OpCode::EMPTY_DICT);
       push<OpCode>(OpCode::MARK);
       for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
         pushString(type->getAttributeName(i));
-        addIValue(obj->getSlot(i));
+        pushIValue(obj->getSlot(i));
       }
       push<OpCode>(OpCode::SETITEMS);
     }
@@ -210,7 +209,7 @@ void Pickler::addIValueImpl(const IValue& ivalue) {
   }
 }
 
-void Pickler::addIValue(const IValue& ivalue) {
+void Pickler::pushIValue(const IValue& ivalue) {
   // Check if reference ivalue has been saved before
   if (ivalue.isPtrType()) {
     const void* ptr = ivalue.internalToPointer();
@@ -227,7 +226,7 @@ void Pickler::addIValue(const IValue& ivalue) {
       return;
     }
   }
-  addIValueImpl(ivalue);
+  pushIValueImpl(ivalue);
   if (ivalue.isPtrType()) {
     memoized_ivalues_.push_back(ivalue);
     memoized_ivalue_map_[ivalue.internalToPointer()] = pushNextBinPut();
@@ -379,7 +378,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<OpCode>(OpCode::TUPLE);
 
   // requires_grad
-  addIValue(tensor.requires_grad());
+  pushIValue(tensor.requires_grad());
 
   // backward_hooks
   pushGlobal("collections", "OrderedDict");
@@ -404,7 +403,7 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
   push<OpCode>(OpCode::MARK);
-  addIValue(tensor_id);
+  pushIValue(tensor_id);
   push<OpCode>(OpCode::TUPLE);
 
   push<OpCode>(OpCode::REDUCE);
@@ -456,8 +455,8 @@ void Pickler::pushDict(const IValue& ivalue) {
   // Sort the dict for deterministic keys
   auto dict_items = iterationOrder(ivalue.toGenericDict());
   for (const auto& pair : dict_items) {
-    addIValue(pair.first);
-    addIValue(pair.second);
+    pushIValue(pair.first);
+    pushIValue(pair.second);
   }
 
   push<OpCode>(OpCode::SETITEMS);
@@ -484,7 +483,7 @@ void Pickler::pushGenericList(const IValue& ivalue) {
   push<OpCode>(OpCode::MARK);
 
   for (const IValue& item : list) {
-    addIValue(item);
+    pushIValue(item);
   }
 
   push<OpCode>(OpCode::APPENDS);
@@ -496,7 +495,7 @@ void Pickler::pushTuple(const IValue& ivalue) {
   auto tuple = ivalue.toTuple();
 
   for (const IValue& item : tuple->elements()) {
-    addIValue(item);
+    pushIValue(item);
   }
 
   push<OpCode>(OpCode::TUPLE);

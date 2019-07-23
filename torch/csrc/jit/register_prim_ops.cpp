@@ -580,10 +580,11 @@ RegisterOperators reg(
 
            // Pickle the tensor
            Pickler p;
-           p.pushMetadata();
-           p.start();
-           p.addIValue(value);
-           p.finish();
+           p.torchSaveStart();
+           p.protocol();
+           p.pushIValue(value);
+           p.stop();
+           p.torchSaveStop();
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);

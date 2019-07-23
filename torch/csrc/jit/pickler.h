@@ -111,23 +111,24 @@ class Pickler {
   const std::vector<char>& stack();
 
   // Push protocol onto the stack
-  void start();
+  void protocol();
 
   // Push STOP OpCode onto the stack
-  void finish();
+  void stop();
 
-  void addIValue(const IValue& ivalue);
+  void pushIValue(const IValue& ivalue);
 
   // See torch/serialization.py for details, pushes a magic number, torch
   // serialization version, and system info to the pickle archive all as
   // individual pickle programs
-  void pushMetadata();
+  void torchSaveStart();
+  void torchSaveStop();
 
   void startTuple();
   void endTuple();
 
  private:
-  void addIValueImpl(const IValue& ivalue);
+  void pushIValueImpl(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
   void pushDouble(const IValue& ivalue);
   void pushGenericList(const IValue& ivalue);
@@ -135,7 +136,6 @@ class Pickler {
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
-  void pushMemoization(const IValue& ivalue);
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
