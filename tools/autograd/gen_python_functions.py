@@ -168,6 +168,19 @@ const auto options = TensorOptions()
     .pinned_memory(${pin_memory});
 """)
 
+INPLACE_DEPRECATION_MESSAGE = ('TORCH_WARN("In-place functions such as torch.{name} are deprecated '
+                               'and will be removed in the next release. '
+                               'Please use their in-place method counterparts (Tensor.{name}) instead.");')
+
+# These functions should not exist because they are in-place. We now deprecate them before removing them.
+DEPRECATED_INPLACE_FUNCTIONS = ('dropout_', 'feature_dropout_', 'alpha_dropout_', 'feature_alpha_dropout_',
+                                'abs_', 'acos_', 'addmv_', 'as_strided_', 'asin_', 'atan_', 'ceil_', 'celu_',
+                                'clamp_', 'clamp_max_', 'clamp_min_', 'cos_', 'cosh_', 'detach_',
+                                'embedding_renorm_', 'erf_', 'erfc_', 'exp_', 'expm1_', 'fill_', 'floor_', 'frac_',
+                                'index_put_', 'log10_', 'log1p_', 'log2_', 'log_', 'neg_', 'reciprocal_', 'relu_',
+                                'resize_as_', 'round_', 'rrelu_', 'rsqrt_', 'selu_', 'sigmoid_', 'sin_', 'sinh_',
+                                'sqrt_', 'tan_', 'tanh_', 'threshold_', 'trunc_', 'zero_')
+
 def should_generate_python_binding(declaration):
     name = declaration['name']
     for pattern in SKIP_PYTHON_BINDINGS:
@@ -708,23 +721,12 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         # In-place operator, should be method only. Deprecate it.
         if not is_module and not has_self and name.endswith('_') and not name.startswith('_'):
-            deprecated_functions = ('dropout_', 'feature_dropout_', 'alpha_dropout_', 'feature_alpha_dropout_',
-                                    'abs_', 'acos_', 'addmv_', 'as_strided_', 'asin_', 'atan_', 'ceil_', 'celu_',
-                                    'clamp_', 'clamp_max_', 'clamp_min_', 'cos_', 'cosh_', 'detach_',
-                                    'embedding_renorm_', 'erf_', 'erfc_', 'exp_', 'expm1_', 'fill_', 'floor_', 'frac_',
-                                    'index_put_', 'log10_', 'log1p_', 'log2_', 'log_', 'neg_', 'reciprocal_', 'relu_',
-                                    'resize_as_', 'round_', 'rrelu_', 'rsqrt_', 'selu_', 'sigmoid_', 'sin_', 'sinh_',
-                                    'sqrt_', 'tan_', 'tanh_', 'threshold_', 'trunc_', 'zero_')
-            if name not in deprecated_functions:  # This is an in-place function variant that was later added
+            if name not in DEPRECATED_INPLACE_FUNCTIONS:  # This is an in-place function variant that was later added
                 raise AssertionError('{} must not have a function variant.'.format(name))
 
             # After the deprecated functions are removed, replace this block with an AssertionError to ensure that
             # future in-place operators won't be exposed as functions.
-            env['deprecation_message'] = ('TORCH_WARN("In-place functions such as torch.{name} are deprecated '
-                                          'and will be removed in the next release. '
-                                          'Please use their in-place method counterparts (Tensor.{name}) instead.");'
-                                          ).format(name=name)
-            env['deprecated'] = True
+            env['deprecation_message'] = INPLACE_DEPRECATION_MESSAGE.format(name=name)
 
         # emit dispatch
         grouped = group_declarations(declarations)
