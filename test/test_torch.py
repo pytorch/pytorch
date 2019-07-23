@@ -3392,9 +3392,11 @@ class _TestTorchMixin(object):
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
                 x_clone = x.clone()
+                if (device == 'cuda' and dt == torch.bfloat16):
+                     self.assertRaises(RuntimeError, lambda: copy(x))
+                     continue
                 y = copy(x)
                 y.fill_(1)
-
                 # copy is a shallow copy, only copies the tensor view,
                 # not the data
                 self.assertEqual(x, y)
@@ -3441,6 +3443,9 @@ class _TestTorchMixin(object):
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
                 y = x.clone()
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: self.assertEqual(x, y))
+                    continue
                 self.assertEqual(x, y)
 
     def test_cat_all_dtypes_and_devices(self):
