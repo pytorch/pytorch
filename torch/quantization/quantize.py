@@ -236,7 +236,7 @@ def quantize_dynamic(model, run_fn=None, run_args=None, qconfig_dict=None):
     """
     model.eval()
     model = prepare_dynamic(model, qconfig_dict)
-    if run_fn != None:
+    if run_fn is not None:
         run_fn(model, run_args)
     convert(model, DEFAULT_DYNAMIC_MODULE_MAPPING)
     return model
