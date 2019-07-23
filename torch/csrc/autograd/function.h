@@ -201,13 +201,6 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return sequence_nr_;
   }
 
-  /// Returns a shared pointer to `this`. `PyFunction`s are not managed by
-  /// `shared_ptr`s by default, but are bound to the lifetime of their Python
-  /// object instead.
-  virtual std::shared_ptr<Function> get_shared_ptr() {
-    return shared_from_this();
-  }
-
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 

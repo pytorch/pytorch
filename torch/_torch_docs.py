@@ -469,6 +469,47 @@ Example::
     True
 """)
 
+add_docstr(torch.as_strided,
+           r"""
+as_strided(input, size, stride, storage_offset=0) -> Tensor
+
+Create a view of an existing `torch.Tensor` :attr:`input` with specified
+:attr:`size`, :attr:`stride` and :attr:`storage_offset`.
+
+.. warning::
+    More than one element of a created tensor may refer to a single memory
+    location. As a result, in-place operations (especially ones that are
+    vectorized) may result in incorrect behavior. If you need to write to
+    the tensors, please clone them first.
+
+    Many PyTorch functions, which return a view of a tensor, are internally
+    implemented with this function. Those functions, like
+    :meth:`torch.Tensor.expand`, are easier to read and are therefore more
+    advisable to use.
+
+
+Args:
+    input (Tensor): the input tensor
+    size (tuple or ints): the shape of the output tensor
+    stride (tuple or ints): the stride of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+
+Example::
+
+    >>> x = torch.randn(3, 3)
+    >>> x
+    tensor([[ 0.9039,  0.6291,  1.0795],
+            [ 0.1586,  2.1939, -0.4900],
+            [-0.1909, -0.7503,  1.9355]])
+    >>> t = torch.as_strided(x, (2, 2), (1, 2))
+    >>> t
+    tensor([[0.9039, 1.0795],
+            [0.6291, 0.1586]])
+    >>> t = torch.as_strided(x, (2, 2), (1, 2), 1)
+    tensor([[0.6291, 0.1586],
+            [1.0795, 2.1939]])
+""")
+
 add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
