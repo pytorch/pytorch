@@ -328,6 +328,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
                 self.checkObservers(model)
 
         model = prepare_dynamic(model, qconfig_dict)
+        checkPrepModules(model, True)
         test_only_eval_fn(model, self.calib_data)
         convert_dynamic(model)
 
