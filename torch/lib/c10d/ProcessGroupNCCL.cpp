@@ -15,6 +15,9 @@ namespace c10d {
 
 namespace {
 
+// RAII helper class to manage NCCL group API and CUDA free mutex.
+// The destructor is allowed to throw since this helper class only
+// manages group and lock lifetimes.
 struct AutoNcclGroup {
   AutoNcclGroup() {
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
@@ -22,7 +25,7 @@ struct AutoNcclGroup {
     C10D_NCCL_CHECK(ncclGroupStart());
 #endif
   }
-  ~AutoNcclGroup() {
+  ~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     C10D_NCCL_CHECK(ncclGroupEnd());
 #endif
