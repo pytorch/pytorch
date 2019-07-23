@@ -184,7 +184,7 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
-def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True, check_sparse_nnz=False, nondet_tol=0.0):
+def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True, check_sparse_nnz=False, nondet_tol=0.0, printDebug=False):
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
     and with ``requires_grad=True``.
@@ -283,6 +283,12 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             return fail_test('Analytical gradient has incorrect size')
 
         for j, (a, n) in enumerate(zip(analytical, numerical)):
+            if printDebug:
+                print("=================CDIST=======================")
+                print("analytical:")
+                print(*analytical)
+                print("numerical:")
+                print(*numerical)
             if a.numel() != 0 or n.numel() != 0:
                 if not torch.allclose(a, n, rtol, atol):
                     sign = (-1 * (n < 0).double()) + (n > 0).double()
