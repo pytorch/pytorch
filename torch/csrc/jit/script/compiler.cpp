@@ -2456,7 +2456,13 @@ struct to_ir {
         return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
-        return graph->insertConstant(IValue(), type_hint, tree->range());
+        TypePtr hint = type_hint;
+        if (hint != nullptr && !hint->isSubtypeOf(NoneType::get()) &&
+            hint->kind() != TypeKind::OptionalType) {
+          // Implicitly wrap in an Optional if necessary
+          hint = OptionalType::create(hint);
+        }
+        return graph->insertConstant(IValue(), hint, tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
