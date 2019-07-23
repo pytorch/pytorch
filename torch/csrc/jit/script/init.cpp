@@ -742,8 +742,14 @@ void initJitScriptBindings(PyObject* module) {
         cu->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
-        for (const auto& def : classDef.defs()) {
-          methodDefs.push_back(def);
+        for (const auto& def : classDef.body()) {
+          if (def.kind() != TK_DEF) {
+            throw ErrorReport(def.range())
+                << "Currently class bodies can only contain method "
+                   "definitions. File an issue on Github if you want "
+                   "something else!";
+          }
+          methodDefs.emplace_back(Def(def));
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }

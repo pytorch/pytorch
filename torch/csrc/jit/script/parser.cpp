@@ -450,7 +450,7 @@ struct ParserImpl {
     }
   }
 
-  TreeRef parseStmt() {
+  TreeRef parseStmt(bool in_class = false) {
     switch (L.cur().kind) {
       case TK_IF:
         return parseIf();
@@ -511,7 +511,7 @@ struct ParserImpl {
         return Pass::create(range);
       }
       case TK_DEF: {
-        return parseFunction(/*is_method=*/false);
+        return parseFunction(/*is_method=*/in_class);
       }
       default: {
         auto lhs = parseExpOrExpTuple();
@@ -530,11 +530,11 @@ struct ParserImpl {
       L.expect(TK_IF);
     auto cond = parseExp();
     L.expect(':');
-    auto true_branch = parseStatements();
+    auto true_branch = parseStatements(/*expect_indent=*/true);
     auto false_branch = makeList(L.cur().range, {});
     if (L.nextIf(TK_ELSE)) {
       L.expect(':');
-      false_branch = parseStatements();
+      false_branch = parseStatements(/*expect_indent=*/true);
     } else if (L.nextIf(TK_ELIF)) {
       // NB: this needs to be a separate statement, since the call to parseIf
       // mutates the lexer state, and thus causes a heap-use-after-free in
@@ -551,7 +551,7 @@ struct ParserImpl {
     auto cond = parseExp();
     L.expect(':');
     cur_loop_count++;
-    auto body = parseStatements();
+    auto body = parseStatements(/*expect_indent=*/true);
     cur_loop_count--;
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
@@ -562,19 +562,19 @@ struct ParserImpl {
     auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseLHSExp);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     cur_loop_count++;
-    auto body = parseStatements();
+    auto body = parseStatements(/*expect_indent=*/true);
     cur_loop_count--;
     return For::create(r, targets, itrs, body);
   }
 
-  TreeRef parseStatements(bool expect_indent = true) {
+  TreeRef parseStatements(bool expect_indent, bool in_class = false) {
     auto r = L.cur().range;
     if (expect_indent) {
       L.expect(TK_INDENT);
     }
     TreeList stmts;
     do {
-      stmts.push_back(parseStmt());
+      stmts.push_back(parseStmt(in_class));
     } while (!L.nextIf(TK_DEDENT));
     return create_compound(TK_LIST, r, std::move(stmts));
   }
@@ -645,16 +645,9 @@ struct ParserImpl {
       }
     }
     L.expect(':');
-
-    L.expect(TK_INDENT);
-    std::vector<Def> methods;
-    while (L.cur().kind != TK_DEDENT) {
-      methods.push_back(Def(parseFunction(/*is_method=*/true)));
-    }
-    L.expect(TK_DEDENT);
-
-    return ClassDef::create(
-        name.range(), name, List<Def>::create(name.range(), methods));
+    const auto statements =
+        parseStatements(/*expect_indent=*/true, /*in_class=*/true);
+    return ClassDef::create(name.range(), name, List<Stmt>(statements));
   }
 
   TreeRef parseFunction(bool is_method) {

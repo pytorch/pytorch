@@ -185,7 +185,7 @@ class Builder(object):
 def build_class_def(ctx, py_def, methods, self_name):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), methods)
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
 
 
 def build_def(ctx, py_def, type_line, self_name=None):

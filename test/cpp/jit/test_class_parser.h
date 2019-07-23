@@ -24,9 +24,9 @@ void testClassParser() {
   p.lexer().expect(TK_EOF);
 
   ASSERT_EQ(classDef.name().name(), "FooTest");
-  ASSERT_EQ(classDef.defs().size(), 2);
-  ASSERT_EQ(classDef.defs()[0].name().name(), "__init__");
-  ASSERT_EQ(classDef.defs()[1].name().name(), "get_x");
+  ASSERT_EQ(classDef.body().size(), 2);
+  ASSERT_EQ(Def(classDef.body()[0]).name().name(), "__init__");
+  ASSERT_EQ(Def(classDef.body()[1]).name().name(), "get_x");
 }
 } // namespace script
 } // namespace jit
