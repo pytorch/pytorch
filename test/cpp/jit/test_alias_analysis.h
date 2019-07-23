@@ -956,7 +956,7 @@ void testMemoryDAG() {
     AT_ASSERT(t.mayContainAlias(a, b));
     AT_ASSERT(t.mayContainAlias(b, a));
 
-    AT_ASSERT(t.mayContainAlias(a, c))
+    AT_ASSERT(t.mayContainAlias(a, c));
     AT_ASSERT(t.mayContainAlias(c, a));
 
     AT_ASSERT(t.mayContainAlias(b, c));
