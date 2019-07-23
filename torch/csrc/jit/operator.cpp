@@ -114,6 +114,17 @@ struct OperatorRegistry {
     }
     return ret;
   }
+
+  const std::vector<std::shared_ptr<Operator>>& getAllOperators() {
+    std::lock_guard<std::mutex> guard(lock);
+    registerPendingOperators();
+    static std::vector<std::shared_ptr<Operator>> values;
+    values.clear();
+    for (auto it = operators.begin(); it != operators.end(); ++it) {
+      values.insert(values.end(), it->second.begin(), it->second.end());
+    }
+    return values;
+  }
 };
 
 OperatorRegistry& getRegistry() {
@@ -142,6 +153,10 @@ void registerOperator(Operator&& op) {
     }
   }
   getRegistry().registerOperator(std::move(op));
+}
+
+const std::vector<std::shared_ptr<Operator>>& getAllOperators() {
+  return getRegistry().getAllOperators();
 }
 
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
