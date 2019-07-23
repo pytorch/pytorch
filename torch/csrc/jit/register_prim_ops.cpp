@@ -1693,12 +1693,22 @@ int dictLen(Stack& stack) {
 
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  auto keys = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
-  keys.reserve(dict.size());
-  for (auto& item : dict) {
-    keys.push_back(item.key());
+  auto addKeysFromDict = [&] (c10::impl::GenericList& keys) {
+    keys.reserve(dict.size());
+    for (auto& item : dict) {
+      keys.push_back(item.key());
+    }
+  };
+  auto key_type = dict._keyType();
+  if (key_type.has_value()) {
+    auto keys = c10::impl::GenericList(*key_type);
+    addKeysFromDict(keys);
+    push(stack, std::move(keys));
+  } else {
+    auto keys = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+    addKeysFromDict(keys);
+    push(stack, std::move(keys));
   }
-  push(stack, IValue(keys));
   return 0;
 }
 
@@ -1851,12 +1861,23 @@ int dictUpdate(Stack& stack) {
 
 int dictItems(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  auto items = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
-  items.reserve(dict.size());
-  for (const auto& item : iterationOrder(dict)) {
-    items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
+  auto addItemsFromDict = [&] (c10::impl::GenericList& items) {
+    items.reserve(dict.size());
+    for (const auto& item : iterationOrder(dict)) {
+      items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
+    }
+  };
+  auto key_type = dict._keyType();
+  auto value_type = dict._valueType();
+  if (key_type.has_value() && value_type.has_value()) {
+    auto items = c10::impl::GenericList(TupleType::create({*key_type, *value_type}));
+    addItemsFromDict(items);
+    push(stack, std::move(items));
+  } else {
+    auto items = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+    addItemsFromDict(items);
+    push(stack, std::move(items));
   }
-  push(stack, std::move(items));
   return 0;
 }
 

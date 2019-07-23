@@ -212,4 +212,20 @@ void Dict<Key, Value>::reserve(size_type count) {
   impl_->dict.reserve(count);
 }
 
+template<class Key, class Value>
+optional<TypePtr> Dict<Key, Value>::_keyType() const {
+  if (!impl_->elementTypes.has_value()) {
+    return c10::nullopt;
+  }
+  return impl_->elementTypes->keyType;
+}
+
+template<class Key, class Value>
+optional<TypePtr> Dict<Key, Value>::_valueType() const {
+  if (!impl_->elementTypes.has_value()) {
+    return c10::nullopt;
+  }
+  return impl_->elementTypes->valueType;
+}
+
 }

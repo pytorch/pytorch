@@ -363,6 +363,12 @@ public:
    * having to reallocate or rehash.
    */
   void reserve(size_type count);
+
+
+  // private API for now because the return type will change to TypePtr
+  // instead of optional<TypePtr> once types are mandatory.
+  optional<TypePtr> _keyType() const;
+  optional<TypePtr> _valueType() const;
 };
 
 namespace impl {
