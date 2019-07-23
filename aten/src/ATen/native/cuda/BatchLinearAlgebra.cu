@@ -160,7 +160,7 @@ void magmaSvd(
     magma_int_t lda, scalar_t* s, scalar_t* U, magma_int_t ldu,
     scalar_t* VT, magma_int_t ldvt, scalar_t* work, magma_int_t lwork,
     magma_int_t* iwork, magma_int_t* info) {
-  AT_ERROR("svd only takes float or double Tensors")
+  AT_ERROR("svd only takes float or double Tensors");
 }
 
 template<>
