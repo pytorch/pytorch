@@ -289,12 +289,6 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             return fail_test('Analytical gradient has incorrect size')
 
         for j, (a, n) in enumerate(zip(analytical, numerical)):
-            if printDebug:
-                print("=================CDIST=======================")
-                print("analytical:")
-                print(*a)
-                print("numerical:")
-                print(*n)
             if a.numel() != 0 or n.numel() != 0:
                 if not torch.allclose(a, n, rtol, atol):
                     sign = (-1 * (n < 0).double()) + (n > 0).double()
@@ -305,6 +299,10 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                                      'sign:%s\ndiff:%s\nerr:%s\nsigns:%s\n'
                                      'output:%s\ntupled_inputs:%s\n'
                                      'numerical:%s\nanalytical:%s\n' % (i, j, sign, diff, err, signs, o, tupled_inputs, n, a))
+                else:
+                    if printDebug:
+                        print("=================CDIST=======================")
+                        return fail_test('numerical:%s\nanalytical:%s\n' % (n, a))
 
         if not reentrant:
             return fail_test('Backward is not reentrant, i.e., running backward with same '
