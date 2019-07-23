@@ -25,7 +25,9 @@ namespace script {
 //
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
-// ClassDef = ClassDef(Ident name, List<Stmt> body)                     TK_CLASS_DEF
+// ClassDef = ClassDef(Ident name,                                      TK_CLASS_DEF
+//                     Maybe<Expr> superclass,
+//                     List<Stmt> body)
 // NamedTupleDef = NamedTupleDef(Ident name, List<Ident> fields,
 //                               List<Maybe<Expr>> types)
 //
@@ -420,19 +422,24 @@ struct ClassDef : public TreeView {
   }
   ClassDef withName(std::string new_name) const {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
-    return create(range(), new_ident, body());
+    return create(range(), new_ident, superclass(), body());
   }
   Ident name() const {
     return Ident(subtree(0));
   }
+  Maybe<Expr> superclass() const {
+    return Maybe<Expr>(subtree(1));
+  }
   List<Stmt> body() const {
-    return List<Stmt>(subtree(1));
+    return List<Stmt>(subtree(2));
   }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
+      const Maybe<Expr>& superclass,
       const List<Stmt>& body) {
-    return ClassDef(Compound::create(TK_CLASS_DEF, range, {name, body}));
+    return ClassDef(
+        Compound::create(TK_CLASS_DEF, range, {name, superclass, body}));
   }
 };
 
