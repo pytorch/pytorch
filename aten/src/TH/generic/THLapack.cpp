@@ -17,8 +17,6 @@ TH_EXTERNC void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, 
 TH_EXTERNC void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 TH_EXTERNC void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
 TH_EXTERNC void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
-TH_EXTERNC void spstrf_(char *uplo, int *n, float *a, int *lda, int *piv, int *rank, float *tol, float *work, int *info);
-TH_EXTERNC void dpstrf_(char *uplo, int *n, double *a, int *lda, int *piv, int *rank, double *tol, double *work, int *info);
 
 
 /* Solve overdetermined or underdetermined real linear systems involving an
@@ -75,20 +73,6 @@ void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info)
 #endif
 #else
   THError("potri: Lapack library not found in compile time\n");
-#endif
-}
-
-/* Cholesky factorization with complete pivoting */
-void THLapack_(pstrf)(char uplo, int n, scalar_t *a, int lda, int *piv, int *rank, scalar_t tol, scalar_t *work, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpstrf_(&uplo, &n, a, &lda, piv, rank, &tol, work, info);
-#else
-  spstrf_(&uplo, &n, a, &lda, piv, rank, &tol, work, info);
-#endif
-#else
-  THError("pstrf: Lapack library not found at compile time\n");
 #endif
 }
 
