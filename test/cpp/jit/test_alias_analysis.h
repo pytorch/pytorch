@@ -511,6 +511,34 @@ void testWriteTracking() {
     ASSERT_TRUE(aliasDb.writesToAlias(
         writingNode, std::unordered_set<const Value*>{aAlias}));
   }
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor):
+    %b : (Tensor) = aten::relu_(%x)
+    return (%b)
+    )IR",
+        &*graph);
+    auto node_iter = graph->block()->nodes().begin();
+    auto relu = *node_iter;
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.isInPlace(relu));
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor, %y : Tensor):
+    %b : (Tensor) = aten::mul(%x, %y)
+    return (%b)
+    )IR",
+        &*graph);
+    auto node_iter = graph->block()->nodes().begin();
+    auto mul = *node_iter;
+    AliasDb aliasDb(graph);
+    AT_ASSERT(!aliasDb.isInPlace(mul));
+  }
 }
 
 void testContainerAliasing() {
