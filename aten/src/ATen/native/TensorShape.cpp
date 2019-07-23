@@ -909,7 +909,13 @@ Tensor view(const Tensor& self, IntArrayRef size) {
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-  auto self_ = self.clone();
+  Tensor self_;
+  if (self.is_quantized()) {
+    self_ = at::_empty_affine_quantized({0}, self.options(), self.q_scale(),
+                                        self.q_zero_point());
+  } else {
+    self_ = at::empty({0}, self.options());
+  }
   self_.set_(self.storage(), self.storage_offset(), inferred_size,
              stride_value);
   return self_;
