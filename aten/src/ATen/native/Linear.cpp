@@ -131,10 +131,10 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 }
 
 Tensor einsum(std::string eqn, TensorList tensors) {
-  constexpr size_t number_of_letters = 26;
+  constexpr size_t number_of_letters = 52;
   std::string in_eqn;
   size_t pos;
-  // The equation is given in terms of single lowercase letters ('a'..'z') and potentially an ellipsis.
+  // The equation is given in terms of single uppercase or lowercase letters ('A'...'Z','a'..'z') and potentially an ellipsis.
   // Internally, we represent it using indices from 0 to num_total_dimensions, with each letter
   // mapped to an index and the ellipsis ('...') being mapped to a number of consequtive indices.
   // The mapping of letters to internal indices is given in letter_mapping. A value of -1 means that
@@ -201,8 +201,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         }
       } else {                                          // a letter (hopefully)
         TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis, operand ", operand);
-        TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
-        int64_t letter_num = c-'a';                     // letter_num  = position in letter_mapping
+        TORCH_CHECK(('A' <= c) && (c <= 'z'), "only letters [A-Z,a-z] allowed as indices");
+        int64_t letter_num = c-'A';                     // letter_num  = position in letter_mapping
         if (letter_mapping[letter_num] == -1) {         // new letter, add internal index and mapping
           letter_mapping[letter_num] = num_total_idxes;
           num_total_idxes++;
@@ -242,8 +242,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         }
       } else if (! isspace(c)) {                              // letter (hopefully)
         TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis in the right hand side");
-        TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
-        int64_t letter_num = c-'a';
+        TORCH_CHECK(('A' <= c) && (c <= 'z'), "only letters [A-Z,a-z] allowed as indices");
+        int64_t letter_num = c-'A';
         TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, " occurs twice in output");
         idxes_to_preprocessed_dims[letter_mapping[letter_num]] = num_output_dims;
         num_output_dims++;
