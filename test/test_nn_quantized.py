@@ -116,7 +116,10 @@ class ModuleAPITest(TestCase):
         rqr2 = dequant_m(qr2)
         self.assertEqual(rqr, rqr2)
 
-    def test_conv_api(self):
+    @given(
+        use_bias=st.booleans(),
+    )
+    def test_conv_api(self, use_bias):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
@@ -134,8 +137,8 @@ class ModuleAPITest(TestCase):
 
         qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
-        b = torch.randn(oC, dtype=torch.float32)
-        qb = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32)
+        b = torch.randn(oC, dtype=torch.float32) if use_bias else None
+        qb = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
 
         conv_under_test = Conv2d(in_channels=iC,
                                  out_channels=oC,
@@ -144,7 +147,7 @@ class ModuleAPITest(TestCase):
                                  padding=0,
                                  dilation=1,
                                  groups=g,
-                                 bias=True,
+                                 bias=use_bias,
                                  padding_mode='zeros')
         conv_under_test.weight = qw
         conv_under_test.bias = qb
@@ -164,7 +167,7 @@ class ModuleAPITest(TestCase):
 
         # Test forward
         result_under_test = conv_under_test(qX)
-        result_reference = qF.conv2d(qX.permute([0, 2, 3, 1]), qw.permute([0, 2, 3, 1]), bias=qb,
+        result_reference = qF.conv2d(qX, qw, bias=qb,
                                      scale=scale, zero_point=zero_point,
                                      stride=1, padding=0,
                                      dilation=1, groups=g,
