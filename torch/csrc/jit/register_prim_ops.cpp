@@ -1018,17 +1018,9 @@ RegisterOperators reg(
              throw std::runtime_error(
                  "DictConstruct must have an even number of inputs");
            }
-           if (node->outputs().size() != 1) {
-             throw std::runtime_error(
-               "DictConstruct must have exactly one output"
-             );
-           }
+           TORCH_INTERNAL_ASSERT(node->outputs().size() == 1, "DictConstruct must have exactly one output");
            TypePtr output_type = node->outputs()[0]->type();
-           if (output_type->kind() != TypeKind::DictType) {
-             throw std::runtime_error(
-               "DictConstruct output must be of Dict type."
-             );
-           }
+           TORCH_INTERNAL_ASSERT(output_type->kind() == TypeKind::DictType, "DictConstruct output must be of Dict type.");
            TypePtr key_type = static_cast<const DictType*>(output_type.get())->getKeyType();
            TypePtr value_type = static_cast<const DictType*>(output_type.get())->getValueType();
            return [=](Stack& stack) {
