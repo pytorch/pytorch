@@ -314,9 +314,22 @@ public:
 
   /**
    * Call this to register an operator. See class doc comment for examples.
+   * The template parameter 'enabled' can be used to enable or disable
+   * registration of this operator at compile time. The operator will only
+   * be registered if enabled == true.
    */
-  RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) && {
+  template<bool enabled = true>
+  RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) &&;
+
+  template<>
+  RegisterOperators&& op<true>(const std::string& schemaOrName, Options&& options) && {
     checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
+    return std::move(*this);
+  }
+
+  template<>
+  RegisterOperators&& op<false>(const std::string& schemaOrName, Options&& options) && {
+    // With enabled = false, we don't register the op
     return std::move(*this);
   }
 
