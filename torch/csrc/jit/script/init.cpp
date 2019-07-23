@@ -557,6 +557,8 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("_copy_into", &Module::copy_into)
+      .def_property_readonly(
+          "name", [](const Module& self) { return self.name().name(); })
       .def(
           "clone_method", [](Module& m, Module& orig, const std::string& name) {
             m.clone_method(orig, name);
@@ -765,7 +767,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def(
       "import_ir_module",
-      [](ModuleLookup module_lookup,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& filename,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -775,11 +777,15 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, filename, optional_device, extra_files);
+        return import_ir_module(
+            std::move(cu),
+            filename,
+            optional_device,
+            extra_files);
       });
   m.def(
       "import_ir_module_from_buffer",
-      [](ModuleLookup module_lookup,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& buffer,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -790,7 +796,8 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, in, optional_device, extra_files);
+        return import_ir_module(
+            std::move(cu), in, optional_device, extra_files);
       });
 
   m.def(
