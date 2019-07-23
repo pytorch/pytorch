@@ -418,6 +418,39 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
         checkQuantized(model)
 
+    def test_type_match_rule(self):
+        r"""Test quantization for nested model, top level 'fc3' and
+        'fc1' of submodule 'sub2', All 'torch.nn.Linear' modules are quantized
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': default_qconfig,
+            'sub2.fc1': default_qconfig,
+            torch.nn.Linear: default_qconfig
+        }
+
+        def checkPrepModules(model, before_calib=False):
+            if before_calib:
+                self.checkObservers(model)
+
+        model = prepare_dynamic(model, qconfig_dict)
+        checkPrepModules(model, True)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub1.fc)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            test_only_eval_fn(model, self.calib_data)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        checkQuantized(model)
+
 
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
