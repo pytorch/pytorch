@@ -91,10 +91,6 @@ std::string SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
   return Pickle(ivalues);
 }
 
-// const std::vector<char>& SourceRangePickler::get_data() {
-//   return p->stack();
-// }
-
 ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
     at::DataPtr&& data,
     size_t size)
@@ -108,35 +104,35 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  // auto ivalues = Unpickle(data.get(), size);
+  auto ivalues = Unpickle(data.get(), size);
 
-  // unpickled_records = std::make_shared<SourceRangeRecords>();
-  // for (auto& val : ivalues) {
-  //   auto tup_elems = val.toTuple()->elements();
-  //   int64_t offset = tup_elems[0].toInt();
-  //   auto source_range = deserializer->deserialize(tup_elems[1]);
-  //   unpickled_records->emplace_back(offset, std::move(source_range));
-  // }
+  unpickled_records = std::make_shared<SourceRangeRecords>();
+  for (auto& val : ivalues) {
+    auto tup_elems = val.toTuple()->elements();
+    int64_t offset = tup_elems[0].toInt();
+    auto source_range = deserializer->deserialize(tup_elems[1]);
+    unpickled_records->emplace_back(offset, std::move(source_range));
+  }
 }
 
 c10::optional<SourceRange> ConcreteSourceRangeUnpickler::
     findSourceRangeThatGenerated(const SourceRange& range) {
-  // unpickle();
+  unpickle();
 
-  // auto query = TaggedRange(range.start(), SourceRange{""});
-  // auto entry = std::upper_bound(
-  //     unpickled_records->begin(),
-  //     unpickled_records->end(),
-  //     query,
-  //     [](const TaggedRange& a, const TaggedRange& b) -> bool {
-  //       return a.bytes < b.bytes;
-  //     });
+  auto query = TaggedRange(range.start(), SourceRange{""});
+  auto entry = std::upper_bound(
+      unpickled_records->begin(),
+      unpickled_records->end(),
+      query,
+      [](const TaggedRange& a, const TaggedRange& b) -> bool {
+        return a.bytes < b.bytes;
+      });
 
-  // // NB: must decrement iterator since upper_bound finds the element
-  // // *greater than* the query.
-  // if (entry != unpickled_records->begin()) {
-  //   return (entry - 1)->range;
-  // }
+  // NB: must decrement iterator since upper_bound finds the element
+  // *greater than* the query.
+  if (entry != unpickled_records->begin()) {
+    return (entry - 1)->range;
+  }
 
   return c10::nullopt;
 }

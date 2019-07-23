@@ -935,7 +935,6 @@ void ScriptModuleSerializer::convertModule(
         module_def->mutable_torchscript_debug_arena();
 
     SourceRangePickler source_range_pickler;
-    // source_range_pickler.pickle(source_ranges);
     const auto& range_data = source_range_pickler.pickle(source_ranges);
     std::stringstream debug_filename;
     debug_filename << "debug/" << module_name.str() << ".pkl";
