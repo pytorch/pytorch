@@ -913,13 +913,17 @@ Tensor view(const Tensor& self, IntArrayRef size) {
   if (self.is_quantized()) {
     TORCH_CHECK(self.qscheme() == kPerTensorAffine,
                 "Only PerTensorAffine quantization is supported right now");
-    self_ = at::_empty_affine_quantized({0}, self.options(), self.q_scale(),
-                                        self.q_zero_point());
+    auto impl = c10::make_intrusive<QTensorImpl>(Storage(self.storage()), self.type_id(),
+                    get_qtensorimpl(self)->quantizer());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(inferred_size, stride_value);
+    self_ = Tensor(impl);
   } else {
-    self_ = at::empty({0}, self.options());
+    auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()), self.type_id());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(inferred_size, stride_value);
+    self_ = Tensor(impl);
   }
-  self_.set_(self.storage(), self.storage_offset(), inferred_size,
-             stride_value);
   return self_;
 }
 
