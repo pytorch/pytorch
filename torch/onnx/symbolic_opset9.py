@@ -1486,7 +1486,11 @@ rnn_relu = _one_hidden_rnn('RNN_RELU')
 def _dim_arange(g, like, dim):
     like_shape = g.op('Shape', like)
     stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
-    return g.op("_caffe2::Range", stop)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("_caffe2::Range", stop)
+    else:
+        # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        return arange(g, stop, 4, None, None, None)
 
 
 def detach(g, input):
@@ -1666,6 +1670,44 @@ def gather(g, self, dim, index, sparse_grad=False):
 @parse_args('v', 'is', 'i')
 def logsumexp(g, input, dim, keepdim):
     return g.op('ReduceLogSumExp', input, axes_i=dim, keepdims_i=keepdim)
+
+
+def arange(g, *args):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", *args, operator_s="arange")
+
+    def _get_arange_dtype(dtype):
+        dtype = sym_help._maybe_get_const(dtype, 'i')
+        if sym_help._is_value(dtype):
+            dtype = 4  # default to int64
+        return dtype
+
+    if len(args) == 5:
+        # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[1])
+        end = g.op("Unsqueeze", args[0], axes_i=[0])
+        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, end, dtype, *(args[2:]))), axes_i=[1])
+        return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 6:
+        # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[2])
+        end = g.op("Unsqueeze", args[1], axes_i=[0])
+        start = g.op("Unsqueeze", args[0], axes_i=[0])
+        range_tensor = g.op("Sub", end, start)
+        arange_tensor = g.op("Add", g.op("Squeeze", nonzero(g, ones(g, range_tensor, dtype, *(args[3:]))), axes_i=[1]), start)
+        return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 7:
+        # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[3])
+        step = g.op("Unsqueeze", args[2], axes_i=[0])
+        end = g.op("Unsqueeze", args[1], axes_i=[0])
+        start = g.op("Unsqueeze", args[0], axes_i=[0])
+        range_tensor = g.op("Div", g.op("Sub", end, start), step)
+        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, range_tensor, dtype, *(args[4:]))), axes_i=[1])
+        arange_tensor = g.op("Add", g.op("Mul", arange_tensor, step), start)
+        return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+    else:
+        raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
 
 
 def masked_fill(g, self, mask, value):
