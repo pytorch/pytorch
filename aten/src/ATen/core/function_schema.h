@@ -250,7 +250,8 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // so we always use Type(alias)? format
   std::stringstream oss;
   if (arg.type()->isSubclass(TypeKind::ListType) && arg.N()) {
-    oss << std::static_pointer_cast<const ListType>(arg.type())->getElementType()->str();
+    oss << std::static_pointer_cast<const ListType>(arg.type())->
+      getElementType()->str();
     oss << "[" << arg.N().value() << "]";
   } else {
     oss << arg.type()->str();
