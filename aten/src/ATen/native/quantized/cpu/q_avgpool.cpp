@@ -18,13 +18,6 @@ inline int end_index(int a, int b, int c) {
   return (int)std::ceil((float)((a + 1) * c) / b);
 }
 
-template <typename underlying_t>
-inline underlying_t clamp_and_cast(int32_t value) {
-  const auto lower = std::numeric_limits<underlying_t>::lowest();
-  const auto upper = std::numeric_limits<underlying_t>::max();
-  return static_cast<underlying_t>(
-      std::max<int32_t>(lower, std::min<int32_t>(upper, value)));
-}
 
 template <typename scalar_t, typename underlying_t>
 static void adaptive_avg_pool2d_single_out_frame(scalar_t *input_p,
@@ -66,7 +59,7 @@ static void adaptive_avg_pool2d_single_out_frame(scalar_t *input_p,
           }
 
           /* set output to local average */
-          *op = scalar_t(clamp_and_cast<underlying_t>(sum / kW / kH));
+          *op = scalar_t(static_cast<underlying_t>(sum / kW / kH));
         }
       }
     }
@@ -126,17 +119,19 @@ void adaptive_avg_pool2d_out_template(Tensor& output, Tensor input,
 
   /* resize output */
   std::vector<int64_t> output_sizes;
-  if (input.dim() == 3 || input.size(0) == 1) {
-    if (input.dim() == 3) {
-      // output_sizes = {sizeD, osizeH, osizeW};
-      // output.resize_({sizeD, osizeH, osizeW});
-      output = output.view({sizeD, osizeH, osizeW});
-    } else {
-      // output_sizes = {1, sizeD, osizeH, osizeW}
-      // output.resize_({1, sizeD, osizeH, osizeW});
-      output = output.view({1, sizeD, osizeH, osizeW});
-    }
+  int64_t sizeB = 0;
+  if (input.dim() == 3) {
+    output_sizes = {sizeD, osizeH, osizeW};
+  } else {
+    sizeB = input.size(-4);
+    output_sizes = {sizeB, sizeD, osizeH, osizeW};
+  }
+  if (!output.is_quantized() || output.sizes() != output_sizes) {
+    output = at::_empty_affine_quantized(output_sizes, input.options(),
+                                         input.q_scale(), input.q_zero_point());
+  }
 
+  if (input.dim() == 3 || input.size(0) == 1) {
     AT_DISPATCH_QINT_TYPES(input.scalar_type(),
       "quantized_adaptive_avg_pool2d", [&] {
         auto input_data = input.data<scalar_t>();
@@ -152,8 +147,6 @@ void adaptive_avg_pool2d_out_template(Tensor& output, Tensor input,
       }
     );
   } else {
-    int64_t sizeB = input.size(-4);
-    output = output.view({sizeB, sizeD, osizeH, osizeW});
     int64_t istrideB = input.stride(-4);
 
     AT_DISPATCH_QINT_TYPES(input.scalar_type(),
@@ -199,22 +192,6 @@ Tensor& quantized_adaptive_avg_pool2d_out(Tensor& output, const Tensor& input,
 Tensor quantized_adaptive_avg_pool2d(const at::Tensor& input,
                                      IntArrayRef output_size) {
   Tensor output;
-  if (input.dim() == 3) {
-    output = at::_empty_affine_quantized({input.size(0),
-                                          output_size[0],
-                                          output_size[1]},
-                                         input.options(),
-                                         input.q_scale(),
-                                         input.q_zero_point());
-  } else {
-    output = at::_empty_affine_quantized({input.size(0),
-                                          input.size(1),
-                                          output_size[0],
-                                          output_size[1]},
-                                         input.options(),
-                                         input.q_scale(),
-                                         input.q_zero_point());
-  }
   adaptive_avg_pool2d_out_template(output, input, output_size);
   return output;
 }

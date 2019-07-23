@@ -76,8 +76,8 @@ def conv2d(input, weight, bias,
     dilation = _extend_to_list(dilation, spatial_dim_len)
 
     if not prepacked:
-        weight = ops.quantized.fbgemm_conv_prepack(weight, groups)
-    return ops.quantized.fbgemm_conv2d(input, weight, bias,
+        weight = ops.quantized.fbgemm_conv_prepack(weight.permute([0, 2, 3, 1]), groups)
+    return ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]), weight, bias,
                                        stride, padding, dilation,
                                        groups, scale, zero_point)
 

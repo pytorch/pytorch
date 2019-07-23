@@ -303,8 +303,7 @@ namespace {
     const Tensor& input,
     IntArrayRef output_size)
   {
-    adaptive_avg_pool2d_out_cpu_template(
-      output, input, output_size);
+    adaptive_avg_pool2d_out_cpu_template(output, input, output_size);
     return output;
   }
 
@@ -314,12 +313,13 @@ namespace {
   {
     Tensor output;
     if (input.is_quantized()) {
-      output = at::_empty_affine_quantized({0}, input.options());
+      output = at::_empty_affine_quantized({0}, input.options(),
+                                           input.q_scale(),
+                                           input.q_zero_point());
     } else {
       output = at::empty({0}, input.options());
     }
-    adaptive_avg_pool2d_out_cpu_template(
-      output, input, output_size);
+    adaptive_avg_pool2d_out_cpu_template(output, input, output_size);
     return output;
   }
 
@@ -334,11 +334,9 @@ namespace {
       int64_t mean_size = input.size(-1) * input.size(-2);
       Tensor out = input.contiguous().view({-1, mean_size});
       if (out.is_quantized()) {
-        TORCH_WARN("Quantized mean is WIP! Falling back to AdaptiveAvgPool");
         return _adaptive_avg_pool2d(input, output_size);
-      } else {
-        out = out.mean(-1);
       }
+      out = out.mean(-1);
       return input.dim() == 3 ? out.view({input.size(0), 1, 1})
                               : out.view({input.size(0), input.size(1), 1, 1});
     } else {
