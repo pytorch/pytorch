@@ -25,6 +25,14 @@ TORCH_API void import_libs(
     // Callback to import any dependencies of this source before compiling
     const std::function<void(const std::string&)>& import_callback);
 
+// Add the methods defined in `src` to the module `mod`.
+TORCH_API void LEGACY_import_methods(
+    const script::Module& mod,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::Tensor>& constant_table,
+    // Callback to import any dependencies of this source before compiling
+    const std::function<void(const std::string&)>& import_callback);
+
 // Add the functions defined in `src` to the compilation unit `cu`.
 // self is passed through the CompilationUnit's define function.
 // If present, it determines the SugaredValue for the first argument

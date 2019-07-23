@@ -553,9 +553,11 @@ class ScriptModuleSerializer final {
   // by module_def->id())
   // all classes used by this module hierarchy
   std::vector<c10::NamedTypePtr> class_table_;
-  OrderedDict<c10::NamedTypePtr, std::string> converted_classes_;
-  std::unordered_map<c10::NamedTypePtr, std::vector<c10::NamedTypePtr>>
-      class_to_deps_;
+  struct ClassInfo {
+    std::string source;
+    SourceRangeRecords debug_info;
+  };
+  OrderedDict<c10::NamedTypePtr, ClassInfo> converted_classes_;
 };
 
 // ScriptModuleSerializer's methods
@@ -601,6 +603,9 @@ void ScriptModuleSerializer::serialize(
 }
 
 void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
+  static const std::string opset_string =
+      c10::str("op_version_set = ", CURRENT_OP_VERSION_SET, "\n");
+
   // Convert all the classes that this model depends on
   for (const auto& class_type : class_table_) {
     convertClass(class_type);
@@ -611,37 +616,54 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 
   // Aggregate classes into files by their qualified names
   std::unordered_map<std::string, std::ostringstream> fileToSrc;
-  for (const auto& item : converted_classes_) {
+  std::unordered_map<std::string, SourceRangeRecords> fileToDebug;
+  for (auto& item : converted_classes_) {
     const auto& class_type = item.key();
-    const auto& class_src = item.value();
+    auto& class_info = item.value();
 
     // For the type, foo.bar.Baz
     const std::string filename =
         ImportExportHelpers::qualifierToPath(class_type->qualifier());
     // End state: filename is "foo/bar.py", in which we will define a class
     // named Baz
-    fileToSrc[filename] << class_src;
+    auto& stream = fileToSrc[filename];
+
+    // Adjust the SourceRange offsets since we are concatenating multiple
+    // classes to a single file.
+    // Need to add opset_string size as an offset because we will be prepending
+    // it to the file. (We should remove this opset_version string at some point
+    // and stash it in the model.json)
+    const auto offset = static_cast<size_t>(stream.tellp()) + opset_string.size();
+    for (auto& sourceRange : class_info.debug_info) {
+      sourceRange.bytes += offset;
+    }
+
+    auto& debugInfo = fileToDebug[filename];
+    debugInfo.insert(
+        debugInfo.end(),
+        class_info.debug_info.begin(),
+        class_info.debug_info.end());
+    fileToSrc[filename] << class_info.source;
   }
 
-  // Write out the files. We still have to do this in converted_classes_ order,
-  // to maintain dependency order.
-  std::unordered_set<std::string> written_files;
-  for (const auto& item : converted_classes_) {
-    const c10::NamedTypePtr& class_type = item.key();
-    const std::string filename =
-        ImportExportHelpers::qualifierToPath(class_type->qualifier());
-    if (written_files.count(filename)) {
-      continue;
-    }
-    written_files.insert(filename);
+  for (const auto& item : fileToSrc) {
+    const auto& filename = item.first;
+    const auto src = item.second.str();
+    const auto& debugInfo = fileToDebug.at(filename);
 
-    const std::string& src = fileToSrc.at(filename).str();
-
-    std::ostringstream lib_stream;
-    lib_stream << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
-    lib_stream << src;
-    std::string lib_str = lib_stream.str();
+    // Prepend the opset_version string
+    const auto lib_str = c10::str(opset_string, src);
     writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
+
+    // Write out the debug information
+    std::stringstream debugFilename;
+    debugFilename << filename << ".debug_pkl";
+    SourceRangePickler source_range_pickler;
+    source_range_pickler.pickle(debugInfo);
+    const auto& range_data = source_range_pickler.get_data();
+
+    writer_.writeRecord(
+        debugFilename.str(), range_data.data(), range_data.size());
   }
 }
 
@@ -665,8 +687,6 @@ void ScriptModuleSerializer::convertClass(
       class_deps,
       /*enforce_importable=*/true);
 
-  class_to_deps_[class_type] = class_deps;
-
   for (const auto& c : class_deps) {
     if (c == class_type) {
       // Don't re-process this class and enter an infinite loop. We need this
@@ -678,7 +698,8 @@ void ScriptModuleSerializer::convertClass(
   }
   // Insert *after* we've traversed the dependencies. This ensures that any
   // given class will appear after its dependencies in the order.
-  converted_classes_.insert(class_type, class_stream.str());
+  ClassInfo info{class_stream.str(), std::move(source_ranges)};
+  converted_classes_.insert(class_type, std::move(info));
 }
 
 void ScriptModuleSerializer::convertModel(

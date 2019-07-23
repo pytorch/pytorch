@@ -122,7 +122,6 @@ const static std::unordered_set<std::string> reserved_names = {
     "aten",
     "attribute",
     "CONSTANTS",
-    "PICKLES",
     "fork",
     "getattr",
     "inf",
