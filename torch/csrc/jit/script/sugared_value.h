@@ -332,6 +332,18 @@ struct TORCH_API PrintValue : public SugaredValue {
       size_t n_binders) override;
 };
 
+struct TORCH_API SortedValue : public SugaredValue {
+  std::string kind() const override {
+    return "sorted";
+  }
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+};
+
 // expressions like int(x)
 // these are the same as call prim::Int or equivalent except it
 // is a noop when the input is a subtype of 'type'

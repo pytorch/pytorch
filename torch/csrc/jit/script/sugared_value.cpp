@@ -29,6 +29,42 @@ std::shared_ptr<SugaredValue> PrintValue::call(
   return std::make_shared<NoneValue>();
 }
 
+std::shared_ptr<SugaredValue> SortedValue::call(
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  auto& g = *m.graph();
+  if (!attributes.empty())
+    throw ErrorReport(loc) << "sorted doesn't accept any keyword arguments";
+
+  if (inputs.size() != 1)
+    throw ErrorReport(loc)
+        << "sorted currently only accept any keyword arguments";
+
+  std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
+  TORCH_INTERNAL_ASSERT(lowered_inputs.size() == 1);
+
+  auto input = lowered_inputs[0];
+  if (auto dict_input = input->type()->cast<DictType>()) {
+    input = emitBuiltinCall(
+        loc, g, aten::keys, /*self*/ c10::nullopt, inputs, attributes, true);
+  } else if (input->type()->cast<ListType>()) {
+    // aten::sort is inplace, so we copy the list here then modify it
+    input = emitBuiltinCall(
+        loc, g, aten::copy, /*self*/ c10::nullopt, inputs, attributes, true);
+  } else {
+    throw ErrorReport(loc)
+        << "sorted currently only accepts Lists and Dictionaries, got "
+        << input->type()->python_str();
+  }
+
+  emitBuiltinCall(
+      loc, g, aten::sort, /*self*/ c10::nullopt, {input}, attributes, true);
+  return std::make_shared<SimpleValue>(input);
+}
+
 static const std::unordered_map<std::string, std::string>&
 builtin_cast_methods() {
   static std::unordered_map<std::string, std::string> builtin_cast_methods = {

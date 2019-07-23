@@ -4804,6 +4804,27 @@ a")
                 return a + b
             ''')
 
+    def test_sorted_keyword(self):
+        def test_sorted_list():
+            a = [2, 1, 3]
+            b = sorted(a)
+            a.append(4)
+            return a, b
+
+        self.checkScript(test_sorted_list, ())
+
+        def test_sorted_dict():
+            a = {1.0: 1.0, 3.0: 3.0, 2.0: 2.0}
+            b = sorted(a)
+            return b
+
+        self.checkScript(test_sorted_dict, ())
+
+        with self.assertRaisesRegex(RuntimeError, "got int"):
+            @torch.jit.script
+            def test():
+                return sorted(1)
+
     def test_opt_opt_refinement(self):
         @torch.jit.script
         def test_unify(weight, bias):

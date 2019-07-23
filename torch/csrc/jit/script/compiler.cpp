@@ -349,6 +349,7 @@ struct Environment {
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
+          {"sorted", std::make_shared<SortedValue>()},
           {"float",
            makeMagic(
                "__float__",

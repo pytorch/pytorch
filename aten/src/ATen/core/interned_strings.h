@@ -118,6 +118,7 @@ namespace c10 {
   _(aten, __not__)                   \
   _(aten, __is__)                    \
   _(aten, __isnot__)                 \
+  _(aten, copy)                      \
   _(aten, copy_)                     \
   _(aten, t_)                        \
   _(aten, addbmm_)                   \
