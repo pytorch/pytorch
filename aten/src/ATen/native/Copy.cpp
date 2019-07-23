@@ -6,6 +6,9 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace {
 
@@ -83,6 +86,32 @@ bool is_supported_device(Device device) {
 namespace at {
 namespace native {
 
+static Tensor& strided_copy_impl(Tensor& self, const Tensor& src, bool non_blocking) {
+  auto builder = TensorIterator::Builder();
+  builder.add_output(self);
+  builder.add_input(src);
+  builder.dont_resize_outputs();
+  builder.dont_compute_common_dtype();
+  auto iter = builder.build();
+
+  if (iter->numel() == 0) {
+    return self;
+  }
+
+  DeviceType device_type = iter->device_type(0);
+  if (iter->device_type(1) == kCUDA) {
+    device_type = kCUDA;
+  }
+
+  if (device_type == kCPU && copy_transpose_valid(self, src)) {
+    copy_same_type_transpose_(self, src);
+    return self;
+  }
+
+  copy_stub(device_type, *iter, non_blocking);
+  return self;
+}
+
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
@@ -119,29 +148,17 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
   }
 
-  auto builder = TensorIterator::Builder();
-  builder.add_output(self);
-  builder.add_input(src);
-  builder.dont_resize_outputs();
-  builder.dont_compute_common_dtype();
-  auto iter = builder.build();
-
-  if (iter->numel() == 0) {
-    return self;
+#ifdef BUILD_NAMEDTENSOR
+  auto should_propagate_names = src.is_named();
+  if (should_propagate_names) {
+    Tensor self_, src_;
+    optional<std::vector<Dimname>> outnames;
+    std::tie(self_, src_, outnames) = namedinference::unify_names_for_binary_op(self, src);
+    return at::internal_set_names_inplace(
+        strided_copy_impl(self_, src_, non_blocking), std::move(outnames.value()));
   }
-
-  DeviceType device_type = iter->device_type(0);
-  if (iter->device_type(1) == kCUDA) {
-    device_type = kCUDA;
-  }
-
-  if (device_type == kCPU && copy_transpose_valid(self, src)) {
-    copy_same_type_transpose_(self, src);
-    return self;
-  }
-
-  copy_stub(device_type, *iter, non_blocking);
-  return self;
+#endif
+  return strided_copy_impl(self, src, non_blocking);
 }
 
 DEFINE_DISPATCH(copy_stub);

@@ -223,6 +223,7 @@ class TestNamedTensor(TestCase):
 
         tests = [
             fn_method_and_inplace('mul'),
+            method('copy_'),
         ]
         tests = flatten(tests)
 
