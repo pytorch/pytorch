@@ -475,7 +475,8 @@ void initJITBindings(PyObject* module) {
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](FunctionSchema& self) { return self.returns(); })
-      .def("__eq__", [](const FunctionSchema& self, const FunctionSchema& other) {
+      .def("__eq__", [](const FunctionSchema& self,
+            const FunctionSchema& other) {
           return self == other;
         })
       .def("__str__", [](FunctionSchema& self) {
@@ -499,7 +500,7 @@ void initJITBindings(PyObject* module) {
       });
   m.def(
       "_jit_get_all_schemas", []() {
-    auto operations = getAllOperators();
+    const std::vector<std::shared_ptr<Operator>>& operations = getAllOperators();
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
       return op->schema();
     });
