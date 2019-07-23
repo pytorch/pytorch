@@ -1690,12 +1690,196 @@ class TestAutograd(TestCase):
         segfault.
         """
         class CollectOnDelete(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_output):
+                return grad_output
 
             def __del__(self):
                 gc.collect()
 
         for _ in range(10):
-            Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
+            CollectOnDelete()(torch.randn(1, requires_grad=True)).backward()
+
+    def test_call_legacy_twice(self):
+        class Id(Function):
+            def forward(self, x):
+                self.save_for_backward(x)
+                return x
+
+            def backward(self, grad_x):
+                x = self.saved_tensors
+                return x
+
+        f = Id()
+        x1 = torch.zeros(1, requires_grad=True)
+        x2 = torch.ones(1, requires_grad=True)
+        y = f(x1)
+        with warnings.catch_warnings(record=True) as w:
+            z = f(x2)
+        self.assertIn('extending-torch-autograd', str(w[1].message))
+        # I don't really care about the functional correctness of this
+        # part of the test: if you make a change that causes this test
+        # to fail, it's probably OK to just fix this test case to follow
+        # it.  I'm mostly making sure we don't segfault here.
+        y.backward()
+        self.assertEqual(x2.grad, x2)
+
+    # Delete this test when legacy custom autograd functions are deleted.
+    def test_naughty_legacy_variable_grad_fn(self):
+        class Id(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_x):
+                return grad_x
+
+        self.assertRaises(RuntimeError, lambda: Variable(torch.zeros(1), _grad_fn=Id()))
+
+    # Delete this test when legacy custom autograd functions are deleted.
+    def test_naughty_legacy_function_backward_before_forward(self):
+        class Id(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_x):
+                return grad_x
+
+        f = Id()
+        self.assertRaises(RuntimeError, lambda: f._do_backward((torch.zeros(0), ), False))
+
+    # Delete this test when legacy custom autograd functions are deleted.
+    def test_naughty_legacy_function_early_access(self):
+        class Id(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_x):
+                return grad_x
+
+        f = Id()
+        # A legacy autograd function is not fully initialized until you actually
+        # apply it.  That means a lot of accessors on them don't actually work.
+        # Test that we properly error in this case.
+        self.assertRaises(RuntimeError, lambda: f.register_hook(lambda x, y: None))
+        self.assertRaises(RuntimeError, lambda: f.next_functions)
+        self.assertRaises(RuntimeError, lambda: f.metadata)
+
+    @unittest.expectedFailure
+    def test_naughty_anomaly_access(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        x = torch.zeros(1, requires_grad=True)
+        y = MyFunction.apply(x)
+        y.backward()
+        y.grad_fn.metadata
+        g = y.grad_fn
+        del y
+        g.metadata  # this currently fails, but shouldn't
+
+    def test_naughty_autograd_function_stashing_ctx(self):
+        saved_ctx = []
+
+        class Id(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_x):
+                saved_ctx.append(ctx)
+                return ctx.saved_tensors
+
+        p = torch.zeros(1, requires_grad=True)
+        loss = Id.apply(p)
+        loss.backward(retain_graph=True)
+        del loss
+        # At this point in time, it complains that the graph has been freed
+        # (which indeed true, although a somewhat indirect way of stating the
+        # problem).
+        self.assertRaises(RuntimeError, lambda: saved_ctx[0].saved_tensors)
+
+    def test_custom_autograd_repeated_grad_grad(self):
+        # This test failed the equality check in PR #22983; it's an interesting
+        # and different test case worth enshrining.  mult1 is not testing
+        # anything that interesting, but mult2 is the interesting case.
+
+        def mult1(x):
+            return x.prod(dim=-1).prod(dim=-1)
+
+        class Mult(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = mult1(x)
+                ctx.save_for_backward(x, y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return (grad_output * y)[:, None, None] / x
+
+        mult2 = Mult.apply
+
+        def check_gradgrad_repeated(x, y):
+            gy, = torch.autograd.grad(y[0], x, create_graph=True)
+            ggy_1, = torch.autograd.grad(gy[0, 0, 0], x, retain_graph=True)
+            gy, = torch.autograd.grad(y[0], x, create_graph=True)
+            ggy_2, = torch.autograd.grad(gy[0, 0, 0], x, retain_graph=True)
+            self.assertEqual(ggy_1[0, 0, 1], ggy_2[0, 0, 1])
+
+        x = torch.ones(2, 4, 4).requires_grad_()
+        check_gradgrad_repeated(x, mult1(x))
+        check_gradgrad_repeated(x, mult2(x))
+
+    def test_custom_autograd_no_early_free(self):
+        # This test failed complaining that buffers had already been freed
+        # prior to #22983.  Also pretty interesting test case.
+        class Double(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x ** 2
+                ctx.save_for_backward(x, y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, _ = ctx.saved_tensors
+                return grad_output * 2 * x
+
+        # this is equivalent, but uses the output of .forward() in .backward()
+        class Double2(Double):
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return grad_output * 2 * y / x
+
+        double = Double.apply
+        double2 = Double2.apply
+
+        x = torch.tensor(2).double().requires_grad_()
+
+        self.assertTrue(torch.autograd.gradcheck(double, x))
+        self.assertTrue(torch.autograd.gradgradcheck(double, x))
+        self.assertTrue(torch.autograd.gradcheck(double2, x))
+        self.assertTrue(torch.autograd.gradgradcheck(double2, x))
+
+        y = double(x)
+        torch.autograd.grad(y, x, create_graph=True)
+        torch.autograd.grad(y, x)
+
+        y = double2(x)
+        torch.autograd.grad(y, x, create_graph=True)
+        torch.autograd.grad(y, x)  # should not error!
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
     @skipIfRocm
