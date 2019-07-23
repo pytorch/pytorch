@@ -111,7 +111,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
       if (result.is_contiguous()) {
         shuffled_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
       } else {
-        shuffled = at::arange(n, result.options());
+        shuffled = at::empty(n, result.options());
         shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data<scalar_t>());
       }
 
