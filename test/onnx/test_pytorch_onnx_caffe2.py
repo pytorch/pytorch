@@ -1782,6 +1782,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test__dim_arange(self):
         class DimArange(torch.nn.Module):
             def forward(self, input):
@@ -1789,6 +1790,60 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.ones(5, 6)
         self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end_step(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
 
     def test_log2(self):
         class Log2Model(torch.nn.Module):
