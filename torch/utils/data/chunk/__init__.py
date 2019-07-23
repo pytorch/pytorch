@@ -5,6 +5,7 @@ from torch._C.data.chunk import DistributedSampler, DistributedRandomSampler, Di
 from torch._C.data.chunk import ChunkDataReaderUint8T, ChunkDataReaderInt8T, ChunkDataReaderInt16T, ChunkDataReaderInt32T  # noqa: F401
 from torch._C.data.chunk import ChunkDataReaderInt64T, ChunkDataReaderFloat, ChunkDataReaderDouble  # noqa: F401
 
+
 class ChunkDatasetWrapper(IterableDataset):
     r"""
     Wrapper class for the C++ ChunkDataset class.
@@ -15,6 +16,7 @@ class ChunkDatasetWrapper(IterableDataset):
     Arguments:
         dataset (Dataset): The whole Dataset
     """
+
     def __init__(self, dataset):
         super(ChunkDatasetWrapper, self).__init__()
         self.dataset = dataset
@@ -34,7 +36,7 @@ class ChunkDatasetWrapper(IterableDataset):
     def reset(self):
         self.dataset.reset()
 
-    def chunk_sampler(self):
-        return self.dataset.chunk_sampler()
+    def set_chunk_sampler_stride(self, stride):
+        self.dataset.set_chunk_sampler_stride(stride)
 
     next = __next__  # py2 compatibility
