@@ -6,7 +6,7 @@ PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
-# TODO: Update these variables when there 
+# TODO: Update these variables when there
 # is a new ir_version and producer_version
 # and use these values in the exporter
 ir_version = 4
@@ -29,8 +29,9 @@ def _export(*args, **kwargs):
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
-           operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True, dynamic_axes=None):
+           operator_export_type=None, export_type=None, opset_version=None,
+           _retain_param_name=True, do_constant_folding=False, example_outputs=None,
+           strip_doc_string=True, dynamic_axes=None):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -74,6 +75,12 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing,
                                                     fall back on ATen op.
             OperatorExportTypes.RAW: export raw ir.
+        export_type (enum, default ExportTypes.PROTOBUF_FILE):
+            ExportTypes.PROTOBUF_FILE: export model to protobuf file.
+            ExportTypes.ZIP_ARCHIVE: export model to zip archive file.
+            ExportTypes.COMPRESSED_ZIP_ARCHIVE: export model to compressed
+                                                            zip archive file.
+            ExportTypes.DIRECTORY: export model to directory.
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
             evolve before next stable release, by default we export to one stable
@@ -127,7 +134,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     from torch.onnx import utils
     return utils.export(model, args, f, export_params, verbose, training,
                         input_names, output_names, aten, export_raw_ir,
-                        operator_export_type, opset_version, _retain_param_name,
+                        operator_export_type, export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes)
 
