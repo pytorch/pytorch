@@ -47,8 +47,8 @@ CONFIG_TREE_DATA = [
                     ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
-            ("9.2", [XImportant("3.6")]),
-            ("10", [XImportant("3.6")]),
+            ("9.2", [X("3.6")]),
+            ("10", [X("3.6")]),
         ]),
         ("android", [
             ("r19c", [XImportant("3.6")]),
