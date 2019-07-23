@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 
 import torch
 from torch._ops import ops
+from torch._jit_internal import List
 from torch.nn.modules.utils import _pair
 
 relu = ops.quantized.relu
