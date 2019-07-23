@@ -27,6 +27,10 @@ SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 PYTHON="$(which python)"
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
   PYTHON=$(which "python${BASH_REMATCH[1]}")
+  # non-interactive bashs do not expand aliases by default
+  shopt -s expand_aliases
+  export PYTORCH_TEST_WITH_ROCM=1
+  alias python="$PYTHON"
 fi
 
 # This token is used by a parser on Jenkins logs for determining
