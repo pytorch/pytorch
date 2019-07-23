@@ -122,7 +122,7 @@ def fuse_modules(model, modules_to_fuse):
             >>> m = myModel()
             >>> # m is a module containing  the sub-modules below
             >>> modules_to_fuse = [ ['conv1', 'bn1', 'relu1'], ['submodule.conv', 'submodule.relu']]
-            >>> torch.quantization.fuse_module(m,modules_to_fuse)
+            >>> torch.nn.utils.fuse_module(m, modules_to_fuse)
             >>> output = m(input)
 
     """

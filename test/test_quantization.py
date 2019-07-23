@@ -4,16 +4,16 @@ import torch
 import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
     default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
-    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
+    quantize, prepare, convert, prepare_qat, quantize_qat
+
+from torch.nn.utils.fuse_modules import fuse_modules
 
 from common_utils import run_tests
-from common_quantized import _conv_output_shape
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
     ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
 
 from hypothesis import given
-from hypothesis import strategies as st
 import hypothesis_utils as hu
 
 class PostTrainingQuantTest(QuantizationTestCase):
