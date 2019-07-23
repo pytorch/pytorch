@@ -569,6 +569,7 @@ static IValue toSpecializedList(const IValue& generic) {
 
 OpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
+  // std::cout << "Read code " << std::hex << int(static_cast<uint8_t>(opcode)) << "\n";
   switch (opcode) {
     case OpCode::EMPTY_LIST: {
       stack_.emplace_back(
@@ -617,16 +618,15 @@ OpCode Unpickler::readInstruction() {
     } break;
     case OpCode::LONG1: {
       // Only read LONG1s with 8 as the length
+      // std::cout << "reading long\n";
       uint8_t length = read<uint8_t>();
       AT_ASSERT(length == 8);
+      // std::cout << "reading data\n";
       stack_.emplace_back(int64_t(read<int64_t>()));
     } break;
     case OpCode::BINUNICODE: {
       uint32_t length = read<uint32_t>();
-      char buffer[length];
-      in_.read(buffer, length);
-      TORCH_CHECK(!in_.eof(), "Overran buffer while reading a string");
-      stack_.emplace_back(std::string(buffer, /*n=*/length));
+      stack_.emplace_back(readBytes(length));
     } break;
     case OpCode::BINFLOAT:
       stack_.emplace_back(readFloat());
@@ -757,13 +757,21 @@ OpCode Unpickler::readInstruction() {
           "Unknown opcode for unpickling at ",
           reinterpret_cast<void*>(opcode),
           ": ",
-          int(static_cast<uint8_t>(opcode)));
+          int(static_cast<uint8_t>(opcode)), " @ ", in_.tellg());
   }
   return opcode;
 }
 
-// Pop all the list items off of the stack and append them to the list at the
-// corresponding MARK
+// Read a number of bytes from the input stream
+std::string Unpickler::readBytes(size_t length) {
+  char buffer[length];
+  in_.read(buffer, length);
+  TORCH_CHECK(!in_.eof(), "Overran buffer while reading bytes");
+  return std::string(buffer, length);
+}
+
+// Pop all the list items off of the stack and append them to the list at
+// the corresponding MARK
 void Unpickler::readList() {
   size_t start = marks_.back();
   marks_.pop_back();

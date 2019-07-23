@@ -240,12 +240,14 @@ class Unpickler {
   template <typename T>
   T read() {
     T item;
-    in_.get(reinterpret_cast<char*>(&item), sizeof(item) + 1, /*delim=*/EOF);
-    if (in_.eof()) {
-      AT_ASSERT("Unpickler overran buffer while reading a value");
-    }
+    in_.read(reinterpret_cast<char*>(&item), sizeof(item));
+    TORCH_CHECK(
+        in_.good(),
+        "Error reading from stream, goodbit was not set after reading");
     return item;
   }
+
+  std::string readBytes(size_t num_bytes);
 
   double readFloat();
   OpCode readInstruction();
