@@ -1222,8 +1222,9 @@ graph(%Ra, %Rb):
                 return grad_output
 
         x = torch.tensor([0.], requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
-            torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
+        with warnings.catch_warnings(record=True):
+            with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
+                torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
 
     def test_inplace_transplant(self):
         x = torch.tensor([0.], requires_grad=True)
@@ -4524,7 +4525,8 @@ a")
                 return foo(x)
 
         f = io.BytesIO()
-        torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
+        with warnings.catch_warnings(record=True):
+            torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
 
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_cast(self):
@@ -6504,7 +6506,8 @@ a")
                 requires_grad=False)
 
             ref = copy.deepcopy(cell)
-            cell = torch.jit.quantized.quantize_rnn_modules(cell)
+            cell_int8 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.uint8)
+            cell_fp16 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.float16)
 
             niter = 10
             x = torch.tensor([[100, -155],
@@ -6521,26 +6524,39 @@ a")
             elif isinstance(ref, torch.nn.GRU):
                 hiddens = hx
 
-            # Compare quantized to unquantized
-            output, final_hiddens = cell(x, hiddens)
             ref_out, ref_hid = ref(x, hiddens)
 
-            torch.testing.assert_allclose(output, ref_out)
-            for out, ref in zip(final_hiddens, ref_hid):
+            # Compare int8 quantized to unquantized
+            output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
+
+            torch.testing.assert_allclose(output_int8, ref_out)
+            for out, ref in zip(final_hiddens_int8, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            if isinstance(cell, torch.jit.quantized.QuantizedLSTM):
-                class ScriptWrapper(torch.jit.ScriptModule):
-                    def __init__(self, cell):
-                        super(ScriptWrapper, self).__init__()
-                        self.cell = cell
+            # Compare fp16 quantized to unquantized
+            output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
 
-                    @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
-                        #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-                        return self.cell(x, hiddens)
-            elif isinstance(cell, torch.jit.quantized.QuantizedGRU):
+            torch.testing.assert_allclose(output_fp16, ref_out)
+            for out, ref in zip(final_hiddens_fp16, ref_hid):
+                torch.testing.assert_allclose(out, ref)
+
+            def compare_quantized_unquantized(ScriptWrapper, cell): 
+                wrapper = ScriptWrapper(cell)
+
+                # Compare quantize scripted module to unquantized
+                script_out, script_hid = wrapper(x, hiddens)
+                torch.testing.assert_allclose(script_out, ref_out)
+                for out, ref in zip(script_hid, ref_hid):
+                    torch.testing.assert_allclose(out, ref)
+
+                # Compare export/import to unquantized
+                export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
+                ei_out, ei_hid = export_import_wrapper(x, hiddens)
+                torch.testing.assert_allclose(ei_out, ref_out)
+                for out, ref in zip(ei_hid, ref_hid):
+                    torch.testing.assert_allclose(out, ref)
+
+            if isinstance(cell, torch.jit.quantized.QuantizedGRU):
                 class ScriptWrapper(torch.jit.ScriptModule):
                     def __init__(self, cell):
                         super(ScriptWrapper, self).__init__()
@@ -6551,20 +6567,20 @@ a")
                         # type: (torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
                         return self.cell(x, hiddens)
 
-            wrapper = ScriptWrapper(cell)
+                compare_quantized_unquantized(ScriptWrapper, cell)
+            elif isinstance(cell, torch.jit.quantized.QuantizedLSTM):
+                for cell in [cell_int8, cell_fp16]:
+                    class ScriptWrapper(torch.jit.ScriptModule):
+                        def __init__(self, cell):
+                            super(ScriptWrapper, self).__init__()
+                            self.cell = cell
 
-            # Compare quantize scripted module to unquantized
-            script_out, script_hid = wrapper(x, hiddens)
-            torch.testing.assert_allclose(script_out, ref_out)
-            for out, ref in zip(script_hid, ref_hid):
-                torch.testing.assert_allclose(out, ref)
-
-            # Compare export/import to unquantized
-            export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
-            ei_out, ei_hid = export_import_wrapper(x, hiddens)
-            torch.testing.assert_allclose(ei_out, ref_out)
-            for out, ref in zip(ei_hid, ref_hid):
-                torch.testing.assert_allclose(out, ref)
+                        @torch.jit.script_method
+                        def forward(self, x, hiddens):
+                            # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                            #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                            return self.cell(x, hiddens)
+                    compare_quantized_unquantized(ScriptWrapper, cell)
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
@@ -6984,7 +7000,7 @@ a")
                 m.sub = nn.Linear(5, 5)
 
     def test_script_inline_trace_multiple_args(self):
-        class M(torch.jit.ScriptModule):
+        class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
 
