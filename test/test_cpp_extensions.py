@@ -47,8 +47,8 @@ class TestCppExtension(common.TestCase):
         dont_wipe = hasattr(getattr(self, test_name), "dont_wipe")
         if dont_wipe:
             print(
-                "Test case {} has 'dont_wipe' attribute set, ".format(test_name) +
-                "therefore not wiping extensions build folder before running the test"
+                "Test case {} has 'dont_wipe' attribute set, ".format(test_name)
+                + "therefore not wiping extensions build folder before running the test"
             )
             return
         if sys.platform == "win32":
@@ -625,21 +625,19 @@ class TestCppExtension(common.TestCase):
         finally:
             torch.set_default_dtype(initial_default)
 
-
     def test_compilation_error_formatting(self):
-        # Test that the missing-semicolon error message has linebreaks in it. 
+        # Test that the missing-semicolon error message has linebreaks in it.
         # This'll fail if the message has been munged into a single line.
         # It's hard to write anything more specific as every compiler has it's own
         # error formatting.
         with self.assertRaises(RuntimeError) as e:
             torch.utils.cpp_extension.load_inline(
                 name="test_compilation_error_formatting",
-                cpp_sources="int main() { return 0 }") 
+                cpp_sources="int main() { return 0 }")
         pattern = r'.*(\\n|\\r).*'
         self.assertNotRegex(str(e), pattern)
 
     def test_dummy_chunkdataset_bindings(self):
-
         """
         This class serves as a basic example on how to use ChunkDataset API python bindings
 
@@ -649,10 +647,6 @@ class TestCppExtension(common.TestCase):
                         Opaque types prevent memory copy between C++ and Python
 
         Python Steps: Check `test_dummy_chunkdataset_bindings` below:
-            Step 1: Instantiate a `Sampler` for the chunk sampler
-            Step 2: Instantiate a `SamplerWrapper` for the chunk sampler in the previous step
-            Step 3: Instantiate a `Sampler` for the example sampler
-            Step 4: Instantiate a `SamplerWrapper` for the example sampler in the previous step
             Step 5: Instantiate a specific `ChunkDataReader`
             Step 6: Instantiate a `ChunkDatasetOptions`
             Step 7: Instantiate a `ChunkDataset`
@@ -665,21 +659,16 @@ class TestCppExtension(common.TestCase):
         This is due to the fact that Python DataLoader uses multiprocessing module for
         parallelism as opposed to multi-threading
         """
-        chunk_count = 3
         batch_size = 5
         cache_size = 100
         preloaders = 1
-        chunk_sampler = chunk.SequentialSampler(size=chunk_count)
-        example_sampler = chunk.SequentialSampler(size=batch_size)
-        chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
-        example_sampler_wrapper = chunk.SamplerWrapper(sampler=example_sampler)
         reader = cpp_extension.DummyChunkDataReader()
         opt = chunk.ChunkDatasetOptions(preloader_count=preloaders, batch_size=batch_size, cache_size=cache_size)
 
         dummy_chunkdataset = cpp_extension.DummyChunkDataset(chunk_reader=reader,
-                                                             chunk_sampler=chunk_sampler_wrapper,
-                                                             example_sampler=example_sampler_wrapper,
-                                                             options=opt)
+                                                             options=opt,
+                                                             shuffle_chunks=False,
+                                                             shuffle_samples=False)
 
         trainset = chunk.ChunkDatasetWrapper(dummy_chunkdataset)
         trainset.reset()
@@ -708,10 +697,6 @@ class TestCppExtension(common.TestCase):
             Step 7: Bind `FooChunkDataset` binding through `py::class_<FooChunkDataReader>`
 
         Python Steps: Check `test_foo_chunkdataset_bindings` below:
-            Step 1: Instantiate a `Sampler` for the chunk sampler
-            Step 2: Instantiate a `SamplerWrapper` for the chunk sampler in the previous step
-            Step 3: Instantiate a `Sampler` for the example sampler
-            Step 4: Instantiate a `SamplerWrapper` for the example sampler in the previous step
             Step 5: Instantiate a specific `ChunkDataReader`
             Step 6: Instantiate a `ChunkDatasetOptions`
             Step 7: Instantiate a `ChunkDataset`
@@ -778,26 +763,20 @@ class TestCppExtension(common.TestCase):
             print('Initializing worker {} with {} threads'.format(
                 worker_id, torch.get_num_threads()))
             dataset = torch.utils.data.get_worker_info().dataset
-            chunk_sampler = dataset.chunk_sampler()
-            chunk_sampler.set_current_stride(stride=worker_id)
+            dataset.set_chunk_sampler_stride(worker_id)
             dataset.reset()
 
-        chunk_count = 1
         batch_size = 5
         cache_size = 100
         preloaders = 1
         num_workers = 1
-        chunk_sampler = chunk.SequentialSampler(size=chunk_count)
-        example_sampler = chunk.SequentialSampler(size=batch_size)
-        chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
-        example_sampler_wrapper = chunk.SamplerWrapper(sampler=example_sampler)
         reader = cpp_extension.FooChunkDataReader()
         opt = chunk.ChunkDatasetOptions(preloader_count=preloaders, batch_size=batch_size, cache_size=cache_size)
 
         foo_chunkdataset = cpp_extension.FooChunkDataset(chunk_reader=reader,
-                                                         chunk_sampler=chunk_sampler_wrapper,
-                                                         example_sampler=example_sampler_wrapper,
-                                                         options=opt)
+                                                         options=opt,
+                                                         shuffle_chunks=False,
+                                                         shuffle_samples=False)
 
         trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset)
         trainset.reset()
@@ -811,6 +790,7 @@ class TestCppExtension(common.TestCase):
             expected = {'feature': torch.tensor([j for j in list(range(batch_size * i, batch_size * i + batch_size))]),
                         'label': torch.tensor([j for j in list(range(batch_size * i + 1, batch_size * i + 1 + batch_size))])}
             self.assertEqual(expected, actual)
+
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod

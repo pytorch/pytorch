@@ -184,14 +184,14 @@ void bind_chunkdataset(py::module& m, const std::string& typestr) {
           py::arg("allow_duplicates") = true)
       .def(
           "get_batch",
-          py::overload_cast<typename SpecificChunkDataset::BatchRequestType>(
-              &SpecificChunkDataset::get_batch),
+          (typename SpecificChunkDataset::BatchType(SpecificChunkDataset::*)(size_t)) &SpecificChunkDataset::get_batch,
           "Returns a batch created from preloaded chunks",
           py::arg("batch_size"),
           py::return_value_policy::take_ownership)
       .def(
           "get_batch",
-          py::overload_cast<>(&SpecificChunkDataset::get_batch),
+          (typename SpecificChunkDataset::BatchType(SpecificChunkDataset::*)()) &
+              SpecificChunkDataset::get_batch,
           "Returns a batch created from preloaded chunks",
           py::return_value_policy::take_ownership)
       .def(

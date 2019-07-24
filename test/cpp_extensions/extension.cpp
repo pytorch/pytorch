@@ -97,68 +97,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   using namespace torch::data::datasets;
 
   /// Specific ChunkDataReader implementation
-  py::class_<DummyChunkDataReader>(
-      m, "DummyChunkDataReader", "Dummy chunk data reader for testing the API")
-      .def(
-          py::init<>(),
-          "Create and return a new `DummyChunkDataReader` instance")
-      .def(
-          "read_chunk",
-          &DummyChunkDataReader::read_chunk,
-          "Returns dummy data",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &DummyChunkDataReader::chunk_count,
-          "Returns the number of chunks")
-      .def("reset", &DummyChunkDataReader::reset, "Not used");
+  auto dummy_reader =
+      torch::data::datasets::bind_chunkdatareader<DummyChunkDataReader>(
+          m, "DummyChunkDataReader");
+  dummy_reader.def(
+      py::init<>(), "Create and return a new `DummyChunkDataReader` instance");
 
   /// Specific ChunkDataset implementation
-  using DummyChunkDataset =
-      ChunkDataset<DummyChunkDataReader, SamplerWrapper, SamplerWrapper>;
-  py::class_<DummyChunkDataset>(
-      m,
-      "DummyChunkDataset",
-      "A stateful dataset that support hierarchical sampling and prefetching of entire chunks."
-      "Unlike regular dataset, chunk dataset require two samplers to operate and keeps internal state."
-      "`ChunkSampler` selects, which chunk to load next"
-      "`ExampleSampler` determines the order of Examples that are returned in each `get_batch` call")
-      .def(
-          py::init<
-              DummyChunkDataReader,
-              SamplerWrapper,
-              SamplerWrapper,
-              ChunkDatasetOptions>(),
-          "Create and return a new `DummyChunkDataset` instance",
-          py::arg("chunk_reader"),
-          py::arg("chunk_sampler"),
-          py::arg("example_sampler"),
-          py::arg("options"))
-      .def(
-          "get_batch",
-          (DummyChunkDataset::BatchType(DummyChunkDataset::*)(size_t)) &
-              DummyChunkDataset::get_batch,
-          "Returns a batch created from preloaded chunks",
-          py::arg("batch_size"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "get_batch",
-          (DummyChunkDataset::BatchType(DummyChunkDataset::*)()) &
-              DummyChunkDataset::get_batch,
-          "Returns a batch created from preloaded chunks",
-          py::return_value_policy::take_ownership)
-      .def(
-          "reset",
-          &DummyChunkDataset::reset,
-          "Resets any internal state and starts the internal prefetching mechanism for the chunk dataset")
-      .def("size", &DummyChunkDataset::size, "Not used")
-      .def(
-          "chunk_sampler",
-          &DummyChunkDataset::chunk_sampler,
-          "Returns the reference to chunk sampler."
-          "Used mainly in distributed data loading to set the epoch number for the sampler.",
-          py::return_value_policy::reference_internal);
+  torch::data::datasets::bind_chunkdataset<DummyChunkDataReader>(
+      m, "DummyChunkDataset");
 
   /// Exposing custom type FooExampleType (example type)
   py::class_<FooExampleType>(
@@ -174,69 +121,16 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       "VectorFooExampleType",
       "VectorFooExampleType holds the custom typed dataset");
 
-  /// Specific ChunkDataReader implementation based on FooExampleType
-  py::class_<FooChunkDataReader>(
-      m, "FooChunkDataReader", "Dummy chunk data reader for testing the API")
-      .def(
-          py::init<>(),
-          "Create and return a new `FooChunkDataReader` instance")
-      .def(
-          "read_chunk",
-          &FooChunkDataReader::read_chunk,
-          "Returns dummy data",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &FooChunkDataReader::chunk_count,
-          "Returns the number of chunks")
-      .def("reset", &FooChunkDataReader::reset, "Not used");
+  /// FooChunkDataReader bindings
+  auto foo_reader =
+      torch::data::datasets::bind_chunkdatareader<FooChunkDataReader>(
+          m, "FooChunkDataReader");
+  foo_reader.def(
+      py::init<>(), "Create and return a new `FooChunkDataReader` instance");
 
-  /// Specific ChunkDataset implementation based on FooChunkDataReader
-  using FooChunkDataset =
-      ChunkDataset<FooChunkDataReader, SamplerWrapper, SamplerWrapper>;
-  py::class_<FooChunkDataset>(
-      m,
-      "FooChunkDataset",
-      "A stateful dataset that support hierarchical sampling and prefetching of entire chunks."
-      "Unlike regular dataset, chunk dataset require two samplers to operate and keeps internal state."
-      "`ChunkSampler` selects, which chunk to load next"
-      "`ExampleSampler` determines the order of Examples that are returned in each `get_batch` call")
-      .def(
-          py::init<
-              FooChunkDataReader,
-              SamplerWrapper,
-              SamplerWrapper,
-              ChunkDatasetOptions>(),
-          "Create and return a new `FooChunkDataset` instance",
-          py::arg("chunk_reader"),
-          py::arg("chunk_sampler"),
-          py::arg("example_sampler"),
-          py::arg("options"))
-      .def(
-          "get_batch",
-          (FooChunkDataset::BatchType(FooChunkDataset::*)(size_t)) &
-              FooChunkDataset::get_batch,
-          "Returns a batch created from preloaded chunks",
-          py::arg("batch_size"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "get_batch",
-          (FooChunkDataset::BatchType(FooChunkDataset::*)()) &
-              FooChunkDataset::get_batch,
-          "Returns a batch created from preloaded chunks",
-          py::return_value_policy::take_ownership)
-      .def(
-          "reset",
-          &FooChunkDataset::reset,
-          "Resets any internal state and starts the internal prefetching mechanism for the chunk dataset")
-      .def("size", &FooChunkDataset::size, "Not used")
-      .def(
-          "chunk_sampler",
-          &FooChunkDataset::chunk_sampler,
-          "Returns the reference to chunk sampler."
-          "Used mainly in distributed data loading to set the epoch number for the sampler.",
-          py::return_value_policy::reference_internal);
+  /// FooChunkDataset bindings
+  torch::data::datasets::bind_chunkdataset<FooChunkDataReader>(
+      m, "FooChunkDataset");
 
   ///
   /// END: ChunkDataset API example, for custom dataset types
