@@ -691,42 +691,42 @@ struct to_ir {
         name, "", std::move(args), std::move(returns), false, false);
   }
 
-  // __setstate__ is special, because it derives the type for `state` from the
-  // output type of __getstate__. This is necessary so that we can allow
-  // submodules to appear in `state`.
-  std::vector<Argument> emitSetStateArguments(
+  // see [setstate type]
+  static TypePtr getTypeForSetStateArg(const Self* self) {
+    TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
+    self->getClassType()->getMethod("__getstate__")->ensure_defined();
+    return self->getClassType()
+        ->getMethod("__getstate__")
+        ->getSchema()
+        .returns()
+        .at(0)
+        .type();
+  }
+
+  // see [setstate type]
+  static bool shouldDeriveSetStateType(
       const Def& def,
-      const Self* self,
-      const FunctionSchema& schema,
-      Block* block) {
-    std::vector<Argument> arguments; // for schema
+      const FunctionSchema& schema) {
+    const bool noTypeAnnotations = std::all_of(
+        schema.arguments().begin(),
+        schema.arguments().end(),
+        [](const Argument& arg) { return arg.is_inferred_type(); });
+
+    bool shouldInfer =
+        def.name().name() == "__setstate__" && noTypeAnnotations;
+    if (!shouldInfer) {
+      return false;
+    }
+
+    // Do some additional basic validation that the __setstate__ func is
+    // well-formed
     TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
-    TORCH_INTERNAL_ASSERT(def.decl().params().size() == 2);
-    TORCH_INTERNAL_ASSERT(self);
-    {
-      const auto self_param = def.decl().params()[0];
-      const auto& name = self_param.ident().name();
-      Value* new_input = block->addInput()->setDebugName(name);
-      environment_stack->setSugaredVar(
-          self_param.ident().range(), name, self->makeSugared(new_input));
-      arguments.emplace_back(name, new_input->type());
-    }
-    {
-      const auto state_param = def.decl().params()[1];
-      const auto& name = state_param.ident().name();
-      Value* new_input = block->addInput()->setDebugName(name);
-      self->getClassType()->getMethod("__getstate__")->ensure_defined();
-      const auto state_type = self->getClassType()
-                                  ->getMethod("__getstate__")
-                                  ->getSchema()
-                                  .returns()
-                                  .at(0)
-                                  .type();
-      new_input->setType(state_type);
-      arguments.emplace_back(name, new_input->type());
-      environment_stack->setVar(state_param.ident().range(), name, new_input);
-    }
-    return arguments;
+    const auto numDeclParams = def.decl().params().size();
+    TORCH_CHECK(
+        numDeclParams,
+        "Expected 2 arguments for __setstate__, got: ",
+        numDeclParams);
+    return true;
   }
 
   std::vector<Argument> emitFormalArguments(
@@ -734,13 +734,6 @@ struct to_ir {
       const Self* self,
       const FunctionSchema& schema,
       Block* block) {
-    const bool no_type_annotations = std::all_of(
-        schema.arguments().begin(),
-        schema.arguments().end(),
-        [](const Argument& arg) { return arg.is_inferred_type(); });
-    if (def.name().name() == "__setstate__" && no_type_annotations) {
-      return emitSetStateArguments(def, self, schema, block);
-    }
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -766,6 +759,12 @@ struct to_ir {
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
+
+    // [setstate type]
+    // __setstate__ is special, because if the user leaves it un-annotated we
+    // will derive the type for `state` from the output type of __getstate__.
+    // This is necessary so that we can allow submodules to appear in `state`.
+    bool shouldDeriveType = shouldDeriveSetStateType(def, schema);
     size_t arg_annotation_idx = 0;
     for (; it != end; ++it) {
       auto& name = (*it).ident().name();
@@ -775,7 +774,14 @@ struct to_ir {
         new_input->setDebugName(name);
       }
       // Record the type for the schema and set the Type on the Value*
-      arguments.push_back(schema.arguments().at(arg_annotation_idx++));
+      auto arg = schema.arguments().at(arg_annotation_idx++);
+      if (shouldDeriveType) {
+        TORCH_INTERNAL_ASSERT(schema.arguments().size() == 1);
+        const auto& inferredStateType = getTypeForSetStateArg(self);
+        arg = arg.cloneWithType(inferredStateType);
+      }
+
+      arguments.push_back(arg);
       new_input->setType(arguments.back().type());
 
       // NB: set type of new_input before setVar call so the Store is
