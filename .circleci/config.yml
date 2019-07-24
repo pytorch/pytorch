@@ -100,13 +100,15 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
 
         # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
-          # Note [namedtensor build image]
-          # The namedtensor build uses the same docker image as
+          # Note [Special build images]
+          # The namedtensor and xla builds use the same docker image as
           # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
-          # distinguish between these two so the test can pick up the correct image.
+          # distinguish between them so the test can pick up the correct image.
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
+          elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-xla
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -132,11 +134,13 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
       no_output_timeout: "90m"
       command: |
         set -e
-        # See Note [namedtensor build image]
+        # See Note [Special build images]
         output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
           export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
           NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
+        elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
+          export COMMIT_DOCKER_IMAGE=$output_image-xla
         else
           export COMMIT_DOCKER_IMAGE=$output_image
         fi
