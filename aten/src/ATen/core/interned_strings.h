@@ -49,6 +49,8 @@ namespace c10 {
   _(prim, IgnoredPythonOp)           \
   _(prim, Reverse)                   \
   _(prim, Return)                    \
+  _(prim, BreakStmt)                 \
+  _(prim, ContinueStmt)              \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -60,7 +62,6 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
-  _(prim, DictIndex)                 \
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
@@ -111,6 +112,7 @@ namespace c10 {
   _(prim, CallFunction)              \
   _(prim, CallAutogradFunction)      \
   _(prim, CallMethod)                \
+  _(prim, LoopContinuation)          \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -133,6 +135,7 @@ namespace c10 {
   _(aten, ne_)                       \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
+  _(aten, __getitem__)               \
   _(aten, _set_item)                 \
   _(aten, manual_seed)               \
   _(aten, set_)                      \

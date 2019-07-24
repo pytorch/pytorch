@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 
 namespace torch {
 namespace jit {

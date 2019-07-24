@@ -469,6 +469,47 @@ Example::
     True
 """)
 
+add_docstr(torch.as_strided,
+           r"""
+as_strided(input, size, stride, storage_offset=0) -> Tensor
+
+Create a view of an existing `torch.Tensor` :attr:`input` with specified
+:attr:`size`, :attr:`stride` and :attr:`storage_offset`.
+
+.. warning::
+    More than one element of a created tensor may refer to a single memory
+    location. As a result, in-place operations (especially ones that are
+    vectorized) may result in incorrect behavior. If you need to write to
+    the tensors, please clone them first.
+
+    Many PyTorch functions, which return a view of a tensor, are internally
+    implemented with this function. Those functions, like
+    :meth:`torch.Tensor.expand`, are easier to read and are therefore more
+    advisable to use.
+
+
+Args:
+    input (Tensor): the input tensor
+    size (tuple or ints): the shape of the output tensor
+    stride (tuple or ints): the stride of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+
+Example::
+
+    >>> x = torch.randn(3, 3)
+    >>> x
+    tensor([[ 0.9039,  0.6291,  1.0795],
+            [ 0.1586,  2.1939, -0.4900],
+            [-0.1909, -0.7503,  1.9355]])
+    >>> t = torch.as_strided(x, (2, 2), (1, 2))
+    >>> t
+    tensor([[0.9039, 1.0795],
+            [0.6291, 0.1586]])
+    >>> t = torch.as_strided(x, (2, 2), (1, 2), 1)
+    tensor([[0.6291, 0.1586],
+            [1.0795, 2.1939]])
+""")
+
 add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
@@ -704,6 +745,22 @@ Example::
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
 """)
 
+add_docstr(torch.bitwise_not,
+           r"""
+           bitwise_not(input, out=None) -> Tensor
+
+Computes the bitwise NOT of the given :attr:`input` tensor. The input must be of integer or Boolean types.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.bitwise_not(torch.tensor([-1, -2, 3], dtype=torch.int8))
+    tensor([ 0,  1, -4], dtype=torch.int8)
+""")
+
 add_docstr(torch.bmm,
            r"""
 bmm(batch1, batch2, out=None) -> Tensor
@@ -880,7 +937,7 @@ tensor will be composed of lower-triangular Cholesky factors of each of the indi
 matrices.
 
 Args:
-    a (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    a (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
     upper (bool, optional): flag that indicates whether to return a
                             upper or lower triangular matrix. Default: ``False``
@@ -2093,8 +2150,8 @@ batched outputs `solution, LU`.
 
     Irrespective of the original strides, the returned matrices
     `solution` and `LU` will be transposed, i.e. with strides like
-    `B.contiguous().transpose(-1, -2).strides()` and
-    `A.contiguous().transpose(-1, -2).strides()` respectively.
+    `B.contiguous().transpose(-1, -2).stride()` and
+    `A.contiguous().transpose(-1, -2).stride()` respectively.
 
 Args:
     B (Tensor): input matrix of size :math:`(*, m, k)` , where :math:`*`
@@ -2262,10 +2319,10 @@ individual inverses.
 .. note::
 
     Irrespective of the original strides, the returned tensors will be
-    transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).strides()`
+    transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).stride()`
 
 Args:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                     batch dimensions
     out (Tensor, optional): the optional output tensor
 
@@ -2637,24 +2694,22 @@ add_docstr(torch.lu_solve,
            r"""
 lu_solve(b, LU_data, LU_pivots, out=None) -> Tensor
 
-Batch LU solve.
-
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
 
 Arguments:
-    b (Tensor): the RHS tensor
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
-    LU_pivots (IntTensor): the pivots of the LU factorization
+    b (Tensor): the RHS tensor of size :math:`(b, m, k)`
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(b, m, m)`
+    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(b, m)`
     out (Tensor, optional): the optional output tensor
 
 Example::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> b = torch.randn(2, 3)
+    >>> b = torch.randn(2, 3, 1)
     >>> A_LU = torch.lu(A)
     >>> x = torch.lu_solve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
+    >>> torch.norm(torch.bmm(A, x) - b)
     tensor(1.00000e-07 *
            2.8312)
 """)
@@ -4410,7 +4465,10 @@ add_docstr(torch.sign,
            r"""
 sign(input, out=None) -> Tensor
 
-Returns a new tensor with the sign of the elements of :attr:`input`.
+Returns a new tensor with the signs of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \operatorname{sgn}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -4841,29 +4899,23 @@ add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
 
-``svd(A)`` returns a namedtuple ``(U, S, V)`` which the singular value
-decomposition of a input real matrix `A` of size `(n x m)` such that
-:math:`A = USV^T`.
+This function returns a namedtuple ``(U, S, V)`` which is the singular value
+decomposition of a input real matrix or batches of real matrices :attr:`input` such that
+:math:`input = U \times diag(S) \times V^T`.
 
-`U` is of shape :math:`(n \times n)`.
-
-`S` is a diagonal matrix of shape :math:`(n \times m)`, represented as a vector
-of size :math:`\min(n, m)` containing the non-negative diagonal entries.
-
-`V` is of shape :math:`(m \times m)`.
-
-If :attr:`some` is ``True`` (default), the returned `U` and `V` matrices will
-contain only :math:`min(n, m)` orthonormal columns.
+If :attr:`some` is ``True`` (default), the method returns the reduced singular value decomposition
+i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the returned
+`U` and `V` matrices will contain only :math:`min(n, m)` orthonormal columns.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
-of shape :math:`(n \times n)` and :math:`(m \times m)` respectively. :attr:`some` will be ignored here.
+of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
           algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
           `gesdd` as well.
 
 .. note:: Irrespective of the original strides, the returned matrix `U`
-          will be transposed, i.e. with strides `(1, n)` instead of `(n, 1)`.
+          will be transposed, i.e. with strides :code:`U.contiguous().transpose(-2, -1).stride()`
 
 .. note:: Extra care needs to be taken when backward through `U` and `V`
           outputs. Such operation is really only stable when :attr:`input` is
@@ -4872,47 +4924,48 @@ of shape :math:`(n \times n)` and :math:`(m \times m)` respectively. :attr:`some
           double backward will usually do an additional backward through `U` and
           `V` even if the original backward is only on `S`.
 
-.. note:: When :attr:`some` = ``False``, the gradients on ``U[:, min(n, m):]``
-          and ``V[:, min(n, m):]`` will be ignored in backward as those vectors
+.. note:: When :attr:`some` = ``False``, the gradients on :code:`U[..., :, min(m, n):]`
+          and :code:`V[..., :, min(m, n):]` will be ignored in backward as those vectors
           can be arbitrary bases of the subspaces.
 
-.. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since ``U`` and ``V``
+.. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
           from the forward pass is required for the backward operation.
 
 Args:
-    input (Tensor): the input 2-D tensor
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of :math:`m \times n` matrices.
     some (bool, optional): controls the shape of returned `U` and `V`
+    compute_uv (bool, optional): option whether to compute `U` and `V` or not
     out (tuple, optional): the output tuple of tensors
 
 Example::
 
-    >>> a = torch.tensor([[8.79,  6.11, -9.15,  9.57, -3.49,  9.84],
-                          [9.93,  6.91, -7.93,  1.64,  4.02,  0.15],
-                          [9.83,  5.04,  4.86,  8.83,  9.80, -8.99],
-                          [5.45, -0.27,  4.85,  0.74, 10.00, -6.02],
-                          [3.16,  7.98,  3.01,  5.80,  4.27, -5.31]]).t()
-
-    >>> torch.svd(a).__class__
-    <class 'torch.return_types.svd'>
+    >>> a = torch.randn(5, 3)
+    >>> a
+    tensor([[ 0.2364, -0.7752,  0.6372],
+            [ 1.7201,  0.7394, -0.0504],
+            [-0.3371, -1.0584,  0.5296],
+            [ 0.3550, -0.4022,  1.5569],
+            [ 0.2445, -0.0158,  1.1414]])
     >>> u, s, v = torch.svd(a)
     >>> u
-    tensor([[-0.5911,  0.2632,  0.3554,  0.3143,  0.2299],
-            [-0.3976,  0.2438, -0.2224, -0.7535, -0.3636],
-            [-0.0335, -0.6003, -0.4508,  0.2334, -0.3055],
-            [-0.4297,  0.2362, -0.6859,  0.3319,  0.1649],
-            [-0.4697, -0.3509,  0.3874,  0.1587, -0.5183],
-            [ 0.2934,  0.5763, -0.0209,  0.3791, -0.6526]])
+    tensor([[ 0.4027,  0.0287,  0.5434],
+            [-0.1946,  0.8833,  0.3679],
+            [ 0.4296, -0.2890,  0.5261],
+            [ 0.6604,  0.2717, -0.2618],
+            [ 0.4234,  0.2481, -0.4733]])
     >>> s
-    tensor([ 27.4687,  22.6432,   8.5584,   5.9857,   2.0149])
+    tensor([2.3289, 2.0315, 0.7806])
     >>> v
-    tensor([[-0.2514,  0.8148, -0.2606,  0.3967, -0.2180],
-            [-0.3968,  0.3587,  0.7008, -0.4507,  0.1402],
-            [-0.6922, -0.2489, -0.2208,  0.2513,  0.5891],
-            [-0.3662, -0.3686,  0.3859,  0.4342, -0.6265],
-            [-0.4076, -0.0980, -0.4933, -0.6227, -0.4396]])
+    tensor([[-0.0199,  0.8766,  0.4809],
+            [-0.5080,  0.4054, -0.7600],
+            [ 0.8611,  0.2594, -0.4373]])
     >>> torch.dist(a, torch.mm(torch.mm(u, torch.diag(s)), v.t()))
-    tensor(1.00000e-06 *
-           9.3738)
+    tensor(8.6531e-07)
+    >>> a_big = torch.randn(7, 5, 3)
+    >>> u, s, v = torch.svd(a_big)
+    >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
+    tensor(2.6503e-06)
 """)
 
 add_docstr(torch.symeig,
@@ -4938,7 +4991,7 @@ only the upper triangular portion is used by default.
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 .. note:: Irrespective of the original strides, the returned matrix `V` will
-          be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).strides()`.
+          be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
 
 .. note:: Extra care needs to be taken when backward through outputs. Such
           operation is really only stable when all eigenvalues are distinct.
@@ -6278,26 +6331,27 @@ this normalizes the result by multiplying it with
 :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary, where
 :math:`N_i` is the size of signal dimension :math:`i`.
 
-Due to the conjugate symmetry, :attr:`input` do not need to contain the full
-complex frequency values. Roughly half of the values will be sufficient, as
-is the case when :attr:`input` is given by :func:`~torch.rfft` with
-``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
-argument of this method to ``True``. Moreover, the original signal shape
-information can sometimes be lost, optionally set :attr:`signal_sizes` to be
-the size of the original signal (without the batch dimensions if in batched
-mode) to recover it with correct shape.
+.. note::
+    Due to the conjugate symmetry, :attr:`input` do not need to contain the full
+    complex frequency values. Roughly half of the values will be sufficient, as
+    is the case when :attr:`input` is given by :func:`~torch.rfft` with
+    ``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
+    argument of this method to ``True``. Moreover, the original signal shape
+    information can sometimes be lost, optionally set :attr:`signal_sizes` to be
+    the size of the original signal (without the batch dimensions if in batched
+    mode) to recover it with correct shape.
 
-Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
-:attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
-and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
-example below for a case of size mismatch.
+    Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
+    :attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
+    and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
+    example below for a case of size mismatch.
 
-See :func:`~torch.rfft` for details on conjugate symmetry.
+    See :func:`~torch.rfft` for details on conjugate symmetry.
 
 The inverse of this function is :func:`~torch.rfft`.
 
 .. warning::
-    Generally speaking, the input of this function should contain values
+    Generally speaking, input to this function should contain values
     following conjugate symmetry. Note that even if :attr:`onesided` is
     ``True``, often symmetry on some part is still needed. When this
     requirement is not satisfied, the behavior of :func:`~torch.irfft` is

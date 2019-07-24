@@ -30,7 +30,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, self.scalar_type(), "copy_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data<scalar_t>();
     scalar_t* rp = self.data<scalar_t>();
     scalar_t* bp = buf.data<scalar_t>();
@@ -86,7 +86,7 @@ namespace native {
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
-  TORCH_CHECK(self.defined(), "src is undefined");
+  TORCH_CHECK(src.defined(), "src is undefined");
 
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
