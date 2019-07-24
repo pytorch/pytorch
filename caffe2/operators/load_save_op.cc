@@ -23,7 +23,7 @@ std::vector<TensorShape> LoadTensorInference(
   // Since it support just one shape, we return
   // the right shape information only when there is just one blob loaded.
   // Otherwise, we return unknown TensorShapes.
-  if (def.output_size() == 1 and shape.size() > 0) {
+  if (def.output_size() == 1 && shape.size() > 0) {
     TensorShape ts;
     ts.set_data_type(static_cast<TensorProto_DataType>(
         helper.GetSingleArgument<int>("dtype", VALUE_TYPE)));
