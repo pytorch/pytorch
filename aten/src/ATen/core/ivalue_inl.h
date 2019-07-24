@@ -437,20 +437,22 @@ std::vector<Elem> generic_to(
   }
   return result;
 }
+
 template <typename T>
 T generic_to(
     IValue ivalue,
     _fake_type<T>) {
-    using ElemType = typename T::element_type;
+    using ElemType = typename std::remove_pointer<T>::type::element_type;
     auto obj = ivalue.toObject();
     auto capsule = obj->getAttr("capsule");
     auto capsulePtr = capsule.toCapsule().release();
-    if (capsulePtr == nullptr) {
-      capsulePtr = (ElemType*)malloc(sizeof(ElemType));
-    }
-    auto initializedCapsule = IValue(c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(static_cast<intrusive_ptr_target*>(capsulePtr)));
-    obj->setAttr("capsule", initializedCapsule);
-    return c10::intrusive_ptr<ElemType>::reclaim(static_cast<ElemType*>(initializedCapsule.toCapsule().release()));
+    return c10::intrusive_ptr<ElemType>::reclaim(static_cast<ElemType*>(capsulePtr));
+}
+template <>
+inline IValue generic_to(
+    IValue ivalue,
+    _fake_type<IValue>) {
+    return ivalue;
 }
 
 template <typename Elem>
@@ -735,7 +737,9 @@ IValue from_(T x, std::false_type) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
   auto retObject = ivalue::Object::create(res->second, 1);
-  retObject->setAttr("capsule", IValue(x));
+  auto objPtr = c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(static_cast<intrusive_ptr_target*>(x.release()));
+
+  retObject->setAttr("capsule", IValue(objPtr));
   auto resIVal = IValue(std::move(retObject));
   return resIVal;
 }

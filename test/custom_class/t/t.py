@@ -19,14 +19,16 @@ class Bar:
 @torch.jit.script
 def f():
     val = torch.classes.Foo(5, 3)
+    print(val)
+    print(val)
     val.display()
-    # val2 = Bar(100, 0)
+    # # val2 = Bar(100, 0)
     val2 = torch.classes.Foo(100, 0)
     val.display()
     val2.display()
-    # val3 = val.combine(val2)
-    # val3.display()
-    return val
+    # # val3 = val.combine(val2)
+    # # val3.display()
+    # return val
 
-# print(f.graph)
 print(f())
+print(f.graph)

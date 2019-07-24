@@ -80,6 +80,8 @@ class class_ {
         ClassType::create(c10::QualifiedName(qualifiedName), classCu);
     c10::getTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
+    c10::getTypeMap().insert(
+        {typeid(IValue).name(), StrongTypePtr(classCu, classTypePtr)});
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
     torch::jit::get_python_cu()->register_class(classTypePtr);
@@ -91,21 +93,31 @@ class class_ {
 
     pyClass->def(py::init<Types...>());
     auto graph = std::make_shared<Graph>();
-    auto qualFuncName = className + "::__init__";
+    auto qualOperatorName = className + "::__init__";
     auto qualMethodName =
         topModule + "." + parentModule + "." + className + ".__init__";
-    auto func = [](c10::intrusive_ptr<CurClass> cur, Types... args) {
-      *cur = CurClass(args...);
+    auto func = [](IValue self, Types... args) {
+      auto classObj = c10::make_intrusive<CurClass>(args...);
+      auto genericPtr = c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
+          static_cast<intrusive_ptr_target*>(classObj.release()));
+      auto capsule = IValue(genericPtr);
+      auto object = self.toObject();
+      object->setAttr("capsule", capsule);
     };
-    std::vector<Value*> inputs = addInputs(func, graph);
     static auto classRegistry =
-        torch::RegisterOperators().op(qualFuncName, std::move(func));
-    auto capsuleValue = graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))->output()->setType(CapsuleType::get());
+        torch::RegisterOperators().op(qualOperatorName, std::move(func));
+
+    std::vector<Value*> inputs = addInputs(func, graph);
+    auto capsuleValue =
+        graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))
+            ->output()
+            ->setType(CapsuleType::get());
     auto n = graph->insertNode(
         graph->create(prim::SetAttr, {inputs[0], capsuleValue}, 0));
     n->s_(attr::name, "capsule");
     auto res = graph->insertNode(
-        graph->create(Symbol::fromQualString(qualFuncName), inputs, 0));
+        graph->create(Symbol::fromQualString(qualOperatorName), inputs, 0));
+
     graph->registerOutput(
         graph->insertConstant(IValue())->setType(NoneType::get()));
     classCu->create_function(qualMethodName, graph);
