@@ -3,6 +3,7 @@ import torch
 
 from . import nested
 from . import codegen
+from . import nn
 
 def _nary_gen(out_dtype=None):
     # Follows signature of torch nary functions
@@ -41,10 +42,23 @@ def _nary_gen(out_dtype=None):
 # NOTE: This is inefficient! The functions that are being overwritten in torch
 # are being replaced by functions with very inefficient dispatch mechanisms to add
 # support for NestedTensor to torch.
-nested, nested.NestedTensor = codegen.add_pointwise_unary_functions(torch.nested, NestedTensor, _nary_gen())
-nested, nested.NestedTensor = codegen.add_pointwise_binary_functions(torch.nested, NestedTensor, _nary_gen())
-nested, nested.NestedTensor = codegen.add_pointwise_comparison_functions(torch.nested, NestedTensor, _nary_gen(torch.uint8))
+nested, nested.NestedTensor = codegen.add_pointwise_unary_functions(nested, nested.NestedTensor, _nary_gen())
+nested, nested.NestedTensor = codegen.add_pointwise_binary_functions(nested, nested.NestedTensor, _nary_gen())
+nested, nested.NestedTensor = codegen.add_pointwise_comparison_functions(nested, nested.NestedTensor, _nary_gen(torch.uint8))
 
-torch.nested.nn.functional.conv2d = nested.conv2d
-torch.nested.nn.functional.relu = nested.relu
-torch.nested.max_pool2d = nested.max_pool2d
+def monkey_patch(module):
+    for function in dir(nested):
+        if not function.startswith("_"):
+            setattr(module, function, getattr(nested, function))
+
+    for function in dir(nn):
+        if not function.startswith("_"):
+            setattr(module.nn, function, getattr(nn, function))
+
+    for function in dir(nn.functional):
+        if not function.startswith("_"):
+            setattr(module.nn.functional.F, function, getattr(nn.functional, function))
+
+from nested import *
+
+__all__ = dir(nested)

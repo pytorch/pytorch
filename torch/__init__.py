@@ -318,7 +318,6 @@ import torch.backends.openmp
 import torch.utils.data
 import torch.__config__
 import torch.__future__
-import torch.nested
 
 _C._init_names(list(torch._storage_classes))
 

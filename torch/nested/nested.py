@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 
 # Set this flag to true, if you want to enable additional verifications.
 DEBUG = False
@@ -10,40 +9,6 @@ DEBUG = False
 
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
-
-def conv2d(input, weight, bias, stride, padding, dilation, groups):
-    if is_nested_tensor(input):
-        ret = []
-        for tensor_ in input._tensors:
-            tensor = tensor_.view(*((1,) + tensor_.size()))
-            ret_ = F.conv2d(tensor, weight, bias, stride,
-                               padding, dilation, groups)
-            ret.append(ret_.view(*(ret_.size()[1:])))
-        return NestedTensor(ret)
-    else:
-        return F.conv2d(input, weight, bias, stride,
-                           padding, dilation, groups)
-
-def relu(input, inplace=False):
-    if is_nested_tensor(input):
-        ret = []
-        for tensor_ in input._tensors:
-            ret.append(F.relu(tensor_, inplace))
-        return NestedTensor(ret)
-    else:
-        return orig_relu(input, inplace)
-
-def max_pool2d(*args, **kwargs):
-    if is_nested_tensor(args[0]):
-        ret = []
-        for tensor_ in args[0]._tensors:
-            tensor = tensor_.view(*((1,) + tensor_.size()))
-            args_ = (tensor,) + args[1:]
-            ret_ = torch.max_pool2d(*args_)
-            ret.append(ret_.view(*(ret_.size()[1:])))
-        return NestedTensor(ret)
-    else:
-        torch.max_pool2d(*args, **kwargs)
 
 # Arguments match torch.tensor
 def nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False):
