@@ -2,7 +2,7 @@
 
 # Install dependencies
 sudo apt-get -y update
-sudo apt-get -y install expect-dev
+sudo apt-get --no-install-recommends -y install expect-dev dvipng texlive-latex-extra
 
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
