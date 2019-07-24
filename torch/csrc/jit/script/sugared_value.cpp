@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
 namespace torch {
@@ -270,8 +270,7 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
-  if (val_type->cast<ListType>() ||
-      val_type->cast<StringType>() ||
+  if (val_type->cast<ListType>() || val_type->cast<StringType>() ||
       val_type->isSubtypeOf(TensorType::get())) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
@@ -307,16 +306,19 @@ Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   return cur_elem;
 }
 
-RangeValue::RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> inputs) {
+RangeValue::RangeValue(
+    const SourceRange& loc,
+    Function& m,
+    std::vector<Value*> inputs) {
   Graph& g = *m.graph();
-  if(inputs.size() == 0) {
+  if (inputs.size() == 0) {
     throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
   } else if (inputs.size() == 1) {
-      end_ = inputs[0];
-      start_ = g.insertConstant(0, nullptr, loc);
-      step_ = g.insertConstant(1, nullptr, loc);
-      // range() call only contains end, easier to calculate len() and getitem()
-      has_only_end_ = true;
+    end_ = inputs[0];
+    start_ = g.insertConstant(0, nullptr, loc);
+    step_ = g.insertConstant(1, nullptr, loc);
+    // range() call only contains end, easier to calculate len() and getitem()
+    has_only_end_ = true;
   } else if (inputs.size() <= 3) {
     start_ = inputs[0];
     end_ = inputs[1];
@@ -351,13 +353,16 @@ Value* RangeValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
 }
 
 std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
-  std::vector<SugaredValuePtr> base_iters {};
+  std::vector<SugaredValuePtr> base_iters{};
 
-  for(SugaredValuePtr sv: children_) {
+  for (SugaredValuePtr sv : children_) {
     if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
       std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();
-      //merge child iters with the base_iters
-      base_iters.insert(base_iters.end(), std::make_move_iterator(child_iters.begin()), std::make_move_iterator(child_iters.end()));
+      // merge child iters with the base_iters
+      base_iters.insert(
+          base_iters.end(),
+          std::make_move_iterator(child_iters.begin()),
+          std::make_move_iterator(child_iters.end()));
 
     } else {
       // IterableTree leaves, either SimpleValue or RangeValue
@@ -368,14 +373,15 @@ std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
 }
 
 Value* IterableTree::len(const SourceRange& loc, Function& m) {
-  // if it's a iterable tree, we get the base iterables that consists of SimpleValue or RangeValue,
-  // and then calculate the minimum length of all the base iterables to be max_trip_count_val
+  // if it's a iterable tree, we get the base iterables that consists of
+  // SimpleValue or RangeValue, and then calculate the minimum length of all the
+  // base iterables to be max_trip_count_val
   Graph& g = *m.graph();
   std::vector<SugaredValuePtr> base_iters = get_base_iterables();
   std::vector<Value*> lengths;
   lengths.reserve(base_iters.size());
 
-  for (const SugaredValuePtr& base_iter: base_iters) {
+  for (const SugaredValuePtr& base_iter : base_iters) {
     lengths.emplace_back(base_iter->len(loc, m));
   }
   Node* list_node = g.insertNode(g.createList(IntType::get(), lengths));
@@ -384,7 +390,7 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
 
 Value* IterableTree::getitem(const SourceRange& loc, Function& m, Value* idx) {
   std::vector<Value*> child_items;
-  for(const SugaredValuePtr& child: children_) {
+  for (const SugaredValuePtr& child : children_) {
     child_items.emplace_back(child->getitem(loc, m, idx));
   }
   // If you call getitem() on a IterableTree sugared value, we will create Tuple
@@ -406,8 +412,8 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
   if (!type_->getMethod("__init__")) {
-    throw ErrorReport(loc)
-        << "Class " << type_->basename() << " does not have an __init__ function defined";
+    throw ErrorReport(loc) << "Class " << type_->basename()
+                           << " does not have an __init__ function defined";
   }
 
   // Call the init function
@@ -439,12 +445,12 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
   auto qualname = type_->qualified_name_obj();
   auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
 
-  auto self = g.insertNode(g.createTuple(
-                                matched_schema.inputs,
-                                std::move(qualname),
-                                std::move(schema))
-                               ->setSourceRange(loc))
-                  ->output();
+  auto self =
+      g.insertNode(
+           g.createTuple(
+                matched_schema.inputs, std::move(qualname), std::move(schema))
+               ->setSourceRange(loc))
+          ->output();
   self->setType(type_);
 
   return std::make_shared<SimpleValue>(self);
