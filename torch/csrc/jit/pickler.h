@@ -101,6 +101,23 @@ enum PicklerClass : uint8_t {
 
 using ::c10::IValue;
 
+struct WriteableTensorData {
+  const char* data() const {
+    return static_cast<const char*>(tensor_.storage().data());
+  }
+  size_t sizeInBytes() const {
+    return size_;
+  }
+  size_t numel() const {
+    return tensor_.storage().numel();
+  }
+
+ private:
+  friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
+  at::Tensor tensor_;
+  uint64_t size_;
+};
+
 class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
@@ -195,7 +212,7 @@ class Pickler {
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
-  std::vector<at::Tensor> literal_tensors_;
+  std::vector<WriteableTensorData> tensor_data_;
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
@@ -258,20 +275,6 @@ class Unpickler {
   // optionally nullptr, needs to be present for creating classes
   std::function<c10::StrongTypePtr(const c10::QualifiedName&)> class_resolver_;
   IValue empty_tuple_;
-};
-
-struct WriteableTensorData {
-  const char* data() const {
-    return static_cast<const char*>(tensor_.storage().data());
-  }
-  size_t sizeInBytes() const {
-    return size_;
-  }
-
- private:
-  friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
-  at::Tensor tensor_;
-  uint64_t size_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
