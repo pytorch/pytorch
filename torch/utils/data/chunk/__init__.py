@@ -1,9 +1,8 @@
 from ..dataset import IterableDataset  # noqa: F401
-from torch._C.data.chunk import ChunkDatasetOptions, SamplerWrapper  # noqa: F401
-from torch._C.data.chunk import Sampler, RandomSampler, SequentialSampler  # noqa: F401
-from torch._C.data.chunk import DistributedSampler, DistributedRandomSampler, DistributedSequentialSampler  # noqa: F401
+from torch._C.data.chunk import ChunkDatasetOptions  # noqa: F401
 from torch._C.data.chunk import ChunkDataReaderUint8T, ChunkDataReaderInt8T, ChunkDataReaderInt16T, ChunkDataReaderInt32T  # noqa: F401
 from torch._C.data.chunk import ChunkDataReaderInt64T, ChunkDataReaderFloat, ChunkDataReaderDouble  # noqa: F401
+
 
 class ChunkDatasetWrapper(IterableDataset):
     r"""
@@ -15,6 +14,7 @@ class ChunkDatasetWrapper(IterableDataset):
     Arguments:
         dataset (Dataset): The whole Dataset
     """
+
     def __init__(self, dataset):
         super(ChunkDatasetWrapper, self).__init__()
         self.dataset = dataset
@@ -34,7 +34,7 @@ class ChunkDatasetWrapper(IterableDataset):
     def reset(self):
         self.dataset.reset()
 
-    def chunk_sampler(self):
-        return self.dataset.chunk_sampler()
+    def set_chunk_sampler_stride(self, stride):
+        self.dataset.set_chunk_sampler_stride(stride)
 
     next = __next__  # py2 compatibility

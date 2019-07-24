@@ -1,193 +1,84 @@
 torch.utils.data.chunk
 ===================================
 
+This module provides a Python `IterableDataset` implementation called
+:py:class:`torch.utils.data.chunk.ChunkDatasetWrapper` which wraps
+the C++ ChunkDataset API as described in the
+`PyTorch C++ API documentation <https://pytorch.org/cppdocs/api/library_root.html>`_.
+It also exposes Python bindings for the existing C++ implementation,
+so that users can leverage both C++ performance and Python flexibility!
+
 .. automodule:: torch.utils.data.chunk
 
-This module provides a Python `IterableDataset` class called
-:py:class:`torch.utils.data.chunk.ChunkDatasetWrapper` which wraps
-the C++ ChunkDataset as described in the
-`PyTorch C++ API documentation <https://pytorch.org/cppdocs/api/library_root.html>`_
-
 .. autoclass:: ChunkDatasetWrapper
-
-Bindings
---------
-
-The following classes were implemented in C++
-(`torch/csrc/api/include/torch/data/datasets/chunk.h`) but also exposed
-to Python through `pybind11 <https://github.com/pybind/pybind11/>.`
-
-.. py:class:: ChunkDatasetOptions(preloader_count, batch_size, cache_size = 2048)
-
-  Create and return a new ChunkDatasetOptions instance
-
-  :param int preloader_count: Number of preloaders threads
-  :param int batch_size: Batch size
-  :param int cache_size: Cache size to be preloaded before batching
-
-.. py:class:: Sampler
-
-  Base class for a sampler, which yields an index with which to access a dataset
-  This class should be used as extension point only, and it shouldn't be instantiated
-
-.. py:class:: RandomSampler(size)
-
-  A :py:class:`Sampler` that returns random indices
-
-  :param int size: Range of the sampler will be `0...size - 1`
-
-.. py:class:: SequentialSampler(size)
-
-  A :py:class:`Sampler` that returns indices sequentially
-
-  :param int size: Range of the sampler will be `0...size - 1`
-
-.. py:class:: DistributedSampler(size, num_replicas=1, rank=0, allow_duplicates=True)
-
-  A :py:class:`Sampler` that selects a subset of indices to sample from and defines a
-  sampling behavior. In a distributed setting, this selects a subset of the
-  indices depending on the provided `num_replicas` and `rank` parameters. The
-  :py:class:`Sampler` performs a rounding operation based on the `allow_duplicates`
-  parameter to decide the local sample count.
-
-  :param int size: Range of the sampler will be `0...size - 1`
-  :param int num_replicas: Number of replicas (processes)
-  :param int rank: Rank (process ID)
-  :param bool allow_duplicates: Drops the last batch if it doesnt have the same size as the other batches
-
-.. py:class:: DistributedRandomSampler(size, num_replicas=1, rank=0, allow_duplicates=True)
-
-  Similar to :py:class:`RandomSampler`, but for a distributed setup
-
-  :param int size: Range of the sampler will be `0...size - 1`
-  :param int num_replicas: Number of replicas (processes)
-  :param int rank: Rank (process ID)
-  :param bool allow_duplicates: Drops the last batch if it doesnt have the same size as the other batches
-
-.. py:class:: DistributedSequentialSampler(size, num_replicas=1, rank=0, allow_duplicates=True)
-
-  Similar to :py:class:`SequentialSampler`, but for a distributed setup
-
-  :param int size: Range of the sampler will be `0...size - 1`
-  :param int num_replicas: Number of replicas (processes)
-  :param int rank: Rank (process ID)
-  :param bool allow_duplicates: Drops the last batch if it doesnt have the same size as the other batches
-
-.. py:class:: SamplerWrapper(sampler, stride=0)
-
-  Implementation of a wrapper around :py:class:`Sampler` classes
-
-  This is needed for generating Python bindings, only.
-  On C++ implementation, a single process share the same `ChunkDataset` class among all threads, so sampling is straingthforward.
-  On Python implementation, on the other hand, `DataLoader` uses multi-processing instead of multi-threading for parallelism.
-
-  Each Python `Dataloader` is a separate process with a copy of `ChunkDataset` library (including :py:class:`Sampler`).
-  To prevent different processes to read the same data in parallel, sampler strides are needed to coordinate workers.
-  Each instance of SamplerWrapper must be configured with different strides, so that sampling happens in a round-robin fashion:
-  `stride0, stride1, ..., strideN, stride0, stride1, ..., strideN, ...`
-
-  For example, assume 2 Python Dataloader workers reading the same `ChunkDataset`.
-  Each worker needs to reset their `ChunkDataset` instance so that one of them reads all even (stride 0)
-  batches while the other reads all odd batches (stride 1).
-
-  NOTE: To preserve back compatibility with C++ implementation, which doesn't need stride support due to multi-threading,
-  `reset()` method doesn't reset stride setting.
-
-  :param torch.utils.data.chunk.Sampler sampler: Instance of :py:class:`Sampler` to be wrapped
-  :param int stride: A unique stride for each sampler to coordinate multiple samplers in different workers
-
-.. py:class:: ChunkDataReaderUint8T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `uint8_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderInt8T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `int8_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderInt16T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `int16_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderInt32T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `int32_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderInt64T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `int64_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderFloat
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `float` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderDouble
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `double` as Example type.
-  It performs data chunking and reading of entire data chunks
 
 Getting started
 ---------------
 
-Using the Python API is very similar to the C++ API documented at
-`PyTorch C++ API documentation <https://pytorch.org/cppdocs/api/library_root.html>`_
+The ChunkDataset Python API is similar to the C++ API documented at
+`PyTorch C++ API documentation <https://pytorch.org/cppdocs/api/library_root.html>`_,
+but two main differences:
 
-The only differences are that the Python API requires:
-  * Samplers must be wrapped by :py:class:`SamplerWrapper`
-    before passing them to :py:class:`ChunkDataReader`.
-  * `ChunkDataset` class must be wrapped by :py:class:`ChunkDatasetWrapper`
-    before passing it to :py:class:`torch.utils.data.DataLoader`
+* To leverage the existing Python DataLoader
+  (:py:class:`torch.utils.data.DataLoader`), the C++ `ChunkDataset` class must
+  be wrapped by a Python :py:class:`ChunkDatasetWrapper`
+* `ChunkDataset` constructor was simplified
+  so that samplers are automatically instantiated
 
-**Example 1 - Reusing `Example`, `ChunkDataReader` and `ChunkDataset` classes:**
+The following examples will discuss i overall lines the data flow and show some
+snipets to demonstrate how the ChunkDataset Python API can be used.
+The first example is intentionally simplistic while the second build on it
+and unleash all power the API can provide.
 
-The main steps for a `ChunkDataset` implementation with built-in type `Example` are:
+Example 1 - Reading data with known batch type classes:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-1. **C++ Steps: Check `test/cpp_extensions/extension.cpp` for a full implementation**
+The simplest way to use the Chunk API is reading batches
+with C++ standard types as `Example`
+(aka `uint8_t`, `int8_t`, `int16_t`, `int32_t`, `int64_t`, `float`, `double`).
 
-  a) [optional] Make `std::vector<BUILT_IN_TYPE>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
+To achieve this, the main steps for both C++ and Python are:
 
-2. **Python Steps: Check `test/test_cpp_extensions.py` for a full implementation**
+**C++ Steps:**
 
-  a) Instantiate a `Sampler` for the chunk sampler
-  b) Instantiate a `SamplerWrapper` for chunk sampler
-  c) Instantiate a `Sampler` for the example sampler
-  d) Instantiate a `SamplerWrapper` for example sampler
-  e) Instantiate a specific `ChunkDataReader`
-  f) Instantiate a `ChunkDatasetOptions`
-  g) Instantiate a specific `ChunkDataset` implementation
-  h) Instantiate a `ChunkDatasetWrapper`
-  i) Instantiate a `DataLoader`
-  j) [optional] Set `DataLoader`'s :attr:`batch_size=None` to disable `auto collation`
-  k) [optional] Set `DataLoader`'s :attr:`pin_memory=True` to pin memory
-  l) [optional] If DataLoader's :attr:`num_workers` > 1, implement a worker initialization function and set :attr:`worker_init_fn` on :py:class:`DataLoader` constructor
-  m) Iterate over `DataLoader`
+* [optional] Make `std::vector<BUILT_IN_TYPE>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
 
-*ps: Opaque types prevent memory copy between C++ and Python*
+Although opaque types prevent memory copy between C++ and Python,
+we will not use this feature to keep the example as simple as possible.
 
-Python snippet::
+**Python Steps:**
+
+* Instantiate `ChunkDataReader`
+* Instantiate `ChunkDatasetOptions`
+* Instantiate `ChunkDataset`
+* Instantiate `ChunkDatasetWrapper`
+* Instantiate `DataLoader`
+* [optional] Set `DataLoader`'s :attr:`batch_size=None` to disable `auto collation`
+* [optional] Set `DataLoader`'s :attr:`pin_memory=True` to pin memory to GPU
+* [optional] If DataLoader's :attr:`num_workers` > 1:
+
+  * Implement worker initialization function
+  * Set :attr:`worker_init_fn` on :py:class:`DataLoader` constructor
+
+* Iterate over `DataLoader`
+
+
+**Python snippet:**
+
+*Check `test/test_cpp_extensions.py (test_dummy_chunkdataset_bindings)` for full implementation*::
 
 >>> # Importing modules
 >>> from torch.utils.data import DataLoader
 >>> import torch.utils.data.chunk as chunk
 >>> import torch.utils.cpp_extension
 >>> # Dummy parameters
->>> chunk_count=3
 >>> batch_size=5
 >>> cache_size=100
 >>> preloaders=1
 >>> # Main ChunkDataset classes
->>> chunk_sampler = chunk.SequentialSampler(size=chunk_count)
->>> example_sampler = chunk.SequentialSampler(size=batch_size)
->>> chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
->>> example_sampler_wrapper = chunk.SamplerWrapper(sampler=example_sampler)
 >>> reader = cpp_extension.DummyChunkDataReader()
 >>> opt = chunk.ChunkDatasetOptions(preloader_count=preloaders, batch_size=batch_size, cache_size=cache_size)
->>> dummy_chunkdataset = cpp_extension.DummyChunkDataset(chunk_reader=reader, chunk_sampler=chunk_sampler_wrapper,example_sampler=example_sampler_wrapper,options=opt)
+>>> dummy_chunkdataset = cpp_extension.DummyChunkDataset(chunk_reader=reader, options=opt, shuffle_chunks=False, shuffle_samples=False)
 >>> trainset = chunk.ChunkDataset(dummy_chunkdataset)
 >>> trainset.reset()
 >>> # Integrating with Python DataLoader
@@ -196,44 +87,53 @@ Python snippet::
 >>> for i, batch in enumerate(trainloader, 0):
 >>>   print('Batch {} is {} examples long'.format(i, len(actual)))
 
+Example 2 - Reading data with new `Example` type:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-**Example 2 - Defining new `Example`, `ChunkDataReader` and `ChunkDataset` custom classes:**
-
-The next example builds on the previous and requires a
+The next example builds on the previous and requires
 `Pytorch C++ Extension <https://pytorch.org/tutorials/advanced/cpp_extension.html#writing-a-c-extension>`
 
-The main steps for a `ChunkDataset` implementation with custom type `Example` are:
+In more advanced models, the C++ batch type will be more complex
+structures that need to be exposed to Python.
+In this scenario, the main steps are:
 
-1. **C++ Steps: Check `test/cpp_extensions/extension.cpp` for a full implementation:**
+**C++ Steps:**
 
-  a) Define `FooExampleType` struct (aka ExampleType)
-  b) Define `FooChunkDataReader` class by extending `torch::data::datasets::ChunkDataReader<FooExampleType>`
-  c) Bind `FooExampleType` struct
-  d) [optional] Make `std::vector<FooExampleType>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
-  e) Bind `std::vector<FooExampleType>` through `py::bind_vector<FooExampleType>()` (aka BatchType)
-  f) Bind `FooChunkDataReader` binding through `py::class_<FooChunkDataReader>`
-  g) Bind `FooChunkDataset` binding through `py::class_<FooChunkDataReader>`
+* Define `FooExampleType` struct (aka ExampleType)
+* Define `FooChunkDataReader` class by extending `torch::data::datasets::ChunkDataReader<FooExampleType>`
+* Bind `FooExampleType` struct
+* [optional] Make `std::vector<FooExampleType>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
+* Bind `std::vector<FooExampleType>` through `py::bind_vector<FooExampleType>()` (aka BatchType)
+* Bind `FooChunkDataReader` binding through `bind_chunkdatareader<>()` helper
+* Bind `FooChunkDataset` binding through `bind_chunkdatareader<>()` helper
 
-2. **Python Steps: Check `test_foo_chunkdataset_bindings` for a full implementation:**
+Making opaque types prevent memory copy between C++ and Python as described at
+`pybind11 documentation <https://pybind11-rtdtest.readthedocs.io/en/stable/advanced.html#treating-stl-data-structures-as-opaque-objects>`_
 
-  a) Instantiate a `Sampler` for the chunk sampler
-  b) Instantiate a `SamplerWrapper` for the chunk sampler in the previous step
-  c) Instantiate a `Sampler` for the example sampler
-  d) Instantiate a `SamplerWrapper` for the example sampler in the previous step
-  e) Instantiate a specific `ChunkDataReader`
-  f) Instantiate a `ChunkDatasetOptions`
-  g) Instantiate a specific `ChunkDataset` implementation
-  h) Instantiate a `ChunkDatasetWrapper`
-  i) Instantiate a `DataLoader`
-  j) [optional] If `ChunkDataset::BatchType` doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement a collate function and set :attr:`collate_fn` on :py:class:`DataLoader` constructor
-  k) [optional] Set `DataLoader`'s :attr:`batch_size=None` to disable `auto collation`
-  l) [optional] Set `DataLoader`'s :attr:`pin_memory=True` to pin memory
-  m) [optional] If DataLoader's :attr:`num_workers` > 1, implement a worker initialization function and set :attr:`worker_init_fn` on :py:class:`DataLoader` constructor
-  n) Iterate over `DataLoader`
+**Python Steps:**
 
-ps: Opaque types prevent memory copy between C++ and Python
+* Instantiate a specific `ChunkDataReader`
+* Instantiate a `ChunkDatasetOptions`
+* Instantiate a specific `ChunkDataset` implementation
+* Instantiate a `ChunkDatasetWrapper`
+* Instantiate a `DataLoader`
+* [optional] If `ChunkDataset::BatchType` doesn't contain tensors, numpy arrays, numbers, dicts or lists:
 
-C++ snippet:
+  * Implement a collate function
+  * Set :attr:`collate_fn` on :py:class:`DataLoader` constructor
+
+* [optional] Set `DataLoader`'s :attr:`batch_size=None` to disable `auto collation`
+* [optional] Set `DataLoader`'s :attr:`pin_memory=True` to pin memory
+* [optional] If DataLoader's :attr:`num_workers` > 1:
+
+  * Implement a worker initialization function
+  * Set :attr:`worker_init_fn` on :py:class:`DataLoader` constructor
+
+* Iterate over `DataLoader`
+
+**C++ snippet:**
+
+*Check `test/cpp_extensions/extension.cpp` for full implementation*
 
 .. code-block:: cpp
 
@@ -301,71 +201,17 @@ C++ snippet:
         "VectorFooExampleType holds the custom typed dataset");
 
     /// Specific ChunkDataReader implementation based on FooExampleType
-    py::class_<FooChunkDataReader>(
-        m, "FooChunkDataReader", "Dummy chunk data reader for testing the API")
-        .def(
-            py::init<>(),
-            "Create and return a new `FooChunkDataReader` instance")
-        .def(
-            "read_chunk",
-            &FooChunkDataReader::read_chunk,
-            "Returns dummy data",
-            py::arg("chunk_index"),
-            py::return_value_policy::take_ownership)
-        .def(
-            "chunk_count",
-            &FooChunkDataReader::chunk_count,
-            "Returns the number of chunks")
-        .def("reset", &FooChunkDataReader::reset, "Not used");
+    auto foo_reader = bind_chunkdatareader<FooChunkDataReader>(m, "FooChunkDataReader");
+    foo_reader.def(py::init<>(), "Create and return a new `FooChunkDataReader` instance");
 
     /// Specific ChunkDataset implementation based on FooChunkDataReader
-    using FooChunkDataset =
-        ChunkDataset<FooChunkDataReader, SamplerWrapper, SamplerWrapper>;
-    py::class_<FooChunkDataset>(
-        m,
-        "FooChunkDataset",
-        "A stateful dataset that support hierarchical sampling and prefetching of entire chunks."
-        "Unlike regular dataset, chunk dataset require two samplers to operate and keeps internal state."
-        "`ChunkSampler` selects, which chunk to load next"
-        "`ExampleSampler` determines the order of Examples that are returned in each `get_batch` call")
-        .def(
-            py::init<
-                FooChunkDataReader,
-                SamplerWrapper,
-                SamplerWrapper,
-                ChunkDatasetOptions>(),
-            "Create and return a new `FooChunkDataset` instance",
-            py::arg("chunk_reader"),
-            py::arg("chunk_sampler"),
-            py::arg("example_sampler"),
-            py::arg("options"))
-        .def(
-            "get_batch",
-            (FooChunkDataset::BatchType(FooChunkDataset::*)(size_t)) &
-                FooChunkDataset::get_batch,
-            "Returns a batch created from preloaded chunks",
-            py::arg("batch_size"),
-            py::return_value_policy::take_ownership)
-        .def(
-            "get_batch",
-            (FooChunkDataset::BatchType(FooChunkDataset::*)()) &
-                FooChunkDataset::get_batch,
-            "Returns a batch created from preloaded chunks",
-            py::return_value_policy::take_ownership)
-        .def(
-            "reset",
-            &FooChunkDataset::reset,
-            "Resets any internal state and starts the internal prefetching mechanism for the chunk dataset")
-        .def("size", &FooChunkDataset::size, "Not used")
-        .def(
-            "chunk_sampler",
-            &FooChunkDataset::chunk_sampler,
-            "Returns the reference to chunk sampler."
-            "Used mainly in distributed data loading to set the epoch number for the sampler.",
-            py::return_value_policy::reference_internal);
+    using FooChunkDataset = ChunkDataset<FooChunkDataReader, SamplerWrapper, SamplerWrapper>;
+    bind_chunkdatareader<FooChunkDataReader>(m, "FooChunkDataset");
   }
 
-Python snippet:
+**Python snippet:**
+
+*Check `test/test_cpp_extensions.py (test_foo_chunkdataset_bindings)` for full implementation*
 
 .. code-block:: python
 
@@ -419,26 +265,20 @@ Python snippet:
     # you have to create an environment variable OMP_NUM_THREADS=1 as a workaround
     torch.set_num_threads(1)
     dataset = torch.utils.data.get_worker_info().dataset
-    chunk_sampler = dataset.chunk_sampler()
-    chunk_sampler.set_current_stride(stride=worker_id)
+    dataset.set_chunk_sampler_stride(worker_id)
     dataset.reset()
 
-  chunk_count = 1
   batch_size = 5
   cache_size = 100
   preloaders = 1
   num_workers = 2
-  chunk_sampler = chunk.SequentialSampler(size=chunk_count)
-  example_sampler = chunk.SequentialSampler(size=batch_size)
-  chunk_sampler_wrapper = chunk.SamplerWrapper(sampler=chunk_sampler)
-  example_sampler_wrapper = chunk.SamplerWrapper(sampler=example_sampler)
   reader = cpp_extension.FooChunkDataReader()
   opt = chunk.ChunkDatasetOptions(preloader_count=preloaders, batch_size=batch_size, cache_size=cache_size)
 
   foo_chunkdataset = cpp_extension.FooChunkDataset(chunk_reader=reader,
-                                                   chunk_sampler=chunk_sampler_wrapper,
-                                                   example_sampler=example_sampler_wrapper,
-                                                   options=opt)
+                                                   options=opt,
+                                                   shuffle_chunks=False,
+                                                   shuffle_samples=False)
 
   trainset = chunk.ChunkDatasetWrapper(foo_chunkdataset)
   trainset.reset()
@@ -448,3 +288,53 @@ Python snippet:
                            worker_init_fn=worker_init_fn)
   for i, batch in enumerate(trainloader, 0):
     print('Batch {}: {}'.format(i, batch))
+
+Python bindings
+---------------
+
+The following classes were implemented in C++
+(`torch/csrc/api/include/torch/data/datasets/chunk.h`) but also exposed
+to Python through `pybind11 <https://github.com/pybind/pybind11/>.`
+
+.. py:class:: ChunkDatasetOptions(preloader_count, batch_size, cache_size = 2048)
+
+  Create and return a new ChunkDatasetOptions instance
+
+  :param int preloader_count: Number of preloaders threads
+  :param int batch_size: Batch size
+  :param int cache_size: Cache size to be preloaded before batching
+
+.. py:class:: ChunkDataReaderUint8T
+
+  Extends :py:class:`ChunkDataReader` backed by an array of `uint8_t` as Example type.
+  It performs data chunking and reading of entire data chunks
+
+.. py:class:: ChunkDataReaderInt8T
+
+  Extends :py:class:`ChunkDataReader` backed by an array of `int8_t` as Example type.
+  It performs data chunking and reading of entire data chunks
+
+.. py:class:: ChunkDataReaderInt16T
+
+  Extends :py:class:`ChunkDataReader` backed by an array of `int16_t` as Example type.
+  It performs data chunking and reading of entire data chunks
+
+.. py:class:: ChunkDataReaderInt32T
+
+  Extends :py:class:`ChunkDataReader` backed by an array of `int32_t` as Example type.
+  It performs data chunking and reading of entire data chunks
+
+.. py:class:: ChunkDataReaderInt64T
+
+  Extends :py:class:`ChunkDataReader` backed by an array of `int64_t` as Example type.
+  It performs data chunking and reading of entire data chunks
+
+.. py:class:: ChunkDataReaderFloat
+
+  Extends :py:class:`ChunkDataReader` backed by an array of `float` as Example type.
+  It performs data chunking and reading of entire data chunks
+
+.. py:class:: ChunkDataReaderDouble
+
+  Extends :py:class:`ChunkDataReader` backed by an array of `double` as Example type.
+  It performs data chunking and reading of entire data chunks

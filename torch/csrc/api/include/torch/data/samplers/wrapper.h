@@ -99,7 +99,7 @@ class SamplerWrapper : public Sampler<> {
   }
 
   /// Deserializes the internal `Sampler` from the `archive`.
-  TORCH_API void load(serialize::InputArchive& archive) override {
+  void load(serialize::InputArchive& archive) override {
     sampler_->load(archive);
   }
 
