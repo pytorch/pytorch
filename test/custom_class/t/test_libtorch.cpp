@@ -6,6 +6,7 @@
 #include <iterator>
 #include <list>
 #include <torch/script.h>
+#include <torch/custom_class.h>
 #include <pybind11/pybind11.h>
 
 using namespace std;
@@ -23,11 +24,11 @@ struct Foo : c10::intrusive_ptr_target {
   int64_t add(int64_t z) {
     return (x+y)*z;
   }
-  // Foo* increment() {
-  //   this->x++;
-  //   this->y++;
-  //   return this;
-  // }
+  int64_t increment() {
+    this->x++;
+    this->y++;
+    return 2;
+  }
   // <Foo> combine(c10::intrusive_ptr<Foo> x) {
   //   this->x += x->x;
   //   this->y += x->y;
@@ -43,6 +44,8 @@ static auto registry = torch::RegisterOperators("my_ops::warp_perspective",
 static auto test = torch::jit::class_<Foo>("Foo")
                     .def(torch::jit::init<int64_t, int64_t>())
                     // .def(torch::jit::init<>())
-                    .def("display", &Foo::display);
+                    .def("increment", &Foo::increment)
+                    .def("display", &Foo::display)
                     // .def("add", &Foo::add);
                     // .def("combine", &Foo::combine);
+                    ;

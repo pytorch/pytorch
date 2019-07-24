@@ -20,15 +20,15 @@ class Bar:
 def f():
     val = torch.classes.Foo(5, 3)
     print(val)
-    print(val)
+    # print(val)
+    val.increment()
     val.display()
-    # # val2 = Bar(100, 0)
-    val2 = torch.classes.Foo(100, 0)
-    val.display()
-    val2.display()
+    # # # val2 = Bar(100, 0)
+    # val2 = torch.classes.Foo(100, 0)
+    # val.display()
+    # val2.display()
     # # val3 = val.combine(val2)
     # # val3.display()
-    # return val
+    return val
 
-print(f())
-print(f.graph)
+x = f()

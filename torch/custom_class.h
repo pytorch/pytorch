@@ -61,6 +61,7 @@ class class_ {
     // dependency. It would require significant changes to class registration,
     // (I think)?
     qualClassName = topModule + "." + parentModule + "." + className;
+
     auto obj = py::module::import("torch").attr(parentModule.c_str());
     pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
     pyClass->attr("qualified_name") = py::str(qualClassName);
@@ -75,7 +76,7 @@ class class_ {
     getClassConverter()[qualClassName] = castToPython;
 
     // We currently represent custom classes as torchscript classes with a
-    // capsule attribute.
+    // capsule attribute
     classCu = std::make_shared<script::CompilationUnit>();
     classTypePtr =
         ClassType::create(c10::QualifiedName(qualClassName), classCu);
@@ -153,9 +154,9 @@ class class_ {
   std::string type_name() {
     return std::string(typeid(Last).name());
   }
-  template <typename First, typename Second, typename ...Rest>
-  std::string type_name () {
-      return type_name<First>() + "_" + type_name<Second, Rest...>();
+  template <typename First, typename Second, typename... Rest>
+  std::string type_name() {
+    return type_name<First>() + "_" + type_name<Second, Rest...>();
   }
 
   template <class T>
