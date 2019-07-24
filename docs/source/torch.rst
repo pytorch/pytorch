@@ -190,7 +190,6 @@ Pointwise Ops
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2
-.. autofunction:: bitwise_not
 .. autofunction:: ceil
 .. autofunction:: clamp
 .. autofunction:: cos
