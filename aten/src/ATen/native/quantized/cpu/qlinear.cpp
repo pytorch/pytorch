@@ -140,7 +140,11 @@ class QLinearInt8 final : public torch::OperatorKernel {
         /*thread_id=*/0,
         /*num_threads=*/1);
 
-    return output;
+    // The resulting matrix here is 2-D, let's view it with the original
+    // left hand dimensions of the input.
+    std::vector<int64_t> out_sizes = input.sizes().vec();
+    out_sizes.back() = N;
+    return output.view(out_sizes);
   }
 #else // USE_FBGEMM
   at::Tensor operator()(
