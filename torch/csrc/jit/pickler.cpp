@@ -52,6 +52,29 @@ const char* getClassName(PicklerClass cls) {
   }
 }
 
+static void postSetStateValidate(IValue v) {
+  auto obj = v.toObject();
+  const auto& objType = obj->type();
+  for (size_t i = 0; i < objType->numAttributes(); i++) {
+    const auto& attrType = objType->getAttribute(i);
+    const auto& attrName = objType->getAttributeName(i);
+    const auto& slot = obj->getSlot(i);
+    // const auto attrType = objType->getAttribute(i);
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (attrType->kind() != TypeKind::OptionalType) {
+      TORCH_CHECK(
+          !slot.isNone(),
+          "The field '",
+          attrName,
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          attrType->python_str(),
+          "'");
+    }
+  }
+}
+
 const std::vector<char>& Pickler::stack() {
   return stack_;
 }
@@ -744,7 +767,12 @@ OpCode Unpickler::readInstruction() {
             auto arg = std::move(stack_.back());
             stack_.pop_back();
             auto obj = c10::ivalue::Object::create(type, n);
+            // XXX: Do not optimize __setstate__, so that we don't try to
+            // specialize the class before it is initialized.
+            setGraphExecutorOptimize(false);
             (*type.type_->getMethod("__setstate__"))({obj, arg});
+            setGraphExecutorOptimize(true);
+            postSetStateValidate(obj);
             stack_.emplace_back(std::move(obj));
           });
         } else {
