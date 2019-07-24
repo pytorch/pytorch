@@ -641,23 +641,8 @@ class TestCppExtension(common.TestCase):
         """
         This class serves as a basic example on how to use ChunkDataset API python bindings
 
-        The main steps for a ChunkDataset implementation with built-in type Example are:
-        C++ Steps: Check `test/cpp_extensions/extension.cpp`:
-            Step 1: [optional] Make `std::vector<BUILT_IN_TYPE>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
-                        Opaque types prevent memory copy between C++ and Python
-
-        Python Steps: Check `test_dummy_chunkdataset_bindings` below:
-            Step 5: Instantiate a specific `ChunkDataReader`
-            Step 6: Instantiate a `ChunkDatasetOptions`
-            Step 7: Instantiate a `ChunkDataset`
-            Step 8: Instantiate a `ChunkDatasetWrapper`
-            Step 9: Instantiate a `DataLoader`
-            Step 10: Iterate on `DataLoader`
-
-        The API is almost identical to the C++ version. The difference is the need for the
-        SampleWrapper on Python implementation that is not required by C++ counterpart.
-        This is due to the fact that Python DataLoader uses multiprocessing module for
-        parallelism as opposed to multi-threading
+        This example uses `int` as `Example` type, which already has all boilerplate code
+        to expose it to Python API.
         """
         batch_size = 5
         cache_size = 100
@@ -684,31 +669,8 @@ class TestCppExtension(common.TestCase):
         """
         This class serves as a more complex example on how to use ChunkDataset API python bindings
 
-        The main steps for a full ChunkDataset implementation are:
-
-        C++ Steps: Check `test/cpp_extensions/extension.cpp`:
-            Step 1: Define `FooExampleType` struct (aka ExampleType)
-            Step 2: Define `FooChunkDataReader` class by extending `torch::data::datasets::ChunkDataReader<FooExampleType>`
-            Step 3: Bind `FooExampleType` struct
-            Step 4: [optional] Make `std::vector<FooExampleType>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
-                        Opaque types prevent memory copy between C++ and Python
-            Step 4.1: Bind `std::vector<FooExampleType>` through `py::bind_vector<FooExampleType>()` (aka BatchType)
-            Step 6: Bind `FooChunkDataReader` binding through `py::class_<FooChunkDataReader>`
-            Step 7: Bind `FooChunkDataset` binding through `py::class_<FooChunkDataReader>`
-
-        Python Steps: Check `test_foo_chunkdataset_bindings` below:
-            Step 5: Instantiate a specific `ChunkDataReader`
-            Step 6: Instantiate a `ChunkDatasetOptions`
-            Step 7: Instantiate a `ChunkDataset`
-            Step 8: Instantiate a `ChunkDatasetWrapper`
-            Step 9: Instantiate a `DataLoader`
-            Step 9.1: [optional] If BatchType doesn't contain tensors, numpy arrays, numbers, dicts or lists, implement `collate_fn`
-            Step 10: Iterate on `DataLoader`
-
-        The API is almost identical to the C++ version. The difference is the need for the
-        SampleWrapper on Python implementation that is not required by C++ counterpart.
-        This is due to the fact that Python DataLoader uses multiprocessing module for
-        parallelism as opposed to multi-threading
+        This example uses `FooExampleType` struct as `Example` type, which is a custom type
+        and therefore requires additional code to expose it to Python API.
         """
 
         def collate_fn(batch):
