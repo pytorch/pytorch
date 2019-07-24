@@ -52,15 +52,19 @@ void Message::swap(Message & rhs) noexcept {
 
 Message::~Message() {}
 
-std::vector<char>& Message::meta() {
+const std::vector<char>& Message::meta() const {
   return meta_;
 }
 
-std::vector<torch::Tensor>& Message::tensors() {
+std::vector<char>& Message::unsafe_meta() {
+  return meta_;
+}
+
+const std::vector<torch::Tensor>& Message::tensors() const {
   return tensors_;
 }
 
-const MessageType& Message::type() {
+const MessageType& Message::type() const {
   return type_;
 }
 

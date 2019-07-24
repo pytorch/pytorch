@@ -28,7 +28,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   ProcessGroupAgent(std::string workerName,
                     std::unordered_map<std::string, int> nameMap,
-                    c10d::ProcessGroup& pg);
+                    std::shared_ptr<c10d::ProcessGroup> pg);
 
   ~ProcessGroupAgent() noexcept(false) override;
 
@@ -54,12 +54,12 @@ class ProcessGroupAgent : public RpcAgent {
 
   // worker name -> rank
   std::unordered_map<std::string, int> nameMap_;
-  // rank -> worker name, use this map to get worker name from rank and pass it
-  // to the RequestCallback.
-  std::unordered_map<int, std::string> reversedNameMap_;
   bool stop_;
-  c10d::ProcessGroup& pg_;
+  std::shared_ptr<c10d::ProcessGroup> pg_;
   int64_t nextId_;
+  // names_[rank] stores the name of the corresponding worker, use this vector
+  // to get worker name from rank and pass it to the RequestCallback.
+  std::vector<std::string> names_;
   std::deque<SendWork> sendQueue_;
   std::mutex idMutex_;
   std::mutex sendQueueMutex_;

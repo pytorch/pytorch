@@ -27,7 +27,7 @@ def _collect_worker_names(name, group):
     names = []
     for i in range(ws):
         name_tensor = name_outputs[i][:len_outputs[i]]
-        names.append(array.array('B', name_tensor.tolist()).tostring().decode('utf-8'))
+        names.append(array.array('B', name_tensor.tolist()).tobytes().decode('utf-8'))
 
     return names
 

@@ -8,11 +8,11 @@ namespace {
 
 // Write the message into the given ostream
 void serialize(Message message, std::ostream& os) {
-  auto data = static_cast<void*>(message.meta().data());
+  auto data = static_cast<void*>(message.unsafe_meta().data());
   auto size = message.meta().size();
 
   // getting tensor table from the message
-  auto& tensors = message.tensors();
+  std::vector<torch::Tensor> tensors = message.tensors();
   // append meta as a tensor
   tensors.push_back(torch::from_blob(data, size, {torch::kChar}));
   // append id and type as a tensor
@@ -49,35 +49,37 @@ Message deserialize(std::istream& is) {
 ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::unordered_map<std::string, int> nameMap,
-    c10d::ProcessGroup& pg)
+    std::shared_ptr<c10d::ProcessGroup> pg)
     : RpcAgent(std::move(workerName), processRequestBlocking),
       nameMap_(std::move(nameMap)),
       stop_(false),
-      pg_(pg),
+      pg_(std::move(pg)),
       nextId_(0) {
-  if (nameMap_.find(workerName_) == nameMap_.end()
-      || pg_.getRank() != nameMap_[workerName_]) {
-    throw std::runtime_error("resolved worker name does not match rank");
-  }
+
+  auto workerRankIter = nameMap_.find(workerName_);
+  TORCH_CHECK(workerRankIter != nameMap_.end(),
+      "Failed to resolve worker name ", workerName_, " to a ProcessGroup rank.");
+  TORCH_CHECK(pg_->getRank() == workerRankIter -> second,
+      "Resolved worker rank ", workerRankIter -> second,
+      " does not match ProcessGroup rank ", pg_->getRank());
+
+  names_.resize(nameMap_.size());
   for (auto entry : nameMap_) {
-    reversedNameMap_[entry.second] = entry.first;
+    names_[entry.second] = entry.first;
   }
   sendThread_ = std::thread(&ProcessGroupAgent::sendLoop, this);
   listenerThread_ = std::thread(&ProcessGroupAgent::listen, this);
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() noexcept(false) {
-  if (!stop_) {
-    throw std::runtime_error("ProcessGroupAgent cannot be destroyed before"
-      "calling shutdown");
-  }
+  TORCH_CHECK(stop_, "ProcessGroupAgent cannot be destroyed before shutdown.");
 }
 
 void ProcessGroupAgent::shutdown() {
   // cannot put this into the destructor, as it is not safe to call virtual
   // functions in constructor and destructor. We can drop this when we can
   // gracefully abort a recvAnysource.
-  int dst = (pg_.getRank() + 1) % pg_.getSize();
+  int dst = (pg_->getRank() + 1) % pg_->getSize();
   std::unique_ptr<std::stringstream> stream(new std::stringstream);
   *stream << 0;
   enqueue(SendWork(dst, std::move(Message({}, {}, MessageType::SHUTDOWN))));
@@ -93,9 +95,10 @@ void ProcessGroupAgent::shutdown() {
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     std::string to, Message message) {
-  if (nameMap_.find(to) == nameMap_.end()) {
-    throw std::runtime_error("unrecoganized destination in _send");
-  }
+
+  auto dstRankIter = nameMap_.find(to);
+  TORCH_CHECK(dstRankIter != nameMap_.end(), "Unknown destination worker ", to);
+  const int dstRank = dstRankIter -> second;
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
@@ -109,7 +112,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     future->markCompleted();
   }
 
-  SendWork work(nameMap_[to], std::move(message));
+  SendWork work(dstRank, std::move(message));
   enqueue(std::move(work));
   return future;
 }
@@ -147,14 +150,14 @@ void ProcessGroupAgent::sendLoop() {
     std::vector<torch::Tensor> header = {
       torch::tensor(
         {
-          (int64_t)pg_.getRank(),
+          (int64_t)pg_->getRank(),
           (int64_t)str.length(),
         }, {torch::kLong})
     };
-    pg_.send(header, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
+    pg_->send(header, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
     std::vector<torch::Tensor> payload =
         {torch::from_blob((void *)str.c_str(), str.length(), {torch::kChar})};
-    pg_.send(payload, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
+    pg_->send(payload, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
 
     lock.lock();
   }
@@ -164,21 +167,21 @@ void ProcessGroupAgent::listen() {
   while (!stop_) {
     // rank, tensor size
     std::vector<torch::Tensor> header = {torch::empty({2}, {torch::kInt64})};
-    pg_.recvAnysource(header, pg_.getRank())->wait();
+    pg_->recvAnysource(header, pg_->getRank())->wait();
     int64_t* header_items = header.front().storage().data<int64_t>();
 
     auto srcRank = header_items[0];
     auto size = header_items[1];
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
-    pg_.recv(tensors, srcRank, pg_.getRank())->wait();
+    pg_->recv(tensors, srcRank, pg_->getRank())->wait();
     std::stringstream ss(std::string(
       (char*)tensors[0].storage().data<signed char>(), tensors[0].numel()));
 
     Message message = deserialize(ss);
 
     if (message.isOp()) {
-      cb_(reversedNameMap_[srcRank], message, *this);
+      cb_(names_[srcRank], message, *this);
     } else if (message.isRet()) {
       auto id = message.id();
       {
@@ -189,7 +192,7 @@ void ProcessGroupAgent::listen() {
     } else if (message.isShutdown()) {
       break;
     } else {
-      throw std::runtime_error("unrecognized message type.");
+      AT_ERROR("unrecognized message type ", message.type());
     }
   }
 }

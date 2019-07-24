@@ -15,7 +15,7 @@ Message BuiltinRet::toMessage() {
   pickler.start();
   pickler.startTuple();
   for (auto& value: values_) {
-    pickler.addIValue(std::move(value));
+    pickler.addIValue(value);
   }
   pickler.endTuple();
   pickler.finish();
@@ -26,9 +26,9 @@ Message BuiltinRet::toMessage() {
 }
 
 BuiltinRet BuiltinRet::fromMessage(Message message) {
-  auto data = static_cast<void*>(message.meta().data());
-  auto size = message.meta().size();
-  Unpickler unpickler(data, size, &message.tensors(), nullptr);
+  auto meta = static_cast<const void*>(message.meta().data());
+  auto meta_size = message.meta().size();
+  Unpickler unpickler(meta, meta_size, &message.tensors(), nullptr);
 
   return BuiltinRet(unpickler.parse_ivalue_list());
 }

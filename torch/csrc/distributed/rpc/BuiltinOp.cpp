@@ -4,16 +4,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-std::shared_ptr<Operator> matchOperator(
-    at::Symbol symbol, std::string str_schema) {
-  for (auto op: torch::jit::getAllOperatorsFor(symbol)) {
-    if (toString(op->schema()).compare(str_schema) == 0) {
-      return op;
-    }
-  }
-  throw std::runtime_error("Cannot find matching operator");
-}
-
 std::shared_ptr<Operator> BuiltinOp::op() {
   return op_;
 }
@@ -29,7 +19,7 @@ Message BuiltinOp::toMessage() {
   pickler.start();
   pickler.startTuple();
   for (auto& value: stack_) {
-    pickler.addIValue(std::move(value));
+    pickler.addIValue(value);
   }
   pickler.addIValue(toString(op_->schema()));
   pickler.endTuple();
@@ -41,20 +31,34 @@ Message BuiltinOp::toMessage() {
 }
 
 BuiltinOp BuiltinOp::fromMessage(Message message) {
-  auto data = static_cast<void*>(message.meta().data());
-  auto size = message.meta().size();
-  Unpickler unpickler(data, size, &message.tensors(), nullptr);
+  auto meta = static_cast<const void*>(message.meta().data());
+  auto meta_size = message.meta().size();
+  Unpickler unpickler(meta, meta_size, &message.tensors(), nullptr);
 
   std::vector<IValue> values = unpickler.parse_ivalue_list();
 
-  auto str_schema = values.back().toStringRef();
-  values.pop_back();
+  TORCH_CHECK(values.size() >= 1, "Message of a BuiltinOp must at least "
+      "contain one IValue as the operator schema.");
 
+  const std::string& str_schema = values.back().toStringRef();
+  // extract symbol from the schema
   auto str_symbol = str_schema.substr(0, str_schema.find("("));
   auto symbol = at::Symbol::fromQualString(str_symbol);
   auto op = matchOperator(symbol, str_schema);
+  // remove str_schema from values
+  values.pop_back();
 
   return BuiltinOp(op, std::move(values));
+}
+
+std::shared_ptr<Operator> BuiltinOp::matchOperator(
+    at::Symbol& symbol, const std::string& str_schema) {
+  for (auto op: torch::jit::getAllOperatorsFor(symbol)) {
+    if (toString(op->schema()).compare(str_schema) == 0) {
+      return op;
+    }
+  }
+  AT_ERROR("Cannot find matching operator for schema ", str_schema);
 }
 
 } // namespace rpc

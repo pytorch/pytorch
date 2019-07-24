@@ -12,12 +12,14 @@ void FutureMessage::wait() {
 }
 
 void FutureMessage::markCompleted(Message message) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  TORCH_CHECK(!completed());
-  completed_ = true;
-  message_ = std::move(message);
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    TORCH_CHECK(!completed());
+    completed_ = true;
+    message_ = std::move(message);
 
-  fireCallbacks();
+    fireCallbacks();
+  }
   finished_cv_.notify_all();
 }
 
@@ -25,7 +27,7 @@ void FutureMessage::markCompleted() {
   markCompleted(Message());
 }
 
-Message& FutureMessage::message() {
+const Message& FutureMessage::message() {
   std::unique_lock<std::mutex> lock(mutex_);
   TORCH_CHECK(completed());
 
@@ -36,7 +38,7 @@ bool FutureMessage::completed() {
   return completed_;
 }
 
-void FutureMessage::addCallback(std::function<void(Message)> callback) {
+void FutureMessage::addCallback(FutureMessage::Callback callback) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (completed()) {
     lock.unlock();
@@ -47,7 +49,7 @@ void FutureMessage::addCallback(std::function<void(Message)> callback) {
 }
 
 void FutureMessage::fireCallbacks() {
-  AT_ASSERT(completed());
+  TORCH_CHECK(completed(), "Firing callbacks on incomplete FutureMessage.");
   // There is no need to protect callbacks with the lock.
   // Once completed_ is set to true, no one can add new callback to the list.
   for (auto& callback : callbacks) {

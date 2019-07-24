@@ -2,7 +2,6 @@
 
 #include <torch/csrc/distributed/rpc/Message.h>
 #include <torch/csrc/distributed/rpc/rpc_headers.h>
-#include <torch/serialize.h>
 #include <vector>
 
 namespace torch {

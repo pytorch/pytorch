@@ -38,9 +38,10 @@ class TORCH_API Message final {
   void swap(Message & rhs) noexcept;
   ~Message();
 
-  std::vector<char>& meta();
-  std::vector<torch::Tensor>& tensors();
-  const MessageType& type();
+  const std::vector<char>& meta() const;
+  std::vector<char>& unsafe_meta();
+  const std::vector<torch::Tensor>& tensors() const;
+  const MessageType& type() const;
 
   bool isOp();
   bool isRet();

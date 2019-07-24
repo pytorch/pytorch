@@ -16,7 +16,7 @@ void processRequestBlocking(
       break;
     }
     default: {
-      throw std::runtime_error("Request type not supported.");
+      AT_ERROR("Request type ", request.type(), " not supported.");
     }
   }
 }

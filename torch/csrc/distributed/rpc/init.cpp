@@ -49,7 +49,7 @@ PyObject* rpc_init(PyObject* _unused) {
           module, "ProcessGroupAgent", rpcAgent)
           .def(py::init<std::string,
                         std::unordered_map<std::string, int>,
-                        ::c10d::ProcessGroup&>())
+                        std::shared_ptr<::c10d::ProcessGroup>>())
           .def("shutdown",
                &ProcessGroupAgent::shutdown,
                py::call_guard<py::gil_scoped_release>());

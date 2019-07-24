@@ -11,20 +11,25 @@ namespace rpc {
 struct TORCH_API FutureMessage final {
 
  public:
+  using Callback = std::function<void(const Message&)>;
+
   void wait();
   void markCompleted(Message message);
   void markCompleted();
-  Message& message();
+  const Message& message();
   bool completed();
-  void addCallback(std::function<void(Message)> callback);
+
+  // If completed() the callback will be invoked in-place.
+  void addCallback(Callback callback);
 
  private:
+
   void fireCallbacks();
 
   std::mutex mutex_;
-  std::atomic_bool completed_ = {false}; // is this future complete
+  std::atomic_bool completed_ {false}; // is this future complete
   std::condition_variable finished_cv_;
-  std::vector<std::function<void(Message)>> callbacks;
+  std::vector<Callback> callbacks;
   Message message_;
 };
 
