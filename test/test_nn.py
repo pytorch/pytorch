@@ -5555,6 +5555,7 @@ class TestNN(NNTestCase):
     def test_CTCLoss_empty_target_cpu(self):
         self._test_CTCLoss_empty_target('cpu')
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_empty_target_cuda(self):
         self._test_CTCLoss_empty_target('cuda')
 
