@@ -2694,24 +2694,22 @@ add_docstr(torch.lu_solve,
            r"""
 lu_solve(b, LU_data, LU_pivots, out=None) -> Tensor
 
-Batch LU solve.
-
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
 
 Arguments:
-    b (Tensor): the RHS tensor
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
-    LU_pivots (IntTensor): the pivots of the LU factorization
+    b (Tensor): the RHS tensor of size :math:`(b, m, k)`
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(b, m, m)`
+    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(b, m)`
     out (Tensor, optional): the optional output tensor
 
 Example::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> b = torch.randn(2, 3)
+    >>> b = torch.randn(2, 3, 1)
     >>> A_LU = torch.lu(A)
     >>> x = torch.lu_solve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
+    >>> torch.norm(torch.bmm(A, x) - b)
     tensor(1.00000e-07 *
            2.8312)
 """)
