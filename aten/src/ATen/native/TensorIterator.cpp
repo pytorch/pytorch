@@ -500,42 +500,42 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
   }
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
   builder.add_input(b);
-  builder.iter_->allow_cpu_scalars_ = true;
+  builder.iter_.allow_cpu_scalars_ = true;
   return builder.build();
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
   return builder.build();
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::nullary_op(Tensor& out) {
+TensorIterator TensorIterator::nullary_op(Tensor& out) {
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
-  builder.iter_->resize_outputs_ = false;
+  builder.iter_.resize_outputs_ = false;
   return builder.build();
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   AT_ASSERT(out.defined());
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
-  builder.iter_->promote_gpu_output_dtypes_ = true;
-  builder.iter_->resize_outputs_ = false;
-  builder.iter_->is_reduction_ = true;
+  builder.iter_.promote_gpu_output_dtypes_ = true;
+  builder.iter_.resize_outputs_ = false;
+  builder.iter_.is_reduction_ = true;
   return builder.build();
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
   AT_ASSERT(out1.defined());
   AT_ASSERT(out2.defined());
   TORCH_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
@@ -551,9 +551,9 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& 
   builder.add_output(out1);
   builder.add_output(out2);
   builder.add_input(a);
-  builder.iter_->promote_gpu_output_dtypes_ = true;
-  builder.iter_->resize_outputs_ = false;
-  builder.iter_->is_reduction_ = true;
+  builder.iter_.promote_gpu_output_dtypes_ = true;
+  builder.iter_.resize_outputs_ = false;
+  builder.iter_.is_reduction_ = true;
   return builder.build();
 }
 
@@ -685,23 +685,23 @@ SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
   return SplitUntil32Bit(*this);
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
+TensorIterator TensorIterator::Builder::build() {
   // set is_output and is_read_write flags on appropriate tensors
-  iter_->mark_outputs();
+  iter_.mark_outputs();
   // compute the broadcasted shape
-  iter_->compute_shape();
+  iter_.compute_shape();
   // compute each tensor's stride after broadcasting
-  iter_->compute_strides();
+  iter_.compute_strides();
   // re-order dimensions to improve coalescing
-  iter_->reorder_dimensions();
+  iter_.reorder_dimensions();
   // compute the result dtype and device
-  iter_->compute_types();
+  iter_.compute_types();
   // allocate the output tensor if it's not provided
-  iter_->allocate_outputs();
+  iter_.allocate_outputs();
   // coalesce adjacent dimensions when possible
-  iter_->coalesce_dimensions();
+  iter_.coalesce_dimensions();
 
-  for (auto& op : iter_->operands_) {
+  for (auto& op : iter_.operands_) {
     AT_ASSERT(op.tensor.defined());
     op.data = op.tensor.data_ptr();
   }
