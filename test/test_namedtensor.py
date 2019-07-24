@@ -71,6 +71,28 @@ class TestNamedTensor(TestCase):
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
 
+    def test_size(self):
+        t = torch.empty(2, 3, 5, names=('N', None, 'C'))
+        self.assertEqual(t.size('N'), 2)
+        self.assertEqual(t.size('C'), 5)
+        with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name*'):
+            t.size(None)
+        with self.assertRaisesRegex(RuntimeError, 'Name \'channels\' not found in '):
+            t.size('channels')
+        with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
+            torch.empty(2, 3, 4).size('N')
+
+    def test_stride(self):
+        t = torch.empty(2, 3, 5, names=('N', None, 'C'))
+        self.assertEqual(t.stride('N'), 3 * 5)
+        self.assertEqual(t.stride('C'), 1)
+        with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
+            t.stride(None)
+        with self.assertRaisesRegex(RuntimeError, 'Name \'channels\' not found in '):
+            t.stride('channels')
+        with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
+            torch.empty(2, 3, 4).stride('N')
+
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
         tensor = torch.empty(1, 1, names=('N', 'D'))
@@ -97,10 +119,12 @@ class TestNamedTensor(TestCase):
         tensor.nelement()
         tensor.shape
         tensor.size()
+        tensor.size(1)
         tensor.storage()
         tensor.storage_offset()
         tensor.storage_type()
         tensor.stride()
+        tensor.stride(1)
         tensor.data
         tensor.data_ptr()
         tensor.ndim
