@@ -46,6 +46,7 @@ detail::types<void, Types...> init() {}
 template <class CurClass>
 class class_ {
   std::string className;
+  std::string qualClassName;
   std::shared_ptr<py::class_<CurClass>> pyClass = nullptr;
   std::shared_ptr<script::CompilationUnit> classCu = nullptr;
   ClassTypePtr classTypePtr;
@@ -59,30 +60,31 @@ class class_ {
     // We'll want to remove this at some point to get rid of the python
     // dependency. It would require significant changes to class registration,
     // (I think)?
+    qualClassName = topModule + "." + parentModule + "." + className;
     auto obj = py::module::import("torch").attr(parentModule.c_str());
     pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
-    std::string qualifiedName =
-        topModule + "." + parentModule + "." + className;
+    pyClass->attr("qualified_name") = py::str(qualClassName);
     auto newClass =
         py::module::import("torch.jit")
-            .attr("_add_script_class")(*pyClass, qualifiedName.c_str());
+            .attr("_add_script_class")(*pyClass, qualClassName.c_str());
+
     auto castToPython = [](void* objPtr) -> py::object {
       CurClass x = *static_cast<CurClass*>(objPtr);
       return py::cast(x);
     };
-    getClassConverter()[qualifiedName] = castToPython;
+    getClassConverter()[qualClassName] = castToPython;
 
-    pyClass->attr("qualified_name") = py::str(qualifiedName);
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute.
     classCu = std::make_shared<script::CompilationUnit>();
     classTypePtr =
-        ClassType::create(c10::QualifiedName(qualifiedName), classCu);
+        ClassType::create(c10::QualifiedName(qualClassName), classCu);
+    classTypePtr->addAttribute("capsule", CapsuleType::get());
+
     c10::getTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
     c10::getTypeMap().insert({typeid(c10::ivalue_holder<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
-    classTypePtr->addAttribute("capsule", CapsuleType::get());
 
     torch::jit::get_python_cu()->register_class(classTypePtr);
   }
@@ -90,12 +92,8 @@ class class_ {
   template <typename... Types>
   class_& def(detail::types<void, Types...>) { // Used in combination with
                                                // torch::jit::init<...>()
-
     pyClass->def(py::init<Types...>());
-    auto graph = std::make_shared<Graph>();
-    auto qualOperatorName = className + "::__init__";
-    auto qualMethodName =
-        topModule + "." + parentModule + "." + className + ".__init__";
+
     auto func = [](c10::ivalue_holder<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
       auto genericPtr = c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
@@ -104,16 +102,19 @@ class class_ {
       auto object = self.ivalue.toObject();
       object->setAttr("capsule", capsule);
     };
+
+    auto graph = std::make_shared<Graph>();
+    auto qualOperatorName = className + "::__init__";
     static auto classRegistry =
         torch::RegisterOperators().op(qualOperatorName, std::move(func));
 
     std::vector<Value*> inputs = addInputs(func, graph);
     auto res = graph->insertNode(
         graph->create(Symbol::fromQualString(qualOperatorName), inputs, 0));
-
     graph->registerOutput(
         graph->insertConstant(IValue())->setType(NoneType::get()));
-    classCu->create_function(qualMethodName, graph);
+
+    classCu->create_function(qualClassName + ".__init__", graph);
     return *this;
   }
   template <typename Func>
@@ -147,24 +148,26 @@ class class_ {
         guts::infer_function_traits_t<Func>::number_of_parameters;
     return addInputs_(f, graph, guts::make_index_sequence<numArgs>());
   }
-  template <class T>
-  void addType(Value* v) {
-    v->setType(getTypePtr<T>());
-  }
+
   template <typename Last>
-  std::string type_name () {
-      return std::string(typeid(Last).name());
+  std::string type_name() {
+    return std::string(typeid(Last).name());
   }
   template <typename First, typename Second, typename ...Rest>
   std::string type_name () {
       return type_name<First>() + "_" + type_name<Second, Rest...>();
   }
+
+  template <class T>
+  void addType(Value* v) {
+    v->setType(getTypePtr<T>());
+  }
+
   template <typename Func, typename R, typename... Types>
   class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {
     pyClass->def(name.c_str(), f);
+
     auto qualFuncName = className + "::" + name;
-    auto qualMethodName =
-        topModule + "." + parentModule + "." + className + "." + name;
     auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
       return guts::invoke(f, *cur, args...);
     };
@@ -183,7 +186,8 @@ class class_ {
       res = graph->insertConstant(IValue())->setType(NoneType::get());
     }
     graph->registerOutput(res);
-    classCu->create_function(qualMethodName, graph);
+
+    classCu->create_function(qualClassName + "." + name, graph);
     return *this;
   }
 };
