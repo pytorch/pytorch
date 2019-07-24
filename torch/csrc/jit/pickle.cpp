@@ -11,13 +11,14 @@ TORCH_API std::string pickle(
     std::vector<at::Tensor>* tensor_table) {
   std::stringstream ss;
   Pickler pickler(ss, tensor_table);
-  pickler.start();
 
   if (tensor_table == nullptr) {
     // No tensor table provided, so tensors will be stored directly in the blob.
     // Add torch.save metadata so these tensors can be de-serialized later
     pickler.pushMetadata();
   }
+
+  pickler.start();
 
   bool wrap_in_tuple = ivalues.size() > 0;
 

@@ -624,7 +624,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
-      AT_ASSERT(length == 8);
+      TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
       stack_.emplace_back(int64_t(read<int64_t>()));
     } break;
     case OpCode::BINUNICODE: {

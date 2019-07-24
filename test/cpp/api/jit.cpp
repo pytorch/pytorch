@@ -6,6 +6,7 @@
 
 #include <string>
 #include <iostream>
+#include <cstdio>
 
 TEST(TorchScriptTest, CanCompileMultipleFunctions) {
   auto module = torch::jit::compile(R"JIT(
@@ -114,14 +115,19 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
 }
 
 TEST(TorchScriptTest, TestPickle) {
+  std::string filename("data.pkl");
   torch::IValue float_value(2.3);
   std::string data = torch::jit::pickle({float_value});
-  std::ofstream out("data.pkl");
+  std::ofstream out(filename);
   out << data;
   out.flush();
 
-  std::ifstream in("data.pkl", std::ios::binary);
+  std::ifstream in(filename, std::ios::binary);
   std::vector<torch::IValue> ivalues = torch::jit::unpickle(in);
-  std::cout << ivalues.at(0) << "\n";
-  // ASSERT_EQ(ivalues.at(0).toDouble(), float_value.toDouble());
+
+  // std::remove(filename.c_str());
+
+  double diff = ivalues.at(0).toDouble() - float_value.toDouble();
+  double eps = 0.0001;
+  ASSERT_TRUE(diff < eps && diff > -eps);
 }
