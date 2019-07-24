@@ -12310,7 +12310,17 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                         a = torch.tensor([-12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
                         a_target = torch.tensor([-1, 0, 1, -1, 1], device=device, dtype=dtype)
 
+                # out = sign(x)
                 self.assertEqual(a.sign(), a_target, 'sign device={} dtype={}'.format(device, dtype))
+
+                # sign(x, out)
+                out = torch.empty_like(a)
+                a.sign(out=out)
+                self.assertEqual(out, a_target, 'sign(out) device={} dtype={}'.format(device, dtype))
+
+                # sign_
+                a.sign_()
+                self.assertEqual(a, a_target, 'sign_ device={} dtype={}'.format(device, dtype))
 
             # Include test for bool dtype
             a_bool = torch.tensor([True, True, False, float('nan')], device=device).bool()
