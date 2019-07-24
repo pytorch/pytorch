@@ -777,10 +777,13 @@ OpCode Unpickler::readInstruction() {
 
 // Read a number of bytes from the input stream
 std::string Unpickler::readBytes(size_t length) {
-  char buffer[length];
-  in_.read(buffer, length);
+  std::string bytes;
+  bytes.resize(length);
+  // C++11 guarantees contiguous strings and string[0] is
+  // defined for 0-length strings, so this is safe
+  in_.read(&bytes[0], bytes.size());
   TORCH_CHECK(in_.good(), "Overran buffer while reading bytes");
-  return std::string(buffer, length);
+  return bytes;
 }
 
 // Pop all the list items off of the stack and append them to the list at
