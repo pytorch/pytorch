@@ -138,4 +138,30 @@ template<class ResultType, template <class> class Condition, class Mapper, class
   return detail::filter_map_<ResultType, num_results>::template call<Condition, Mapper, Args...>(mapper, guts::make_index_sequence<num_results>(), std::forward<Args>(args)...);
 }
 
+
+/**
+ * call_if takes a boolean template parameter and a lambda argument.
+ * It calls the lambda if and only if the boolean parameter is true.
+ * The boolean is a template parameter so it can be evaluated at compile time.
+ * If it is false, then the registration lambda can be pruned by the linker.
+ */
+namespace detail {
+template<bool enabled, class return_type = void> struct call_if_;
+template<class return_type> struct call_if_<true, return_type> final {
+    template<class Lambda>
+    static return_type call(Lambda&& lambda) {
+        return lambda();
+    }
+};
+template<class return_type> struct call_if_<false, return_type> final {
+    template<class Lambda>
+    static return_type call(Lambda&& /* lambda */) {
+        return return_type();
+    }
+};
+}
+template<bool enabled, class Lambda> guts::result_of_t<Lambda()> call_if(Lambda&& lambda) {
+    return detail::call_if_<enabled, guts::result_of_t<Lambda()>>::call(std::forward<Lambda>(lambda));
+}
+
 }}

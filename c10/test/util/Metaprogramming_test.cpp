@@ -214,4 +214,30 @@ namespace test_filter_map {
     }
 }
 
+namespace test_call_if {
+  TEST(MetaprogrammingTest, CallIf_callsIfTrue) {
+    bool was_called = false;
+    call_if<true>([&] {was_called = true;});
+    EXPECT_TRUE(was_called);
+  }
+
+  TEST(MetaprogrammingTest, CallIf_doesntCallIfFalse) {
+    bool was_called = false;
+    call_if<false>([&] {was_called = true;});
+    EXPECT_FALSE(was_called);
+  }
+
+  TEST(MetaprogrammingTest, CallIf_returnsResultIfTrue) {
+    auto result = call_if<true>([] { return std::string("hello"); });
+    static_assert(std::is_same<std::string, decltype(result)>::value, "wrong type");
+    EXPECT_EQ("hello", result);
+  }
+
+  TEST(MetaprogrammingTest, CallIf_returnsDefaultIfFalse) {
+    auto result = call_if<false>([] { return std::string("hello"); });
+    static_assert(std::is_same<std::string, decltype(result)>::value, "wrong type");
+    EXPECT_EQ("", result);
+  }
+}
+
 }

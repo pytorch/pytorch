@@ -314,12 +314,17 @@ public:
 
   /**
    * Call this to register an operator. See class doc comment for examples.
-   * The template parameter 'enabled' can be used to enable or disable
-   * registration of this operator at compile time. The operator will only
-   * be registered if enabled == true.
+   *
+   * The template parameter 'enabled' is not part of the public API.
+   * Using it may break your code with future versions of PyTorch.
+   * It can be used to enable or disable registration of this operator at
+   * compile time. The operator will only be registered if enabled == true.
    */
   template<bool enabled = true>
-  RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) &&;
+  RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) && {
+    c10::guts::call_if<enabled>([&] {checkSchemaAndRegisterOp_(schemaOrName, std::move(options));});
+    return std::move(*this);
+  }
 
   // internal only for registering caffe2 ops
   RegisterOperators&& op(FunctionSchema schema, Options&& options) && {
@@ -428,18 +433,6 @@ private:
   static_assert(std::is_nothrow_move_constructible<std::vector<OperatorRegistrar>>::value, "");
   static_assert(std::is_nothrow_move_assignable<std::vector<OperatorRegistrar>>::value, "");
 };
-
-template<>
-inline RegisterOperators&& RegisterOperators::op<true>(const std::string& schemaOrName, Options&& options) && {
-  checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
-  return std::move(*this);
-}
-
-template<>
-inline RegisterOperators&& RegisterOperators::op<false>(const std::string& schemaOrName, Options&& options) && {
-  // With enabled = false, we don't register the op
-  return std::move(*this);
-}
 
 }
 
