@@ -16,7 +16,7 @@ inline void THBlas_axpy(int64_t n, T a, T *x, int64_t incx, T *y, int64_t incy);
     TH ## name ## Blas_axpy(n, a, x, incx, y, incy); \
   }
 
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_BFLOAT16(AXPY_SPECIALIZATION)
+AT_FORALL_SCALAR_TYPES(AXPY_SPECIALIZATION)
 
 
 template<typename T>
@@ -29,7 +29,7 @@ inline void THBlas_copy(int64_t n, T *x, int64_t incx, T *y, int64_t incy);
     TH ## name ## Blas_copy(n, x, incx, y, incy); \
   }
 
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_BFLOAT16(COPY_SPECIALIZATION)
+AT_FORALL_SCALAR_TYPES(COPY_SPECIALIZATION)
 
 template<typename T>
 inline T THBlas_dot(int64_t n, T *x, int64_t incx, T *y, int64_t incy);
@@ -40,7 +40,7 @@ inline T THBlas_dot(int64_t n, T *x, int64_t incx, T *y, int64_t incy);
     return TH ## name ## Blas_dot(n, x, incx, y, incy); \
   }
 
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_BFLOAT16(DOT_SPECIALIZATION)
+AT_FORALL_SCALAR_TYPES(DOT_SPECIALIZATION)
 
 template<typename T>
 inline void THBlas_gemm(
@@ -78,7 +78,7 @@ inline void THBlas_gemm(
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc); \
   }
 
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_BFLOAT16(GEMM_SPECIALIZATION)
+AT_FORALL_SCALAR_TYPES(GEMM_SPECIALIZATION)
 
 template <typename T>
 inline void THBlas_gemv(
@@ -111,4 +111,4 @@ inline void THBlas_gemv(
     TH ## name ## Blas_gemv(transa, m, n, alpha, a, lda, x, incx, beta, y, incy); \
   }
 
- AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_BFLOAT16(GEMV_SPECIALIZATION)
+ AT_FORALL_SCALAR_TYPES(GEMV_SPECIALIZATION)
