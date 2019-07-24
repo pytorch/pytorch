@@ -3,6 +3,7 @@ from .quantize import *  # noqa: F401
 from .observer import *  # noqa: F401
 from .QConfig import *  # noqa: F401
 from .fake_quantize import *  # noqa: F401
+from .fuse_modules import fuse_modules  # noqa: F401
 
 def default_eval_fn(model, calib_data):
     r"""

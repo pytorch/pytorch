@@ -241,6 +241,7 @@ def quantize_dynamic(model, run_fn=None, run_args=None, qconfig_dict=None):
 DEFAULT_MODULE_MAPPING = {
     torch.nn.Linear: nnq.Linear,
     torch.nn.ReLU: nnq.ReLU,
+    torch.nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # QAT modules:
