@@ -1,8 +1,12 @@
 #include <ATen/native/cpu/layer_norm_kernel.h>
 
+#include <array>
+#include <numeric>
+
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cpu/vec256/vec256.h>
 
 namespace at {
 namespace native {
@@ -30,14 +34,27 @@ void LayerNormKernelImplInternal(
   T* mean_data = mean->data<T>();
   T* rstd_data = rstd->data<T>();
   const T c = T(1) / static_cast<T>(N);
+  constexpr int64_t K = vec256::Vec256<T>::size();
+  const int64_t n = N / K * K;
+  std::array<T, K> mean_arr;
+  std::array<T, K> rstd_arr;
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
   for (int64_t i = 0; i < M; ++i) {
     const T* X_ptr = X_data + i * N;
     T* Y_ptr = Y_data + i * N;
-    T mean_val = T(0);
-    T rstd_val = T(0);
-    for (int64_t j = 0; j < N; ++j) {
+    vec256::Vec256<T> mean_vec(0);
+    vec256::Vec256<T> rstd_vec(0);
+    for (int64_t j = 0; j < n; j += K) {
+      const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
+      mean_vec = mean_vec + x_vec;
+      rstd_vec = rstd_vec + x_vec * x_vec;
+    }
+    mean_vec.store(mean_arr.data());
+    rstd_vec.store(rstd_arr.data());
+    T mean_val = std::accumulate(mean_arr.cbegin(), mean_arr.cend(), T(0));
+    T rstd_val = std::accumulate(rstd_arr.cbegin(), rstd_arr.cend(), T(0));
+    for (int64_t j = n; j < N; ++j) {
       mean_val += X_ptr[j];
       rstd_val += X_ptr[j] * X_ptr[j];
     }
@@ -104,15 +121,32 @@ void LayerNormBackwardKernelImplInternal(
     std::memset(dbeta_data, 0, N * sizeof(T));
   }
   const T scale = T(1) / static_cast<T>(N);
+  constexpr int64_t K = vec256::Vec256<T>::size();
+  const int64_t n = N / K * K;
+  std::array<T, K> ds_arr;
+  std::array<T, K> db_arr;
   const bool gamma_null = gamma_data == nullptr;
   for (int64_t i = 0; i < M; ++i) {
     const T* dY_ptr = dY_data + i * N;
     const T* X_ptr = X_data + i * N;
     if (dX_data != nullptr) {
       T* dX_ptr = dX_data + i * N;
-      T ds = 0;
-      T db = 0;
-      for (int64_t j = 0; j < N; ++j) {
+      vec256::Vec256<T> ds_vec(0);
+      vec256::Vec256<T> db_vec(0);
+      for (int64_t j = 0; j < n; j += K) {
+        const vec256::Vec256<T> dy_vec = vec256::Vec256<T>::loadu(dY_ptr + j);
+        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
+        const vec256::Vec256<T> gamma_vec = gamma_null
+            ? vec256::Vec256<T>(1)
+            : vec256::Vec256<T>::loadu(gamma_data + j);
+        ds_vec = ds_vec + dy_vec * x_vec * gamma_vec;
+        db_vec = db_vec + dy_vec * gamma_vec;
+      }
+      ds_vec.store(ds_arr.data());
+      db_vec.store(db_arr.data());
+      T ds = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
+      T db = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
+      for (int64_t j = n; j < N; ++j) {
         const T gamma_v = gamma_null ? T(1) : gamma_data[j];
         ds += dY_ptr[j] * X_ptr[j] * gamma_v;
         db += dY_ptr[j] * gamma_v;
