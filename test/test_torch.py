@@ -2036,13 +2036,49 @@ class _TestTorchMixin(object):
         a, b = cast(a), cast(b)
         LU_data, pivots, info = a.lu(get_infos=True, pivot=pivot)
         self.assertEqual(info.abs().sum(), 0)
-        x = torch.lu_solve(b, LU_data, pivots)
-        b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
-        self.assertEqual(b_, b)
+        with warnings.catch_warnings(record=True) as w:
+            x = torch.lu_solve(b, LU_data, pivots)
+            b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
+            self.assertEqual(b_, b)
+            # Warning related check
+            self.assertEqual(len(w), 1)
+            self.assertTrue("Passing RHS tensor with number of dimensions = 2 is deprecated" in str(w[-1].message))
+
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+        for batches in [2, 5]:
+            for k, n in zip([2, 3, 5], [3, 5, 7]):
+                A = cast(random_fullrank_matrix_distinct_singular_value(n, batches))
+                b = cast(torch.randn(batches, n, k))
+                LU_data, LU_pivots, infos = A.lu(get_infos=True)
+                self.assertEqual(infos, torch.zeros_like(infos))
+                x = torch.lu_solve(b, LU_data, LU_pivots)
+                b_ = torch.matmul(A, x)
+                self.assertEqual(b_, b)
 
     @skipIfNoLapack
     def test_lu_solve(self):
         self._test_lu_solve(self, lambda t: t)
+
+    @staticmethod
+    def _test_lu_solve_batched_many_batches(self, cast):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        def run_test(A_dims, b_dims, cast):
+            A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+            b = cast(torch.randn(*b_dims))
+            LU_data, LU_pivots, infos = A.lu(get_infos=True)
+            self.assertEqual(infos, torch.zeros_like(infos))
+            x = torch.lu_solve(b, LU_data, LU_pivots)
+            b_ = torch.matmul(A, x)
+            self.assertEqual(b_, b.expand_as(b_))
+
+        run_test((5, 65536), (65536, 5, 10), cast)
+        run_test((5, 262144), (262144, 5, 10), cast)
+
+    @skipIfNoLapack
+    @slowTest
+    def test_lu_solve_batched_many_batches(self):
+        self._test_lu_solve_batched_many_batches(self, lambda t: t)
 
     @staticmethod
     def _test_lu_unpack(self, cast, pivot=True):
@@ -5422,6 +5458,18 @@ class _TestTorchMixin(object):
 
             with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.triangular_solve(b, A)
+
+            # b and A have to be modified to match accepted inputs sizes for lu_solve
+            b = b.unsqueeze(0)
+            A = A.unsqueeze(0)
+            with self.assertRaisesRegex(RuntimeError, err_str):
+                torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=A_device).int())
+
+            # This checks if a suitable error message is thrown
+            # when LU output and pivots are on the same device
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Expected LU_pivots and LU_data to be on the same device"):
+                torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=b_device).int())
 
     @staticmethod
     def _test_qr(self, cast):
