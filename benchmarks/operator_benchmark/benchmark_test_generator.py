@@ -4,16 +4,21 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from collections import namedtuple
+import copy 
 from benchmark_core import TestConfig
 from benchmark_caffe2 import register_caffe2_op_test_case
 from benchmark_pytorch import register_pytorch_op_test_case
 
 
-def generate_test(configs, bench_op, OperatorTestCase, run_backward):
-    """
-    This function is used to generate PyTorch/Caffe2 tests based on 
-    the configs and operators.
-    TODO(mingzhe0908): introduce device and add it to the benchmark name 
+def _generate_test(configs, bench_op, OperatorTestCase, run_backward, op_name_function=None):
+    """Generate PyTorch/Caffe2 tests of operators with different inputs.
+       Args: 
+           configs: a dictionary that has the input shapes
+           bench_op: a subclass of Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+               creation and operator execution
+           OperatorTestCase: a named tuple to save the metadata of an test 
+           run_backward: a bool parameter indicating backward path 
+           op_name_function: a dictionary includes operator name and function
     """
     for config in configs:
         test_attrs = {}
@@ -31,7 +36,18 @@ def generate_test(configs, bench_op, OperatorTestCase, run_backward):
         if tags is None:
             raise ValueError("Missing tags in configs")
         op = bench_op()
-        op.init(**test_attrs)
+        tensor_error_info = None
+        # op_name_function is a dictionary which has op_name and op_function.
+        # an example of op_name_function is:
+        # {'op_name' : 'abs', 'op_function' : torch.abs}
+        # op_function is concatenated with the input dict then passed to the init function 
+        # op_name is passed to the set_module_name function
+        init_dict = copy.deepcopy(test_attrs)
+        if op_name_function is not None:
+            op_name = op_name_function['op_name']
+            init_dict.update({'op_func' : op_name_function['op_func']})
+            op.set_module_name(op_name)
+        op.init(**init_dict)
         test_name = op.test_name(**test_attrs)
         input_config = str(test_attrs)[1:-1].replace('\'', '')
         test_config = TestConfig(test_name, input_config, tags, run_backward)
@@ -90,22 +106,53 @@ def generate_c2_test_from_ops(ops_metadata, bench_op, tags):
 def generate_pt_test(configs, pt_bench_op):
     """ This function creates PyTorch op test based on the given operator
     """
-    generate_test(configs, pt_bench_op, register_pytorch_op_test_case, run_backward=False)
+    _generate_test(configs, pt_bench_op, register_pytorch_op_test_case, 
+                   run_backward=False)
 
 
 def generate_c2_test(configs, c2_bench_op):
     """ This function creates Caffe2 op test based on the given operator 
     """
-    generate_test(configs, c2_bench_op, register_caffe2_op_test_case, run_backward=False)
+    _generate_test(configs, c2_bench_op, register_caffe2_op_test_case, 
+                   run_backward=False)
 
 
 def generate_pt_gradient_test(configs, pt_bench_op):
     """ This function creates PyTorch op test based on the given operator
     """
-    generate_test(configs, pt_bench_op, register_pytorch_op_test_case, run_backward=True)
+    _generate_test(configs, pt_bench_op, register_pytorch_op_test_case, 
+                   run_backward=True)
 
 
 def generate_c2_gradient_test(configs, c2_bench_op):
     """ This function creates Caffe2 op test based on the given operator 
     """
-    generate_test(configs, c2_bench_op, register_caffe2_op_test_case, run_backward=True)
+    _generate_test(configs, c2_bench_op, register_caffe2_op_test_case, 
+                   run_backward=True)
+
+
+def generate_pt_tests_from_op_list(ops_list, configs, pt_bench_op):
+    """ This function creates pt op tests one by one from a list of dictionaries.
+        ops_list is a list of dictionary. Each dictionary includes 
+        the name of the operator and the math operation. Here is an example of using this API:
+        unary_ops_configs = op_bench.config_list(
+            attrs=[...],
+            attr_names=["M", "N"],
+        )
+        unary_ops_list = op_bench.op_list(
+            attr_names=["op_name", "op_func"],
+            attrs=[
+                ["abs", torch.abs],
+            ],
+        )
+        class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
+            def init(self, M, N, op_name, op_func): 
+                ... 
+            def forward(self):
+                ...
+        op_bench.generate_pt_tests_from_op_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
+    """
+    for op in ops_list:
+        _generate_test(configs, pt_bench_op, register_pytorch_op_test_case, 
+                       run_backward=False, 
+                       op_name_function=op)

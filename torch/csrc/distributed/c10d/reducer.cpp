@@ -457,7 +457,7 @@ void Reducer::initialize_buckets(
         // This must be a Variable because as of Apr 2019 there is still
         // a distinction between the Tensor and Variable types, and it
         // is not recommended (or sometimes even possible) to mix and match.
-        replica.contents = torch::autograd::make_variable_consuming(
+        replica.contents = torch::autograd::make_variable(
             at::empty({static_cast<long>(offset)}, options));
       }
 
@@ -491,8 +491,8 @@ void Reducer::initialize_buckets(
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::unordered_set<torch::autograd::Function*> seen;
-  std::vector<torch::autograd::Function*> queue;
+  std::unordered_set<torch::autograd::Node*> seen;
+  std::vector<torch::autograd::Node*> queue;
 
   // Check that any prior reduction has finished.
   // The variable `require_finalize_` is true until all gradients

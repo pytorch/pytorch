@@ -101,6 +101,44 @@ struct LoopView {
     bodyBlock()->permuteInputs(adjusted_block_order);
   }
 
+  void replaceMaxTripCount(Value* new_max_trip_count) {
+    node_->replaceInput(0, new_max_trip_count);
+  }
+  void replaceInputCondition(Value* new_input_condition) {
+    node_->replaceInput(1, new_input_condition);
+  }
+
+  // our way of encoding loops makes them difficult to turn back into python
+  // syntax. we have to check properties of the condition and trip count inputs
+  // to figure out which one it initially was. ModifiedLoops are not directly
+  // mappable to either For or While
+  enum LoopType { While, For, ModifiedLoop };
+
+  LoopType loopType() {
+    auto trip_count = toIValue(maxTripCount());
+    auto cond_input = toIValue(inputCond());
+    auto cond_next = toIValue(nextCond());
+
+    bool condition_is_always_true =
+        cond_input && cond_input->toBool() && cond_next && cond_next->toBool();
+    bool trip_count_is_specified = !trip_count || // trip is not a constant
+        trip_count->toInt() !=
+            std::numeric_limits<int64_t>::max() || // it is a constant but not
+                                                   // the default one
+        currentTripCount()->uses().size() >
+            0; // it is actually being used in the body.
+
+    if (condition_is_always_true) {
+      // if the trip count was not specified this was a user-written while True:
+      return trip_count_is_specified ? For : While;
+    } else {
+      if (trip_count_is_specified) {
+        return ModifiedLoop;
+      }
+      return While;
+    }
+  }
+
  private:
   Node* node_;
 
