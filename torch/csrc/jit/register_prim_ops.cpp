@@ -1691,66 +1691,68 @@ int dictLen(Stack& stack) {
   return 0;
 }
 
-int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  auto addKeysFromDict = [&] (c10::impl::GenericList& keys) {
-    keys.reserve(dict.size());
-    for (auto& item : dict) {
-      keys.push_back(item.key());
-    }
-  };
-  auto key_type = dict._keyType();
-  if (key_type.has_value()) {
-    auto keys = c10::impl::GenericList(*key_type);
-    addKeysFromDict(keys);
-    push(stack, std::move(keys));
-  } else {
-    auto keys = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
-    addKeysFromDict(keys);
-    push(stack, std::move(keys));
-  }
-  return 0;
-}
-
-template <typename Elem>
-c10::List<Elem> makeListForDictValues(
+template <unsigned int Index, typename Elem>
+c10::List<Elem> makeListForDictKeysOrValues(
+    const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
+  TORCH_INTERNAL_ASSERT(std::get<Index>(types) == getTypePtr<Elem>(),
+      "Type mismatch when trying to get a List of keys/values from Dict. ",
+      "Type in Dict is ", toString(std::get<Index>(types)),
+      ". Type in List is ", toString(getTypePtr<Elem>()),
+      ". Index is ", c10::guts::to_string(Index));
   c10::List<Elem> values;
   values.reserve(order.size());
   for (const auto& item : order) {
-    values.push_back(item.second.to<Elem>());
+    values.push_back(std::get<Index>(item).template to<Elem>());
   }
   return values;
 }
 
-template <>
-c10::impl::GenericList makeListForDictValues<IValue>(
+template <unsigned int Index>
+c10::impl::GenericList makeGenericListForDictKeysOrValues(
+    const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
-  auto values = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto type = std::get<Index>(types);
+  auto values = type.has_value()
+    ? c10::impl::GenericList(*type)
+    : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   values.reserve(order.size());
   for (const auto& item : order) {
-    values.push_back(item.second);
+    values.push_back(std::get<Index>(item));
   }
   return values;
 }
 
-Operation dictValues(const Node* n) {
+template <unsigned int Index>
+Operation dictKeysOrValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
-    const auto& order = iterationOrder(pop(stack).toGenericDict());
+    auto dict = pop(stack).toGenericDict();
+    const auto& order = iterationOrder(dict);
+    const auto types = std::make_pair(dict._keyType(), dict._valueType());
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
-      push(stack, makeListForDictValues<at::Tensor>(order));
+      push(stack, makeListForDictKeysOrValues<Index, at::Tensor>(types, order));
     } else if (outputType->getElementType() == IntType::get()) {
-      push(stack, makeListForDictValues<int64_t>(order));
+      push(stack, makeListForDictKeysOrValues<Index, int64_t>(types, order));
     } else if (outputType->getElementType() == FloatType::get()) {
-      push(stack, makeListForDictValues<double>(order));
+      push(stack, makeListForDictKeysOrValues<Index, double>(types, order));
     } else if (outputType->getElementType() == BoolType::get()) {
-      push(stack, makeListForDictValues<bool>(order));
+      push(stack, makeListForDictKeysOrValues<Index, bool>(types, order));
     } else {
-      push(stack, makeListForDictValues<IValue>(order));
+      push(stack, makeGenericListForDictKeysOrValues<Index>(types, order));
     }
     return 0;
   };
+}
+
+Operation dictKeys(const Node* n) {
+  // getting first dict pair
+  return dictKeysOrValues<0>(n);
+}
+
+Operation dictValues(const Node* n) {
+  // getting second of dict pair
+  return dictKeysOrValues<1>(n);
 }
 
 int dictIndex(Stack& stack) {
@@ -1861,23 +1863,16 @@ int dictUpdate(Stack& stack) {
 
 int dictItems(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  auto addItemsFromDict = [&] (c10::impl::GenericList& items) {
-    items.reserve(dict.size());
-    for (const auto& item : iterationOrder(dict)) {
-      items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
-    }
-  };
   auto key_type = dict._keyType();
   auto value_type = dict._valueType();
-  if (key_type.has_value() && value_type.has_value()) {
-    auto items = c10::impl::GenericList(TupleType::create({*key_type, *value_type}));
-    addItemsFromDict(items);
-    push(stack, std::move(items));
-  } else {
-    auto items = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
-    addItemsFromDict(items);
-    push(stack, std::move(items));
+  auto items = (key_type.has_value() && value_type.has_value())
+      ? c10::impl::GenericList(TupleType::create({*key_type, *value_type}))
+      : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  items.reserve(dict.size());
+  for (const auto& item : iterationOrder(dict)) {
+    items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
   }
+  push(stack, std::move(items));
   return 0;
 }
 
