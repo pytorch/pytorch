@@ -114,7 +114,7 @@ class CMake:
             return cmake_value
 
     @staticmethod
-    def _get_cmake_cache_variables(cmake_cache_file):
+    def get_cmake_cache_variables_from_file(cmake_cache_file):
         r"""Gets values in CMakeCache.txt into a dictionary.
 
         Arguments:
@@ -148,7 +148,7 @@ class CMake:
           dict: A ``dict`` containing the value of cached CMake variables.
         """
         with open(self._cmake_cache_file) as f:
-            return CMake._get_cmake_cache_variables(f)
+            return CMake._get_cmake_cache_variables_from_file(f)
 
     def generate(self, version, cmake_python_library, build_python, build_test, my_env, rerun):
         "Runs cmake to generate native build files."
