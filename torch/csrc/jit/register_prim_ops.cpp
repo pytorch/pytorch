@@ -1695,9 +1695,11 @@ template <unsigned int Index, typename Elem>
 c10::List<Elem> makeListForDictKeysOrValues(
     const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
-  TORCH_INTERNAL_ASSERT(std::get<Index>(types) == getTypePtr<Elem>(),
+  TORCH_INTERNAL_ASSERT(
+      (!std::get<Index>(types).has_value())
+      || (*std::get<Index>(types) == getTypePtr<Elem>()),
       "Type mismatch when trying to get a List of keys/values from Dict. ",
-      "Type in Dict is ", toString(std::get<Index>(types)),
+      "Type in Dict is ", toString(*std::get<Index>(types)),
       ". Type in List is ", toString(getTypePtr<Elem>()),
       ". Index is ", c10::guts::to_string(Index));
   c10::List<Elem> values;
