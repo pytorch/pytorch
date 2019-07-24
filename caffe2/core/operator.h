@@ -1590,6 +1590,7 @@ class ExternalTensorFunctionsBase {
  public:
   explicit ExternalTensorFunctionsBase() {}
   virtual ~ExternalTensorFunctionsBase() {}
+  virtual bool isQuantized() const = 0;
   virtual bool IsSameMetaType(TypeIdentifier id) = 0;
   virtual void SetupExternalTensorDescriptor(
       const Blob* blob,

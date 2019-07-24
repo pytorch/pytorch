@@ -22,7 +22,7 @@ static void lerp_kernel_scalar(
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "lerp_kernel_scalar", [&] {
     scalar_t weight_val = weight.to<scalar_t>();
     at::native::cpu_kernel(
-        *iter,
+        iter,
         [weight_val](scalar_t self_val, scalar_t end_val) {
           return (weight_val < 0.5)
               ? self_val + weight_val * (end_val - self_val)
@@ -44,7 +44,7 @@ static void lerp_kernel_tensor(
   auto iter = builder.build();
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "lerp_kernel_tensor", [&] {
     at::native::cpu_kernel(
-        *iter,
+        iter,
         [](scalar_t self_val, scalar_t end_val, scalar_t weight_val) {
           return (weight_val < 0.5)
               ? self_val + weight_val * (end_val - self_val)

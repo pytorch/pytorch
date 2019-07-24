@@ -111,7 +111,7 @@ class BatchDataBuffer {
       auto batch_example_indices = this->example_sampler_.next(example_count);
       AT_ASSERT(
           batch_example_indices &&
-          batch_example_indices.value().size() == example_count)
+          batch_example_indices.value().size() == example_count);
       BatchRequestType& indices = batch_example_indices.value();
       for (size_t i : indices) {
         TORCH_CHECK(i < data_size, "Index out of range");

@@ -209,6 +209,7 @@ scalar_types = [
     ('Long', 'int64_t', 'Long', False),
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
+    ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
 ]
 
 
@@ -514,6 +515,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'dispatch_scalar_type_declaration': str,
     'with_gil': bool,
     'cpu_half': bool,
+    'cpu_bfloat16': bool,
     'deprecated': bool,
     'cpu_bool': bool,
     'cuda_bool': bool,

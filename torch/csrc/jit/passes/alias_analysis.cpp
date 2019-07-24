@@ -275,7 +275,6 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeContainerConstruct(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
-    case prim::DictIndex:
     case prim::TupleSlice:
     case prim::ListUnpack:
     case prim::PythonOp:
@@ -1118,7 +1117,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Function,
       prim::TupleUnpack,
       prim::TupleIndex,
-      prim::DictIndex,
       prim::TupleSlice,
       prim::ListUnpack,
       prim::PythonOp,

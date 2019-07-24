@@ -5,6 +5,7 @@
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
+#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -112,6 +113,15 @@ int64_t CUDAHooks::current_device() const {
     return device;
   }
   return -1;
+}
+
+bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
+  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
+              "hasPrimaryContext expects valid device index, but got device_index=", device_index);
+  unsigned int ctx_flags;
+  int ctx_is_active;
+  AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
+  return ctx_is_active == 1;
 }
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {

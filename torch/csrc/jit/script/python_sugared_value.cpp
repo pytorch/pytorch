@@ -277,7 +277,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         self_, py::cast<std::vector<std::string>>(overloads));
   }
   if (!py::hasattr(py_module_, field.c_str())) {
-    throw ErrorReport(loc) << "module has no attribute '" << field;
+    throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   py::object attr = py::getattr(py_module_, field.c_str());
 
@@ -488,10 +488,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   if (py::isinstance<py::function>(obj)) {
     if (typeString(obj) == "builtin_function_or_method") {
-      throw ErrorReport(loc)
-          << "You are calling a python builtin_function_or_method "
-          << "which is currently not supported in Torchscript."
-          << "Please open a feature request to add it.";
+      throw ErrorReport(loc) << "Python builtin " << py::str(obj)
+                             << " is currently not supported in Torchscript";
     }
   }
 

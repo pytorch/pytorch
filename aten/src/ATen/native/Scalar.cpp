@@ -21,7 +21,7 @@ Scalar item(const Tensor& self) {
 Scalar _local_scalar_dense_cpu(const Tensor& self) {
   Scalar r;
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
-    at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "_local_scalar_dense_cpu", [&] {
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "_local_scalar_dense_cpu", [&] {
         scalar_t value = *self.data<scalar_t>();
         r = Scalar(value);
       });

@@ -170,7 +170,7 @@ class ShapePropagator {
     // prevented it
     std::stringstream ss;
     ss << "unable to create representative value for: " << type_->str()
-       << ". File a bug report.";
+       << ". File a bug report";
     throw std::runtime_error(ss.str());
   }
 
@@ -982,8 +982,8 @@ class ShapePropagator {
             "aten::adaptive_avg_pool2d(Tensor self, int[] output_size) -> Tensor",
             "aten::adaptive_avg_pool3d(Tensor self, int[] output_size) -> Tensor",
             "aten::avg_pool1d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
-            "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
-            "aten::avg_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
+            "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor",
+            "aten::avg_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor",
             "aten::max_pool1d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
             "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
             "aten::max_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
@@ -1219,56 +1219,6 @@ class ShapePropagator {
           at::optional<IValue> opt_dtype = node->get(attr::dtype);
           return reduce_op_handler(
               node, /*num_reduce_dim=*/0, /*integer_upcast=*/true, opt_dtype);
-        }};
-
-    // Requirements:
-    //   dims           : preserved if keepdim == false, dim->size() smaller
-    //   otherwise
-    //   scalar type    : preserved
-    //   device         : preserved
-    //   tensor inputs  : 1
-    //   tensor outputs : 1
-    // Additionally:
-    //   - First input should be the only tensor input
-    //   - has a bool keepdim argument
-    static const register_formula_for multidim_reduce_ops{
-        {
-            "aten::logsumexp(Tensor self, int[] dim, bool keepdim) -> Tensor",
-            "aten::norm(Tensor self, Scalar? p, int[] dim, bool keepdim) -> Tensor",
-            "aten::std(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
-            "aten::var(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
-            "aten::max_values(Tensor self, int[] dim, bool keepdim) -> Tensor",
-            "aten::min_values(Tensor self, int[] dim, bool keepdim) -> Tensor",
-        },
-        [](Node* node) -> type_vec_t {
-          auto dims = node->namedInput(attr::dim)->node()->inputs().size();
-          return multidim_reduce_with_keepdim(
-              node,
-              /*num_reduced_dim=*/dims,
-              /*upcast_integer=*/false);
-        }};
-
-    // Requirements:
-    //   dims           : preserved if keepdim == false, dim.size() smaller otherwise
-    //   scalar type    : preserved if floating point, otherwise long/int64
-    //   device         : preserved
-    //   tensor inputs  : 1
-    //   tensor outputs : 1
-    // Additionally:
-    //   - has bool keepdim and int[] dim arguments
-    static const register_formula_for multidim_reduce_ops_with_integer_upcast{
-        {
-            "aten::sum(Tensor self, int[] dim, bool keepdim, *, int? dtype) -> Tensor",
-            "aten::mean(Tensor self, int[] dim, bool keepdim, *, int? dtype) -> Tensor",
-        },
-        [](Node* node) -> type_vec_t {
-          auto dims = node->namedInput(attr::dim)->node()->inputs().size();
-          auto opt_keepdim = node->get<bool>(attr::keepdim);
-          at::optional<IValue> opt_dtype = node->get(attr::dtype);
-          auto num_reduced = *opt_keepdim ? 0 : dims;
-          // TODO: can dim contain duplicates?
-          return reduce_op_handler(
-              node, /*num_reduced_dim=*/num_reduced, /*upcast_integer=*/true, opt_dtype);
         }};
 
     // Requirements:
