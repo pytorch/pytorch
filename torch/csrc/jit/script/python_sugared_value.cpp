@@ -26,11 +26,6 @@ c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
   return c10::nullopt;
 }
 
-thread_local bool recurse_on_python_ops = false;
-bool& getRecursiveScriptMode() {
-  return recurse_on_python_ops;
-}
-
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
     const size_t n_binders) {
@@ -244,87 +239,6 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
                          << err.str();
 }
 
-std::vector<Module> compile_cache;
-
-bool is_same(const Module& module, const Module& cached_module) {
-  auto names = module.type()->attributeNames();
-
-  // If the modules have a different number of attributes (i.e. some are
-  // conditionally defined), we can't use the cached module. The cached module
-  // may either be missing attributes or use attributes that the module doesn't
-  // have defined.
-  if (module.type()->numAttributes() != cached_module.type()->numAttributes()) {
-    std::cout << "num attrs mismatch\n";
-    return false;
-  }
-
-  std::cout << "Checking " << module.type()->qualname() << " (" << module.type()
-            << ") against " << cached_module.type()->qualname() << " ("
-            << cached_module.type() << ")\n";
-  std::cout << "\tunit: " << module.type()->compilation_unit().get() << " and "
-            << cached_module.type()->compilation_unit().get() << "\n";
-
-  // py::module::import("torch.jit").attr("dothing")();
-  // py::module::import("traceback").attr("print_exc")();
-  std::cout << "py: " << Py_file_input << "\n";
-  throw std::exception();
-  if (module.type()->qualname() != cached_module.type()->qualname()) {
-    std::cout << "qualname mismatch\n";
-    return false;
-  }
-
-  // For each slot on the module being looked up, check that the cached module
-  // has an attribute of that same type
-  for (const auto& name : names) {
-    const auto& module_slot_type =
-        module.type()->getAttribute(module.type()->getAttributeSlot(name));
-
-    if (!cached_module.type()->hasAttribute(name)) {
-      std::cout << "Cached module is missing " << name << "\n";
-      return false;
-    }
-
-    const auto& cached_module_slot_type = cached_module.type()->getAttribute(
-        cached_module.type()->getAttributeSlot(name));
-
-    if (!module_slot_type->isSubtypeOf(cached_module_slot_type)) {
-      std::cout << "type mismatch on slot " << name << "\n";
-      return false;
-    }
-  }
-
-  std::cout << "MATCH\n";
-  return true;
-}
-
-// Is there an already compiled module of the same type? If so, grab the field
-// and return it instead of re-compiling
-c10::optional<Module> check_cache(
-    const Module& module,
-    const std::string& field) {
-  std::cout << "Checking cache to look up " << module.type()->str()
-            << " (cache has " << compile_cache.size() << " items)\n";
-  size_t i = 0;
-  for (const auto& mod : compile_cache) {
-    if (is_same(module, mod)) {
-      std::cout << "Found same on entry " << i << "\n";
-      return mod;
-    }
-    std::cout << "not same\n";
-    ++i;
-  }
-  return c10::nullopt;
-}
-
-void cache_module(const Module& module) {
-  compile_cache.push_back(module);
-}
-
-bool should_recurse(py::object obj) {
-  return py::cast<bool>(py::module::import("torch.jit._recursive")
-                            .attr("is_recursive_script_enabled")(obj));
-}
-
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
@@ -386,28 +300,33 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<ConstantParameterList>(list);
   }
 
-  // If recursive script mode is on, add a python method as a script::Method
-  if (should_recurse(attr)) {
-    if (py::isinstance<py::function>(attr)) {
-      // TODO: this is not necessarily a method, it can be a free function
-      //   eg. my_module.something = my_global_function
-      auto cached_module = check_cache(module_, field);
-      if (cached_module) {
-        // Cache hit for this module, so attach that module's methof for this
-        // field to this module and exit
-        std::cout << "!! cache hit !!\n";
-        module_.type()->swapCU(cached_module->type()->compilation_unit());
-        return SimpleValue(self_).attr(loc, m, field);
-      } else {
-        // Cache miss, so compile the method and add the module to the cache
-        auto stub = py::module::import("torch.jit._recursive")
-                        .attr("create_method_from_fn")(py_module_, attr);
-        if (!stub.is_none()) {
-          // TODO: put this somewhere else
-          cache_module(module_);
-          return SimpleValue(self_).attr(loc, m, field);
-        }
-      }
+  // Recursively create a ScriptModule and register it as
+  // as submodule or register a python method as a script::Method
+  if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
+    // If the module is a submodule of the py_module, convert it to a
+    // ScriptModule and add it as a submodule to the script::Module. This
+    // enables lazy strong-ification of modules.
+    auto result =
+        py::module::import("torch.jit")
+            .attr("_make_strong_submodule")(field, attr, py_module_);
+    if (!result.is_none()) {
+      auto submodule = as_module(result);
+      TORCH_CHECK(
+          submodule,
+          "Result of torch.jit._make_strong_submodule "
+          "was not a ScriptModule");
+      // The module was a submodule of the nn.Module, so register it here
+      // and return the submodule.
+      module_.register_module(field, *submodule);
+      auto v = module_.find_module(field);
+      return std::make_shared<ModuleValue>(
+          m.graph()->insertGetAttr(self_, field), *v, result);
+    }
+  } else if (py::isinstance<py::function>(attr)) {
+    auto stub = py::module::import("torch.jit")
+                    .attr("_create_method_from_fn")(py_module_, attr);
+    if (!stub.is_none()) {
+      return SimpleValue(self_).attr(loc, m, field);
     }
   }
 
@@ -511,6 +430,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     Function& m,
     SourceRange loc,
     bool is_constant) {
+
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
   // f = python_constant
@@ -585,15 +505,38 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
-    auto pyCu = CompilationUnit::_get_python_cu();
+    auto pyCu = get_python_cu();
     if (auto classType = pyCu->get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
+    } else {
+      // If we can't get the source code for the type, it's implemented in C and
+      // probably part of the standard library, so give up and leave it as a
+      // call to Python
+      bool can_compile_class = py::cast<bool>(
+          py::module::import("torch._jit_internal").attr("can_compile_class")(obj));
+      if (can_compile_class) {
+        // Register class
+        auto rcb = py::module::import("torch._jit_internal")
+                       .attr("createResolutionCallbackForClassMethods")(obj);
+        py::module::import("torch.jit")
+            .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
+
+        // Return class
+        auto newClassType = pyCu->get_class(c10::QualifiedName(qualifiedName));
+        AT_ASSERT(
+            newClassType,
+            "Class '",
+            qualifiedName,
+            "' should have been compiled but was not");
+        return std::make_shared<ClassValue>(newClassType);
+      }
     }
   }
 
-  if (should_recurse(obj) && py::isinstance<py::function>(obj)) {
+  py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
+  if (py::cast<bool>(isFunction)) {
     auto compiled_fn =
-        py::module::import("torch.jit._recursive").attr("try_compile_fn")(obj);
+        py::module::import("torch.jit").attr("_try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
