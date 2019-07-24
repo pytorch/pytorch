@@ -332,7 +332,8 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
   const auto name = QualifiedName(module.name(), "forward");
-  module.module_object()->compilation_unit()->create_function(name, graph);
+  auto method = module.class_compilation_unit()->create_function(name, graph);
+  module.type()->addMethod(method);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -346,7 +347,7 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module>(m, "ScriptModule")
-      .def(py::init<std::string>())
+      .def(py::init<std::string, std::shared_ptr<CompilationUnit>>())
       .def(
           "save",
           [](Module& m,
@@ -524,8 +525,9 @@ void initJitScriptBindings(PyObject* module) {
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, &self);
             const auto method_name = QualifiedName(self.name(), name);
-            self.module_object()->compilation_unit()->create_function(
+            auto fn = self.class_compilation_unit()->create_function(
                 method_name, graph);
+            self.type()->addMethod(fn);
             didFinishEmitModule(self);
           })
       .def(
@@ -547,8 +549,7 @@ void initJitScriptBindings(PyObject* module) {
             PythonPrint(
                 ss,
                 source_ranges,
-                *self.class_compilation_unit(),
-                true,
+                self,
                 tensors,
                 classes,
                 false);
@@ -556,6 +557,8 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("_copy_into", &Module::copy_into)
+      .def_property_readonly(
+          "name", [](const Module& self) { return self.name().name(); })
       .def(
           "clone_method", [](Module& m, Module& orig, const std::string& name) {
             m.clone_method(orig, name);
@@ -654,9 +657,13 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             return self.function_->get_executor().getDebugState();
           })
-      .def_property_readonly("name", [](const StrongFunctionPtr& self) {
-        return self.function_->name();
-      });
+      .def_property_readonly(
+          "name",
+          [](const StrongFunctionPtr& self) { return self.function_->name(); })
+      .def_property_readonly(
+          "qualified_name", [](const StrongFunctionPtr& self) {
+            return self.function_->qualname().qualifiedName();
+          });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
@@ -681,12 +688,6 @@ void initJitScriptBindings(PyObject* module) {
             ss, source_ranges, self.function(), true, tensors, classes, false);
         return ss.str();
       });
-  m.def(
-      "_jit_recursive_script",
-      []() { return getRecursiveScriptMode(); });
-  m.def(
-      "_jit_recursive_script",
-      [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
       [](const std::string& qualname,
@@ -722,10 +723,10 @@ void initJitScriptBindings(PyObject* module) {
         auto typed_inputs = toTypedStack(input_tuple);
         auto graph = tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, force_outplace);
-        // TODO this should go in the global Python CU
-        auto cu = std::make_shared<CompilationUnit>();
-        const auto name = c10::QualifiedName(qualname);
-        auto result = cu->create_function(std::move(name), std::move(graph));
+        auto cu = get_python_cu();
+        auto name = c10::QualifiedName(qualname);
+        auto result = cu->create_function(
+            std::move(name), std::move(graph), /*shouldMangle=*/true);
         StrongFunctionPtr ret(std::move(cu), result);
         didFinishEmitFunction(ret);
         return ret;
@@ -737,14 +738,24 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
+        if (classDef.superclass().present()) {
+          throw ErrorReport(classDef.range())
+              << "Torchscript does not support class inheritance.";
+        }
         auto cu = get_python_cu();
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
         cu->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
-        for (const auto& def : classDef.defs()) {
-          methodDefs.push_back(def);
+        for (const auto& def : classDef.body()) {
+          if (def.kind() != TK_DEF) {
+            throw ErrorReport(def.range())
+                << "Currently class bodies can only contain method "
+                   "definitions. File an issue on Github if you want "
+                   "something else!";
+          }
+          methodDefs.emplace_back(Def(def));
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
@@ -760,7 +771,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def(
       "import_ir_module",
-      [](ModuleLookup module_lookup,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& filename,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -770,11 +781,15 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, filename, optional_device, extra_files);
+        return import_ir_module(
+            std::move(cu),
+            filename,
+            optional_device,
+            extra_files);
       });
   m.def(
       "import_ir_module_from_buffer",
-      [](ModuleLookup module_lookup,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& buffer,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -785,17 +800,17 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, in, optional_device, extra_files);
+        return import_ir_module(
+            std::move(cu), in, optional_device, extra_files);
       });
 
   m.def(
       "_jit_import_functions",
-      [](CompilationUnit& cu,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& src,
          const std::vector<at::Tensor>& constant_table) {
         import_functions(
             c10::nullopt,
-            *get_python_cu(),
             cu,
             std::make_shared<Source>(src),
             constant_table,
@@ -827,8 +842,7 @@ void initJitScriptBindings(PyObject* module) {
       PythonPrint(
           ss,
           source_ranges,
-          *self->class_compilation_unit(),
-          true,
+          *self,
           constants,
           classes,
           true);

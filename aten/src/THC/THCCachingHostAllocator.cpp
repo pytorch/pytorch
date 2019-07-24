@@ -1,4 +1,6 @@
 #include <THC/THCCachingHostAllocator.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 
 #include <cuda_runtime_api.h>
@@ -40,6 +42,24 @@ static bool BlockComparator(const BlockSize& a, const BlockSize& b)
   return (uintptr_t)a.ptr < (uintptr_t)b.ptr;
 }
 
+static int64_t inline get_device_index_with_primary_context() {
+  const auto& cuda_hooks = at::detail::getCUDAHooks();
+  // check current device first
+  int64_t current_device_index = cuda_hooks.current_device();
+  if (current_device_index >= 0) {
+    if (cuda_hooks.hasPrimaryContext(current_device_index)) {
+      return current_device_index;
+    }
+  }
+  for (int64_t device_index = 0; device_index < cuda_hooks.getNumGPUs(); device_index++) {
+    if (device_index == current_device_index) continue;
+    if (cuda_hooks.hasPrimaryContext(device_index)) {
+      return device_index;
+    }
+  }
+  return -1;
+}
+
 struct HostAllocator
 {
   typedef bool (*Comparison)(const BlockSize&, const BlockSize&);
@@ -78,6 +98,17 @@ struct HostAllocator
       *ptr = block.ptr;
       available.erase(it);
       return cudaSuccess;
+    }
+
+    // Pinned memory pointers allocated by any device can be directly used by any
+    // other device, regardless of the current device at the time of allocation,
+    // since we assume unified addressing.
+    // So we grab any existing primary context, if available.
+    // See pytorch/pytorch#21081.
+    at::OptionalDeviceGuard device_guard;
+    auto primary_ctx_device_index = get_device_index_with_primary_context();
+    if (primary_ctx_device_index >= 0) {
+      device_guard.reset_device(at::Device(at::DeviceType::CUDA, primary_ctx_device_index));
     }
 
     // note that cudaHostAlloc may not touch pointer if size is 0

@@ -86,7 +86,7 @@ namespace native {
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
-  TORCH_CHECK(self.defined(), "src is undefined");
+  TORCH_CHECK(src.defined(), "src is undefined");
 
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
@@ -126,12 +126,12 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   builder.dont_compute_common_dtype();
   auto iter = builder.build();
 
-  if (iter->numel() == 0) {
+  if (iter.numel() == 0) {
     return self;
   }
 
-  DeviceType device_type = iter->device_type(0);
-  if (iter->device_type(1) == kCUDA) {
+  DeviceType device_type = iter.device_type(0);
+  if (iter.device_type(1) == kCUDA) {
     device_type = kCUDA;
   }
 
@@ -140,7 +140,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     return self;
   }
 
-  copy_stub(device_type, *iter, non_blocking);
+  copy_stub(device_type, iter, non_blocking);
   return self;
 }
 
