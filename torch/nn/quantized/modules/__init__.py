@@ -1,4 +1,4 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS​
+# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 from torch.nn.modules.pooling import MaxPool2d
 

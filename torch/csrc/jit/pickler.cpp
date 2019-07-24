@@ -1,7 +1,8 @@
-#include <torch/csrc/jit/pickler.h>
 #include <ATen/ATen.h>
-#include <string>
 #include <ATen/core/Dict.h>
+#include <torch/csrc/jit/function.h>
+#include <torch/csrc/jit/pickler.h>
+#include <string>
 
 namespace torch {
 namespace jit {
@@ -193,13 +194,18 @@ void Pickler::addIValueImpl(const IValue& ivalue) {
     pushGlobal(type->qualifier(), type->basename());
     push<OpCode>(OpCode::EMPTY_TUPLE);
     push<OpCode>(OpCode::NEWOBJ);
-    push<OpCode>(OpCode::EMPTY_DICT);
-    push<OpCode>(OpCode::MARK);
-    for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
-      pushString(type->getAttributeName(i));
-      addIValue(obj->getSlot(i));
+    if (checkHasValidSetGetState(type)) {
+      Function* getstate = type->getMethod("__getstate__");
+      addIValue((*getstate)({obj}));
+    } else {
+      push<OpCode>(OpCode::EMPTY_DICT);
+      push<OpCode>(OpCode::MARK);
+      for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
+        pushString(type->getAttributeName(i));
+        addIValue(obj->getSlot(i));
+      }
+      push<OpCode>(OpCode::SETITEMS);
     }
-    push<OpCode>(OpCode::SETITEMS);
     push<OpCode>(OpCode::BUILD);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
@@ -721,17 +727,27 @@ OpCode Unpickler::readInstruction() {
         AT_ASSERT(class_resolver_);
         at::StrongTypePtr type =
             class_resolver_(c10::QualifiedName(module_name, class_name));
-        globals_.emplace_back([this, type] {
-          auto dict = stack_.back().toGenericDict();
-          stack_.pop_back();
-          auto cls = type.type_->expect<at::ClassType>();
-          size_t n = cls->numAttributes();
-          auto obj = c10::ivalue::Object::create(type, n);
-          for (size_t i = 0; i < n; ++i) {
-            obj->setSlot(i, dict.at(cls->getAttributeName(i)));
-          }
-          stack_.emplace_back(std::move(obj));
-        });
+        auto cls = type.type_->expect<at::ClassType>();
+        size_t n = cls->numAttributes();
+        if (checkHasValidSetGetState(type.type_)) {
+          globals_.emplace_back([this, type, n] {
+            auto arg = std::move(stack_.back());
+            stack_.pop_back();
+            auto obj = c10::ivalue::Object::create(type, n);
+            (*type.type_->getMethod("__setstate__"))({obj, arg});
+            stack_.emplace_back(std::move(obj));
+          });
+        } else {
+          globals_.emplace_back([this, type, cls, n] {
+            auto dict = std::move(stack_.back()).toGenericDict();
+            stack_.pop_back();
+            auto obj = c10::ivalue::Object::create(type, n);
+            for (size_t i = 0; i < n; ++i) {
+              obj->setSlot(i, dict.at(cls->getAttributeName(i)));
+            }
+            stack_.emplace_back(std::move(obj));
+          });
+        }
       }
       stack_.emplace_back(int64_t(globals_.size() - 1));
     } break;
@@ -874,6 +890,66 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
 uint64_t getStorageKey(const at::Tensor& tensor) {
   at::StorageImpl* storage_key = tensor.storage().unsafeGetStorageImpl();
   return reinterpret_cast<intptr_t>(storage_key);
+}
+
+bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
+  // Check that the schemas for __getstate__ and __setstate__ are correct
+  auto getstate = cls->getMethod("__getstate__");
+  if (getstate == nullptr) {
+    return false;
+  }
+  auto get_schema = getstate->getSchema();
+
+  // Check __getstate__
+  //   __getstate__ is expected to be (self) -> T
+  TORCH_CHECK(
+      get_schema.arguments().size() == 1,
+      "'__getstate__' must have 'self' as its only argument, but found ",
+      get_schema.arguments().size(),
+      " arguments");
+  TORCH_CHECK(
+      get_schema.returns().size() == 1,
+      "'__getstate__' must return 1 value, but found ",
+      get_schema.returns().size());
+
+  // Check __setstate__ if the method exists
+  //   __setstate__ is expected to be (self, T) -> None
+  auto setstate = cls->getMethod("__setstate__");
+  if (!setstate) {
+    return false;
+  }
+  auto set_schema = setstate->getSchema();
+
+  TORCH_CHECK(
+      set_schema.arguments().size() == 2,
+      "'__setstate__' must have 'self' and the state as its "
+      "only arguments, but found ",
+      set_schema.arguments().size(),
+      " arguments");
+  TORCH_CHECK(
+      set_schema.returns().size() == 1,
+      "'__setstate__' must return None, but found ",
+      set_schema.returns().size(),
+      " return values");
+  TORCH_CHECK(
+      set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
+      "'__setstate__' must return None, but found value of type",
+      set_schema.returns().at(0).type()->python_str());
+
+  // Check that the return type of __getstate__ matches the input to
+  // __setstate__
+  auto get_type = get_schema.returns().at(0).type();
+  auto set_type = set_schema.arguments().at(1).type();
+
+  TORCH_CHECK(
+      set_type->isSubtypeOf(get_type),
+      "'__getstate__'s return type (",
+      get_type->python_str(),
+      " does not match '__setstate__'s argument type (",
+      set_type->python_str(),
+      "))");
+
+  return true;
 }
 
 } // namespace jit

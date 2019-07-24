@@ -264,5 +264,10 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor);
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);
 
+// if the cls has __getstate__/__setstate__
+// assert they have the right schema and return true,
+// otherwise return false
+bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
+
 } // namespace jit
 } // namespace torch
