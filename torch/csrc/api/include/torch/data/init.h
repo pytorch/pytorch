@@ -91,13 +91,42 @@ class PyChunkDataReader : public ChunkDataReader<DataType> {
   }
 };
 
+/* Generates Python bindings for a specific ChunkDataReader implementation
+ *
+ * A reference for the binded class is returned so that its constructors
+ * are manually binded by the user. This is necessary as the constructor
+ * signature are implementation specific
+ */
 template <typename SpecificChunkDataReader>
-void bind_chunkdataset(py::module &m, const std::string& typestr) {
-  // Getting reference to python submodule
+py::class_<SpecificChunkDataReader>& bind_chunkdatareader(
+    py::module& m,
+    const std::string& typestr) {
+  // SpecificChunkDataReader
+  return py::class_<SpecificChunkDataReader>(
+             m,
+             typestr.c_str(),
+             "Performs data chunking and reading of entire chunks")
+      .def(
+          "read_chunk",
+          &SpecificChunkDataReader::read_chunk,
+          "Returns data from a chunk file",
+          py::arg("chunk_index"),
+          py::return_value_policy::take_ownership)
+      .def(
+          "chunk_count",
+          &SpecificChunkDataReader::chunk_count,
+          "Returns the number of chunks")
+      .def("reset", &SpecificChunkDataReader::reset, "Not used");
+}
 
+/* Generates Python bindings for a specific ChunkDataset implementation */
+template <typename SpecificChunkDataReader>
+void bind_chunkdataset(py::module& m, const std::string& typestr) {
   // SpecificChunkDataset
-  using SpecificChunkDataset =
-      ChunkDataset<SpecificChunkDataReader, samplers::SamplerWrapper, samplers::SamplerWrapper>;
+  using SpecificChunkDataset = ChunkDataset<
+      SpecificChunkDataReader,
+      samplers::SamplerWrapper,
+      samplers::SamplerWrapper>;
   py::class_<SpecificChunkDataset>(
       m,
       typestr.c_str(),
@@ -144,7 +173,8 @@ void bind_chunkdataset(py::module &m, const std::string& typestr) {
                 samplers::SamplerWrapper(example_sampler),
                 options);
           }),
-          std::string("Creates and returns a new `" + typestr + "` instance").c_str(),
+          std::string("Creates and returns a new `" + typestr + "` instance")
+              .c_str(),
           py::arg("chunk_reader"),
           py::arg("options"),
           py::arg("shuffle_chunks") = true,
