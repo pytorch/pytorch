@@ -22,7 +22,9 @@ void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  return add_kernel_cuda(iter, -alpha_scalar);
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "sub_cuda", [&]() {
+    add_kernel_cuda(iter, -alpha_scalar);
+  });
 }
 
 void div_kernel_cuda(TensorIterator& iter) {

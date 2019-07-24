@@ -31,7 +31,9 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
-  add_kernel(iter, -alpha_scalar);
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sub_cpu", [&]() {
+    add_kernel(iter, -alpha_scalar);
+  });
 }
 
 void mul_kernel(TensorIterator& iter) {
