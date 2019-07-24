@@ -196,6 +196,11 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
         build_name = build_config.gen_build_name("build")
         jobs_list.append({build_name: {"requires": ["setup"]}})
 
+    jobs_dict[toplevel_key] = OrderedDict(
+        triggers=gen_schedule_tree(cron_schedule),
+        jobs=jobs_list,
+    )
+
     graph = visualization.generate_graph(get_root(smoke, toplevel_key))
     graph.draw(toplevel_key + "-config-dimensions.png", prog="twopi")
 
