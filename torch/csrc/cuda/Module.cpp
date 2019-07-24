@@ -17,7 +17,6 @@
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
@@ -43,7 +42,6 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
   int64_t device = THPUtils_unpackLong(arg);
 
-  torch::utils::cuda_lazy_init();
   THCPModule_setDevice(device);
 
   Py_RETURN_NONE;
@@ -54,7 +52,6 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
   int device;
-  torch::utils::cuda_lazy_init();
   THCudaCheck(cudaGetDevice(&device));
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
@@ -63,16 +60,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
-  //torch::utils::cuda_lazy_init();
   return PyLong_FromLong(at::cuda::device_count());
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_set_run_yet_variable_to_false_wrap(PyObject *self)
-{
-  HANDLE_TH_ERRORS
-  torch::utils::set_run_yet_variable_to_false();
-  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -399,8 +387,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
-  {"_cuda_set_run_yet_variable_to_false",
-    (PyCFunction)THCPModule_set_run_yet_variable_to_false_wrap, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     (PyCFunction)THCPModule_getCurrentStream_wrap, METH_O, nullptr},
   {"_cuda_getDefaultStream",
