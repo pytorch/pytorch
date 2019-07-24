@@ -324,14 +324,11 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t r1 = x1.size(-2);
   const int64_t r2 = x2.size(-2);
   const int64_t m = x1.size(-1);
-  int64_t d = 1;
-  if (x1.dim() > 2) {
-    d = x1.size(0);
-  }
+  int64_t batch = x1.dim() > 2 ? x1.size(0) : 1;
   const int block_x = 64;
   const int block_y = 16;
   const int grid_x = (m + block_x * 8 - 1) / (block_x * 8);
-  const int grid_y = ((r1 * r2 * d) + block_y - 1) / block_y;
+  const int grid_y = ((r1 * r2 * batch) + block_y - 1) / block_y;
 
   const dim3 grid(grid_x, grid_y);
   const dim3 block(block_x, block_y);
@@ -341,7 +338,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
 
-  Tensor buffer = at::empty({d, r2, r1, m}, result.options());
+  Tensor buffer = at::empty({batch, r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
       cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);

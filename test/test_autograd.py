@@ -2229,11 +2229,11 @@ class TestAutograd(TestCase):
 
     def test_cdist(self):
         def _test_cdist_for_size(sizes):
-            devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+            devices = torch.testing.get_all_device_types()
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True),
-                                       torch.randn(sizes, device=device, requires_grad=True))
+                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
+                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
@@ -2244,6 +2244,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
