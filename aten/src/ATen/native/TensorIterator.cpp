@@ -515,6 +515,7 @@ std::unique_ptr<TensorIterator> TensorIterator::comparison_op(Tensor& out, const
   builder.add_input(a);
   builder.add_input(b);
   builder.iter_->allow_cpu_scalars_ = true;
+  builder.dont_compute_common_dtype();
   return builder.build();
 }
 
