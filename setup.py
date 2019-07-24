@@ -182,8 +182,7 @@ import importlib
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
-                                     check_env_flag,
-                                     DEBUG, REL_WITH_DEB_INFO)
+                                     check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
@@ -288,7 +287,7 @@ def build_deps():
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(DEBUG)))
+        f.write("debug = {}\n".format(repr(build_type.is_debug())))
         f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
         f.write("git_version = {}\n".format(repr(sha)))
 
@@ -631,14 +630,14 @@ def configure_extension_build():
                     break
         library_dirs.append(cuda_lib_path)
 
-    if DEBUG:
+    if build_type.is_debug():
         if IS_WINDOWS:
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-O0', '-g']
             extra_link_args += ['-O0', '-g']
 
-    if REL_WITH_DEB_INFO:
+    if build_type.is_rel_with_deb_info():
         if IS_WINDOWS:
             extra_link_args.append('/DEBUG:FULL')
         else:
