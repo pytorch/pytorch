@@ -31,18 +31,20 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   out << ") -> ";
 
   const auto& returns = schema.returns();
-  if (schema.is_varret()) {
-    out << "...";
-  } else {
-    out << "(";
-    for(size_t i = 0; i < returns.size(); ++i) {
-      if (i > 0) {
-        out << ", ";
-      }
-      out << returns.at(i);
+  out << "(";
+  for(size_t i = 0; i < returns.size(); ++i) {
+    if (i > 0) {
+      out << ", ";
     }
-    out << ")";
+    out << returns.at(i);
   }
+  if (schema.is_varret()) {
+    if (returns.size() != 0) {
+      out << ", ";
+    }
+    out << "...";
+  }
+  out << ")";
   return out;
 }
 
