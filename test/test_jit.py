@@ -13013,7 +13013,7 @@ a")
             m = M(param)
             m(input)
             with open(fname, "rb") as handle:
-                loaded_tensor = torch.load(fname)
+                loaded_tensor = torch.load(fname)[0]
                 self.assertEqual(loaded_tensor, input + param)
 
     def _test_pickle_checkpoint_views(self, device):
@@ -13038,7 +13038,7 @@ a")
             m = M(param)
             m(input)
             with open(fname, "rb") as handle:
-                loaded_y, loaded_y_view, loaded_y_2 = torch.load(fname)
+                loaded_y, loaded_y_view, loaded_y_2 = torch.load(fname)[0]
                 self.assertEqual(loaded_y, input + param)
                 with torch.no_grad():
                     loaded_y_view[1] += 20
