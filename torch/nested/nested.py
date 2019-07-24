@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 # Set this flag to true, if you want to enable additional verifications.
 DEBUG = False
@@ -6,6 +7,68 @@ DEBUG = False
 # This implementation is based on NestedTensor 0.0.1
 # NOTE: This is experimental code! Don't use this in production!
 # RFC: https://github.com/pytorch/pytorch/issues/22169
+
+
+
+orig_interpolate = F.interpolate
+
+def interpolate(*args, **kwargs):
+    print("CALLING INTO MONKEY")
+    if is_nested_tensor(args[0]):
+        # feat_shape = inner_lateral.shape[-2:]
+        # inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
+        ret = []
+        # TODO: Implement size parameter
+        for i in range(len(last_inner)):
+            ret = F.interpolate(last_inner._tensors[i].view((1,) + last_inner._tensors[i].size()),
+                          size=tuple(inner_lateral._tensors[i].shape[-2:]),
+                          mode="nearest")
+            ret.append(ret.view(ret.size()[1:]))
+        return torch.nested.NestedTensor(ret)
+    else:
+        orig_interpolate(*args, **kwargs)
+
+orig_max_pool2d = torch.max_pool2d
+
+def max_pool2d(*args, **kwargs):
+    print("CALLING INTO MONKEY")
+    if is_nested_tensor(args[0]):
+        ret = []
+        for tensor_ in args[0]._tensors:
+            tensor = tensor_.view(*((1,) + tensor_.size()))
+            args_ = (tensor,) + args[1:]
+            ret_ = orig_max_pool2d(*args_)
+            ret.append(ret_.view(*(ret_.size()[1:])))
+        return NestedTensor(ret)
+    else:
+        orig_max_pool2d(*args, **kwargs)
+
+orig_conv2d = F.conv2d
+
+def conv2d(input, weight, bias, stride, padding, dilation, groups):
+    print("CALLING INTO MONKEY")
+    if is_nested_tensor(input):
+        ret = []
+        for tensor_ in input._tensors:
+            tensor = tensor_.view(*((1,) + tensor_.size()))
+            ret_ = orig_conv2d(tensor, weight, bias, stride,
+                               padding, dilation, groups)
+            ret.append(ret_.view(*(ret_.size()[1:])))
+        return NestedTensor(ret)
+    else:
+        return orig_conv2d(input, weight, bias, stride,
+                           padding, dilation, groups)
+orig_relu = F.relu
+
+def relu(input, inplace=False):
+    print("CALLING INTO MONKEY")
+    if is_nested_tensor(input):
+        ret = []
+        for tensor_ in input._tensors:
+            ret.append(orig_relu(tensor_, inplace))
+        return NestedTensor(ret)
+    else:
+        return orig_relu(input, inplace)
 
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)

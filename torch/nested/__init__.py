@@ -3,7 +3,6 @@ import torch
 
 from . import nested
 from . import codegen
-from . import nn
 
 def _nary_gen(out_dtype=None):
     # Follows signature of torch nary functions
@@ -42,23 +41,31 @@ def _nary_gen(out_dtype=None):
 # NOTE: This is inefficient! The functions that are being overwritten in torch
 # are being replaced by functions with very inefficient dispatch mechanisms to add
 # support for NestedTensor to torch.
-nested, nested.NestedTensor = codegen.add_pointwise_unary_functions(nested, nested.NestedTensor, _nary_gen())
-nested, nested.NestedTensor = codegen.add_pointwise_binary_functions(nested, nested.NestedTensor, _nary_gen())
-nested, nested.NestedTensor = codegen.add_pointwise_comparison_functions(nested, nested.NestedTensor, _nary_gen(torch.uint8))
 
 def monkey_patch(module):
-    for function in dir(nested):
-        if not function.startswith("_"):
-            setattr(module, function, getattr(nested, function))
+    print("SETUP MONKEY")
+    module.nested_tensor = nested.nested_tensor
+    module.NestedTensor = nested.NestedTensor
+    module.as_nested_tensor = nested.as_nested_tensor
 
-    for function in dir(nn):
-        if not function.startswith("_"):
-            setattr(module.nn, function, getattr(nn, function))
+    module, nested.NestedTensor = codegen.add_pointwise_unary_functions(module, nested.NestedTensor, _nary_gen())
+    module, nested.NestedTensor = codegen.add_pointwise_binary_functions(module, nested.NestedTensor, _nary_gen())
+    module, nested.NestedTensor = codegen.add_pointwise_comparison_functions(module, nested.NestedTensor, _nary_gen(torch.uint8))
 
-    for function in dir(nn.functional):
-        if not function.startswith("_"):
-            setattr(module.nn.functional.F, function, getattr(nn.functional, function))
+    module.nn.functional.interpolate = nested.interpolate
+    module.nn.functional.conv2d = nested.conv2d
+    module.nn.functional.relu = nested.relu
 
-from nested import *
+    module.max_pool2d = nested.max_pool2d
 
-__all__ = dir(nested)
+    return module
+
+    # for function in dir(nn):
+    #     if not function.startswith("_"):
+    #         setattr(module.nn, function, getattr(nn, function))
+
+    # for function in dir(nn.functional):
+    #     if not function.startswith("_"):
+    #         setattr(module.nn.functional.F, function, getattr(nn.functional, function))
+
+__all__ = ["monkey_patch"]
