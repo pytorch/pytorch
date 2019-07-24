@@ -12,27 +12,21 @@ namespace jit {
 /// .. code-block:: cpp
 ///
 ///   torch::IValue float_value(2.3);
-///   torch::IValue tensor_value(at::ones(2, 2));
-///
-///   std::string data = torch::jit::Pickle({float_value, tensor_value});
+///   std::string data = torch::jit::Pickle({float_value});
 ///   std::ofstream out("data.pkl");
 ///   out << data;
+///   out.flush();
 ///
 ///
-///   std::ifstream in("data.pkl", ios::binary);
-///   std::string data = std::string(
-///       std::istreambuf_iterator<char>(in),
-///       std::istreambuf_iterator<char>());
-///   std::vector<torch::IValue> ivalues =
-///       torch::jit::Unpickle(std::stringstream(data));
+///   std::ifstream in("data.pkl", std::ios::binary);
+///   std::vector<torch::IValue> ivalues = torch::jit::Unpickle(in);
 ///   std::cout << ivalues.at(0) << "\n";
-///   std::cout << ivalues.at(1) << "\n";
 ///
 /// .. code-block:: python
 ///
-///   values = pickle.load(open("data.pkl", "rb"))
-///   print(values[0])
-///   print(values[1])
+///   values = torch.load('data.pkl')
+///   print(values)
+///
 /// \endrst
 TORCH_API std::string Pickle(
     std::vector<IValue> ivalues,

@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 
-std::string Pickle(
+TORCH_API std::string Pickle(
     std::vector<IValue> ivalues,
     std::vector<at::Tensor>* tensor_table) {
   std::stringstream ss;
@@ -23,7 +23,7 @@ std::string Pickle(
   return ss.str();
 }
 
-std::vector<IValue> Unpickle(
+TORCH_API std::vector<IValue> Unpickle(
     std::istream& in,
     std::vector<at::Tensor>* tensor_table,
     ClassResolver class_resolver) {
@@ -32,7 +32,7 @@ std::vector<IValue> Unpickle(
   return unpickler.parse_ivalue_list();
 }
 
-std::vector<IValue> Unpickle(
+TORCH_API std::vector<IValue> Unpickle(
     const char* data,
     size_t size,
     std::vector<at::Tensor>* tensor_table,
@@ -44,7 +44,7 @@ std::vector<IValue> Unpickle(
   return unpickler.parse_ivalue_list();
 }
 
-std::vector<IValue> Unpickle(
+TORCH_API std::vector<IValue> Unpickle(
     const void* data,
     size_t size,
     std::vector<at::Tensor>* tensor_table,
