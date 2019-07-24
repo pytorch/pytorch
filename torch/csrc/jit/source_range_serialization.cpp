@@ -130,7 +130,7 @@ c10::optional<SourceRange> ConcreteSourceRangeUnpickler::
     findSourceRangeThatGenerated(const SourceRange& range) {
   unpickle();
 
-  auto query = TaggedRange(range.start(), SourceRange{""});
+  auto query = TaggedRange(range.start(), SourceRange{});
   auto entry = std::upper_bound(
       unpickled_records->begin(),
       unpickled_records->end(),
