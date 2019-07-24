@@ -115,10 +115,10 @@ struct OperatorRegistry {
     return ret;
   }
 
-  const std::vector<std::shared_ptr<Operator>>& getAllOperators() {
+  const std::vector<std::shared_ptr<Operator>> getAllOperators() {
     std::lock_guard<std::mutex> guard(lock);
     registerPendingOperators();
-    static std::vector<std::shared_ptr<Operator>> values;
+    std::vector<std::shared_ptr<Operator>> values;
     values.clear();
     for (auto it = operators.begin(); it != operators.end(); ++it) {
       values.insert(values.end(), it->second.begin(), it->second.end());
@@ -155,7 +155,7 @@ void registerOperator(Operator&& op) {
   getRegistry().registerOperator(std::move(op));
 }
 
-const std::vector<std::shared_ptr<Operator>>& getAllOperators() {
+const std::vector<std::shared_ptr<Operator>> getAllOperators() {
   return getRegistry().getAllOperators();
 }
 
