@@ -1222,8 +1222,9 @@ graph(%Ra, %Rb):
                 return grad_output
 
         x = torch.tensor([0.], requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
-            torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
+        with warnings.catch_warnings(record=True):
+            with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
+                torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
 
     def test_inplace_transplant(self):
         x = torch.tensor([0.], requires_grad=True)
@@ -4526,7 +4527,8 @@ a")
                 return foo(x)
 
         f = io.BytesIO()
-        torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
+        with warnings.catch_warnings(record=True):
+            torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
 
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_cast(self):
@@ -6992,9 +6994,9 @@ a")
             m.sub = nn.Linear(5, 5)
 
     def test_script_inline_trace_multiple_args(self):
-        class M(torch.jit.ScriptModule):
+        class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__(False)
+                super(M, self).__init__()
 
             def forward(self, input, input2):
                 return input + input2
@@ -12246,10 +12248,11 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                pass
+                return None
 
             @torch.jit.export
-            def __setstate__(self):
+            def __setstate__(self, _):
+                # type: (None) -> None
                 self.buffer1 = torch.ones(2, 2) + 10
                 self.buffer2 = torch.ones(2, 2) + 10
 
@@ -13432,6 +13435,22 @@ class TestRecursiveScript(JitTestCase):
                 self.a = 4
                 self.inner = Inner()
 
+        @torch.jit.script
+        class SFoo(object):
+            def __init__(self):
+                self.a = 4
+                self.inner = Inner()
+
+            def __setstate__(self, obj):
+                # type: (Tuple[int, Inner]) -> None
+                a, inner = obj
+                self.a = a
+                self.inner = inner
+
+            def __getstate__(self):
+                return (self.a, self.inner)
+
+
         untyped_values = (
             ('my_dict', {"I": "am", "a test": "test"}),
             ('my_float', 2.3),
@@ -13451,6 +13470,7 @@ class TestRecursiveScript(JitTestCase):
             ('my_empty_dict', {}),
             ('my_none', None),
             ('my_object', Foo()),
+            ('my_object2', SFoo()),
         )
 
         class M(torch.nn.Module):
@@ -13480,6 +13500,8 @@ class TestRecursiveScript(JitTestCase):
                     self.my_none,
                     self.my_object.a,
                     self.my_object.inner.b,
+                    self.my_object.a,
+                    self.my_object2.inner.b,
                 )
 
         # TODO: as a followup, fix this test
@@ -13496,6 +13518,7 @@ class TestRecursiveScript(JitTestCase):
             'my_empty_dict': Dict[str, int],
             'my_none': Optional[int],
             'my_object': Foo,
+            'my_object2': SFoo,
         }
 
         m = M()
@@ -16450,6 +16473,14 @@ class TestDict(JitTestCase):
             return list(x.keys())
 
         self.assertEqual(set(keys(self.dict())), set(self.dict().keys()))
+
+        @torch.jit.script
+        def specialized_list():
+            li = {1: 1, 2: 2}.keys()
+            li.append(3)
+            return li
+
+        self.assertTrue(set(specialized_list()) == set([1, 2, 3]))
 
     def test_values(self):
         @torch.jit.script

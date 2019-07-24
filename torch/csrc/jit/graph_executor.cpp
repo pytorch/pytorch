@@ -111,7 +111,7 @@ struct CaptureList {
 
   void unpack(
       Stack& stack,
-      const std::shared_ptr<autograd::Function>& saved_for) {
+      const std::shared_ptr<autograd::Node>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
     auto size_it = sizes_.begin();
@@ -189,7 +189,7 @@ struct UnpackInstructions {
   std::vector<size_t> sizes_;
 };
 
-struct DifferentiableGraphBackward : public autograd::Function {
+struct DifferentiableGraphBackward : public autograd::Node {
   DifferentiableGraphBackward(
       GraphExecutor executor,
       size_t input_size,
@@ -213,7 +213,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     // Here stack.size()[=1] with a TensorList IValue of
     // backward graph output.
     // num_outputs()[=2], however, is the number of outputs of
-    // grad_fn (an autograd::Function). grad_fn's outputs are
+    // grad_fn (an autograd::Node). grad_fn's outputs are
     // grads with regard to Tensor/Variables `x`, but not
     // graph input TensorList [x, x]. These two grads will
     // be accumulated to x.grad later using autograd::InputBuffer.
@@ -262,7 +262,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
-      add_input_metadata(autograd::Function::undefined_input{});
+      add_input_metadata(autograd::Node::undefined_input{});
     }
   }
 
