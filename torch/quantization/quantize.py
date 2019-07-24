@@ -4,6 +4,9 @@ import torch.nn.quantized as nnq
 import torch.nn.qat as qat
 import torch
 
+from ._mappings import _DEFAULT_MODULE_MAPPING
+from ._mappings import _DEFAULT_QAT_MODULE_MAPPING
+
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
 
@@ -147,7 +150,7 @@ def prepare(model, qconfig_dict=None):
 
 def prepare_qat(model, qconfig_dict=None):
     model = prepare(model, qconfig_dict)
-    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
+    model = convert(model, _DEFAULT_QAT_MODULE_MAPPING)
     return model
 
 class QuantStub(nn.Module):
@@ -220,25 +223,7 @@ def quantize_qat(model, run_fn, run_args, qconfig_dict=None):
     convert(model)
     return model
 
-# Map for swapping float module to quantized ones
-DEFAULT_MODULE_MAPPING = {
-    torch.nn.Linear: nnq.Linear,
-    torch.nn.ReLU: nnq.ReLU,
-    torch.nn.Conv2d: nnq.Conv2d,
-    QuantStub: nnq.Quantize,
-    DeQuantStub: nnq.DeQuantize,
-    # QAT modules:
-    qat.Linear: nnq.Linear,
-    qat.Conv2d: nnq.Conv2d,
-}
-
-# Map for swapping float module to qat modules
-DEFAULT_QAT_MODULE_MAPPING = {
-    torch.nn.Linear: qat.Linear,
-    torch.nn.Conv2d: qat.Conv2d,
-}
-
-def convert(module, mapping=DEFAULT_MODULE_MAPPING):
+def convert(module, mapping=_DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
     parameters) to a quantized module.
     Args:
