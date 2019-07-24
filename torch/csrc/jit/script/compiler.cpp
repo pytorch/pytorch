@@ -2456,6 +2456,8 @@ struct to_ir {
         return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
+        // A None can be inserted even if the type_hint is not an Optional or
+        // None (e.g. `torch.jit.annotate(Tensor, None)`)
         TypePtr hint = type_hint;
         if (hint != nullptr && !hint->isSubtypeOf(NoneType::get()) &&
             hint->kind() != TypeKind::OptionalType) {
