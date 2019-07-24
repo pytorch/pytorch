@@ -61,6 +61,12 @@ class AliasDb {
   // value in group `b`? i.e. may they overlap?
   TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
+  // Do any nodes write to an alias set input to `n`?
+  TORCH_API bool hasInputWriters(const Node* n) const;
+
+  // Do any nodes write to an alias set output by `n`?
+  TORCH_API bool hasOutputWriters(const Node* n) const;
+
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
 
