@@ -89,7 +89,7 @@ std::string SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
     ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
   std::vector<at::Tensor> table;
-  auto result = Pickle(ivalues, &table);
+  auto result = jit::pickle(ivalues, &table);
   TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
   return result;
 }
@@ -107,7 +107,7 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  auto ivalues = Unpickle(data.get(), size);
+  auto ivalues = jit::unpickle(data.get(), size);
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {

@@ -579,7 +579,7 @@ RegisterOperators reg(
            auto ivalue = pop(stack);
 
            // Pickle the tensor
-           auto data = Pickle({ivalue});
+           auto data = pickle({ivalue});
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);

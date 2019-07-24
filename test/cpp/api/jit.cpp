@@ -5,6 +5,7 @@
 #include <torch/types.h>
 
 #include <string>
+#include <iostream>
 
 TEST(TorchScriptTest, CanCompileMultipleFunctions) {
   auto module = torch::jit::compile(R"JIT(
@@ -114,7 +115,7 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
 
 TEST(TorchScriptTest, TestPickle) {
   torch::IValue float_value(2.3);
-  std::string data = torch::jit::Pickle({float_value});
+  std::string data = torch::jit::pickle({float_value});
   std::ofstream out("data.pkl");
   out << data;
   out.flush();
