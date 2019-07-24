@@ -2,6 +2,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/ExpandUtils.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/Parallel.h>
@@ -56,6 +57,10 @@ extern "C" void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda,
                         double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
 extern "C" void sgesdd_(char *jobz, int *m, int *n, float *a, int *lda,
                         float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *iwork, int *info);
+
+// getrs
+extern "C" void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
+extern "C" void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 #endif
 
 namespace at {
@@ -112,6 +117,11 @@ template<class scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
                scalar_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *iwork, int *info) {
   AT_ERROR("svd only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
+  AT_ERROR("lu_solve only takes float or double Tensors");
 }
 
 #ifdef USE_LAPACK
@@ -196,6 +206,14 @@ template<> void lapackSvd<float>(char jobz, int m, int n, float *a, int lda,
                                  float *s, float *u, int ldu, float *vt, int ldvt, float *work, int lwork, int *iwork, int *info) {
   sgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
+
+template<> void lapackLuSolve<double>(char trans, int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
+  dgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
+  sgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
 #endif
 
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
@@ -254,7 +272,7 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
   TORCH_CHECK(A.dim() >= 2,
            "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
+  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A, "solve");
   return at::_solve_helper(self_broadcasted, A_broadcasted);
 }
 
@@ -393,7 +411,7 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
   TORCH_CHECK(A.dim() >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
+  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A, "cholesky_solve");
   return at::_cholesky_solve_helper(self_broadcasted, A_broadcasted, upper);
 }
 
@@ -712,7 +730,7 @@ std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
   TORCH_CHECK(A.dim() >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
+  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A, "triangular_solve");
   return at::_triangular_solve_helper(self_broadcasted, A_broadcasted, upper, transpose, unitriangular);
 }
 
@@ -1068,6 +1086,98 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& VT,
   S.resize_as_(S_tmp).copy_(S_tmp);
   VT.resize_as_(VT_tmp).copy_(VT_tmp);
   return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("lu_solve: LAPACK library not found in compilation");
+#else
+  auto b_data = b.data<scalar_t>();
+  auto lu_data = lu.data<scalar_t>();
+  auto pivots_data = pivots.data<int>();
+  auto b_stride = matrixStride(b);
+  auto lu_stride = matrixStride(lu);
+  auto pivots_stride = pivots.size(-1);
+  auto batch_size = batchCount(b);
+
+  auto n = lu.size(-2);
+  auto nrhs = b.size(-1);
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* b_working_ptr = &b_data[i * b_stride];
+    scalar_t* lu_working_ptr = &lu_data[i * lu_stride];
+    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    lapackLuSolve<scalar_t>('N', n, nrhs, lu_working_ptr, n, pivots_working_ptr,
+                            b_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto LU_data_working_copy = cloneBatchedColumnMajor(LU_data);
+  auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
+  std::vector<int64_t> infos(batchCount(self), 0);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
+    apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);
+  });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "lu_solve_cpu");
+  } else {
+    singleCheckErrors(infos[0], "lu_solve_cpu");
+  }
+  return self_working_copy;
+}
+
+Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  TORCH_CHECK(self.dim() == 3 || self.dim() == 2,
+              "b should have 2 or 3 dimensions, but has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(LU_data.dim() == 3,
+              "LU_data should have 3 dimensions, but has ", LU_data.dim(), " dimensions instead");
+  TORCH_CHECK(self.size(0) == LU_data.size(0),
+              "b and LU_data should have the same number of batches");
+  TORCH_CHECK(LU_pivots.size(1) == LU_data.size(2),
+              "Number of pivots per batch should be same as the dimension of the matrix");
+  TORCH_CHECK(LU_pivots.size(0) == LU_data.size(0),
+              "Batch dimensions of LU_pivots doesn't match batch dimensions of LU_data");
+  TORCH_CHECK(LU_pivots.dtype() == at::kInt,
+              "LU_pivots should be a Tensor of scalar type Int");
+  TORCH_CHECK(LU_pivots.device() == LU_data.device(),
+              "Expected LU_pivots and LU_data to be on the same device, "
+              "but found LU_pivots on ", LU_pivots.device(), " and LU_data on ",
+              LU_data.device(), " instead");
+
+  Tensor self_3D;
+  if (self.dim() == 2) {
+    TORCH_WARN("Passing RHS tensor with number of dimensions = 2 is deprecated, "
+               "and will be removed in the next release. Please unsqueeze the last dimension "
+               "to obtain an RHS tensor with number of right hand sides = 1");
+    self_3D = self.unsqueeze(2);
+  } else {
+    self_3D = self;
+  }
+  linearSolveCheckInputs(self_3D, LU_data, "lu_solve");
+
+  Tensor solution = at::_lu_solve_helper(self_3D, LU_data, LU_pivots);
+  if (self.dim() == 2) {
+    return solution.squeeze(2);
+  } else {
+    return solution;
+  }
+}
+
+Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  Tensor result_tmp = at::lu_solve(self, LU_data, LU_pivots);
+  result.resize_as_(result_tmp).copy_(result_tmp);
+  return result;
 }
 
 }}  // namespace at::native
