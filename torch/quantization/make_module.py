@@ -26,7 +26,7 @@ class _WrapModule(torch.nn.Module):
 
     def from_float(self, *args, **kwargs):
         func = func_from_float[self.func]
-        return _WrapModule(func, name = self.__name__+"_quantized")
+        return _WrapModule(func, name=self.__name__ + "_quantized")
 
 """Factory method to create a module wrapper.
 
