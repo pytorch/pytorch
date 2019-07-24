@@ -346,10 +346,11 @@ Tensor fbgemm_linear_fp16_weight(
   const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =
       cpp_custom_type_hack::cast<fbgemm::PackedGemmMatrixFP16>(packed_weight);
 
-  TORCH_CHECK(input.size(1) == packed_weight_fp16.numRows())
+  TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
   TORCH_CHECK(input.dim() >= 2);
-  int64_t M = input.size(0);
   TORCH_CHECK(bias.dim() == 1);
+
+  int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   int64_t N = packed_weight_fp16.numCols();
 
   auto output = at::empty({M, N}, bias.options().dtype(at::kFloat));
@@ -366,7 +367,9 @@ Tensor fbgemm_linear_fp16_weight(
   // Add bias term
   output.add_(bias);
 
-  return output;
+  std::vector<int64_t> out_sizes = input.sizes().vec();
+  out_sizes.back() = N;
+  return output.view(out_sizes);
 }
 
 #else // USE_FBGEMM

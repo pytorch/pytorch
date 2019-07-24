@@ -417,7 +417,6 @@ RegisterOperators reg({
     Operator(
         "aten::as_tensor(Tensor(a) data, *, ScalarType? dtype=None, Device? device=None) -> Tensor(a|b)",
         [](const Node* node) {
-          auto input = node->inputs().at(0);
           return [](Stack& stack) {
             auto device = pop(stack).toOptional<c10::Device>();
             auto dtype = pop(stack).toOptional<at::ScalarType>();
