@@ -15,4 +15,4 @@ class ConvBn2d(torch.nn.Sequential):
 
 class ConvBnReLU2d(torch.nn.Sequential):
     def __init__(self, conv, bn, relu):
-        super(ConvBnReLU2d, self).__init__(linear, bn, relu)
+        super(ConvBnReLU2d, self).__init__(conv, bn, relu)
