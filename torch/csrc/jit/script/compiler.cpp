@@ -197,7 +197,9 @@ struct Environment {
 
   // set type error in the lowest environment. if the variable is used after an
   // error has been set, then we will use the more informative error message
-  void setVariableTypeError(const std::string& name, std::function<std::string()> msg) {
+  void setVariableTypeError(
+      const std::string& name,
+      std::function<std::string()> msg) {
     auto runner = this;
     while (runner->next) {
       runner = runner->next.get();
@@ -309,17 +311,17 @@ struct Environment {
               unshapedType(simple_parent->type()))) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
-               << simple_parent->type()->python_str()
-               << " but is now being assigned to a value of type "
-               << as_simple_value->type()->python_str();
+              << simple_parent->type()->python_str()
+              << " but is now being assigned to a value of type "
+              << as_simple_value->type()->python_str();
 
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
           error << "\n. (Note: empty lists are constructed as Tensor[]; "
-                 << "if you want an empty list of a different type, "
-                 << "use `torch.jit.annotate(List[T], [])`, "
-                 << "where `T` is the type of elements in the list)";
+                << "if you want an empty list of a different type, "
+                << "use `torch.jit.annotate(List[T], [])`, "
+                << "where `T` is the type of elements in the list)";
         }
         throw error;
       }
@@ -413,8 +415,7 @@ struct Environment {
         if (auto class_type = type->cast<ClassType>()) {
           retval = std::make_shared<script::ClassValue>(class_type);
         } else if (auto tuple_type = type->cast<TupleType>()) {
-          retval =
-              std::make_shared<script::NamedTupleConstructor>(tuple_type);
+          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
         }
       }
     }
@@ -1209,9 +1210,8 @@ struct to_ir {
             save_false->findInParentFrame(x)) {
           throw error;
         } else {
-          environment_stack->setVariableTypeError(x, [=]() -> std::string {
-            return error.what();
-          });
+          environment_stack->setVariableTypeError(
+              x, [=]() -> std::string { return error.what(); });
           continue;
         }
       }
@@ -1362,36 +1362,38 @@ struct to_ir {
     auto itrs = stmt.itrs();
     auto body = stmt.body();
     if (stmt.itrs().size() != 1) {
-      throw ErrorReport(stmt)
-          << "List of iterables is not supported currently";
+      throw ErrorReport(stmt) << "List of iterables is not supported currently";
     }
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
     SugaredValuePtr sv = emitSugaredExpr(itrs[0], 1);
 
     // We will get IterableTree for builtinFunctions zip() and enumerate(),
-    // RangeValue for range(), and SimpleValue for types like List/Tensor/Dict/String.
+    // RangeValue for range(), and SimpleValue for types like
+    // List/Tensor/Dict/String.
     auto range_val = std::dynamic_pointer_cast<RangeValue>(sv);
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
     auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(sv);
 
-    // For SimpleValue(except Tuple) or RanveValue/IterableTree, emit common loop
-    if ((siv && !siv->getValue()->type()->cast<TupleType>())
-        || range_val || iterable_tree) {
+    // For SimpleValue(except Tuple) or RanveValue/IterableTree, emit common
+    // loop
+    if ((siv && !siv->getValue()->type()->cast<TupleType>()) || range_val ||
+        iterable_tree) {
       // looping over a dict defaults to looping over the keys in python
       if (siv && siv->getValue()->type()->cast<DictType>()) {
         sv = std::make_shared<SimpleValue>(
-          graph->insert(aten::keys, {siv->getValue()}, {}, stmt.range()));
+            graph->insert(aten::keys, {siv->getValue()}, {}, stmt.range()));
       }
       emitLoopCommon(stmt.range(), body, sv, targets, {});
       return;
     }
 
-    // Emit or unroll the loop for Tuple or ModuleList, we choose to unroll or emit
-    // each subelemnt for each iteration separately. This is because for ModuleList,
-    // each module inside the list may be different types, so FOR .. in ModuleList
-    // essentially should emit different stmts for each iteration, which we shouldn't
-    // emit the prim::Loop node for it, the same rule applies for the Tuple case.
+    // Emit or unroll the loop for Tuple or ModuleList, we choose to unroll or
+    // emit each subelemnt for each iteration separately. This is because for
+    // ModuleList, each module inside the list may be different types, so FOR ..
+    // in ModuleList essentially should emit different stmts for each iteration,
+    // which we shouldn't emit the prim::Loop node for it, the same rule applies
+    // for the Tuple case.
     auto instances = sv->asTuple(stmt.range(), method);
     pushFrame(environment_stack->block());
     for (const auto& inst : instances) {
@@ -1458,8 +1460,8 @@ struct to_ir {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
-      if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT
-          || assignee.kind() == TK_TUPLE_LITERAL) {
+      if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT ||
+          assignee.kind() == TK_TUPLE_LITERAL) {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
@@ -1575,7 +1577,8 @@ struct to_ir {
     const auto lhsValue = environment_stack->getSugaredVar(lhs.name())
                               ->asValue(lhs.range(), method);
     auto lhsType = lhsValue->type();
-    if (lhsType->isSubtypeOf(TensorType::get()) || lhsType->cast<c10::ListType>()) {
+    if (lhsType->isSubtypeOf(TensorType::get()) ||
+        lhsType->cast<c10::ListType>()) {
       // for tensors, emit the corresponding in-place op
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
       const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
@@ -1758,8 +1761,12 @@ struct to_ir {
     emitTupleAssign(tl, output, rhs.range(), n_binders, starred_unpack);
   }
 
-  void emitTupleAssign(const TupleLiteral& tl, const SugaredValuePtr& rhs_output,
-                       const SourceRange& rhs_loc, size_t n_binders, bool starred_unpack) {
+  void emitTupleAssign(
+      const TupleLiteral& tl,
+      const SugaredValuePtr& rhs_output,
+      const SourceRange& rhs_loc,
+      size_t n_binders,
+      bool starred_unpack) {
     auto outputs = rhs_output->asTuple(
         rhs_loc,
         method,
@@ -1777,8 +1784,11 @@ struct to_ir {
     emitExprsAssign(tl.inputs(), outputs, rhs_loc, n_binders);
   }
 
-  void emitExprsAssign(const List<Expr>& lhs_exprs, const at::ArrayRef<SugaredValuePtr> outputs,
-                       const SourceRange& rhs_loc, size_t n_binders) {
+  void emitExprsAssign(
+      const List<Expr>& lhs_exprs,
+      const at::ArrayRef<SugaredValuePtr> outputs,
+      const SourceRange& rhs_loc,
+      size_t n_binders) {
     int i = 0;
     for (auto assignee : lhs_exprs) {
       switch (assignee.kind()) {
@@ -1786,8 +1796,7 @@ struct to_ir {
           emitSubscriptAssign(
               rhs_loc,
               Subscript(assignee),
-              NamedValue(
-                  rhs_loc, outputs.at(i)->asValue(rhs_loc, method)));
+              NamedValue(rhs_loc, outputs.at(i)->asValue(rhs_loc, method)));
           i++;
           break;
         case TK_VAR:
@@ -1798,8 +1807,7 @@ struct to_ir {
         case TK_STARRED: {
           auto var = Starred(assignee).expr();
           if (var.kind() != TK_VAR) {
-            throw ErrorReport(var)
-                << "Cannot pack a tuple into a non-variable";
+            throw ErrorReport(var) << "Cannot pack a tuple into a non-variable";
           }
           size_t n_matched = outputs.size() - n_binders;
           ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
@@ -1816,11 +1824,17 @@ struct to_ir {
           // recursively emit tuple assignments on tuple literal input
           TupleLiteral sub_tl = TupleLiteral(assignee);
           size_t sub_n_binders = sub_tl.inputs().size();
-          bool sub_starred_unpack = validateAssignLhsExpr(sub_tl.inputs(), sub_tl.range());
+          bool sub_starred_unpack =
+              validateAssignLhsExpr(sub_tl.inputs(), sub_tl.range());
           if (sub_starred_unpack)
             sub_n_binders--;
-          emitTupleAssign(sub_tl, outputs.at(i), rhs_loc, sub_n_binders, sub_starred_unpack);
-          i ++;
+          emitTupleAssign(
+              sub_tl,
+              outputs.at(i),
+              rhs_loc,
+              sub_n_binders,
+              sub_starred_unpack);
+          i++;
         } break;
         default:
           throw ErrorReport(assignee)
@@ -2278,63 +2292,64 @@ struct to_ir {
 
   // We construct the iterable tree here using the IterableTree SugaredValue,
   // The tree consists of SimpleValue, RangeValue or IterableValue:
-  // For SimpleValues(List, Dict, etc) or RangeValue. We will make them as tree leaves
-  // since we could get the loop information from len() and get_item().
-  // For IterableValue like zip(), enumerate(), we can model them as a combination of
-  // leaves, and we emit a IterableTree value to record the tree information
+  // For SimpleValues(List, Dict, etc) or RangeValue. We will make them as tree
+  // leaves since we could get the loop information from len() and get_item().
+  // For IterableValue like zip(), enumerate(), we can model them as a
+  // combination of leaves, and we emit a IterableTree value to record the tree
+  // information
   SugaredValuePtr emitIterableTree(
       SourceRange& loc,
       const List<Expr>& inputs,
       const std::shared_ptr<IterableValue>& iterable) {
-      std::shared_ptr<IterableTree> iterable_tree = nullptr;
-      size_t input_size = inputs.size();
+    std::shared_ptr<IterableTree> iterable_tree = nullptr;
+    size_t input_size = inputs.size();
 
-      // Handling different iterable values
-      if (iterable->symbol_ == prim::range) {
-        std::vector<Value*> input_vals = getValues(inputs, /*maybe_unpack=*/true);
-        return std::make_shared<RangeValue>(loc, method, input_vals);
-      } else if (iterable->symbol_ == prim::enumerate) {
-        // enumerate(x) can be rewrite as subtrees:
-        // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
-        Value* start_index = nullptr;
-        if (input_size == 0) {
-          throw ErrorReport(loc) << "enumerate expected at least 1 arguments, got 0";
-        }
-
-        if (input_size == 2) {
-          start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
-        }
-
-        if (input_size > 2) {
-          throw ErrorReport(loc)
-            << "enumerate expected at most 2 arguments, got " << input_size;
-        }
-        std::vector<Value*> range_inputs;
-        if (start_index != nullptr) {
-          range_inputs.emplace_back(start_index);
-        }
-        Value* end = materializeConstant(
-          std::numeric_limits<int64_t>::max(),
-          *graph,
-          loc,
-          integral_constants);
-        range_inputs.emplace_back(end);
-        SugaredValuePtr range_sv = std::make_shared<RangeValue>(loc, method, range_inputs);
-        SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
-        iterable_tree = std::make_shared<IterableTree>(std::vector<SugaredValuePtr>({range_sv, expr_sv}));
-      } else if (iterable->symbol_ == prim::zip) {
-        // zip(x, y) can be rewrite as subtrees:
-        // IterableTree(IterableTree(x), IterableTree(y))
-        if (inputs.size() == 0) {
-          throw ErrorReport(loc) << "zip expected at least 1 arguments, got 0";
-        }
-        iterable_tree = std::make_shared<IterableTree>();
-        for(Expr expr: inputs) {
-          auto expr_sv = emitSugaredExpr(expr, 1);
-          iterable_tree->addChild(expr_sv);
-        }
+    // Handling different iterable values
+    if (iterable->symbol_ == prim::range) {
+      std::vector<Value*> input_vals = getValues(inputs, /*maybe_unpack=*/true);
+      return std::make_shared<RangeValue>(loc, method, input_vals);
+    } else if (iterable->symbol_ == prim::enumerate) {
+      // enumerate(x) can be rewrite as subtrees:
+      // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
+      Value* start_index = nullptr;
+      if (input_size == 0) {
+        throw ErrorReport(loc)
+            << "enumerate expected at least 1 arguments, got 0";
       }
-      return iterable_tree;
+
+      if (input_size == 2) {
+        start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
+      }
+
+      if (input_size > 2) {
+        throw ErrorReport(loc)
+            << "enumerate expected at most 2 arguments, got " << input_size;
+      }
+      std::vector<Value*> range_inputs;
+      if (start_index != nullptr) {
+        range_inputs.emplace_back(start_index);
+      }
+      Value* end = materializeConstant(
+          std::numeric_limits<int64_t>::max(), *graph, loc, integral_constants);
+      range_inputs.emplace_back(end);
+      SugaredValuePtr range_sv =
+          std::make_shared<RangeValue>(loc, method, range_inputs);
+      SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
+      iterable_tree = std::make_shared<IterableTree>(
+          std::vector<SugaredValuePtr>({range_sv, expr_sv}));
+    } else if (iterable->symbol_ == prim::zip) {
+      // zip(x, y) can be rewrite as subtrees:
+      // IterableTree(IterableTree(x), IterableTree(y))
+      if (inputs.size() == 0) {
+        throw ErrorReport(loc) << "zip expected at least 1 arguments, got 0";
+      }
+      iterable_tree = std::make_shared<IterableTree>();
+      for (Expr expr : inputs) {
+        auto expr_sv = emitSugaredExpr(expr, 1);
+        iterable_tree->addChild(expr_sv);
+      }
+    }
+    return iterable_tree;
   }
 
   std::shared_ptr<SugaredValue> emitForkExpr(
@@ -2425,8 +2440,7 @@ struct to_ir {
 
         return asSimple(
             makeMagic(
-                overload,
-                std::make_shared<BuiltinFunction>(kind, at::nullopt))
+                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
                 ->call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
@@ -2605,10 +2619,10 @@ struct to_ir {
     }
     if (input->type()->cast<TupleType>()) {
       auto has_step = slice.step().present();
-      if (has_step)
-      {
+      if (has_step) {
         // TODO: add support for slicing tuples with a step
-        throw ErrorReport(loc) << "Unsupported operation: slicing tuples with a step isn't supported";
+        throw ErrorReport(loc)
+            << "Unsupported operation: slicing tuples with a step isn't supported";
       }
 
       if (has_end) {
@@ -2619,21 +2633,14 @@ struct to_ir {
     }
 
     auto step = emitExpr(Expr(slice.stepOr(1)));
-    NamedValue step_nv =
-        NamedValue(loc, "step", step);
+    NamedValue step_nv = NamedValue(loc, "step", step);
     return emitBuiltinCall(
         loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
     return emitBuiltinCall(
-        loc,
-        *graph,
-        aten::unsqueeze,
-        c10::nullopt,
-        {input, dim_val},
-        {},
-        true);
+        loc, *graph, aten::unsqueeze, c10::nullopt, {input, dim_val}, {}, true);
   }
 
   Value* emitIndex(
@@ -2661,17 +2668,16 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
-    // Overall, to handle indexing (other than Tensors), we need to handle a couple different things.
-    // For example, for x[1:3, None, 4], each of these different index types
-    // (slice, None, and integer) result in different number of dimensions.
-    // Slicing doesn't change the number of dimensions, None adds a dimension,
-    // and integer removes a dimension. As these indexing operations are applied
-    // left to right, the actual index that it's being applied to depends on the
-    // previous operations.
-    // Ellipses indexing throws another wrinkle. Ellipses selects any remaining
-    // unspecified dimensions. Thus, for indexes following an ellipses, the
-    // actual index an indexing operation is being applied to depends on the
-    // operations to the right.
+    // Overall, to handle indexing (other than Tensors), we need to handle a
+    // couple different things. For example, for x[1:3, None, 4], each of these
+    // different index types (slice, None, and integer) result in different
+    // number of dimensions. Slicing doesn't change the number of dimensions,
+    // None adds a dimension, and integer removes a dimension. As these indexing
+    // operations are applied left to right, the actual index that it's being
+    // applied to depends on the previous operations. Ellipses indexing throws
+    // another wrinkle. Ellipses selects any remaining unspecified dimensions.
+    // Thus, for indexes following an ellipses, the actual index an indexing
+    // operation is being applied to depends on the operations to the right.
     // Thus, we do two passes, one from left to right up until the ellipses, and
     // one from right to left.
 
@@ -2717,7 +2723,7 @@ struct to_ir {
       } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
         if (is_reverse) {
           throw ErrorReport(loc)
-            << "Ellipses followed by tensor indexing is currently not supported";
+              << "Ellipses followed by tensor indexing is currently not supported";
         } else {
           return dim + 1;
         }
@@ -2743,7 +2749,7 @@ struct to_ir {
          rev_idx--) {
       auto subscript_expr = subscript_exprs[rev_idx];
       if (subscript_expr.kind() == TK_DOTS) {
-          throw ErrorReport(loc)
+        throw ErrorReport(loc)
             << "An index can only have a single ellipsis ('...')";
       }
       rdim =
@@ -2964,8 +2970,7 @@ struct to_ir {
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, Function*>&
-          functionTable)
+      const std::unordered_map<std::string, Function*>& functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
@@ -2979,14 +2984,14 @@ struct FunctionResolver : public Resolver {
     return otherResolver_->resolveValue(name, m, loc);
   }
 
-  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      const override {
     return otherResolver_->resolveType(name, loc);
   }
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, Function*>&
-      functionTable_;
+  const std::unordered_map<std::string, Function*>& functionTable_;
 };
 
 CompilationUnit::CompilationUnit(const std::string& source)
