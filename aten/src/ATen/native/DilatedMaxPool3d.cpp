@@ -70,18 +70,16 @@ static void max_pool3d_with_indices_single_out_frame(
               + ti * owidth * oheight + i * owidth + j;
 
             /* compute local max: */
-            int64_t maxindex = -1;
-            scalar_t maxval = -std::numeric_limits<scalar_t>::max();
-            int64_t x,y,z;
-            int64_t index = 0;
+            int64_t maxindex = start_t * iwidth * iheight + start_h * iwidth + start_w;
+            scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
 
-            for (z = start_t; z < end_t; z += dilationT)
+            for (int64_t z = start_t; z < end_t; z += dilationT)
             {
-              for (y = start_h; y < end_h; y += dilationH)
+              for (int64_t y = start_h; y < end_h; y += dilationH)
               {
-                for (x = start_w; x < end_w; x += dilationW)
+                for (int64_t x = start_w; x < end_w; x += dilationW)
                 {
-                  index = z * iwidth * iheight + y * iwidth + x;
+                  int64_t index = z * iwidth * iheight + y * iwidth + x;
                   scalar_t val = ip[index];
                   if ((val > maxval) || std::isnan(val))
                   {
