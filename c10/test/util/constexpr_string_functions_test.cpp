@@ -47,14 +47,14 @@ namespace skip_until_first_of_test {
 }
 
 namespace csv_contains_test {
-  static_assert(c10::util::csv_contains2("", ""), "");
-  static_assert(!c10::util::csv_contains2("", "a"), "");
-  static_assert(!c10::util::csv_contains2("a", ""), "");
-  static_assert(!c10::util::csv_contains2("a,bc", ""), "");
+  static_assert(c10::util::csv_contains("", ""), "");
+  static_assert(!c10::util::csv_contains("", "a"), "");
+  static_assert(!c10::util::csv_contains("a", ""), "");
+  static_assert(!c10::util::csv_contains("a,bc", ""), "");
 
-  static_assert(c10::util::csv_contains2("a,bc,d", "a"), "");
-  static_assert(c10::util::csv_contains2("a,bc,d", "bc"), "");
-  static_assert(c10::util::csv_contains2("a,bc,d", "d"), "");
-  static_assert(!c10::util::csv_contains2("a,bc,d", "e"), "");
-  static_assert(!c10::util::csv_contains2("a,bc,d", ""), "");
+  static_assert(c10::util::csv_contains("a,bc,d", "a"), "");
+  static_assert(c10::util::csv_contains("a,bc,d", "bc"), "");
+  static_assert(c10::util::csv_contains("a,bc,d", "d"), "");
+  static_assert(!c10::util::csv_contains("a,bc,d", "e"), "");
+  static_assert(!c10::util::csv_contains("a,bc,d", ""), "");
 }

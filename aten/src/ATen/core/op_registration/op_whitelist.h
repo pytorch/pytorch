@@ -15,9 +15,12 @@
 
 namespace c10 {
 
-constexpr bool op_should_be_registered(const char* op_name) {
+// Returns true iff the given op name is on the whitelist
+// and should be registered
+constexpr bool op_whitelist(const char* op_name) {
 #if !defined(TORCH_OPERATOR_WHITELIST)
-  // If the whitelist parameter is not defined, all ops are to be registered
+  // If the TORCH_OPERATOR_WHITELIST parameter is not defined,
+  // all ops are to be registered
   return true;
 #else
   return c10::util::csv_contains(TORCH_OPERATOR_WHITELIST, op_name);

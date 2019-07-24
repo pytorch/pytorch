@@ -984,6 +984,18 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Dict(str, Dict(int, str)?[])[] a) -> Dict(str, Dict(int, str)?[])[]");
 }
 
+TEST(OperatorRegistrationTest, whenRegistrationIsExplicitlyEnabled_thenOpIsPresent) {
+  auto registrar = RegisterOperators().op<true>("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t i) {return i+1;}));
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
+  ASSERT_TRUE(op.has_value());
+}
+
+TEST(OperatorRegistrationTest, whenRegistrationIsExplicitlyDisabled_thenOpIsNotPresent) {
+  auto registrar = RegisterOperators().op<false>("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t i) {return i+1;}));
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
+  ASSERT_FALSE(op.has_value());
+}
+
 }
 
 #pragma GCC diagnostic pop

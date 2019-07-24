@@ -321,18 +321,6 @@ public:
   template<bool enabled = true>
   RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) &&;
 
-  template<>
-  RegisterOperators&& op<true>(const std::string& schemaOrName, Options&& options) && {
-    checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
-    return std::move(*this);
-  }
-
-  template<>
-  RegisterOperators&& op<false>(const std::string& schemaOrName, Options&& options) && {
-    // With enabled = false, we don't register the op
-    return std::move(*this);
-  }
-
   // internal only for registering caffe2 ops
   RegisterOperators&& op(FunctionSchema schema, Options&& options) && {
     checkSchemaAndRegisterOp_(std::move(schema), std::move(options));
@@ -440,6 +428,18 @@ private:
   static_assert(std::is_nothrow_move_constructible<std::vector<OperatorRegistrar>>::value, "");
   static_assert(std::is_nothrow_move_assignable<std::vector<OperatorRegistrar>>::value, "");
 };
+
+template<>
+inline RegisterOperators&& RegisterOperators::op<true>(const std::string& schemaOrName, Options&& options) && {
+  checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
+  return std::move(*this);
+}
+
+template<>
+inline RegisterOperators&& RegisterOperators::op<false>(const std::string& schemaOrName, Options&& options) && {
+  // With enabled = false, we don't register the op
+  return std::move(*this);
+}
 
 }
 
