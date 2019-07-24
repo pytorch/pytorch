@@ -93,9 +93,13 @@ struct ConstantTableValue : public SugaredValue {
     if (offset < 0 || size_t(offset) >= constants_.size()) {
       throw ErrorReport(loc) << "constant index " << offset
                              << " is out of bounds (constant table has "
-                             << constants_.size() << " entries).";
+                             << constants_.size() << " entries)";
     }
     Value* value = m.graph()->insertConstant(constants_[offset], nullptr, loc);
+
+    // specializing tensor type on compilation messes up typing relations
+    value->setType(unshapedType(value->type()));
+
     return std::make_shared<SimpleValue>(value);
   }
 
@@ -176,7 +180,7 @@ struct SourceImporter {
       throw ErrorReport(p_.lexer().cur().range)
           << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
           << CURRENT_OP_VERSION_SET
-          << " but the script being loaded is version " << version_ << ".";
+          << " but the script being loaded is version " << version_;
     }
   }
 
@@ -190,13 +194,17 @@ struct SourceImporter {
       auto parsed_treeref = p_.parseClassLike();
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
+        if (class_def.superclass().present()) {
+          throw ErrorReport(class_def.range())
+              << "Torchscript does not support class inheritance.";
+        }
         const auto qualified_classname = QualifiedName(
             QualifiedName(class_qualifier), class_def.name().name());
 
         std::vector<Def> definitions;
         std::vector<ResolverPtr> resolvers;
-        for (const auto& method_def : class_def.defs()) {
-          definitions.emplace_back(method_def);
+        for (const auto& method_def : class_def.body()) {
+          definitions.emplace_back(Def(method_def));
           resolvers.emplace_back(resolver_);
         }
 

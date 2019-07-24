@@ -289,4 +289,9 @@ size_t List<T>::use_count() const {
   return impl_.use_count();
 }
 
+template<class T>
+optional<TypePtr> List<T>::_elementType() const {
+  return impl_->elementType;
+}
+
 }

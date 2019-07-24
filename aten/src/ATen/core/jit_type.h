@@ -463,7 +463,7 @@ struct CAFFE2_API VaryingShape {
 
   c10::optional<size_t> size() const
   {
-    AT_ASSERT(size_ == dims_.size());
+    AT_ASSERT(!size_ || size_ == dims_.size());
     return size_;
   }
 
@@ -505,6 +505,30 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return ProfiledTensorTypePtr(new ProfiledTensorType(t));
   }
 
+  static ProfiledTensorTypePtr create(const TypePtr& tptr) {
+    if (auto dtt = tptr->cast<DimensionedTensorType>()) {
+      at::VaryingShape vshape(c10::optional<size_t>(dtt->dim()));
+      return ProfiledTensorType::create(
+          {dtt->scalarType()},
+          {dtt->device()},
+          vshape,
+          vshape,
+          {dtt->requires_grad()});
+    }
+
+    if (auto ptt = tptr->cast<ProfiledTensorType>()) {
+      return ptt;
+    }
+
+    if (tptr->isSubclass(TypeKind::TensorType)) {
+      c10::optional<size_t> sz;
+      return ProfiledTensorType::create(
+          {}, {}, VaryingShape{sz}, VaryingShape{sz}, {});
+    }
+
+    TORCH_INTERNAL_ASSERT(false, "Expected a tensor type");
+  }
+
   static ProfiledTensorTypePtr create(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
   {
       return ProfiledTensorTypePtr(new ProfiledTensorType(scalar_type, device, sizes, strides, requires_grad));
@@ -524,6 +548,9 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
   c10::optional<at::Device> device() const { return device_; }
   c10::optional<at::ScalarType> scalarType() const { return scalar_type_; }
   c10::optional<bool> requiresGrad() const { return requires_grad_; }
+  bool requires_grad() const override {
+    return requires_grad_ ? *requires_grad_ : false;
+  }
 
   bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
