@@ -108,6 +108,7 @@ struct CAFFE2_API SourceRange {
       : source_(std::make_shared<Source>(std::move(string_range))),
         start_(0),
         end_(source_->text().size()) {}
+  SourceRange() : source_(nullptr), start_(0), end_(0) {}
 
   const std::string text() const {
     return source_->text().substr(start(), end() - start());

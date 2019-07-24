@@ -204,8 +204,7 @@ SourceRange Node::sourceRange() const {
   if (source_range_) {
     return *source_range_;
   }
-  std::stringstream ss;
-  return SourceRange(ss.str());
+  return SourceRange();
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
