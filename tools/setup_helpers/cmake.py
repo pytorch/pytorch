@@ -12,9 +12,7 @@ import distutils.sysconfig
 from distutils.version import LooseVersion
 
 from . import escape_path, which
-from .env import (IS_64BIT, IS_DARWIN, IS_WINDOWS,
-                  DEBUG, REL_WITH_DEB_INFO,
-                  check_env_flag, check_negative_env_flag)
+from .env import (IS_64BIT, IS_DARWIN, IS_WINDOWS, check_env_flag, check_negative_env_flag, build_type)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
@@ -40,13 +38,6 @@ class CMake:
     def __init__(self, build_dir):
         self._cmake_command = CMake._get_cmake_command()
         self.build_dir = build_dir
-
-        if DEBUG:
-            self._build_type = "Debug"
-        elif REL_WITH_DEB_INFO:
-            self._build_type = "RelWithDebInfo"
-        else:
-            self._build_type = "Release"
 
     @property
     def _cmake_cache_file(self):
@@ -234,6 +225,7 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
+             'CMAKE_BUILD_TYPE',
              'CMAKE_PREFIX_PATH',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'MKL_THREADING',
@@ -279,7 +271,6 @@ class CMake:
                       PYTHON_LIBRARY=escape_path(cmake_python_library),
                       PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
                       TORCH_BUILD_VERSION=version,
-                      CMAKE_BUILD_TYPE=self._build_type,
                       INSTALL_TEST=build_test,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
                       CMAKE_INSTALL_PREFIX=install_dir,
@@ -321,8 +312,7 @@ class CMake:
         "Runs cmake to build binaries."
 
         max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
-        build_args = ['--build', '.', '--target',
-                      'install', '--config', self._build_type]
+        build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]
         # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
         # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
         # would be sufficient by then.
