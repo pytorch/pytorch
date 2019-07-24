@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/schema_type_parser.h>
 #include <c10/util/string_utils.h>
+#include <ATen/core/Reduction.h>
 
 #include <functional>
 #include <memory>
@@ -186,14 +187,14 @@ struct SchemaParser {
       std::vector<IValue> vs) {
     switch (kind) {
       case TypeKind::FloatType:
-        return fmap(vs, [](IValue v) { return v.toDouble(); });
+        return c10::impl::toList(fmap(vs, [](IValue v) { return v.toDouble(); }));
       case TypeKind::IntType:
-        return fmap(vs, [](IValue v) { return v.toInt(); });
+        return c10::impl::toList(fmap(vs, [](IValue v) { return v.toInt(); }));
       case TypeKind::BoolType:
-        return fmap(vs, [](IValue v) { return v.toBool(); });
+        return c10::impl::toList(fmap(vs, [](IValue v) { return v.toBool(); }));
       default:
         throw ErrorReport(range)
-            << "lists are only supported for float or int types.";
+            << "lists are only supported for float or int types";
     }
   }
   IValue parseConstantList(TypeKind kind) {

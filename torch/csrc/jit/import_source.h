@@ -15,9 +15,7 @@ namespace script {
 
 // Add the methods defined in `src` to the module `mod`.
 TORCH_API void import_methods(
-    // CompilationUnit in which to look up any classes used
-    const CompilationUnit& lib_cu,
-    const std::shared_ptr<script::Module>& mod,
+    const script::Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     // Callback to import any dependencies of this source before compiling
@@ -26,7 +24,7 @@ TORCH_API void import_methods(
 // Define the list of classes in `src`.
 TORCH_API void import_libs(
     // The compilation unit that will own the imported libs
-    CompilationUnit& lib_cu,
+    std::shared_ptr<CompilationUnit> cu,
     // Qualifier for any classes that `src` defines. Looks like a module path,
     // like "foo.bar.baz"
     const std::string& class_qualifier,
@@ -40,13 +38,13 @@ TORCH_API void import_libs(
 // If present, it determines the SugaredValue for the first argument
 // and that argument is no longer expected to have type annotations.
 TORCH_API void import_functions(
-    // CompilationUnit in which to look up any classes used
-    const CompilationUnit& lib_cu,
+    // Prefix to use when importing these functions in to the CU
+    const c10::optional<c10::QualifiedName>& prefix,
     // CompilationoUnit to define the functions in.
-    CompilationUnit& cu,
+    std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
-    const Self& self = nullptr,
+    const Self* self = nullptr,
     const std::function<void(const std::string&)>& import_callback = nullptr);
 
 } // namespace script

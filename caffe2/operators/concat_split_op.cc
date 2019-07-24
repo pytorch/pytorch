@@ -196,13 +196,15 @@ OpSchema::Cost CostInferenceForConcat(
       : GetDimFromOrderString(
             helper.GetSingleArgument<string>("order", "NCHW"));
   bool add_axis = helper.GetSingleArgument<int>("add_axis", 0) != 0;
-  const int canonical_axis = canonical_axis_index_(axis, in[0].dims_size());
+  int adj_size = in[0].dims_size() + (add_axis ? 1 : 0);
+  const int canonical_axis = canonical_axis_index_(axis, adj_size);
+  CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   CAFFE_ENFORCE_GT(in.size(), 0);
   vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
   if (add_axis) {
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
-    for (int i = 1; i < in.size(); ++i) {
+    for (size_t i = 1; i < in.size(); ++i) {
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
   }

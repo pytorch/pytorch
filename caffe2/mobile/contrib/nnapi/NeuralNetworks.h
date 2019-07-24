@@ -42,8 +42,6 @@
  *   - DO NOT CHANGE THE LAYOUT OR SIZE OF STRUCTURES
  */
 
-#if __ANDROID_API__ >= __ANDROID_API_O_MR1__
-
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/cdefs.h>
@@ -1921,8 +1919,6 @@ int ANeuralNetworksEvent_wait(ANeuralNetworksEvent* event);
 void ANeuralNetworksEvent_free(ANeuralNetworksEvent* event);
 
 __END_DECLS
-
-#endif  //  __ANDROID_API__ >= 27
 
 #endif  // ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_H
 

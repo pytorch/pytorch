@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -23,11 +22,11 @@ class QAddInt8 final : public c10::OperatorKernel {
     auto iter = TensorIterator::binary_op(c, a, b);
 
     if (ReLUFused) {
-      binary_kernel(*iter, [&](float a_val, float b_val) -> float {
+      cpu_kernel(*iter, [&](float a_val, float b_val) -> float {
         return std::max<float>(a_val + b_val, 0);
       });
     } else {
-      binary_kernel(*iter, [&](float a_val, float b_val) -> float {
+      cpu_kernel(*iter, [&](float a_val, float b_val) -> float {
         return a_val + b_val;
       });
     }

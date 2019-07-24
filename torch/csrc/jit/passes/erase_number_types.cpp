@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
@@ -32,15 +33,16 @@ static void EraseNumberTypesOnBlock(Block* block) {
           Value* r = block->owningGraph()->insertConstant(
               scalar_to_tensor(s), nullptr, c10::nullopt, it->scope());
           it->output()->replaceAllUsesWith(r);
+          it.destroyCurrent();
         }
       } break;
-      case prim::Bool:
-      case prim::Float:
-      case prim::Int:
+      case aten::Bool:
+      case aten::Float:
+      case aten::Int:
       case prim::ImplicitTensorToNum:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
-        // Let DCE cleanup
+        it.destroyCurrent();
       } break;
       default: {
         for (auto o : it->outputs()) {

@@ -116,14 +116,28 @@ bool in_parallel_region() {
 
 void intraop_launch(std::function<void()> func) {
   if (!in_parallel_region() && get_num_threads() > 1) {
-    internal::_get_intraop_pool().run([func](){
-      func();
-    });
+    internal::_get_intraop_pool().run(func);
   } else {
     // execute inline if we're in parallel region
     func();
   }
+}
 
+std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+    std::function<void()> func) {
+  auto future = std::make_shared<c10::ivalue::Future>();
+  if (!in_parallel_region() && get_num_threads() > 1) {
+    internal::_get_intraop_pool().run(
+      [func, future]() {
+        func();
+        future->markCompleted();
+      }
+    );
+  } else {
+    func();
+    future->markCompleted();
+  }
+  return future;
 }
 
 } // namespace at

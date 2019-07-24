@@ -144,9 +144,10 @@ struct C10_API NonVariableTypeMode {
   static void set_enabled(bool enabled);
 };
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface();
+  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const;
 };
 #endif
 
@@ -186,23 +187,30 @@ struct C10_API NamedTensorMetaInterface {
 // pass in multi-thread scenarios, thus making the forward pass not thread-safe anymore,
 // which breaks the invariant.
 struct C10_API VariableVersion {
+ private:
+  struct VersionCounter : intrusive_ptr_target {
+    VersionCounter(uint32_t version) : version_(version) {}
+    std::atomic<uint32_t> version_;
+  };
+  c10::intrusive_ptr<VersionCounter> version_counter_;
+
  public:
+  bool unique() const {
+    return 1 == version_counter_.use_count();
+  }
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version = 0)
-      : version_block_(std::make_shared<std::atomic<uint32_t>>(version)) {}
+      : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
 
   void bump() noexcept {
-    version_block_->fetch_add(1);
+    ++version_counter_->version_;
   }
 
   uint32_t current_version() const noexcept {
-    return version_block_->load();
+    return version_counter_->version_;
   }
-
- private:
-  std::shared_ptr<std::atomic<uint32_t>> version_block_;
 };
 
 /**
@@ -387,6 +395,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return numel_;
   }
 
+  bool unique_version() const {
+    return version_counter_.unique();
+  }
+
   /**
    * Whether or not a tensor is laid out in contiguous memory.
    *
@@ -394,7 +406,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
    */
-  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
+  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const;
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
@@ -736,7 +748,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
-    auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
 
     sizes_.resize(new_dim);
@@ -744,7 +755,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       sizes_[dim] = new_size[dim];
     }
 
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
     refresh_numel();
   }
 
@@ -849,7 +860,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   /**
    * Set the pointer to named tensor metadata.
    */
@@ -877,30 +888,46 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // NOTE [ TensorImpl Shallow-Copying ]
   //
-  // TensorImpl shallow-copying is used when we want to have two Variables share the same storage pointer
-  // and tensor metadata, but each with a different autograd history. Example call sites:
+  // TensorImpl shallow-copying is used when we want to have two Variables share the same tensor metadata
+  // (e.g. sizes / strides / storage pointer / storage_offset), but each with a different autograd history.
+  // Example call sites:
   //
   // 1. `var_detached = var.detach()` uses `shallow_copy_and_detach()` to create `var_detached` that shares
-  // the same storage pointer and tensor metadata with `var`, but with a completely new autograd history.
-  // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy storage pointer and tensor metadata from
+  // the same tensor metadata with `var`, but with a completely new autograd history.
+  // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy tensor metadata from
   // `tensor` into `var`, while keeping `var`'s original AutogradMeta.
   //
   // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` / `shallow_copy_from()` /
-  // `copy_tensor_data()`) copy the storage pointer and the tensor metadata fields (e.g. sizes / strides /
+  // `copy_tensor_metadata()`) copy the tensor metadata fields (e.g. sizes / strides / storage pointer /
   // storage_offset) by value. However, the following fields are not copied:
   //
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
   // 2. the version counter, because the destination TensorImpl's version counter is either set to the
-  // passed-in `version_counter` (in `shallow_copy_and_detach()` and `copy_tensor_data()`), or it is kept
+  // passed-in `version_counter` (in `shallow_copy_and_detach()` and `copy_tensor_metadata()`), or it is kept
   // intact (in `shallow_copy_from()`). See NOTE [ Version Counter Sharing ] for details.
   //
-  // In `shallow_copy_and_detach()` and `copy_tensor_data()`, the passed-in `allow_tensor_metadata_change`
+  // In `shallow_copy_and_detach()` and `copy_tensor_metadata()`, the passed-in `allow_tensor_metadata_change`
   // determines whether the TensorImpl shallow-copy allows changes to its metadata (e.g. sizes / strides /
   // storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor ] for details.
   //
   // In `shallow_copy_from()`, we don't check the destination TensorImpl's `allow_tensor_metadata_change_`,
   // because `shallow_copy_from()` is used for implementing functions such as `var.set_data(tensor)`, which
   // changes `var`'s tensor metadata and expects its `allow_tensor_metadata_change_` to be ignored.
+
+  /**
+   * One TensorImpl can be copied to another TensorImpl if they have the same
+   * type_id. The only two special cases (for legacy reason) are:
+   * CPUTensorId is compatible with CUDATensorId and SparseCPUTensorId is
+   * compatible with SparseCUDATensorId.
+   */
+  inline bool has_compatible_shallow_copy_type(TensorTypeId from) {
+    TensorTypeId self = type_id();
+    return (self == from) ||
+        ((self == CPUTensorId() || self == CUDATensorId() || self == HIPTensorId()) &&
+        (from == CPUTensorId() || from == CUDATensorId() || from == HIPTensorId())) ||
+        ((self == SparseCPUTensorId() || self == SparseCUDATensorId() || self == SparseHIPTensorId()) &&
+        (from == SparseCPUTensorId() || from == SparseCUDATensorId() || from == SparseHIPTensorId()));
+  }
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
@@ -912,7 +939,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
-    copy_tensor_data(
+    copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
@@ -929,7 +956,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   virtual void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
-    copy_tensor_data(
+    copy_tensor_metadata(
       /*src_impl=*/impl.get(),
       /*dest_impl=*/this,
       /*version_counter=*/version_counter(),
@@ -1148,9 +1175,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         " The old caffe2 mixes Reshape and Resize but this behavior has "
         "been changed. If you find this error, most likely you will need "
         "to change corresponding code from Reshape to Resize.");
-    auto old_dim = sizes_.size();
     sizes_ = dims;
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
   }
 
   /**
@@ -1350,6 +1376,39 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     device_opt_ = storage_.device();
   }
 
+  /**
+   * Set the strides of the tensor to match memory_format
+   *
+   * WARNING: This function doesn't rearrange data and assumes tensor is a memory
+   * contiguous
+   */
+  virtual void empty_tensor_restride(MemoryFormat memory_format) {
+    is_contiguous_ = false;
+    switch (memory_format) {
+      case MemoryFormat::Contiguous: {
+        strides_.resize(sizes_.size(), 0);
+        if (dim() > 0) {
+          int last_idx = dim() - 1;
+          strides_[last_idx] = 1;
+          for (auto i = last_idx - 1; i >= 0; --i) {
+            strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
+          }
+        }
+        is_contiguous_ = true;
+        return;
+      }
+      case MemoryFormat::ChannelsLast: {
+        TORCH_CHECK(
+            dim() == 4,
+            "required rank 4 tensor to use channels_last format");
+        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
+        return;
+      }
+      case MemoryFormat::Preserve:
+        TORCH_CHECK(false, "unsupported memory format ", memory_format);
+    }
+  }
+
 private:
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
@@ -1366,14 +1425,13 @@ private:
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDimsTemplate(ArrayRef<T> src) {
     auto old_numel = numel_;
-    auto old_dim = sizes_.size();
     sizes_.resize(src.size());
     int64_t new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
       new_numel *= src[i];
       sizes_[i] = src[i];
     }
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
     numel_ = new_numel;
     return numel_ != old_numel;
   }
@@ -1410,18 +1468,6 @@ private:
     return SetDims(IntArrayRef{d0, d1, d2, d3});
   }
 
-  inline void update_to_contiguous_strides(size_t old_dim) {
-    strides_.resize(sizes_.size(), 0);
-    if (dim() > 0) {
-      int last_idx = dim() - 1;
-      strides_[last_idx] = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
-        strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
-      }
-    }
-    is_contiguous_ = true;
-  }
-
   /**
    * Compute the number of elements based on the sizes of a tensor.
    */
@@ -1456,12 +1502,12 @@ protected:
   }
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
    * from one TensorImpl to another TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
    */
-  static void copy_tensor_data(
+  static void copy_tensor_metadata(
       const TensorImpl* src_impl,
       TensorImpl* dest_impl,
       const c10::VariableVersion& version_counter,
@@ -1478,6 +1524,11 @@ protected:
     dest_impl->reserved_ = src_impl->reserved_;
     dest_impl->set_version_counter(version_counter);
     dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+#ifdef BUILD_NAMEDTENSOR
+    if (src_impl->named_tensor_meta_ != nullptr) {
+      dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
+    }
+#endif
   }
 
 protected:
@@ -1488,13 +1539,25 @@ protected:
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 #endif
 
   c10::VariableVersion version_counter_;
 
-  PyObject* pyobj_ = nullptr; // weak reference
+  // This field contains a weak reference to a PyObject representing
+  // this Tensor.  It MUST NOT be a strong reference, as that would
+  // create a reference cycle between Tensor and the PyObject.  If
+  // pyobj is nullptr, when we transfer Tensor to Python, we allocate
+  // a new PyObject for it and set this field.  This is thread safe
+  // because all Python code is protected under the GIL.  This design does
+  // NOT WORK for Tensors which are shared across multiple Python
+  // subinterpreters (introduced in Python 3.8) since you don't have
+  // enough space to store the separate PyObject per subinterpreter.
+  // When a PyObject dies, you are obligated to clear this field
+  // (otherwise, you will try to use-after-free the pyobj); this currently
+  // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
+  PyObject* pyobj_ = nullptr;
 
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
@@ -1547,7 +1610,7 @@ protected:
   // tensor to also be updated.
   //
   // NOTE: For a full list of tensor metadata fields, please see
-  // `shallow_copy_and_detach()` in TensorImpl and its subclasses to find
+  // `copy_tensor_metadata()` in TensorImpl and its subclasses to find
   // which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
 
@@ -1589,8 +1652,7 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
-//    version counter (word 0)
-//    version counter (word 1)
+//    version counter pointer
 //    PyObject pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
@@ -1614,10 +1676,10 @@ protected:
 //    (optional) device
 //    miscellaneous bitfield
 //
-#ifdef NAMEDTENSOR_ENABLED
-#define NWORDS 30
-#else
+#ifdef BUILD_NAMEDTENSOR
 #define NWORDS 29
+#else
+#define NWORDS 28
 #endif
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               sizeof(TensorImpl) == sizeof(int64_t) * NWORDS,

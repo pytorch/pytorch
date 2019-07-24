@@ -47,6 +47,14 @@ if(CUDA_FOUND)
   # compiling with, e.g., if a ccache nvcc is fed to us by CUDA_NVCC_EXECUTABLE
   # but the PATH is not consistent with CUDA_HOME.  It's better safe
   # than sorry: make sure everything is consistent.
+  if(MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")
+    # When using Visual Studio, it attempts to lock the whole binary dir when
+    # `try_run` is called, which will cause the build to fail.
+    string(RANDOM BUILD_SUFFIX)
+    set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}/${BUILD_SUFFIX}")
+  else()
+    set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
+  endif()
   set(file "${PROJECT_BINARY_DIR}/detect_cuda_version.cc")
   file(WRITE ${file} ""
     "#include <cuda.h>\n"
@@ -56,7 +64,7 @@ if(CUDA_FOUND)
     "  return 0;\n"
     "}\n"
     )
-  try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
+  try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
     CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
     LINK_LIBRARIES ${CUDA_LIBRARIES}
     RUN_OUTPUT_VARIABLE cuda_version_from_header

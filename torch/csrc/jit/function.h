@@ -12,9 +12,9 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 // It contains schema information, and the executor that manages the
 // execution of the function. script::Method is a wrapper around a
 // underlying Function that also provides a `self` object.
-struct TORCH_API Function : public std::enable_shared_from_this<Function> {
+struct TORCH_API Function {
   Function(
-      std::string name,
+      c10::QualifiedName name,
       bool optimize,
       std::shared_ptr<Graph> graph,
       std::function<void(Function&)> function_creator)
@@ -43,8 +43,12 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
     return graph_;
   }
 
-  const std::string& name() const {
+  const c10::QualifiedName& qualname() const {
     return name_;
+  }
+
+  const std::string& name() const {
+    return name_.name();
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -88,6 +92,7 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   }
 
   GraphExecutor& get_executor() {
+    ensure_defined();
     std::call_once(executor_init_, [&] {
       check_single_output();
       executor_ = GraphExecutor(graph(), optimize_);
@@ -103,8 +108,8 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
     size_t num_inputs = function.num_inputs();
     for (size_t i = 0; i < num_inputs; ++i) {
       const Value* v = g.inputs().at(i);
-      std::string name = v->hasUniqueName() ? v->uniqueNameBase()
-                                            : ("argument_" + std::to_string(i));
+      std::string name = v->hasDebugName() ? v->debugNameBase()
+                                           : ("argument_" + std::to_string(i));
       args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
     }
     for (size_t i = 0; i < g.outputs().size(); ++i) {
@@ -113,7 +118,7 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
     return {function.name(), "", std::move(args), std::move(returns)};
   }
 
-  std::string name_;
+  c10::QualifiedName name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize_;
 

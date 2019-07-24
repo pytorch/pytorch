@@ -5,6 +5,15 @@
   scalar_check:
     output: 'false'
     grad_input: 'false'
+  # Using this section you can specify what scalar types should be used for each backend
+  # to generate backward and forward methods
+  # If not specified, ['Float', 'Double', 'Half'] will be used
+  CPU:
+    forward_scalar_types: ['Float', 'Double', 'Half']
+    backward_scalar_types: ['Float', 'Double', 'Half']
+  CUDA:
+    forward_scalar_types: ['Float', 'Double', 'Half']
+    backward_scalar_types: ['Float', 'Double', 'Half']
 
 - name: _thnn_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: AbsCriterion
@@ -116,16 +125,6 @@
     output: 'false'
     grad_input: 'false'
 
-# Pooling
-
-- name: _thnn_avg_pool3d(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
-  cname: VolumetricAveragePooling
-  default_init:
-    stride: kernel_size
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 # Private functions. These also exist in TH, but we want the backwards functions
 # to implement derivatives.
 
@@ -143,17 +142,12 @@
 
 # Convolutions
 
-- name: _thnn_conv_transpose2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] output_padding=0, IntArrayRef[2] dilation=1)
-  cname: SpatialFullDilatedConvolution
-  buffers: [columns, ones]
-
-- name: _thnn_conv_transpose3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] output_padding=0, IntArrayRef[3] dilation=1)
-  cname: VolumetricFullDilatedConvolution
-  buffers: [finput, fgrad_input]
-
 - name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0)
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
+  CPU:
+    forward_scalar_types: ['Float', 'Double', 'Long']
+    backward_scalar_types: ['Float', 'Double']
 
 - name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
   cname: SpatialDepthwiseConvolution
@@ -162,25 +156,6 @@
 - name: _thnn_conv3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
-
-- name: _thnn_conv_dilated2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
-  cname: SpatialDilatedConvolution
-  buffers: [columns, ones]
-
-- name: _thnn_conv_dilated3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1)
-  cname: VolumetricDilatedConvolution
-  buffers: [columns, ones]
-
-# Fold and Unfold
-
-- name: _thnn_col2im(Tensor self, IntArrayRef[2] output_size, IntArrayRef[2] kernel_size, IntArrayRef[2] dilation, IntArrayRef[2] padding, IntArrayRef[2] stride)
-  cname: Col2Im
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_im2col(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] dilation, IntArrayRef[2] padding, IntArrayRef[2] stride)
-  cname: Im2Col
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
+  CPU:
+    forward_scalar_types: ['Float', 'Double', 'Long']
+    backward_scalar_types: ['Float', 'Double']

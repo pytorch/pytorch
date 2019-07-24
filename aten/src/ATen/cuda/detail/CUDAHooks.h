@@ -11,16 +11,19 @@ namespace at { namespace cuda { namespace detail {
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
   std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const override;
-  std::unique_ptr<Generator> initCUDAGenerator(Context*) const override;
+  Device getDeviceFromPtr(void* data) const override;
+  Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
+  const at::cuda::NVRTC& nvrtc() const override;
   int64_t current_device() const override;
+  bool hasPrimaryContext(int64_t device_index) const override;
   Allocator* getPinnedMemoryAllocator() const override;
-  void registerCUDATypes(Context*) const override;
   bool compiledWithCuDNN() const override;
   bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
+  bool supportsDepthwiseConvolutionWithCuDNN() const override;
   long versionCuDNN() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;

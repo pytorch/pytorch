@@ -311,7 +311,7 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
         {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
         at::dtype<float>());  // RoI pooled data
 
-    int output_size = Y->numel();
+    size_t output_size = Y->numel();
     ROIAlignRotatedForward<float>(
         output_size,
         X.data<float>(),
@@ -331,7 +331,7 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
         0,
         {R.dim32(0), pooled_height_, pooled_width_, X.dim32(3)},
         at::dtype<float>());   // RoI pooled data
-    int output_size = Y->numel();
+    size_t output_size = Y->numel();
     ROIAlignRotatedForward<float>(
         output_size,
         X.data<float>(),

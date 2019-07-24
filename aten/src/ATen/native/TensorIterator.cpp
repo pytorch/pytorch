@@ -16,8 +16,13 @@ void TensorIterator::reorder_dimensions() {
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
 
-  // initialize perm with n-1, n-2, ..., 1, 0
   perm_.resize(ndim());
+  if (ndim() == 1) {
+    perm_[0] = 0;
+    return;
+  }
+
+  // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm_.rbegin(), perm_.rend(), 0);
 
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
@@ -120,6 +125,7 @@ void TensorIterator::compute_types() {
     auto common_type = compute_common_type();
     auto common_device = std::get<0>(common_type);
     auto common_dtype = std::get<1>(common_type);
+    bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
         op.device = common_device;
@@ -127,10 +133,12 @@ void TensorIterator::compute_types() {
       } else if (compute_common_dtype_ &&
                  (op.device != common_device || op.dtype != common_dtype)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
-            common_device.is_cuda() && op.tensor.device().is_cpu()) {
-          // don't cast CPU scalars in CUDA ops that directly support them
+            common_device.is_cuda() && op.tensor.device().is_cpu() &&
+            !has_cpu_scalar) {
+          // don't cast CPU scalars in CUDA ops that directly support them.
           op.device = op.tensor.device();
           op.dtype = op.tensor.scalar_type();
+          has_cpu_scalar = true;
         } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
             !op.is_output &&
             op.tensor.scalar_type() == kHalf && common_dtype == kFloat &&
@@ -206,7 +214,7 @@ void TensorIterator::allocate_outputs() {
 }
 
 void TensorIterator::coalesce_dimensions() {
-  if (ndim() == 0) {
+  if (ndim() <= 1) {
     return;
   }
 
@@ -342,8 +350,9 @@ int TensorIterator::num_reduce_dims() const {
   }
   return count;
 }
-static loop2d_t loop_wrapper(const loop_t& loop) {
-  return [&loop](int ntensor, char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+
+static inline loop2d_t loop_wrapper(int ntensor, const loop_t* loop) {
+  return [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
     auto data = PtrVector(base, base + ntensor);
     const int64_t* outer_strides = &strides[ntensor];
 
@@ -353,13 +362,13 @@ static loop2d_t loop_wrapper(const loop_t& loop) {
           data[arg] += outer_strides[arg];
         }
       }
-      loop(ntensor, data.data(), strides, size0);
+      (*loop)(data.data(), strides, size0);
     }
   };
 }
 
 void TensorIterator::for_each(const loop_t& loop) {
-  for_each(loop_wrapper(loop));
+  for_each(loop_wrapper(ntensors(), &loop));
 }
 
 void TensorIterator::for_each(const loop2d_t& loop) {
@@ -386,7 +395,7 @@ DimVector TensorIterator::get_strides() const {
 }
 
 void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
-  serial_for_each(loop_wrapper(loop), range);
+  serial_for_each(loop_wrapper(ntensors(), &loop), range);
 }
 
 void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
@@ -401,13 +410,13 @@ void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
   auto base_ptrs = get_base_ptrs();
   if (ndim() <= 1) {
     auto ptrs = get_data_ptrs(base_ptrs, { range.begin });
-    loop(ntensors(), ptrs.data(), strides.data(), range.size(), 1);
+    loop(ptrs.data(), strides.data(), range.size(), 1);
   } else {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
       auto ptrs = get_data_ptrs(base_ptrs, counter.values);
       auto step = counter.max_2d_step();
-      loop(ntensors(), ptrs.data(), strides.data(), step[0], step[1]);
+      loop(ptrs.data(), strides.data(), step[0], step[1]);
       counter.increment(step);
     }
   }
@@ -551,12 +560,12 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& 
 void TensorIterator::mark_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     operands_[i].is_output = true;
-    auto output = operands_[i].tensor;
+    const auto &output = operands_[i].tensor;
     if (!output.defined()) continue;
 
     // check if output is also an input
     for (int arg = num_outputs_; arg < ntensors(); arg++) {
-      auto input = operands_[arg].tensor;
+      const auto &input = operands_[arg].tensor;
       if (output.is_same(input)) {
         operands_[i].is_read_write = true;
       }
@@ -602,28 +611,22 @@ void TensorIterator::compute_shape() {
   }
 }
 
-static DimVector compute_stride(const Tensor& tensor, IntArrayRef shape) {
-  int ndim = shape.size();
-  auto original_shape = tensor.sizes();
-  auto original_stride = tensor.strides();
-  auto element_size_in_bytes = tensor.element_size();
-
-  auto stride = DimVector(ndim, 0);
-  auto offset = ndim - original_shape.size();
-  for (size_t i = 0; i < original_shape.size(); i++) {
-    if (original_shape[i] == 1) {
-      stride[offset + i] = 0;
-    } else {
-      stride[offset + i] = original_stride[i] * element_size_in_bytes;
-    }
-  }
-  return stride;
-}
-
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      op.stride_bytes = compute_stride(op.tensor, shape_);
+      auto original_shape = op.tensor.sizes();
+      auto original_stride = op.tensor.strides();
+      auto element_size_in_bytes = op.tensor.element_size();
+
+      op.stride_bytes.resize(ndim(), 0);
+      auto offset = ndim() - original_shape.size();
+      for (size_t i = 0; i < original_shape.size(); i++) {
+        if (original_shape[i] == 1) {
+          op.stride_bytes[offset + i] = 0;
+        } else {
+          op.stride_bytes[offset + i] = original_stride[i] * element_size_in_bytes;
+        }
+      }
     }
   }
 }
