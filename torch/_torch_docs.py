@@ -469,6 +469,47 @@ Example::
     True
 """)
 
+add_docstr(torch.as_strided,
+           r"""
+as_strided(input, size, stride, storage_offset=0) -> Tensor
+
+Create a view of an existing `torch.Tensor` :attr:`input` with specified
+:attr:`size`, :attr:`stride` and :attr:`storage_offset`.
+
+.. warning::
+    More than one element of a created tensor may refer to a single memory
+    location. As a result, in-place operations (especially ones that are
+    vectorized) may result in incorrect behavior. If you need to write to
+    the tensors, please clone them first.
+
+    Many PyTorch functions, which return a view of a tensor, are internally
+    implemented with this function. Those functions, like
+    :meth:`torch.Tensor.expand`, are easier to read and are therefore more
+    advisable to use.
+
+
+Args:
+    input (Tensor): the input tensor
+    size (tuple or ints): the shape of the output tensor
+    stride (tuple or ints): the stride of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+
+Example::
+
+    >>> x = torch.randn(3, 3)
+    >>> x
+    tensor([[ 0.9039,  0.6291,  1.0795],
+            [ 0.1586,  2.1939, -0.4900],
+            [-0.1909, -0.7503,  1.9355]])
+    >>> t = torch.as_strided(x, (2, 2), (1, 2))
+    >>> t
+    tensor([[0.9039, 1.0795],
+            [0.6291, 0.1586]])
+    >>> t = torch.as_strided(x, (2, 2), (1, 2), 1)
+    tensor([[0.6291, 0.1586],
+            [1.0795, 2.1939]])
+""")
+
 add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
@@ -2637,24 +2678,22 @@ add_docstr(torch.lu_solve,
            r"""
 lu_solve(input, LU_data, LU_pivots, out=None) -> Tensor
 
-Batch LU solve.
-
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
 
 Arguments:
-    input (Tensor): the RHS tensor :math:`b`
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
-    LU_pivots (IntTensor): the pivots of the LU factorization
+    input (Tensor): the RHS tensor of size :math:`(b, m, k)`
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(b, m, m)`
+    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(b, m)`
     out (Tensor, optional): the optional output tensor
 
 Example::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> b = torch.randn(2, 3)
+    >>> b = torch.randn(2, 3, 1)
     >>> A_LU = torch.lu(A)
     >>> x = torch.lu_solve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
+    >>> torch.norm(torch.bmm(A, x) - b)
     tensor(1.00000e-07 *
            2.8312)
 """)
@@ -4410,7 +4449,10 @@ add_docstr(torch.sign,
            r"""
 sign(input, out=None) -> Tensor
 
-Returns a new tensor with the sign of the elements of :attr:`input`.
+Returns a new tensor with the signs of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \operatorname{sgn}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -6273,26 +6315,27 @@ this normalizes the result by multiplying it with
 :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary, where
 :math:`N_i` is the size of signal dimension :math:`i`.
 
-Due to the conjugate symmetry, :attr:`input` do not need to contain the full
-complex frequency values. Roughly half of the values will be sufficient, as
-is the case when :attr:`input` is given by :func:`~torch.rfft` with
-``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
-argument of this method to ``True``. Moreover, the original signal shape
-information can sometimes be lost, optionally set :attr:`signal_sizes` to be
-the size of the original signal (without the batch dimensions if in batched
-mode) to recover it with correct shape.
+.. note::
+    Due to the conjugate symmetry, :attr:`input` do not need to contain the full
+    complex frequency values. Roughly half of the values will be sufficient, as
+    is the case when :attr:`input` is given by :func:`~torch.rfft` with
+    ``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
+    argument of this method to ``True``. Moreover, the original signal shape
+    information can sometimes be lost, optionally set :attr:`signal_sizes` to be
+    the size of the original signal (without the batch dimensions if in batched
+    mode) to recover it with correct shape.
 
-Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
-:attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
-and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
-example below for a case of size mismatch.
+    Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
+    :attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
+    and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
+    example below for a case of size mismatch.
 
-See :func:`~torch.rfft` for details on conjugate symmetry.
+    See :func:`~torch.rfft` for details on conjugate symmetry.
 
 The inverse of this function is :func:`~torch.rfft`.
 
 .. warning::
-    Generally speaking, the input of this function should contain values
+    Generally speaking, input to this function should contain values
     following conjugate symmetry. Note that even if :attr:`onesided` is
     ``True``, often symmetry on some part is still needed. When this
     requirement is not satisfied, the behavior of :func:`~torch.irfft` is
