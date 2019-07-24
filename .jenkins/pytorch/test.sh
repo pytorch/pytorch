@@ -92,10 +92,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export PYTORCH_TEST_WITH_ROCM=1
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
@@ -138,7 +134,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@487c9bf4b7750e779fac31c35d930381baa60a4a
+  pip_install --user git+https://github.com/pytorch/vision.git@2b73a4846773a670632b29fb2fc2ac57df7bce5d
 }
 
 test_libtorch() {

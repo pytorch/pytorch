@@ -58,47 +58,51 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-if(NOT BUILD_ATEN_ONLY)
-  add_subdirectory(proto)
-  add_subdirectory(contrib)
+if (NOT BUILD_ATEN_ONLY)
   add_subdirectory(core)
-  add_subdirectory(utils)
-  add_subdirectory(predictor)
-  add_subdirectory(predictor/emulator)
-  add_subdirectory(core/nomnigraph)
+  add_subdirectory(proto)
   add_subdirectory(serialize)
-  if (USE_NVRTC)
-    add_subdirectory(cuda_rtc)
-  endif()
-  add_subdirectory(db)
-  add_subdirectory(distributed)
-  # add_subdirectory(experiments) # note, we may remove this folder at some point
-  add_subdirectory(ideep)
-  add_subdirectory(image)
-  add_subdirectory(video)
-  add_subdirectory(mobile)
-  add_subdirectory(mpi)
-  add_subdirectory(observers)
-  add_subdirectory(onnx)
-  if (BUILD_CAFFE2_OPS)
-    add_subdirectory(operators)
-    add_subdirectory(operators/rnn)
-    if (USE_FBGEMM)
-      add_subdirectory(quantization)
-      add_subdirectory(quantization/server)
-    endif()
-    if (USE_QNNPACK)
-      add_subdirectory(operators/quantized)
-    endif()
-  endif()
-  add_subdirectory(opt)
+  add_subdirectory(utils)
   add_subdirectory(perfkernels)
-  add_subdirectory(python)
-  add_subdirectory(queue)
-  add_subdirectory(sgd)
-  add_subdirectory(share)
-  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-  add_subdirectory(transforms)
+
+  # Skip modules that are not used by libtorch mobile yet.
+  if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+    add_subdirectory(contrib)
+    add_subdirectory(predictor)
+    add_subdirectory(predictor/emulator)
+    add_subdirectory(core/nomnigraph)
+    if (USE_NVRTC)
+      add_subdirectory(cuda_rtc)
+    endif()
+    add_subdirectory(db)
+    add_subdirectory(distributed)
+    # add_subdirectory(experiments) # note, we may remove this folder at some point
+    add_subdirectory(ideep)
+    add_subdirectory(image)
+    add_subdirectory(video)
+    add_subdirectory(mobile)
+    add_subdirectory(mpi)
+    add_subdirectory(observers)
+    add_subdirectory(onnx)
+    if (BUILD_CAFFE2_OPS)
+      add_subdirectory(operators)
+      add_subdirectory(operators/rnn)
+      if (USE_FBGEMM)
+        add_subdirectory(quantization)
+        add_subdirectory(quantization/server)
+      endif()
+      if (USE_QNNPACK)
+        add_subdirectory(operators/quantized)
+      endif()
+    endif()
+    add_subdirectory(opt)
+    add_subdirectory(python)
+    add_subdirectory(queue)
+    add_subdirectory(sgd)
+    add_subdirectory(share)
+    # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
+    add_subdirectory(transforms)
+  endif()
 endif()
 
 # Advanced: if we have white list specified, we will do intersections for all
@@ -456,42 +460,27 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
-  if (WIN32)
+  if (NOT WIN32)
     list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_win.cpp
-    )
-    if (USE_CUDA AND NOT USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-      )
-      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
-      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
-      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
-      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
-  else ()
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
     )
-    if (USE_CUDA AND NOT USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-      )
-      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
-      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
-      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
-      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-
-    endif()
   endif ()
 
   if (USE_CUDA)
+    if (NOT USE_ROCM)
+      list(APPEND Caffe2_GPU_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      )
+    endif()
     list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
+    add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if (USE_ROCM)
@@ -499,6 +488,13 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
+    # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
+    # See NOTE [ ATen NVRTC Stub and HIP ]
+    add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
+    install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if (NOT NO_API)

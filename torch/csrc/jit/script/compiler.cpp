@@ -308,20 +308,21 @@ struct Environment {
       }
       if (!as_simple_value->type()->isSubtypeOf(
               unshapedType(simple_parent->type()))) {
-        std::stringstream errMsg;
-        errMsg << "variable '" << name << "' previously has type "
-               << simple_parent->type()->python_str()
-               << " but is now being assigned to a value of type "
-               << as_simple_value->type()->python_str();
+        auto error = ErrorReport(loc);
+        error << "Variable '" << name << "' previously has type "
+              << simple_parent->type()->python_str()
+              << " but is now being assigned to a value of type "
+              << as_simple_value->type()->python_str();
+
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
-          errMsg << "\n. (Note: empty lists are constructed as Tensor[]; "
-                 << "if you want an empty list of a different type, "
-                 << "use `torch.jit.annotate(List[T], [])`, "
-                 << "where `T` is the type of elements in the list)";
+          error << "\n. (Note: empty lists are constructed as Tensor[]; "
+                << "if you want an empty list of a different type, "
+                << "use `torch.jit.annotate(List[T], [])`, "
+                << "where `T` is the type of elements in the list)";
         }
-        throw ErrorReport(loc) << errMsg.str();
+        throw error;
       }
     }
     if (as_simple_value) {
@@ -1412,8 +1413,7 @@ struct to_ir {
     auto itrs = stmt.itrs();
     auto body = stmt.body();
     if (stmt.itrs().size() != 1) {
-      throw ErrorReport(stmt)
-          << "List of iterables is not supported currently.";
+      throw ErrorReport(stmt) << "List of iterables is not supported currently";
     }
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
@@ -1518,19 +1518,19 @@ struct to_ir {
         num_starred++;
       } else {
         throw ErrorReport(assignee) << "lhs of assignment must be a variable, "
-                                    << "subscript, or starred expression.";
+                                    << "subscript, or starred expression";
       }
     }
 
     if (num_starred > 1) {
       throw ErrorReport(r)
-          << "Only one starred expression is allowed on the lhs.";
+          << "Only one starred expression is allowed on the lhs";
     }
 
     if (num_starred > 0 && num_normal_assign == 0) {
       throw ErrorReport(r) << "A Starred expression may only appear on the "
                            << "lhs within the presence of another non-starred"
-                           << " expression.";
+                           << " expression";
     }
 
     return num_starred;
@@ -1577,7 +1577,7 @@ struct to_ir {
       default:
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on "
-            << "left-hand side of augmented assignment.";
+            << "left-hand side of augmented assignment";
     }
   }
 
@@ -1720,7 +1720,7 @@ struct to_ir {
         throw ErrorReport(subscriptExprs)
             << "Sliced expression not yet supported for"
             << " subscripted list augmented assignment. "
-            << "File a bug if you want this.";
+            << "File a bug if you want this";
       }
       const auto idxValue = emitExpr(subscriptExprs[0]);
 
@@ -1790,7 +1790,7 @@ struct to_ir {
         throw ErrorReport(subscript)
             << "Sliced expression not yet supported for"
             << " subscripted list assignment. "
-            << "File a bug if you want this.";
+            << "File a bug if you want this";
       }
 
       std::vector<NamedValue> args;
@@ -1858,8 +1858,7 @@ struct to_ir {
         case TK_STARRED: {
           auto var = Starred(assignee).expr();
           if (var.kind() != TK_VAR) {
-            throw ErrorReport(var)
-                << "Cannot pack a tuple into a non-variable.";
+            throw ErrorReport(var) << "Cannot pack a tuple into a non-variable";
           }
           size_t n_matched = outputs.size() - n_binders;
           ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
@@ -1896,6 +1895,11 @@ struct to_ir {
   }
 
   void emitAssignment(const Assign& stmt) {
+    if (!stmt.rhs().present()) {
+      throw ErrorReport(stmt.range())
+          << "For an assignment, expected an expression on the right-hand side";
+    }
+    const Expr& rhs = stmt.rhs().get();
     switch (stmt.lhs().kind()) {
       case TK_VAR: {
         auto v = Var(stmt.lhs());
@@ -1904,28 +1908,31 @@ struct to_ir {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
         environment_stack->setSugaredVar(
-            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1, type));
+            v.range(), v.name().name(), emitSugaredExpr(rhs, 1, type));
       } break;
       case TK_TUPLE_LITERAL:
-        emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
+        emitTupleAssign(TupleLiteral(stmt.lhs()), rhs);
         break;
       case '.':
         emitSelectAssign(stmt);
         break;
       case TK_SUBSCRIPT:
-        emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), stmt.rhs());
+        emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), rhs);
         break;
       default:
         throw ErrorReport(stmt.lhs())
-            << "unexpected expression on left-hand side of assignment.";
+            << "unexpected expression on left-hand side of assignment";
     }
   }
 
   void emitSelectAssign(const Assign& stmt) {
+    if (!stmt.rhs().present()) {
+      throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
+    }
     const auto lhs = Select(stmt.lhs());
     const auto basename = Var(lhs.value()).name();
-    const auto rhsValue =
-        emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
+    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
+                              ->asValue(stmt.rhs().range(), method);
     auto userObject = environment_stack->getSugaredVar(basename);
     userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
@@ -2510,7 +2517,7 @@ struct to_ir {
       }
       case TK_STARRED: {
         throw ErrorReport(tree)
-            << "Unexpected starred expansion. File a bug report.";
+            << "Unexpected starred expansion. File a bug report";
       }
       case TK_CONST: {
         return emitConst(Const(tree));
@@ -2522,7 +2529,7 @@ struct to_ir {
         return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
-        return graph->insertConstant(IValue(), nullptr, tree->range());
+        return graph->insertConstant(IValue(), type_hint, tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2609,7 +2616,6 @@ struct to_ir {
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
-        break;
     }
   }
 
@@ -2683,15 +2689,9 @@ struct to_ir {
         loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
   }
 
-  Value* emitUnsqueeze(const SourceRange& loc, Value* input, int64_t dim) {
+  Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
     return emitBuiltinCall(
-        loc,
-        *graph,
-        aten::unsqueeze,
-        c10::nullopt,
-        {input, graph->insertConstant(dim, nullptr, loc)},
-        {},
-        true);
+        loc, *graph, aten::unsqueeze, c10::nullopt, {input, dim_val}, {}, true);
   }
 
   Value* emitIndex(
@@ -2719,67 +2719,118 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
+    // Overall, to handle indexing (other than Tensors), we need to handle a
+    // couple different things. For example, for x[1:3, None, 4], each of these
+    // different index types (slice, None, and integer) result in different
+    // number of dimensions. Slicing doesn't change the number of dimensions,
+    // None adds a dimension, and integer removes a dimension. As these indexing
+    // operations are applied left to right, the actual index that it's being
+    // applied to depends on the previous operations. Ellipses indexing throws
+    // another wrinkle. Ellipses selects any remaining unspecified dimensions.
+    // Thus, for indexes following an ellipses, the actual index an indexing
+    // operation is being applied to depends on the operations to the right.
+    // Thus, we do two passes, one from left to right up until the ellipses, and
+    // one from right to left.
+
     std::vector<Value*> tensor_indices;
-    size_t dim = 0;
 
-    auto handle_tensor = [&](Value* tensor) {
-      // NB: tensor_indices can have None holes because of how at::index works.
-      tensor_indices.resize(dim + 1);
-      tensor_indices[dim] = tensor;
-      dim++;
-    };
-
-    // before ellipsis, dimension index should be `dim`
-    // after ellipsis, dimension index should be `-offset`
-    int offset = 0;
-    size_t ellipsis_dim = 0;
     auto insert_value_for_dim = [&](int64_t dim) {
-      return (offset == 0)
-          ? graph->insertConstant(dim, nullptr, loc)
-          :
-          // NB: offset is incremented to move to the next dimension index
-          graph->insertConstant(offset++, nullptr, loc);
+      return graph->insertConstant(dim, nullptr, loc);
+    };
+    std::vector<int64_t> dims(subscript_exprs.size());
+    std::vector<c10::optional<Value*>> exprs(
+        subscript_exprs.size(), c10::nullopt);
+
+    auto handle_indexing = [&](const Expr& subscript_expr,
+                               int expr_idx,
+                               int64_t dim,
+                               bool is_reverse = false) {
+      dims[expr_idx] = dim;
+      if (subscript_expr.kind() == TK_SLICE_EXPR) {
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim + 1;
+        }
+      }
+      TypePtr type_hint = OptionalType::ofTensor();
+      if (subscript_expr.kind() == TK_NONE) {
+        type_hint = NoneType::get();
+      }
+      auto index = emitExpr(subscript_expr, type_hint);
+      exprs[expr_idx] = index;
+      if (index->type()->isSubtypeOf(NoneType::get())) {
+        if (is_reverse) {
+          return dim;
+        } else {
+          return dim + 1;
+        }
+      } else if (index->type() == IntType::get()) {
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim;
+        }
+      } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
+        if (is_reverse) {
+          throw ErrorReport(loc)
+              << "Ellipses followed by tensor indexing is currently not supported";
+        } else {
+          return dim + 1;
+        }
+      } else {
+        throw ErrorReport(loc)
+            << "Unsupported operation: indexing tensor with unsupported index type '"
+            << index->type()->python_str()
+            << "'. Only ints, slices, and tensors are supported";
+      }
     };
 
-    for (const auto& subscript_expr : subscript_exprs) {
-      // NB: ellipsis_dim is **always** incremented
-      // (comparing to dim) in order to compute
-      // the correct offsets for the remaining
-      // dimension indices following an ellipsis "..."
-      // token
-      ellipsis_dim++;
+    size_t idx = 0;
+    int64_t dim = 0;
+    for (; idx < subscript_exprs.size(); idx++) {
+      auto subscript_expr = subscript_exprs[idx];
       if (subscript_expr.kind() == TK_DOTS) {
-        offset = -(subscript_exprs.size() - ellipsis_dim);
-        ++dim;
+        break;
+      }
+      dim = handle_indexing(subscript_expr, idx, dim, /*is_reverse=*/false);
+    }
+    int64_t rdim = -1;
+    for (size_t rev_idx = subscript_exprs.size() - 1; rev_idx > idx;
+         rev_idx--) {
+      auto subscript_expr = subscript_exprs[rev_idx];
+      if (subscript_expr.kind() == TK_DOTS) {
+        throw ErrorReport(loc)
+            << "An index can only have a single ellipsis ('...')";
+      }
+      rdim =
+          handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
+    }
+    for (size_t i = 0; i < exprs.size(); i++) {
+      if (!exprs[i].has_value()) {
+        if (subscript_exprs[i].kind() == TK_SLICE_EXPR) {
+          sliceable = emitSlice(
+              loc,
+              sliceable,
+              insert_value_for_dim(dims[i]),
+              SliceExpr(subscript_exprs[i]));
+        }
         continue;
       }
-      if (subscript_expr.kind() == TK_SLICE_EXPR) {
-        auto dim_val = insert_value_for_dim(dim);
+      auto expr = exprs[i].value();
+      if (expr->type()->isSubtypeOf(NoneType::get())) {
         sliceable =
-            emitSlice(loc, sliceable, dim_val, SliceExpr(subscript_expr));
-        ++dim;
-        continue;
+            emitUnsqueeze(loc, sliceable, insert_value_for_dim(dims[i]));
+      } else if (expr->type() == IntType::get()) {
+        sliceable =
+            emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
+      } else if (expr->type()->isSubtypeOf(OptionalType::ofTensor())) {
+        tensor_indices.resize(dims[i] + 1);
+        tensor_indices[dims[i]] = expr;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            "Trying to process index type that we don't support.");
       }
-      auto index = emitExpr(subscript_expr, OptionalType::ofTensor());
-      if (index->type() == IntType::get()) {
-        // NB: note, select squeezes out a dimension,
-        // so dim is **not** incremented
-        auto dim_val = insert_value_for_dim(dim);
-        sliceable = emitSelect(loc, sliceable, dim_val, index);
-        continue;
-      } else if (index->type()->isSubtypeOf(NoneType::get())) {
-        sliceable = emitUnsqueeze(loc, sliceable, dim);
-        dim++;
-        continue;
-      } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
-        // NB:index type can either be a Tensor or : (None of Optional Tensor)
-        handle_tensor(index);
-        continue;
-      }
-      throw ErrorReport(loc)
-          << "Unsupported operation: indexing tensor with unsupported index type '"
-          << index->type()->python_str()
-          << "'. Only ints, slices, and tensors are supported";
     }
     // at::index takes in a List[Optional[Tensor]] where some dims can be None.
     // create None node with optional tensor output type and pass to at::index.
@@ -2817,7 +2868,7 @@ struct to_ir {
     if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
       throw ErrorReport(loc)
           << "Unsupported operation: attempted to use multidimensional "
-          << "indexing on a non-tensor type.";
+          << "indexing on a non-tensor type";
     }
 
     std::vector<Value*> tensor_indices;
@@ -3000,12 +3051,31 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
+// Mangle a qualified name so that it is globally unique.
+std::string CompilationUnit::mangle(const std::string& name) const {
+  static const std::string manglePrefix = "___torch_mangle_";
+
+  std::string mangledName;
+  auto pos = name.find(manglePrefix);
+  if (pos != std::string::npos) {
+    // If the name is already mangled, avoid re-appending the prefix.
+    mangledName.reserve(name.size());
+    // Append the part of the name up to the end of the prefix
+    mangledName.append(name, 0, pos);
+    mangledName.append(std::to_string(mangleIndex_++));
+  } else {
+    mangledName = c10::str(name, manglePrefix, std::to_string(mangleIndex_++));
+  }
+  return mangledName;
+}
+
 std::unique_ptr<Function> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const Def& def,
     const ResolverPtr& resolver,
     const Self* self,
-    const std::unordered_map<std::string, Function*>& function_table) const {
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -3018,22 +3088,41 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    ErrorReport::CallStack::push_function(def.name().name());
+    if (self) {
+      // Include the fully qualified name if this is a method
+      ErrorReport::CallStack::push_function(method.qualname().qualifiedName());
+    } else {
+      ErrorReport::CallStack::push_function(method.qualname().name());
+    }
     to_ir(def, _resolver, self, method);
     // Compilation was successful, so remove the function def info
     ErrorReport::CallStack::pop_function();
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
                      : QualifiedName(def.name().name());
-  return torch::make_unique<Function>(
+  if (shouldMangle) {
+    // If `shouldMangle` is set, we should generate a unique name for this
+    // function if there is already an existing one.
+    if (auto fn = find_function(name)) {
+      auto newBase = mangle(name.name());
+      name = QualifiedName(name.prefix(), newBase);
+    }
+  }
+  auto fn = torch::make_unique<Function>(
       std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
+  if (self) {
+    // Register this as a method on `self`'s type
+    self->getClassType()->addMethod(fn.get());
+  }
+  return fn;
 }
 
 std::vector<Function*> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
-    const Self* self) {
+    const Self* self,
+    bool shouldMangle) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
@@ -3055,7 +3144,8 @@ std::vector<Function*> CompilationUnit::define(
         definitions[*init_idx],
         resolvers[*init_idx],
         self,
-        function_table);
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
     functions.push_back(fn.get());
@@ -3068,8 +3158,13 @@ std::vector<Function*> CompilationUnit::define(
       continue;
     }
 
-    auto fn =
-        define(prefix, definitions[i], resolvers[i], self, function_table);
+    auto fn = define(
+        prefix,
+        definitions[i],
+        resolvers[i],
+        self,
+        function_table,
+        shouldMangle);
     const auto& name = fn->name();
     function_table[name] = fn.get();
     functions.push_back(fn.get());

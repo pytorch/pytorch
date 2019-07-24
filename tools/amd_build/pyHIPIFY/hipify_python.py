@@ -131,12 +131,12 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocessor(output_directory, filepath, stats, hip_clang_launch)
+        result = preprocessor(output_directory, filepath, stats, hip_clang_launch)
         # Show what happened
         if show_progress:
             print(
                 filepath, "->",
-                get_hip_file_path(filepath))
+                get_hip_file_path(filepath), result)
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
@@ -611,58 +611,65 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch):
     if not os.path.exists(os.path.dirname(fout_path)):
         os.makedirs(os.path.dirname(fout_path))
 
-    with open(fout_path, 'w') as fout:
-        # unsupported_calls statistics reporting is broken atm
-        if is_pytorch_file(filepath):
-            def pt_repl(m):
-                return PYTORCH_MAP[m.group(0)]
-            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
-        else:
-            def c2_repl(m):
-                return CAFFE2_MAP[m.group(0)]
-            output_source = RE_CAFFE2_PREPROCESSOR.sub(c2_repl, output_source)
+    # unsupported_calls statistics reporting is broken atm
+    if is_pytorch_file(filepath):
+        def pt_repl(m):
+            return PYTORCH_MAP[m.group(0)]
+        output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
+    else:
+        def c2_repl(m):
+            return CAFFE2_MAP[m.group(0)]
+        output_source = RE_CAFFE2_PREPROCESSOR.sub(c2_repl, output_source)
 
-        # Header rewrites
-        def mk_repl(templ):
-            def repl(m):
-                f = m.group(1)
-                if (
-                    f.startswith("ATen/cuda")
-                    or f.startswith("ATen/native/cuda")
-                    or f.startswith("ATen/native/sparse/cuda")
-                    or f.startswith("THC/")
-                    or f.startswith("THCUNN/")
-                    or (f.startswith("THC") and not f.startswith("THCP"))
-                ):
-                    return templ.format(get_hip_file_path(m.group(1)))
-                return m.group(0)
-            return repl
-        output_source = RE_QUOTE_HEADER.sub(mk_repl('#include "{0}"'), output_source)
-        output_source = RE_ANGLE_HEADER.sub(mk_repl('#include <{0}>'), output_source)
-        output_source = RE_THC_GENERIC_FILE.sub(mk_repl('#define THC_GENERIC_FILE "{0}"'), output_source)
+    # Header rewrites
+    def mk_repl(templ):
+        def repl(m):
+            f = m.group(1)
+            if (
+                f.startswith("ATen/cuda")
+                or f.startswith("ATen/native/cuda")
+                or f.startswith("ATen/native/sparse/cuda")
+                or f.startswith("THC/")
+                or f.startswith("THCUNN/")
+                or (f.startswith("THC") and not f.startswith("THCP"))
+            ):
+                return templ.format(get_hip_file_path(m.group(1)))
+            return m.group(0)
+        return repl
+    output_source = RE_QUOTE_HEADER.sub(mk_repl('#include "{0}"'), output_source)
+    output_source = RE_ANGLE_HEADER.sub(mk_repl('#include <{0}>'), output_source)
+    output_source = RE_THC_GENERIC_FILE.sub(mk_repl('#define THC_GENERIC_FILE "{0}"'), output_source)
 
-        # CMakeLists.txt rewrites
-        if filepath.endswith('CMakeLists.txt'):
-            output_source = output_source.replace('CUDA', 'HIP')
-            output_source = output_source.replace('THC', 'THH')
-            output_source = RE_CU_SUFFIX.sub('.hip', output_source)
+    # CMakeLists.txt rewrites
+    if filepath.endswith('CMakeLists.txt'):
+        output_source = output_source.replace('CUDA', 'HIP')
+        output_source = output_source.replace('THC', 'THH')
+        output_source = RE_CU_SUFFIX.sub('.hip', output_source)
 
-        # Perform Kernel Launch Replacements
-        if not hip_clang_launch:
-            output_source = processKernelLaunches(output_source, stats)
+    # Perform Kernel Launch Replacements
+    if not hip_clang_launch:
+        output_source = processKernelLaunches(output_source, stats)
 
-        # Replace std:: with non-std:: versions
-        if filepath.endswith(".cu") or filepath.endswith(".cuh"):
-            output_source = replace_math_functions(output_source)
+    # Replace std:: with non-std:: versions
+    if filepath.endswith(".cu") or filepath.endswith(".cuh"):
+        output_source = replace_math_functions(output_source)
 
-        # Include header if device code is contained.
-        output_source = hip_header_magic(output_source)
+    # Include header if device code is contained.
+    output_source = hip_header_magic(output_source)
 
-        # Replace the extern __shared__
-        output_source = replace_extern_shared(output_source)
+    # Replace the extern __shared__
+    output_source = replace_extern_shared(output_source)
 
-        fout.write(output_source)
-
+    do_write = True
+    if os.path.exists(fout_path):
+        with open(fout_path, 'r') as fout_old:
+            do_write = fout_old.read() != output_source
+    if do_write:
+        with open(fout_path, 'w') as fout:
+            fout.write(output_source)
+        return "ok"
+    else:
+        return "skipped"
 
 def file_specific_replacement(filepath, search_string, replace_string, strict=False):
     with openf(filepath, "r+") as f:

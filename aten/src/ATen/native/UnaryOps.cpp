@@ -49,7 +49,7 @@ Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
   assert_no_internal_overlap(result, "bitwise_not");
   auto iter = TensorIterator::unary_op(result, self);
-  bitwise_not_stub(iter->device_type(), *iter);
+  bitwise_not_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
@@ -119,21 +119,6 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
-Tensor& fill_out(Tensor& self, const Scalar value) {
-  auto iter = TensorIterator::nullary_op(self);
-  fill_stub(iter->device_type(), *iter, value);
-  return self;
-}
-
-Tensor& fill_(Tensor& self, Scalar value) {
-  return fill_out(self, value);
-}
-
-Tensor& fill_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  return fill_out(self, value.item());
-}
-
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
@@ -178,7 +163,7 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     checkBackend(#op, result, Backend::CPU);                    \
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
-    op##_stub(iter->device_type(), *iter);                      \
+    op##_stub(iter.device_type(), iter);                      \
     propagate_names_if_namedtensor_enabled(result, self);       \
     return result;                                              \
   }
@@ -241,6 +226,5 @@ DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
-DEFINE_DISPATCH(fill_stub);
 }
 } // namespace at
