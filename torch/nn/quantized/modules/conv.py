@@ -1,24 +1,26 @@
 # coding=utf-8
+r"""Quantized convolution modules."""
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-from torch.nn.modules.utils import _pair
-from torch.nn.quantized import functional as qF
-
+from torch._ops import ops
 from torch.nn.modules.conv import _ConvNd
 from torch.nn import Conv2d as NNConv2d
 # from torch.nn.qat import Conv2d as QATConv2d
+from torch.nn.modules.utils import _pair
 
 
 class Conv2d(_ConvNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros'):
-        if padding_mode == 'circular':
-            raise NotImplementedError("Circular padding is not implemented!")
+        if padding_mode != 'zeros':
+            raise NotImplementedError(
+                "Currently only zero-padding is supported!")
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
@@ -60,20 +62,37 @@ class Conv2d(_ConvNd):
     def weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(w.permute([0, 2, 3, 1]), self.groups)
 
-    def forward(self, input):
-        return qF.conv2d(input=input,
-                         weight=self._packed_weight,
-                         bias=self.bias,
-                         stride=self.stride,
-                         padding=self.padding,
-                         dilation=self.dilation,
-                         groups=self.groups,
-                         padding_mode=self.padding_mode,
-                         scale=self.scale,
-                         zero_point=self.zero_point,
-                         dtype=torch.quint8,
-                         prepacked=True).permute([0, 3, 1, 2]).contiguous()
+    @property
+    def scale(self):
+        return self._scale.item()
 
+    @scale.setter
+    def scale(self, s):
+        if isinstance(s, torch.Tensor):
+            self._scale = s
+        else:
+            self._scale = torch.tensor([s], dtype=torch.double)
+
+    @property
+    def zero_point(self):
+        return self._zero_point.item()
+
+    @zero_point.setter
+    def zero_point(self, zp):
+        if isinstance(zp, torch.Tensor):
+            self._zero_point = zp
+        else:
+            self._zero_point = torch.Tensor([zp]).to(torch.int)
+
+    def forward(self, input):
+        if input.ndim != 4:
+            raise ValueError("Input shape must be `(N, C, H, W)`!")
+        output = ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
+                                             self._packed_weight, self.bias,
+                                             self.stride, self.padding,
+                                             self.dilation, self.groups,
+                                             self.scale, self.zero_point)
+        return output.permute([0, 3, 1, 2])
 
     @staticmethod
     def from_float(mod):
