@@ -121,7 +121,7 @@ TEST(TorchScriptTest, TestPickle) {
   out.flush();
 
   std::ifstream in("data.pkl", std::ios::binary);
-  std::vector<torch::IValue> ivalues = torch::jit::Unpickle(in);
+  std::vector<torch::IValue> ivalues = torch::jit::unpickle(in);
   std::cout << ivalues.at(0) << "\n";
   // ASSERT_EQ(ivalues.at(0).toDouble(), float_value.toDouble());
 }
