@@ -912,11 +912,11 @@ void initJitScriptBindings(PyObject* module) {
       "_logging_set_logger",
       [](logging::LoggerBase* logger) { return logging::setLogger(logger); },
       py::return_value_policy::reference);
-  m.def("set_graph_executor_optimize", [](bool optimize) {
+  m.def("_set_graph_executor_optimize", [](bool optimize) {
     setGraphExecutorOptimize(optimize);
   });
 
-  m.def("get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+  m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
 
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");

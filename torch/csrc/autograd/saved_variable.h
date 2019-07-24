@@ -10,7 +10,7 @@
 namespace torch { namespace autograd {
 
 struct Variable;
-struct Function;
+struct Node;
 
 TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
@@ -26,7 +26,7 @@ class TORCH_API SavedVariable {
   /// Reconstructs the saved variable. Pass `saved_for` as the gradient
   /// function if constructing the `SavedVariable` with it would have caused a
   /// circular reference.
-  Variable unpack(std::shared_ptr<Function> saved_for = nullptr) const;
+  Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
   void reset_data() {
     return data_.reset();
@@ -43,8 +43,8 @@ class TORCH_API SavedVariable {
   // is false, then this is a leaf node. Note that the grad_fn is not saved if
   // it would create a circular reference. In that case, the grad_fn must be
   // passed in to the unpack function when reconstructing the Variable.
-  std::shared_ptr<Function> grad_fn_;
-  std::weak_ptr<Function> grad_accumulator_;
+  std::shared_ptr<Node> grad_fn_;
+  std::weak_ptr<Node> grad_accumulator_;
   c10::VariableVersion version_counter_;
 
   uint32_t saved_version_ = 0;

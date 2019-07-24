@@ -81,12 +81,16 @@ def scope(scope_name):
 
 @contextlib.contextmanager
 def optimized_execution(should_optimize):
+    """
+    A context manager that controls whether the JIT's executor will run
+    optimizations before executing a function.
+    """
     stored_flag = torch._C.get_graph_executor_optimize()
-    torch._C.set_graph_executor_optimize(should_optimize)
+    torch._C._set_graph_executor_optimize(should_optimize)
     try:
         yield
     finally:
-        torch._C.set_graph_executor_optimize(stored_flag)
+        torch._C._set_graph_executor_optimize(stored_flag)
 
 
 DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
