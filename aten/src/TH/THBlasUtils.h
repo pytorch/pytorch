@@ -9,7 +9,7 @@
 template<typename T>
 inline void THBlas_axpy(int64_t n, T a, T *x, int64_t incx, T *y, int64_t incy);
 
-#define AXPY_SPECIALIZATION(ctype,name,_1) \
+#define AXPY_SPECIALIZATION(ctype,name) \
   template<> \
   inline void THBlas_axpy<ctype>(int64_t n, ctype a, ctype *x, int64_t incx, \
                    ctype *y, int64_t incy) { \
@@ -22,7 +22,7 @@ AT_FORALL_SCALAR_TYPES(AXPY_SPECIALIZATION)
 template<typename T>
 inline void THBlas_copy(int64_t n, T *x, int64_t incx, T *y, int64_t incy);
 
-#define COPY_SPECIALIZATION(ctype,name,_1) \
+#define COPY_SPECIALIZATION(ctype,name) \
   template<> \
   inline void THBlas_copy<ctype>(int64_t n, ctype *x, int64_t incx, \
                    ctype *y, int64_t incy) { \
@@ -34,7 +34,7 @@ AT_FORALL_SCALAR_TYPES(COPY_SPECIALIZATION)
 template<typename T>
 inline T THBlas_dot(int64_t n, T *x, int64_t incx, T *y, int64_t incy);
 
-#define DOT_SPECIALIZATION(ctype,name,_1) \
+#define DOT_SPECIALIZATION(ctype,name) \
   template<> \
   inline ctype THBlas_dot<ctype>(int64_t n, ctype *x, int64_t incx, ctype *y, int64_t incy) { \
     return TH ## name ## Blas_dot(n, x, incx, y, incy); \
@@ -58,7 +58,7 @@ inline void THBlas_gemm(
     T *c,
     int64_t ldc);
 
-#define GEMM_SPECIALIZATION(ctype,name,_1) \
+#define GEMM_SPECIALIZATION(ctype,name) \
   template<> \
   inline void THBlas_gemm<ctype>( \
       char transa, \
@@ -94,7 +94,7 @@ inline void THBlas_gemv(
     T* y,
     int64_t incy);
 
-#define GEMV_SPECIALIZATION(ctype, name, _1) \
+#define GEMV_SPECIALIZATION(ctype, name) \
   template <> \
   inline void THBlas_gemv<ctype>( \
       char transa, \

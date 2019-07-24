@@ -26,7 +26,7 @@ namespace at {
 namespace native {
 
 // These functions are defined in native/TensorFactories.cpp.
-#define TENSOR(T, S, _1)                                                      \
+#define TENSOR(T, S)                                                          \
   CAFFE2_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
   inline Tensor tensor(                                                       \
       std::initializer_list<T> values, const TensorOptions& options) {        \

@@ -19,7 +19,7 @@ using at::DimnameList;
 
 namespace torch {
 
-#define TENSOR(T, S, _1)                                                   \
+#define TENSOR(T, S)                                                       \
   inline at::Tensor tensor(                                                \
       at::ArrayRef<T> values, const at::TensorOptions& options) {          \
     at::Tensor result = ([&]() {                                           \
