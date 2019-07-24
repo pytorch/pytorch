@@ -1160,6 +1160,11 @@ struct to_ir {
     // if ...:
     //   a =
     // ... = a # OK, a is defined along all paths
+    // if ...:
+    //   a =
+    // else:
+    //   return
+    // ... = a # OK, a is always defined
 
     // ordered set, because we want deterministic graph output
     std::set<std::string> mutated_variables;
@@ -1197,6 +1202,9 @@ struct to_ir {
       }
     }
 
+    // if both branches exit don't emit any variables
+    // if one branch exits then we allow the all variables in the other branch
+    // to escape scope since they are well-defined
     if (false_exits && true_exits) {
       return;
     }
