@@ -682,8 +682,6 @@ class GRU(RNNBase):
             result = _VF.gru(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
                              self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
-
-        output = result[0]
         hidden = result[1]
 
         return output, hidden
