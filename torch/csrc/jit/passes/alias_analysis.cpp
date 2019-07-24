@@ -299,6 +299,9 @@ void AliasDb::analyzeImpl(Node* node) {
           node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
       makePointerTo(node->inputs().at(1), node->output());
       return;
+    case prim::Guard:
+      makePointerTo(node->inputs().at(0), node->output());
+      return;
     case prim::CallFunction:
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does
