@@ -4,14 +4,6 @@ import torch
 from . import nested
 from . import codegen
 
-USE_NESTEDTENSOR = os.getenv('USE_NESTEDTENSOR', 'OFF') == 'ON'
-if not USE_NESTEDTENSOR:
-    raise RuntimeError("Attempting to use NestedTensor code "
-                       "without the environment flag USE_NESTEDTENSOR "
-                       "set to ON")
-
-NestedTensor = nested.NestedTensor
-
 def _nary_gen(out_dtype=None):
     # Follows signature of torch nary functions
     def _nary(*args, **kwargs):
@@ -30,7 +22,7 @@ def _nary_gen(out_dtype=None):
                 if out_dtype is not None:
                     out_tensor = out_tensor.to(out_dtype)
                 out_tensors.append(out_tensor)
-            return NestedTensor(out_tensors)
+            return nested.NestedTensor(out_tensors)
         else:
             # NOTE: We are disabling broadcasting for now. These checks introduce a lot of overhead.
             for i in range(len(out)):
@@ -49,13 +41,10 @@ def _nary_gen(out_dtype=None):
 # NOTE: This is inefficient! The functions that are being overwritten in torch
 # are being replaced by functions with very inefficient dispatch mechanisms to add
 # support for NestedTensor to torch.
-torch, NestedTensor = codegen.add_pointwise_unary_functions(torch, NestedTensor, _nary_gen())
-torch, NestedTensor = codegen.add_pointwise_binary_functions(torch, NestedTensor, _nary_gen())
-torch, NestedTensor = codegen.add_pointwise_comparison_functions(torch, NestedTensor, _nary_gen(torch.uint8))
-torch.nestedtensor = nested.make_nested_tensor
-torch.as_nestedtensor = nested.as_nestedtensor
+nested, nested.NestedTensor = codegen.add_pointwise_unary_functions(torch.nested, NestedTensor, _nary_gen())
+nested, nested.NestedTensor = codegen.add_pointwise_binary_functions(torch.nested, NestedTensor, _nary_gen())
+nested, nested.NestedTensor = codegen.add_pointwise_comparison_functions(torch.nested, NestedTensor, _nary_gen(torch.uint8))
 
-# nn monkey patching
-torch.nn.functional.conv2d = nested.monkey_conv2d
-torch.nn.functional.relu = nested.monkey_relu
-torch.max_pool2d = nested.monkey_max_pool2d
+torch.nested.nn.functional.conv2d = nested.conv2d
+torch.nested.nn.functional.relu = nested.relu
+torch.nested.max_pool2d = nested.max_pool2d

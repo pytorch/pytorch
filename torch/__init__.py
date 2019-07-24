@@ -318,6 +318,7 @@ import torch.backends.openmp
 import torch.utils.data
 import torch.__config__
 import torch.__future__
+import torch.nested
 
 _C._init_names(list(torch._storage_classes))
 
@@ -337,6 +338,3 @@ from torch._ops import ops  # noqa: F401
 # Import the quasi random sampler
 import torch.quasirandom
 
-USE_NESTEDTENSOR = os.getenv('USE_NESTEDTENSOR', 'OFF') == 'ON'
-if USE_NESTEDTENSOR:
-    import torch.nested

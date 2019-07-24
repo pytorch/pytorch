@@ -11,48 +11,42 @@ DEBUG = False
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
 
-orig_conv2d = F.conv2d
-
-def monkey_conv2d(input, weight, bias, stride, padding, dilation, groups):
+def conv2d(input, weight, bias, stride, padding, dilation, groups):
     if is_nested_tensor(input):
         ret = []
         for tensor_ in input._tensors:
             tensor = tensor_.view(*((1,) + tensor_.size()))
-            ret_ = orig_conv2d(tensor, weight, bias, stride,
+            ret_ = F.conv2d(tensor, weight, bias, stride,
                                padding, dilation, groups)
             ret.append(ret_.view(*(ret_.size()[1:])))
         return NestedTensor(ret)
     else:
-        return orig_conv2d(input, weight, bias, stride,
+        return F.conv2d(input, weight, bias, stride,
                            padding, dilation, groups)
 
-orig_relu = F.relu
-
-def monkey_relu(input, inplace=False):
+def relu(input, inplace=False):
     if is_nested_tensor(input):
         ret = []
         for tensor_ in input._tensors:
-            ret.append(orig_relu(tensor_, inplace))
+            ret.append(F.relu(tensor_, inplace))
         return NestedTensor(ret)
     else:
         return orig_relu(input, inplace)
 
-orig_max_pool2d = torch.max_pool2d
-
-def monkey_max_pool2d(*args, **kwargs):
+def max_pool2d(*args, **kwargs):
     if is_nested_tensor(args[0]):
         ret = []
         for tensor_ in args[0]._tensors:
             tensor = tensor_.view(*((1,) + tensor_.size()))
             args_ = (tensor,) + args[1:]
-            ret_ = orig_max_pool2d(*args_)
+            ret_ = torch.max_pool2d(*args_)
             ret.append(ret_.view(*(ret_.size()[1:])))
         return NestedTensor(ret)
     else:
-        orig_max_pool2d(*args, **kwargs)
+        torch.max_pool2d(*args, **kwargs)
 
 # Arguments match torch.tensor
-def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False):
+def nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False):
     if is_nested_tensor(data):
         # This is consistent with torch.tensor(torch.Tensor)
         # but errors out.
@@ -84,7 +78,7 @@ def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_m
 
         return NestedTensor(tensors).contiguous()
 
-def as_nestedtensor(data, dtype=None, device=None):
+def as_nested_tensor(data, dtype=None, device=None):
     ret = NestedTensor(data)
     if dtype is not None:
         ret = ret.to(dtype)
