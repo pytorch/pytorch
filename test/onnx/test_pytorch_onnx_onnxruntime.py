@@ -937,17 +937,17 @@ TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
 # opset 10 tests, with keep_initializers_as_inputs=False for 
 # IR version 4 style export.
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__,
-                               keep_initializers_as_inputs=False))
+                                   (unittest.TestCase,),
+                                   dict(TestONNXRuntime.__dict__,
+                                   keep_initializers_as_inputs=False))
 
 
 # opset 10 tests, with keep_initializers_as_inputs=False for 
 # IR version 4 style export.
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__, opset_version=10,
-                               keep_initializers_as_inputs=False))
+                                    (unittest.TestCase,),
+                                    dict(TestONNXRuntime.__dict__, opset_version=10,
+                                    keep_initializers_as_inputs=False))
 
 
 if __name__ == '__main__':

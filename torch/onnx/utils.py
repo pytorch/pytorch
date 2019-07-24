@@ -279,7 +279,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer,
                                     opset_version, _retain_param_name,
-                                    keep_initializers_as_inputs = keep_initializers_as_inputs)
+                                    keep_initializers_as_inputs=keep_initializers_as_inputs)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
