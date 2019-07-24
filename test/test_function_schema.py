@@ -4,7 +4,7 @@ import torch
 from common_utils import TestCase
 
 
-class TestSparse(TestCase):
+class TestFunctionSchema(TestCase):
     def test_serialize_and_deserialize(self):
         schemas = torch._C._jit_get_all_schemas()
         # so far we have around 1700 registered schemas
