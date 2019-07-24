@@ -13014,8 +13014,6 @@ a")
             m(input)
             with open(fname, "rb") as handle:
                 loaded_tensor = torch.load(fname)
-                print(loaded_tensor)
-                print(input + param)
                 self.assertEqual(loaded_tensor, input + param)
 
     def _test_pickle_checkpoint_views(self, device):
