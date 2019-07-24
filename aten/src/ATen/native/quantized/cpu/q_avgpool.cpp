@@ -38,11 +38,13 @@ static void adaptive_avg_pool2d_single_out_frame(scalar_t *input_p,
         int istartH = start_index(oh, osizeH, isizeH);
         int iendH   = end_index(oh, osizeH, isizeH);
         int kH = iendH - istartH;
+        float kHr = 1.0 / kH;
 
         for(ow = 0; ow < osizeW; ow++) {
           int istartW = start_index(ow, osizeW, isizeW);
           int iendW   = end_index(ow, osizeW, isizeW);
           int kW = iendW - istartW;
+          float kHWr = kHr / kW;
 
           /* local pointers */
           scalar_t *ip = input_p   + d*istrideD + istartH*istrideH + istartW*istrideW;
@@ -59,7 +61,7 @@ static void adaptive_avg_pool2d_single_out_frame(scalar_t *input_p,
           }
 
           /* set output to local average */
-          *op = scalar_t(static_cast<underlying_t>(sum / kW / kH));
+          op->val_ = static_cast<underlying_t>(std::nearbyint(sum * kHWr));
         }
       }
     }

@@ -3868,15 +3868,15 @@
     CUDA: _lu_with_info_cuda
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_btrisolve_out
-    CUDA: legacy::cuda::_th_btrisolve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
+
+- func: _lu_solve_helper(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
+  variants: function
   dispatch:
-    CPU: legacy::cpu::_th_btrisolve
-    CUDA: legacy::cuda::_th_btrisolve
+    CPU: _lu_solve_helper_cpu
+    CUDA: _lu_solve_helper_cuda
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
