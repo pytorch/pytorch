@@ -13,9 +13,9 @@ TEST(TensorIteratorTest, CPUScalar) {
   auto x = at::randn({5, 5}, kCUDA);
   auto y = at::ones(1, kCPU).squeeze();
   auto iter = TensorIterator::binary_op(out, x, y);
-  EXPECT_TRUE(iter->device(0).is_cuda()) << "result should be CUDA";
-  EXPECT_TRUE(iter->device(1).is_cuda()) << "x should be CUDA";
-  EXPECT_TRUE(iter->device(2).is_cpu()) << "y should be CPU";
+  EXPECT_TRUE(iter.device(0).is_cuda()) << "result should be CUDA";
+  EXPECT_TRUE(iter.device(1).is_cuda()) << "x should be CUDA";
+  EXPECT_TRUE(iter.device(2).is_cpu()) << "y should be CPU";
 }
 
 // An operation with a CUDA output and CPU scalar inputs should only
@@ -27,9 +27,9 @@ TEST(TensorIteratorTest, CPUScalarInputs) {
   auto x = at::ones(1, kCPU).squeeze();
   auto y = at::ones(1, kCPU).squeeze();
   auto iter = TensorIterator::binary_op(out, x, y);
-  EXPECT_TRUE(iter->device(0).is_cuda()) << "result should be CUDA";
-  EXPECT_TRUE(iter->device(1).is_cpu()) << "x should be CPU";
-  EXPECT_TRUE(iter->device(2).is_cuda()) << "y should be CUDA";
+  EXPECT_TRUE(iter.device(0).is_cuda()) << "result should be CUDA";
+  EXPECT_TRUE(iter.device(1).is_cpu()) << "x should be CPU";
+  EXPECT_TRUE(iter.device(2).is_cuda()) << "y should be CUDA";
 }
 
 // Mixing CPU and CUDA tensors should raise an exception (if neither is a scalar)

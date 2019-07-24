@@ -548,7 +548,6 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   IValue moduleGetState(const script::Module& module);
-  bool moduleHasValidGetSetState(const script::Module& module);
 
   void convertClass(const c10::NamedTypePtr& type);
 
@@ -720,78 +719,6 @@ void ScriptModuleSerializer::convertModel(
   }
 }
 
-bool ScriptModuleSerializer::moduleHasValidGetSetState(
-    const script::Module& module) {
-  // Check that the schemas for __getstate__ and __setstate__ are correct
-  auto getstate = module.module_object()->type()->getMethod("__getstate__");
-  if (getstate == nullptr) {
-    return false;
-  }
-  auto get_schema =
-      module.module_object()->type()->getMethod("__getstate__")->getSchema();
-
-  // Check __getstate__
-  //   __getstate__ is expected to be (self) -> T
-  TORCH_CHECK(
-      get_schema.arguments().size() == 1,
-      "'__getstate__' must have 'self' as its only argument, but found ",
-      get_schema.arguments().size(),
-      " arguments");
-  TORCH_CHECK(
-      get_schema.returns().size() == 1,
-      "'__getstate__' must return 1 value, but found ",
-      get_schema.returns().size());
-
-  // Check __setstate__ if the method exists
-  //   __setstate__ is expected to be (self, T) -> None
-  // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.find_method("__setstate__");
-  if (!setstate) {
-    return false;
-  }
-  auto set_schema = setstate->function().getSchema();
-
-  if (set_schema.arguments().size() == 1) {
-    TORCH_CHECK(
-        get_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
-        "For '__setstate__' to have no state"
-        " param, '__getstate__' must return None");
-  } else {
-    TORCH_CHECK(
-        set_schema.arguments().size() == 2,
-        "'__setstate__' must have 'self' and the state as its "
-        "only arguments, but found ",
-        set_schema.arguments().size(),
-        " arguments");
-  }
-  TORCH_CHECK(
-      set_schema.returns().size() == 1,
-      "'__setstate__' must return None, but found ",
-      set_schema.returns().size(),
-      " return values");
-  TORCH_CHECK(
-      set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
-      "'__setstate__' must return None, but found value of type",
-      set_schema.returns().at(0).type()->python_str());
-
-  // Check that the return type of __getstate__ matches the input to
-  // __setstate__
-  auto get_type = get_schema.returns().at(0).type();
-  auto set_type = set_schema.arguments().size() == 1
-      ? NoneType::get()
-      : set_schema.arguments().at(1).type();
-
-  TORCH_CHECK(
-      set_type->isSubtypeOf(get_type),
-      "'__getstate__'s return type (",
-      get_type->python_str(),
-      " does not match '__setstate__'s argument type (",
-      set_type->python_str(),
-      "))");
-
-  return true;
-}
-
 /// Run module.__getstate__() and return the result
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
   return module.get_method("__getstate__")({});
@@ -872,7 +799,8 @@ void ScriptModuleSerializer::convertModule(
 
   // If __getstate__ and __setstate__ methods are provided, use those for
   // serializing instead of serializing the attributes directly
-  bool user_provided_serialization = moduleHasValidGetSetState(module);
+  bool user_provided_serialization =
+      checkHasValidSetGetState(module.module_object()->type());
   if (user_provided_serialization) {
     // Run the '__getstate__' method on the module and store the result
     pickled_ivalues_.emplace_back(moduleGetState(module));
