@@ -62,6 +62,13 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
    torchvision/index
 
+.. toctree::
+   :glob:
+   :maxdepth: 2
+   :caption: torchaudio Reference
+
+   torchaudio/index
+
 
 Indices and tables
 ==================
