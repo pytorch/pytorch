@@ -241,7 +241,8 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   return !(lhs == rhs);
 }
 
-// for debugging, make sure we can describe the call site
+// print out Argument, which is compatible with FunctionSchema parser
+// full format: Type(alias)? name=default_value
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   bool optional_type = arg.type()->isSubclass(TypeKind::OptionalType);
   // for adjusting the ? position.
@@ -250,8 +251,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // so we always use Type(alias)? format
   std::stringstream oss;
   if (arg.type()->isSubclass(TypeKind::ListType) && arg.N()) {
-    oss << std::static_pointer_cast<const ListType>(arg.type())->
-      getElementType()->str();
+    oss << arg.type()->cast<ListType>()->getElementType()->str();
     oss << "[" << arg.N().value() << "]";
   } else {
     oss << arg.type()->str();
@@ -271,8 +271,8 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   }
   if (arg.default_value()) {
     out << "=";
-    //out << expand_escapes(arg.default_value().value().toStringRef());
     if (arg.type()->kind() == c10::TypeKind::StringType) {
+        // TODO prettify the result, such as using \n to represent \012
         out << "\'";
         std::ios_base::fmtflags flags(out.flags());
         for (unsigned char c : arg.default_value().value().toStringRef()) {
