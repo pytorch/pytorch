@@ -29,7 +29,11 @@ namespace jit {
 ///
 /// \endrst
 TORCH_API std::string Pickle(
-    std::vector<IValue> ivalues,
+    const std::vector<IValue>& ivalues,
+    std::vector<at::Tensor>* tensor_table = nullptr);
+
+TORCH_API std::string Pickle(
+    const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table = nullptr);
 
 TORCH_API std::vector<IValue> Unpickle(

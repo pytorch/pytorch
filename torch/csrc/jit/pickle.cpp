@@ -7,7 +7,7 @@ namespace torch {
 namespace jit {
 
 TORCH_API std::string Pickle(
-    std::vector<IValue> ivalues,
+    const std::vector<IValue>& ivalues,
     std::vector<at::Tensor>* tensor_table) {
   std::stringstream ss;
 
@@ -30,11 +30,32 @@ TORCH_API std::string Pickle(
   return ss.str();
 }
 
+TORCH_API std::string Pickle(
+    const IValue& ivalue,
+    std::vector<at::Tensor>* tensor_table) {
+  std::stringstream ss;
+
+  Pickler pickler(ss, tensor_table);
+  pickler.start();
+
+  if (tensor_table == nullptr) {
+    // No tensor table provided, so tensors will be stored directly in the blob.
+    // Add torch.save metadata so these tensors can be de-serialized later
+    pickler.pushMetadata();
+  }
+
+  // Just one value, so don't wrap it in a tuple
+  pickler.addIValue(ivalue);
+  pickler.finish();
+
+  return ss.str();
+}
+
 TORCH_API std::vector<IValue> Unpickle(
     std::istream& in,
     std::vector<at::Tensor>* tensor_table,
     ClassResolver class_resolver) {
-  Unpickler unpickler(in, tensor_table, class_resolver);
+  Unpickler unpickler(in, tensor_table, std::move(class_resolver));
   return unpickler.parse_ivalue_list();
 }
 
@@ -45,7 +66,7 @@ TORCH_API std::vector<IValue> Unpickle(
     ClassResolver class_resolver) {
   std::stringstream ss;
   ss << std::string(data, size);
-  Unpickler unpickler(ss, tensor_table, class_resolver);
+  Unpickler unpickler(ss, tensor_table, std::move(class_resolver));
   return unpickler.parse_ivalue_list();
 }
 
@@ -54,9 +75,11 @@ TORCH_API std::vector<IValue> Unpickle(
     size_t size,
     std::vector<at::Tensor>* tensor_table,
     ClassResolver class_resolver) {
-  // TODO: don't double copy here
   return Unpickle(
-      reinterpret_cast<const char*>(data), size, tensor_table, class_resolver);
+      reinterpret_cast<const char*>(data),
+      size,
+      tensor_table,
+      std::move(class_resolver));
 }
 
 } // namespace jit
