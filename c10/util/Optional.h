@@ -1092,4 +1092,8 @@ struct hash<c10::optional<T&>> {
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
 
+namespace torch {
+  template<class T> using Optional = c10::optional<T>;
+}
+
 #endif // C10_UTIL_OPTIONAL_H_
