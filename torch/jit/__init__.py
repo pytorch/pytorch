@@ -1,3 +1,4 @@
+
 import torch._C
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
@@ -1074,9 +1075,10 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
 def autograd_script(fn):
     if not _enabled:
         return fn
+    qualified_name = _qualified_name(fn)
     _rcb = _jit_internal.createResolutionCallback(1)
     ast = get_jit_def(fn, _is_autograd=True)
-    fn = torch._C._jit_autograd_script_compile(ast, _rcb, get_default_args(fn))
+    fn = torch._C._jit_autograd_script_compile(qualified_name, ast, _rcb, get_default_args(fn))
     # Forward docstrings
     fn.__doc__ = fn.__doc__
     return fn

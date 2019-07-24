@@ -766,17 +766,23 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_autograd_script_compile",
-      [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
-        C10_LOG_API_USAGE_ONCE("torch.script.compile");
+      [](const std::string& qualname,
+         const Def& def,
+         ResolutionCallback rcb,
+         FunctionDefaults defaults) {
+        C10_LOG_API_USAGE_ONCE("torch.script.autograd_compile");
+        const auto name = c10::QualifiedName(qualname);
+        TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
         // TODO what todo about this?  should be the global python CU
         CompilationUnit tmp_cu;
         auto cu = std::make_shared<CompilationUnit>();
-        tmp_cu.define({def}, {pythonResolver(std::move(rcb))}, nullptr);
+        tmp_cu.define(
+            QualifiedName(name.prefix()),
+            {def},
+            {pythonResolver(std::move(rcb))},
+            nullptr);
         auto defined = tmp_cu.get_functions().at(0);
         auto pair_schema = getGradientPairAndSchema(defined);
-        /*defined->setSchema(getSchemaWithNameAndDefaults(
-          def.range(), defined->getSchema(), def.name().name(), defaults));*/
-        // which of those parts do we need here?
         auto fw_defined =
             cu->create_function(def.name().name(), pair_schema.first.forward);
         fw_defined->setSchema(pair_schema.second);
