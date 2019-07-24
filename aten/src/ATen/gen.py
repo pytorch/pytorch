@@ -120,7 +120,6 @@ TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 TYPE_EXTENSION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.h")
 TYPE_EXTENSION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.cpp")
-REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
 
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
@@ -179,7 +178,6 @@ top_env = {
     'native_function_declarations': [],
     'extension_backend_headers': [],
     'extension_backend_register_switches': [],
-    'registration_declarations': [],
 }
 
 
@@ -366,7 +364,7 @@ def declare_outputs():
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
              'Functions.h', 'NativeFunctions.h',
-             'ExtensionBackendRegistration.h', 'RegistrationDeclarations.h']
+             'ExtensionBackendRegistration.h']
     for f in files:
         file_manager.will_write(f)
     for backend, density in iterate_types():
@@ -459,7 +457,6 @@ def generate_outputs():
 
     file_manager.write('TypeDefault.h', TYPE_DEFAULT_H, top_env)
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
-    file_manager.write('RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, top_env)
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
 
