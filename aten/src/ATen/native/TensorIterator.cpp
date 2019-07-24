@@ -509,6 +509,15 @@ std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Ten
   return builder.build();
 }
 
+std::unique_ptr<TensorIterator> TensorIterator::comparison_op(Tensor& out, const Tensor& a, const Tensor& b) {
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out, a.device(), ScalarType::Byte);
+  builder.add_input(a);
+  builder.add_input(b);
+  builder.iter_->allow_cpu_scalars_ = true;
+  return builder.build();
+}
+
 std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tensor& a) {
   auto builder = TensorIterator::Builder();
   builder.add_output(out);

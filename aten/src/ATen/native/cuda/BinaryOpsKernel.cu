@@ -4,6 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <THC/THCNumerics.cuh>
 #include <limits>
 
 
@@ -61,9 +62,18 @@ void mul_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void eq_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "eq_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> uint8_t {
+      return THCNumerics<scalar_t>::eq(a, b);
+    });
+  });
+}
+
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
+REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda);
 
 }} // namespace at::native

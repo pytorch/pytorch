@@ -13,6 +13,7 @@ DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(eq_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
@@ -184,6 +185,37 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
 }
+
+Tensor& eq_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  at::assert_no_internal_overlap(result, "eq");
+  auto iter = TensorIterator::comparison_op(result, self, other);
+  eq_stub(iter->device_type(), *iter);
+  return result;
+}
+
+Tensor eq(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::comparison_op(result, self, other);
+  eq_stub(iter->device_type(), *iter);
+  return iter->output();
+}
+
+Tensor& eq_(Tensor& self, const Tensor& other) {
+  return native::eq_out(self, self, other);
+}
+
+Tensor eq(const Tensor& self, Scalar other) {
+  return native::eq(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& eq_(Tensor& self, Scalar other) {
+  return native::eq_(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& eq_out(Tensor& result, const Tensor& self, Scalar other) {
+  return native::eq_out(result, self, wrapped_scalar_tensor(other));
+}
+
 
 }
 }  // namespace at
