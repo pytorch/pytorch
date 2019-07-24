@@ -2226,7 +2226,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
   }
 }
 
-TEST(DataLoaderTest, CustomSortPolicy) {
+TEST(DataLoaderTest, CustomPreprocessPolicy) {
   const size_t chunk_size = 5;
   const size_t batch_size = 10;
 
@@ -2250,11 +2250,11 @@ TEST(DataLoaderTest, CustomSortPolicy) {
     size_t chunk_count_;
   };
 
-  // custom sorting policy - sort the data ascendingly
+  // custom preprocessing policy - sort the data ascendingly
   auto sorting_policy = [](std::vector<int>& raw_batch_data) {
     std::sort(raw_batch_data.begin(), raw_batch_data.end());
   };
-  std::function<void(std::vector<int>&)> sorting_policy_function =
+  std::function<void(std::vector<int>&)> policy_function =
       sorting_policy;
 
   const size_t prefetch_count = 1;
@@ -2284,7 +2284,7 @@ TEST(DataLoaderTest, CustomSortPolicy) {
                   batch_size,
                   cache_size,
                   cross_chunk_shuffle_count),
-              sorting_policy_function);
+              policy_function);
 
       auto data_loader = torch::data::make_data_loader(
           dataset, DataLoaderOptions(batch_size).workers(0));
