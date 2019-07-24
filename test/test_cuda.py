@@ -1062,6 +1062,12 @@ class TestCuda(TestCase):
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
+    def test_add_bool(self):
+        cuda = torch.device('cuda:0')
+        m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=cuda)
+        m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool, device=cuda)
+        self.assertEqual(m1 + m2, torch.tensor([True, True, False, True, False, True], dtype=torch.bool, device=cuda))
+
     def test_mul_intertype_scalar(self):
         def test_mul(dtype):
             x = torch.tensor(1.5, dtype=dtype, device='cuda')
