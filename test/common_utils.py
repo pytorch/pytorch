@@ -933,7 +933,7 @@ def random_square_matrix_of_rank(l, rank):
 
 def random_symmetric_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    A = A + A.transpose(-2, -1)
+    A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 

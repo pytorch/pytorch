@@ -1818,10 +1818,18 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
       return nonsingular_case_backward(grad, self, det);
     }
   } else {
-    Tensor grad_det = at::empty_like(self);
     auto nonzero_det_indices = at::where(det != 0);
     auto zero_det_indices = at::where(det == 0);
 
+    if (zero_det_indices[0].size(0) == det.numel()) {  // all determinants are zero (singular)
+      return singular_case_backward(grad, self, det);
+    }
+
+    if (nonzero_det_indices[0].size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
+      return nonsingular_case_backward(grad, self, det);
+    }
+
+    Tensor grad_det = at::empty_like(self);
     if (nonzero_det_indices[0].size(0) > 0) {  // invertible case
       auto indexed_grad = grad.index(nonzero_det_indices);
       auto indexed_det = det.index(nonzero_det_indices);
@@ -1860,10 +1868,18 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
       return singular_case_backward(grad, self);
     }
   } else {
-    Tensor grad_logdet = at::empty_like(self);
     auto finite_logdet_indices = at::where(logdet != -INFINITY);
     auto neginf_logdet_indices = at::where(logdet == -INFINITY);
 
+    if (finite_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
+      return nonsingular_case_backward(grad, self);
+    }
+
+    if (neginf_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
+      return singular_case_backward(grad, self);
+    }
+
+    Tensor grad_logdet = at::empty_like(self);
     if (finite_logdet_indices[0].size(0) > 0) {  // invertible case
       auto indexed_grad = grad.index(finite_logdet_indices);
       auto indexed_self = self.index(finite_logdet_indices);
@@ -1904,10 +1920,18 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    Tensor grad_slogdet = at::empty_like(self);
     auto nonzero_signdet_indices = at::where(signdet != 0);
     auto zero_signdet_indices = at::where(signdet == 0);
 
+    if (zero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
+      return singular_case_backward(grad_logabsdet, self);
+    }
+
+    if (nonzero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
+      return nonsingular_case_backward(grad_logabsdet, self);
+    }
+
+    Tensor grad_slogdet = at::empty_like(self);
     if (nonzero_signdet_indices[0].size(0) > 0) {  // invertible case
       auto indexed_grad = grad_logabsdet.index(nonzero_signdet_indices);
       auto indexed_self = self.index(nonzero_signdet_indices);
