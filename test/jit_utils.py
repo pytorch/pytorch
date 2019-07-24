@@ -10,6 +10,7 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 import torch.jit.quantized
+import zipfile
 
 # Testing utils
 from common_utils import TestCase, IS_WINDOWS, \
@@ -90,6 +91,23 @@ class JitTestCase(TestCase):
         return False
 
     def _compared_saved_loaded(self, m):
+        def extract_files(buffer):
+            # crack open the zip format to get at the main module code
+            archive = zipfile.ZipFile(buffer)
+            # check that we have no duplicate names
+            self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
+            files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
+            # unwrap all the code files into strings
+            code_files = filter(lambda x: x.endswith('.py'), files)
+            code_files = map(lambda f: archive.open(f), code_files)
+            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files)
+
+            # unpickled all the debug files
+            debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
+            debug_files = map(lambda f: archive.open(f), debug_files)
+            debug_files = map(lambda f: pickle.load(f), debug_files)
+            return code_files, debug_files
+
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with torch.jit._disable_emit_hooks():
             try:
@@ -108,17 +126,7 @@ class JitTestCase(TestCase):
                 # and it's easier to just work with a fresh copy each time.
                 buffer_copy = buffer.getvalue()
 
-                # crack open the zip format to get at the main module code
-                # archive = zipfile.ZipFile(buffer)
-                # check that we have no duplicate names
-                # self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
-                buffer.seek(0)
-                main_module_code = torch.jit.load(buffer)._c.code
-
-                # main_module_code = torch.jit.load(buffer).code
-                # main_module = archive.open('archive/libs/__torch__.py')
-                # main_module_debug_file = archive.open('archive/debug/archive.pkl')
-                # main_module_debug = pickle.load(main_module_debug_file)
+                code_files, debug_files = extract_files(buffer)
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -134,12 +142,10 @@ class JitTestCase(TestCase):
             torch.jit.save(imported, saved_module_buffer_2)
 
             saved_module_buffer_2.seek(0)
-            main_module_2_code = torch.jit.load(saved_module_buffer_2)._c.code
-            # main_module_2_debug_file = archive.open('archive/debug/archive.pkl')
-            # main_module_2_debug = pickle.load(main_module_2_debug_file)
+            code_files_2, debug_files_2 = extract_files(saved_module_buffer_2)
 
-            self.assertMultiLineEqual(main_module_code, main_module_2_code)
-            # self.assertEqual(main_module_debug, main_module_2_debug)
+            for a, b in zip(code_files, code_files_2):
+                self.assertMultiLineEqual(a, b)
 
 
     def emitFunctionHook(self, func):
