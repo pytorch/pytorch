@@ -32,10 +32,6 @@ TORCH_API std::string Pickle(
     const std::vector<IValue>& ivalues,
     std::vector<at::Tensor>* tensor_table = nullptr);
 
-TORCH_API std::string Pickle(
-    const IValue& ivalue,
-    std::vector<at::Tensor>* tensor_table = nullptr);
-
 TORCH_API std::vector<IValue> Unpickle(
     const char* data,
     size_t size,

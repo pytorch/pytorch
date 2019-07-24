@@ -10,7 +10,6 @@ TORCH_API std::string Pickle(
     const std::vector<IValue>& ivalues,
     std::vector<at::Tensor>* tensor_table) {
   std::stringstream ss;
-
   Pickler pickler(ss, tensor_table);
   pickler.start();
 
@@ -20,32 +19,17 @@ TORCH_API std::string Pickle(
     pickler.pushMetadata();
   }
 
-  pickler.startTuple();
+  bool wrap_in_tuple = ivalues.size() > 0;
+
+  if (wrap_in_tuple) {
+    pickler.startTuple();
+  }
   for (const auto& ivalue : ivalues) {
     pickler.addIValue(ivalue);
   }
-  pickler.endTuple();
-  pickler.finish();
-
-  return ss.str();
-}
-
-TORCH_API std::string Pickle(
-    const IValue& ivalue,
-    std::vector<at::Tensor>* tensor_table) {
-  std::stringstream ss;
-
-  Pickler pickler(ss, tensor_table);
-  pickler.start();
-
-  if (tensor_table == nullptr) {
-    // No tensor table provided, so tensors will be stored directly in the blob.
-    // Add torch.save metadata so these tensors can be de-serialized later
-    pickler.pushMetadata();
+  if (wrap_in_tuple) {
+    pickler.endTuple();
   }
-
-  // Just one value, so don't wrap it in a tuple
-  pickler.addIValue(ivalue);
   pickler.finish();
 
   return ss.str();

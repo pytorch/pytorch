@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/jit.h>
+#include <torch/script.h>
 #include <torch/types.h>
 
 #include <string>
@@ -109,4 +110,17 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
   ASSERT_EQ(
       0, module->run_method("optional_tuple_op", torch::jit::IValue()).toInt());
 
+}
+
+TEST(TorchScriptTest, TestPickle) {
+  torch::IValue float_value(2.3);
+  std::string data = torch::jit::Pickle({float_value});
+  std::ofstream out("data.pkl");
+  out << data;
+  out.flush();
+
+  std::ifstream in("data.pkl", std::ios::binary);
+  std::vector<torch::IValue> ivalues = torch::jit::Unpickle(in);
+  std::cout << ivalues.at(0) << "\n";
+  // ASSERT_EQ(ivalues.at(0).toDouble(), float_value.toDouble());
 }
