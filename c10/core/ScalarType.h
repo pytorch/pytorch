@@ -74,15 +74,16 @@ namespace c10 {
   _(at::Half, Half, d)                     \
   _(float, Float, d)                       \
   _(double, Double, d)                     \
-  _(bool, Bool, i)
+  _(bool, Bool, i)                         \
+  _(at::BFloat16, BFloat16, d)
 
-#define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
-  _(uint8_t, Byte, i)                         \
-  _(int8_t, Char, i)                          \
-  _(int16_t, Short, i)                        \
-  _(int, Int, i)                              \
-  _(int64_t, Long, i)                         \
-  _(float, Float, d)                          \
+#define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_BFLOAT16(_) \
+  _(uint8_t, Byte, i)                                      \
+  _(int8_t, Char, i)                                       \
+  _(int16_t, Short, i)                                     \
+  _(int, Int, i)                                           \
+  _(int64_t, Long, i)                                      \
+  _(float, Float, d)                                       \
   _(double, Double, d)
 
 #define AT_FORALL_QINT_TYPES(_)  \
