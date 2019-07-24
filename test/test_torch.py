@@ -12331,7 +12331,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
             # sign_out
             a_out = torch.empty_like(a_bool)
-            torch.sign(a_bool, a_out)
+            torch.sign(a_bool, out=a_out)
             self.assertEqual(a_out, a_bool_target, 'sign_out device={} dtype=bool'.format(device))
             
             # sign_
