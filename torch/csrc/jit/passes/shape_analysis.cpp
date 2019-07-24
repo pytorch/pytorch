@@ -1557,15 +1557,15 @@ class ShapePropagator {
           c10::Device default_device = type->device();
           if (auto dtype_index = node->schema().argumentIndexWithName("dtype")) {
             auto inp = toIValue(node->inputs().at(*dtype_index));
-            if (!inp->isNone()) {
+            if (inp != c10::nullopt && !inp->isNone()) {
               default_type = inp->toScalarType();
             }
           }
           if (auto device_index = node->schema().argumentIndexWithName("device")) {
               auto inp = toIValue(node->inputs().at(*device_index));
-            if (!inp->isNone()) {
+              if (inp != c10::nullopt && !inp->isNone()) {
                 default_device = inp->toDevice();
-            }
+              }
           }
           node->output()->setType(
             DimensionedTensorType::create(default_type, default_device, type->dim()));
