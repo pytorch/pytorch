@@ -46,6 +46,7 @@ class Adagrad(Optimizer):
                 state['sum'].share_memory_()
 
     def step(self, closure=None):
+        print('hello')
         """Performs a single optimization step.
 
         Arguments:
