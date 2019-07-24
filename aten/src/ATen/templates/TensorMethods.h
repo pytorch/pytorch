@@ -156,6 +156,7 @@ inline bool is_quantized(Tensor self) {
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_CAST)
+AT_FORALL_QINTS(DEFINE_CAST)
 #undef DEFINE_CAST
 
 #define DEFINE_ITEM(T, name, _)   \

@@ -51,6 +51,11 @@ namespace c10 {
   _(bool, Bool, i)                                                          \
   _(at::BFloat16, BFloat16, d)
 
+#define AT_FORALL_QINTS(_)  \
+  _(c10::qint8, QInt8, i)   \
+  _(c10::quint8, QUInt8, i) \
+  _(c10::qint32, QInt32, i)
+
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(_) \
   _(uint8_t, Byte, i)                         \
   _(int8_t, Char, i)                          \
