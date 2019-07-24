@@ -662,14 +662,14 @@ void bernoulli_scalar_cuda_kernel(TensorIterator& iter, double p_, Generator* ge
 
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
-  uniform_kernel_cuda(*iter, from, to, gen);
+  uniform_kernel_cuda(iter, from, to, gen);
   return self;
 }
 
 Tensor& random_cuda_(Tensor& self, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uint64_t range;
-  auto iter_scalar_type = iter->dtype();
+  auto iter_scalar_type = iter.dtype();
   if (isFloatingType(iter_scalar_type)) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter_scalar_type, "random_cuda_range_calc", [&] {
       range = static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
@@ -679,7 +679,7 @@ Tensor& random_cuda_(Tensor& self, Generator* gen) {
       range = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
     });
   }
-  random_kernel_cuda(*iter, range, 0, gen);
+  random_kernel_cuda(iter, range, 0, gen);
   return self;
 }
 
@@ -687,7 +687,7 @@ Tensor& clamped_random_cuda_(Tensor& self, int64_t from, int64_t to, Generator* 
   TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
   auto iter = TensorIterator::nullary_op(self);
   uint64_t range = to - from;
-  random_kernel_cuda(*iter, range, from, gen);
+  random_kernel_cuda(iter, range, from, gen);
   return self;
 }
 
@@ -698,7 +698,7 @@ Tensor& capped_random_cuda_(Tensor& self, int64_t to, Generator* gen) {
 Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
-  normal_kernel_cuda(*iter, mean, std, gen);
+  normal_kernel_cuda(iter, mean, std, gen);
   return self;
 }
 
@@ -751,34 +751,34 @@ Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
 
 Tensor& cauchy_cuda_(Tensor& self, double median, double sigma, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
-  cauchy_kernel_cuda(*iter, median, sigma, gen);
+  cauchy_kernel_cuda(iter, median, sigma, gen);
   return self;
 }
 
 Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
-  exponential_kernel_cuda(*iter, lambda, gen);
+  exponential_kernel_cuda(iter, lambda, gen);
   return self;
 }
 
 Tensor& geometric_cuda_(Tensor& self, double p, Generator* gen) {
   TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
-  geometric_kernel_cuda(*iter, p, gen);
+  geometric_kernel_cuda(iter, p, gen);
   return self;
 }
 
 Tensor& log_normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
-  log_normal_kernel_cuda(*iter, mean, std, gen);
+  log_normal_kernel_cuda(iter, mean, std, gen);
   return self;
 }
 
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
-  bernoulli_scalar_cuda_kernel(*iter, p, gen);
+  bernoulli_scalar_cuda_kernel(iter, p, gen);
   return self;
 }
 
