@@ -40,6 +40,9 @@ from common_utils import TEST_WITH_UBSAN
 
 from torch.nn import MultiheadAttention
 
+from hypothesis import given
+import hypothesis_utils as hu
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -4734,6 +4737,32 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i, device_ids=(cuda0, cuda1), output_device=cuda0)
         self.assertEqual(out, l(i))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_function_deletion(self):
+        # this test case is originated from #16532
+        def gradient_penalty(net, x):
+            output = net(x)
+            loss = torch.autograd.grad(
+                outputs=output, inputs=x,
+                grad_outputs=x.new_ones(output.size()),
+                create_graph=True, retain_graph=True)[0].mean()
+            return loss
+
+        net = nn.Linear(4, 1).cuda()
+        dpn = nn.DataParallel(net, [0, 1])
+        x = torch.ones(2, 4, requires_grad=True).cuda()
+
+        dpn.zero_grad()
+        loss = gradient_penalty(dpn, x)
+        loss.backward()
+        grads = [p.grad for p in net.parameters()]
+        self.assertEqual(2, len(grads))
+        self.assertEqual(
+            torch.tensor([[0.25, 0.25, 0.25, 0.25]], device='cuda:0'),
+            grads[0])
+        self.assertEqual(torch.tensor([0.0], device='cuda:0'), grads[1])
+
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
@@ -9215,6 +9244,32 @@ class TestNNInit(TestCase):
         def fn():
             init.normal(x)
         self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
+
+class TestFusionEval(TestCase):
+    @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
+           running_mean=hu.tensor(shapes=(6,)),
+           running_var=hu.tensor(shapes=(6,)))
+    def test_fuse_module_eval_numerics(self, X, running_mean, running_var):
+        inputs, _ = X
+
+        iC, oC = inputs.shape[1], len(running_mean[0])
+        inputs = torch.from_numpy(inputs).to(torch.double)
+        kernel_size = (3, 3)
+
+        conv_ref = torch.nn.Conv2d(iC, oC, bias=True, kernel_size=kernel_size)
+        bn_ref = torch.nn.BatchNorm2d(oC)
+        bn_ref.running_mean = torch.from_numpy(running_mean[0]).to(torch.double)
+        bn_ref.running_var = torch.from_numpy(running_var[0]).to(torch.double)
+
+        conv_ref.eval()
+        bn_ref.eval()
+
+        Y_ref = bn_ref(conv_ref(inputs))
+        conv_bn_fused = torch.nn.utils.fusion.fuse_conv_bn_eval(conv_ref,
+                                                                bn_ref)
+        Y_hat = conv_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, message="Conv+BN fusion results are off")
 
 
 def add_test(test, decorator=None):

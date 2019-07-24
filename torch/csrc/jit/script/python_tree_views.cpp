@@ -141,7 +141,8 @@ void initTreeViewBindings(PyObject* module) {
     return Expr(Compound::create(TK_NONE, range, {}));
   });
 
-  py::class_<Stmt, TreeView>(m, "Stmt"); // NOLINT(bugprone-unused-raii)
+  py::class_<Stmt, TreeView>(m, "Stmt") // NOLINT(bugprone-unused-raii)
+      .def(py::init([](const TreeView& thing) { return Stmt(thing.get()); }));
   py::class_<Expr, TreeView>(m, "Expr"); // NOLINT(bugprone-unused-raii)
   py::class_<Def, TreeView>(m, "Def").def(
       py::init([](const Ident& name, Decl decl, std::vector<Stmt> body) {
@@ -149,9 +150,10 @@ void initTreeViewBindings(PyObject* module) {
         return Def::create(r, name, decl, wrap_list(r, std::move(body)));
       }));
   py::class_<ClassDef, TreeView>(m, "ClassDef")
-      .def(py::init([](const Ident& name, std::vector<Def> body) {
+      .def(py::init([](const Ident& name, std::vector<Stmt> body) {
         const auto& r = name.range();
-        return ClassDef::create(r, name, wrap_list(r, std::move(body)));
+        return ClassDef::create(
+            r, name, Maybe<Expr>::create(r), wrap_list(r, std::move(body)));
       }));
   py::class_<Decl, TreeView>(m, "Decl").def(py::init(
       [](const SourceRange& r, std::vector<Param> params, Expr* return_type) {
@@ -162,11 +164,17 @@ void initTreeViewBindings(PyObject* module) {
   py::class_<Assign, Stmt>(m, "Assign")
       .def(py::init([](const Expr& lhs, const Expr& rhs) {
         return Assign::create(
-            lhs.range(), lhs, rhs, Maybe<Expr>::create(lhs.range()));
+            lhs.range(),
+            lhs,
+            Maybe<Expr>::create(rhs.range(), rhs),
+            Maybe<Expr>::create(lhs.range()));
       }))
       .def(py::init([](const Expr& lhs, const Expr& rhs, Expr* type) {
         return Assign::create(
-            lhs.range(), lhs, rhs, wrap_maybe(lhs.range(), type));
+            lhs.range(),
+            lhs,
+            Maybe<Expr>::create(rhs.range(), rhs),
+            wrap_maybe(lhs.range(), type));
       }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
       .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
