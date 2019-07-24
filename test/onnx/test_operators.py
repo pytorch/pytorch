@@ -212,6 +212,12 @@ class TestOperators(TestCase):
     def test_params(self):
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
         y = nn.Parameter(torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True))
+        self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ),
+                        keep_initializers_as_inputs=True)
+
+    def test_params_onnx_irv4(self):
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+        y = nn.Parameter(torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True))
         self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ))
 
     def test_symbolic_mismatch(self):
@@ -236,17 +242,25 @@ class TestOperators(TestCase):
     # TODO: Do an nn style test for these
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
+        self.assertONNX(nn.BatchNorm2d(2), x, keep_initializers_as_inputs=True)
+
+    def test_batchnorm_onnx_irv4(self):
+        x = torch.ones(2, 2, 2, 2, requires_grad=True)
         self.assertONNX(nn.BatchNorm2d(2), x)
 
     def test_batchnorm_1d(self):
         x = torch.ones(2, 2, requires_grad=True)
-        self.assertONNX(nn.BatchNorm1d(2), x)
+        self.assertONNX(nn.BatchNorm1d(2), x, keep_initializers_as_inputs=True)
 
     def test_batchnorm_training(self):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(2), x, training=True)
+        self.assertONNX(nn.BatchNorm2d(2), x, training=True, keep_initializers_as_inputs=True)
 
     def test_conv(self):
+        x = torch.ones(20, 16, 50, 40, requires_grad=True)
+        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x, keep_initializers_as_inputs=True)
+    
+    def test_conv_onnx_irv4(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
         self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
 
@@ -276,7 +290,8 @@ class TestOperators(TestCase):
     def test_convtranspose(self):
         x = torch.ones(2, 3, 4, 5, requires_grad=True)
         self.assertONNX(nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False,
-                                           padding=1, output_padding=2), x)
+                                           padding=1, output_padding=2), x,
+                                           keep_initializers_as_inputs=True)
 
     def test_maxpool(self):
         x = torch.randn(20, 16, 50)
@@ -545,13 +560,14 @@ class TestOperators(TestCase):
 
     def test_batchnorm_noaffine(self):
         x = torch.randn(128, 128, 1, 1, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x)
+        self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x,
+                                       keep_initializers_as_inputs=True)
 
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
         offset = torch.tensor([0]).long()
-        self.assertONNX(emb_bag, (input, offset))
+        self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True)
 
     def test_implicit_expand(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -575,7 +591,7 @@ class TestOperators(TestCase):
 
     def test_prelu(self):
         x = torch.randn(1, 2, 3, 4)
-        self.assertONNX(torch.nn.PReLU(2), x)
+        self.assertONNX(torch.nn.PReLU(2), x, keep_initializers_as_inputs=True)
 
     def test_log_sigmoid(self):
         x = torch.randn(1, 2, 3, 4)
@@ -583,7 +599,8 @@ class TestOperators(TestCase):
 
     def test_linear(self):
         x = torch.randn(3, 4)
-        self.assertONNX(torch.nn.Linear(4, 5, bias=True), x)
+        self.assertONNX(torch.nn.Linear(4, 5, bias=True), x,
+                        keep_initializers_as_inputs=True)
 
     def test_zeros_like(self):
         x = torch.randn(5, 8, requires_grad=True)
@@ -645,7 +662,8 @@ class TestOperators(TestCase):
                 return self.fc2(self.fc1(x))
 
         x = torch.randn(3, 4).float()
-        self.assertONNX(MyModule(), (x,), _retain_param_name=False)
+        self.assertONNX(MyModule(), (x,), _retain_param_name=False,
+                        keep_initializers_as_inputs=True)
 
     def test_c2_op(self):
         class MyModel(torch.nn.Module):
