@@ -23,6 +23,8 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
 
   explicit NamedTensorMeta(DimnameList names)
     : names_(names.vec()) {}
+  explicit NamedTensorMeta(std::vector<Dimname>&& names)
+    : names_(std::move(names)) {}
 
   std::unique_ptr<c10::NamedTensorMetaInterface> clone() const override {
     return torch::make_unique<NamedTensorMeta>(names_);
@@ -36,6 +38,11 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
     std::copy(new_names.begin(), new_names.end(), names_.begin());
   }
 
+  void set_names_(std::vector<Dimname>&& new_names) {
+    TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
+    names_ = std::move(new_names);
+  }
+
  private:
   std::vector<Dimname> names_;
 };
@@ -45,6 +52,7 @@ namespace impl {
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
+CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
 CAFFE2_API optional<DimnameList> internal_get_names(TensorImpl* impl);
 CAFFE2_API bool internal_is_named(TensorImpl* impl);
 
