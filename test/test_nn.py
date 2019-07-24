@@ -40,6 +40,9 @@ from common_utils import TEST_WITH_UBSAN
 
 from torch.nn import MultiheadAttention
 
+from hypothesis import given
+import hypothesis_utils as hu
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -5518,7 +5521,7 @@ class TestNN(NNTestCase):
 
         self.assertEqual(l, expected)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 7000), "needs cudnn >= 7.0")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 7000), "needs cudnn >= 7.0")
     def test_CTCLoss_cudnn(self):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
@@ -6837,13 +6840,13 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
@@ -6886,7 +6889,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         import sys
         if sys.version_info[0] == 2:
@@ -6929,7 +6932,7 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
@@ -9241,6 +9244,32 @@ class TestNNInit(TestCase):
         def fn():
             init.normal(x)
         self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
+
+class TestFusionEval(TestCase):
+    @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
+           running_mean=hu.tensor(shapes=(6,)),
+           running_var=hu.tensor(shapes=(6,)))
+    def test_fuse_module_eval_numerics(self, X, running_mean, running_var):
+        inputs, _ = X
+
+        iC, oC = inputs.shape[1], len(running_mean[0])
+        inputs = torch.from_numpy(inputs).to(torch.double)
+        kernel_size = (3, 3)
+
+        conv_ref = torch.nn.Conv2d(iC, oC, bias=True, kernel_size=kernel_size)
+        bn_ref = torch.nn.BatchNorm2d(oC)
+        bn_ref.running_mean = torch.from_numpy(running_mean[0]).to(torch.double)
+        bn_ref.running_var = torch.from_numpy(running_var[0]).to(torch.double)
+
+        conv_ref.eval()
+        bn_ref.eval()
+
+        Y_ref = bn_ref(conv_ref(inputs))
+        conv_bn_fused = torch.nn.utils.fusion.fuse_conv_bn_eval(conv_ref,
+                                                                bn_ref)
+        Y_hat = conv_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, message="Conv+BN fusion results are off")
 
 
 def add_test(test, decorator=None):
