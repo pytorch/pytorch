@@ -80,8 +80,8 @@ class class_ {
         ClassType::create(c10::QualifiedName(qualifiedName), classCu);
     c10::getTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
-    c10::getTypeMap().insert(
-        {typeid(IValue).name(), StrongTypePtr(classCu, classTypePtr)});
+    c10::getTypeMap().insert({typeid(c10::ivalue_holder<CurClass>).name(),
+                              StrongTypePtr(classCu, classTypePtr)});
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
     torch::jit::get_python_cu()->register_class(classTypePtr);
@@ -96,25 +96,18 @@ class class_ {
     auto qualOperatorName = className + "::__init__";
     auto qualMethodName =
         topModule + "." + parentModule + "." + className + ".__init__";
-    auto func = [](IValue self, Types... args) {
+    auto func = [](c10::ivalue_holder<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
       auto genericPtr = c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
           static_cast<intrusive_ptr_target*>(classObj.release()));
       auto capsule = IValue(genericPtr);
-      auto object = self.toObject();
+      auto object = self.ivalue.toObject();
       object->setAttr("capsule", capsule);
     };
     static auto classRegistry =
         torch::RegisterOperators().op(qualOperatorName, std::move(func));
 
     std::vector<Value*> inputs = addInputs(func, graph);
-    auto capsuleValue =
-        graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))
-            ->output()
-            ->setType(CapsuleType::get());
-    auto n = graph->insertNode(
-        graph->create(prim::SetAttr, {inputs[0], capsuleValue}, 0));
-    n->s_(attr::name, "capsule");
     auto res = graph->insertNode(
         graph->create(Symbol::fromQualString(qualOperatorName), inputs, 0));
 

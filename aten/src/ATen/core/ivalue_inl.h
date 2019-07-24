@@ -23,6 +23,10 @@ namespace c10 {
 struct IValue;
 struct ClassType;
 struct TupleType;
+template <typename T>
+struct ivalue_holder {
+  IValue ivalue;
+};
 
 template<class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
@@ -448,11 +452,12 @@ T generic_to(
     auto capsulePtr = capsule.toCapsule().release();
     return c10::intrusive_ptr<ElemType>::reclaim(static_cast<ElemType*>(capsulePtr));
 }
-template <>
-inline IValue generic_to(
+
+template <typename T>
+ivalue_holder<T> generic_to(
     IValue ivalue,
-    _fake_type<IValue>) {
-    return ivalue;
+    _fake_type<ivalue_holder<T>>) {
+    return ivalue_holder<T>{ivalue};
 }
 
 template <typename Elem>
@@ -749,5 +754,6 @@ template <typename T>
 IValue from(T x) {
   return detail::from_(x, detail::has_constructor<T>{});
 }
+
 }
 } // namespace c10

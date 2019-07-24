@@ -1092,13 +1092,6 @@ RegisterOperators reg(
            };
          }),
      Operator(
-         "prim::CreateCapsule() -> Capsule",
-         [](Stack& stack) {
-            auto res = IValue(c10::intrusive_ptr<c10::intrusive_ptr_target>());
-            push(stack, std::move(res));
-            return 0;
-         }),
-     Operator(
          prim::GetAttr,
          [](const Node* node) {
            const auto type = node->input()->type()->expect<ClassType>();
