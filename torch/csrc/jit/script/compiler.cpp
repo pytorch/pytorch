@@ -691,11 +691,56 @@ struct to_ir {
         name, "", std::move(args), std::move(returns), false, false);
   }
 
+  // __setstate__ is special, because it derives the type for `state` from the
+  // output type of __getstate__. This is necessary so that we can allow
+  // submodules to appear in `state`.
+  std::vector<Argument> emitSetStateArguments(
+      const Def& def,
+      const Self* self,
+      const FunctionSchema& schema,
+      Block* block) {
+    std::vector<Argument> arguments; // for schema
+    TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
+    TORCH_INTERNAL_ASSERT(def.decl().params().size() == 2);
+    TORCH_INTERNAL_ASSERT(self);
+    {
+      const auto self_param = def.decl().params()[0];
+      const auto& name = self_param.ident().name();
+      Value* new_input = block->addInput()->setDebugName(name);
+      environment_stack->setSugaredVar(
+          self_param.ident().range(), name, self->makeSugared(new_input));
+      arguments.emplace_back(name, new_input->type());
+    }
+    {
+      const auto state_param = def.decl().params()[1];
+      const auto& name = state_param.ident().name();
+      Value* new_input = block->addInput()->setDebugName(name);
+      self->getClassType()->getMethod("__getstate__")->ensure_defined();
+      const auto state_type = self->getClassType()
+                                  ->getMethod("__getstate__")
+                                  ->getSchema()
+                                  .returns()
+                                  .at(0)
+                                  .type();
+      new_input->setType(state_type);
+      arguments.emplace_back(name, new_input->type());
+      environment_stack->setVar(state_param.ident().range(), name, new_input);
+    }
+    return arguments;
+  }
+
   std::vector<Argument> emitFormalArguments(
       const Def& def,
       const Self* self,
       const FunctionSchema& schema,
       Block* block) {
+    const bool no_type_annotations = std::all_of(
+        schema.arguments().begin(),
+        schema.arguments().end(),
+        [](const Argument& arg) { return arg.is_inferred_type(); });
+    if (def.name().name() == "__setstate__" && no_type_annotations) {
+      return emitSetStateArguments(def, self, schema, block);
+    }
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -3081,40 +3126,10 @@ std::vector<Function*> CompilationUnit::define(
     const Self* self,
     bool shouldMangle) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
-  // We need to compile `__init__` first, since it can determine what attributes
-  // are available to other methods. So reorder the definitions accordingly.
-  c10::optional<size_t> init_idx;
-  for (size_t i = 0; i < definitions.size(); i++) {
-    const auto& def = definitions[i];
-    if (def.name().name() == "__init__") {
-      init_idx = i;
-      break;
-    }
-  }
-
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
-  if (init_idx.has_value()) {
-    // if we have an init, do it first.
-    auto fn = define(
-        prefix,
-        definitions[*init_idx],
-        resolvers[*init_idx],
-        self,
-        function_table,
-        shouldMangle);
-    const auto& name = fn->name();
-    function_table[name] = fn.get();
-    functions.push_back(fn.get());
-    register_function(std::move(fn));
-  }
 
   for (size_t i = 0; i < definitions.size(); i++) {
-    if (init_idx.has_value() && i == *init_idx) {
-      // skip this def since it's already been compiled
-      continue;
-    }
-
     auto fn = define(
         prefix,
         definitions[i],
@@ -3126,6 +3141,15 @@ std::vector<Function*> CompilationUnit::define(
     function_table[name] = fn.get();
     functions.push_back(fn.get());
     register_function(std::move(fn));
+  }
+
+  // We need to compile `__init__` first, since it can determine what attributes
+  // are available to other methods. So reorder the definitions accordingly.
+  for (size_t i = 0; i < definitions.size(); i++) {
+    const auto& def = definitions[i];
+    if (def.name().name() == "__init__") {
+      functions[i]->ensure_defined();
+    }
   }
 
   for (Function* function : functions) {
