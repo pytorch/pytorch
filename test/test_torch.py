@@ -2586,11 +2586,15 @@ class _TestTorchMixin(object):
 
             a = torch.tensor([[True, False, True],
                               [False, False, False],
-                              [True, True, True]],dtype=torch.bool, device=d)
+                              [True, True, True]], device=d)
             b = a.byte()
-            a1 = torch.cumsum(a, 0)
-            b1 = torch.cumsum(b, 0)
-            self.assertEqual(a1, b1)
+            aRes = torch.cumsum(a, 0)
+            bRes = torch.cumsum(b, 0)
+            self.assertEqual(aRes, bRes)
+
+            aRes = torch.cumsum(a, 1)
+            bRes = torch.cumsum(b, 1)
+            self.assertEqual(aRes, bRes)
 
     def test_cumprod(self):
         for d in torch.testing.get_all_device_types():
@@ -2604,9 +2608,13 @@ class _TestTorchMixin(object):
                               [False, False, False],
                               [True, True, True]],dtype=torch.bool, device=d)
             b = a.byte()
-            a1 = torch.cumprod(a, 0)
-            b1 = torch.cumprod(b, 0)
-            self.assertEqual(a1, b1)
+            aRes = torch.cumprod(a, 0)
+            bRes = torch.cumprod(b, 0)
+            self.assertEqual(aRes, bRes)
+
+            aRes = torch.cumprod(a, 1)
+            bRes = torch.cumprod(b, 1)
+            self.assertEqual(aRes, bRes)
 
     def _test_reduce_integer_upcast(self, fn, has_out=True):
         shape = (3, 4, 5)
