@@ -203,10 +203,8 @@ class ShapePropagator {
     return tensor_types;
   }
 
-  c10::ScalarType typeToScalarType(const c10::TypePtr & type) {
-    if (auto cast = type->cast<CompleteTensorType>()) {
-      return cast->scalarType();
-    } else if(auto cast = type->cast<DimensionedTensorType>()) {
+  c10::optional<c10::ScalarType> typeToScalarType(const c10::TypePtr & type) {
+    if(auto cast = type->cast<DimensionedTensorType>()) {
       return cast->scalarType();
     } else if (auto cast = type->cast<FloatType>()) {
       return c10::ScalarType::Float;
@@ -215,7 +213,7 @@ class ShapePropagator {
     } else if (auto cast = type->cast<BoolType>()) {
       return c10::ScalarType::Bool;
     }
-    return c10::ScalarType::Undefined;
+    return c10::nullopt;
   }
 
   c10::ScalarType getScalarType(Node *node) {
@@ -223,19 +221,12 @@ class ShapePropagator {
     auto& args = node->schema().arguments();
     for (size_t i = 0 ; i < args.size() ; i++ ) { //auto arg : args ) {
       auto arg = args[i];
-      auto dtype = typeToScalarType(arg.type());
       auto inputDtype = typeToScalarType(node->inputs()[i]->type());
-      if (dtype != c10::ScalarType::Undefined) { //}->cast<DimensionedTensorType>()) {
-        if (ret == c10::ScalarType::Undefined ) {
-          ret = dtype;
-        } else {
-          ret = c10::promoteTypes(ret, dtype);
-        }
-      } else if (inputDtype != c10::ScalarType::Undefined) {
+      if (inputDtype) {
         if (ret == c10::ScalarType::Undefined) {
-          ret = inputDtype;
+          ret = inputDtype.value();
         } else {
-          ret = c10::promoteTypes(ret, inputDtype);
+          ret = c10::promoteTypes(ret, inputDtype.value());
         }
       }
     }
@@ -832,13 +823,31 @@ class ShapePropagator {
     //   device         : always matching and preserved
     //   tensor inputs  : *
     //   tensor outputs : 1
-    static const register_formula_for broadcasting_ops{
+    static const register_formula_for broadcasting_ops_arithmetic{
         {
             // Tensor-Tensor operators
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
             "aten::mul(Tensor self, Tensor other) -> Tensor",
             "aten::div(Tensor self, Tensor other) -> Tensor",
+        },
+        [this](Node* node) -> type_vec_t {
+          if (auto maybe_tensor_types =
+                  gatherTensorTypes<DimensionedTensorType>(node)) {
+            AT_ASSERT(maybe_tensor_types->size() >= 2);
+            return {broadcast(*maybe_tensor_types, getScalarType(node))};
+          }
+          return {};
+        }};
+
+    // Requirements:
+    //   dims           : broadcast all tensor args
+    //   scalar type    : always matching and preserved
+    //   device         : always matching and preserved
+    //   tensor inputs  : *
+    //   tensor outputs : 1
+    static const register_formula_for broadcasting_ops{
+        {
             "aten::pow(Tensor self, Tensor exponent) -> Tensor",
             "aten::fmod(Tensor self, Tensor other) -> Tensor",
             "aten::remainder(Tensor self, Tensor other) -> Tensor",
@@ -864,7 +873,14 @@ class ShapePropagator {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
             AT_ASSERT(maybe_tensor_types->size() >= 2);
-            return {broadcast(*maybe_tensor_types, getScalarType(node))};
+            auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
+            auto second_scalar_type = (*maybe_tensor_types)[1]->scalarType();
+            size_t arg_for_type = 0;
+            if (c10::promoteTypes(first_scalar_type, second_scalar_type) != first_scalar_type) {
+              arg_for_type = 1;
+            }
+            auto t = (*maybe_tensor_types)[arg_for_type]->scalarType();
+            return {broadcast(*maybe_tensor_types, t)};
           }
           return {};
         }};
@@ -878,13 +894,12 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, getScalarType(node))};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[0]->scalarType())};
           }
           return {};
         }};
 
-    // NB: we always take the scalar type of the Tensor
-    static const register_formula_for broadcasting_tensor_scalar_ops{
+    static const register_formula_for broadcasting_tensor_scalar_ops_arithmetic{
         {
 
             // Tensor-Scalar operators
@@ -892,6 +907,19 @@ class ShapePropagator {
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             "aten::mul(Tensor self, Scalar other) -> Tensor",
             "aten::div(Tensor self, Scalar other) -> Tensor",
+          },
+          [this](Node* node) -> type_vec_t {
+            if (auto maybe_tensor_types =
+                    gatherTensorTypes<DimensionedTensorType>(node)) {
+              return {broadcast(*maybe_tensor_types, getScalarType(node))};
+            }
+            return {};
+          }};
+
+    // NB: we always take the scalar type of the Tensor
+    static const register_formula_for broadcasting_tensor_scalar_ops{
+        {
+
             "aten::pow(Tensor self, Scalar exponent) -> Tensor",
             "aten::fmod(Tensor self, Scalar other) -> Tensor",
             "aten::remainder(Tensor self, Scalar other) -> Tensor",
@@ -910,7 +938,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, getScalarType(node))};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[0]->scalarType())};
           }
           return {};
         }};
@@ -925,7 +953,7 @@ class ShapePropagator {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
 
-            return {broadcast(*maybe_tensor_types, getScalarType(node))};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[1]->scalarType())};
           }
           return {};
         }};

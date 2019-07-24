@@ -187,14 +187,27 @@ void TensorIterator::compute_types() {
         }
       }
 
-      if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
-      {
+      if (op.tensor.defined()) {
+        // For binary_ops, we follow casting rules. For unary/nullary types
+        // we require the type to match.
         if (op.is_output) {
-          if (!can_cast(common_dtype, op.tensor.scalar_type())) {
+          if ((ninputs() < 2 && op.dtype != op.tensor.scalar_type()) ||
+              !can_cast(common_dtype, op.tensor.scalar_type()))
+          {
             AT_ERROR("result type ", common_dtype,
               " can't be cast to the desired output type ",
               op.tensor.scalar_type());
           }
+        } else {
+          if (ninputs() < 2 && op.dtype != op.tensor.scalar_type()) {
+            AT_ERROR("expected dtype ", op.dtype, " but got dtype ", op.tensor.scalar_type());
+          }
+        }
+      }
+
+      if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
+      {
+        if (op.is_output) {
           // to convert result back to a provided output type.
           op.dtype = op.tensor.scalar_type();
         } else {

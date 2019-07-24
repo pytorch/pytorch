@@ -34,7 +34,7 @@ Boolean                    ``torch.bool``                                ``torch
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
 can be used, which returns ``True`` if the data type is a floating point data type.
 
-We allow casting a tensor to an output tensor of another dtype, except:
+For arithmetic operations we allow casting a tensor to an output tensor of another dtype, except:
   * An integral output tensor cannot accept a floating point tensor.
   * An unsigned output tensor cannot accept a signed tensor.
 

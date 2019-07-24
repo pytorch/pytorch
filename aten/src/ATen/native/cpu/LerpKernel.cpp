@@ -14,6 +14,10 @@ static void lerp_kernel_scalar(
     const Tensor& self,
     const Tensor& end,
     Scalar weight) {
+  // lerp() only uses TensorIterator for CPU. Since TensorIterator would
+  // would attempt to promote types inconsistent with the CUDA implementation,
+  // restrict types explicitly here
+  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " but got dtype ", end.dtype());
   auto builder = at::TensorIterator::Builder();
   builder.add_output(ret);
   builder.add_input(self);
@@ -36,6 +40,11 @@ static void lerp_kernel_tensor(
     const Tensor& self,
     const Tensor& end,
     const Tensor& weights) {
+  // lerp() only uses TensorIterator for CPU. Since TensorIterator would
+  // would attempt to promote types inconsistent with the CUDA implementation,
+  // restrict types explicitly here
+  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " but got dtype ", end.dtype());
+  TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " but got weights with dtype ", end.dtype());
   auto builder = at::TensorIterator::Builder();
   builder.add_output(ret);
   builder.add_input(self);

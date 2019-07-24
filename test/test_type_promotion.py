@@ -156,6 +156,15 @@ class TestTypePromotion(TestCase):
             self.assertEqual(c.dtype, d.dtype, message='from {} to {}'.format(k, v))
             self.assertEqual(c, d, message='from {} to {}'.format(k, v))
 
+    def test_non_promoting_ops(self):
+        x = torch.ones(4, dtype=torch.double)
+        err = 'expected dtype .ouble but got dtype .loat'
+        self.assertRaisesRegex(RuntimeError, err,
+                               lambda: torch.neg(torch.ones(4, dtype=torch.float), out=x))
+        self.assertRaisesRegex(RuntimeError, err,
+                               lambda: torch.lerp(x, torch.ones(4, dtype=torch.float), 1))
+
+
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):
