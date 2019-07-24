@@ -30,7 +30,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry pip install -q awscli
   s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
-  retry aws s3 cp "$pkg" "$s3_dir" --acl public-read
+  retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
 else
   retry pip install -q awscli
   s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
