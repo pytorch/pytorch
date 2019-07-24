@@ -232,7 +232,50 @@ The dynamic control flow is captured correctly. We can verify in backends with d
 Limitations
 -----------
 
-* TODO: LHS indexing, indexed assignments.
+* Tensor in-place indexed assignment like `data[index] = new_data` is currently not supported in exporting.
+  One way to resolve this kind of issue is to use operator `scatter`, explicitly updating the original tensor. ::
+
+    data = torch.zeros(3, 4)
+    index = torch.tensor(1)
+    new_data = torch.arange(4).to(torch.float32)
+
+    # Assigning to left hand side indexing is not supported in exporting.
+    # class InPlaceIndexedAssignment(torch.nn.Module):
+    # def forward(self, data, index, new_data):
+    #     data[index] = new_data
+    #     return data
+
+    class InPlaceIndexedAssignmentONNX(torch.nn.Module):
+        def forward(self, data, index, new_data):
+            new_data = new_data.unsqueeze(0)
+            index = index.expand(1, new_data.size(1))
+            data.scatter_(0, index, new_data)
+            return data
+
+    out = InPlaceIndexedAssignmentONNX()(data, index, new_data)
+
+    torch.onnx.export(InPlaceIndexedAssignmentONNX(), (data, index, new_data), 'inplace_assign.onnx')
+
+    # caffe2
+    import caffe2.python.onnx.backend as backend
+    import onnx
+
+    onnx_model = onnx.load('inplace_assign.onnx')
+    rep = backend.prepare(onnx_model)
+    out_caffe2 = rep.run((torch.zeros(3, 4).numpy(), index.numpy(), new_data.numpy()))
+
+    assert torch.all(torch.eq(out, torch.tensor(out_caffe2)))
+
+    # onnxruntime
+    import onnxruntime
+    sess = onnxruntime.InferenceSession('inplace_assign.onnx')
+    out_ort = sess.run(None, {
+        sess.get_inputs()[0].name: torch.zeros(3, 4).numpy(),
+        sess.get_inputs()[1].name: index.numpy(),
+        sess.get_inputs()[2].name: new_data.numpy(),
+    })
+
+    assert torch.all(torch.eq(out, torch.tensor(out_ort)))
 
 * TODO: Tensor List.
 
@@ -570,7 +613,36 @@ with matching custom ops implementation, e.g. `Caffe2 custom ops <https://caffe2
 
 Frequently Asked Questions
 --------------------------
-Q: 
+Q: I have exported my lstm model, but its input size seems to be fixed?
+
+  The tracer records the example inputs shape in the graph. In case the model should accept
+  inputs of dynamic shape, you can utilize the parameter `dynamic_axes` in export api. ::
+
+    layer_count = 4
+
+    model = nn.LSTM(10, 20, num_layers=layer_count, bidirectional=True)
+    model.eval()
+
+    with torch.no_grad():
+        input = torch.randn(5, 3, 10)
+        h0 = torch.randn(layer_count * 2, 3, 20)
+        c0 = torch.randn(layer_count * 2, 3, 20)
+        output, (hn, cn) = model(input, (h0, c0))
+
+        # default export
+        torch.onnx.export(model, (input, (h0, c0)), 'lstm.onnx')
+        onnx_model = onnx.load('lstm.onnx')
+        # input shape [5, 3, 10]
+        print(onnx_model.graph.input[0])
+
+        # export with `dynamic_axes`
+        torch.onnx.export(model, (input, (h0, c0)), 'lstm.onnx',
+                        input_names=['input', 'h0', 'c0'],
+                        output_names=['output', 'hn', 'cn'],
+                        dynamic_axes={'input': {0: 'sequence'}, 'output': {0: 'sequence'}})
+        onnx_model = onnx.load('lstm.onnx')
+        # input shape ['sequence', 3, 10]
+        print(onnx_model.graph.input[0])
 
 
 Q: How to export models with loops in it?
