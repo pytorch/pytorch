@@ -33,7 +33,7 @@ struct ScalarTypeToCType<at::ScalarType::Half> {
   // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
   // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
   // TODO: remove once the bug is fixed.
-  static at::Half t;
+  static type t;
 };
 
 template<>
@@ -44,7 +44,7 @@ struct ScalarTypeToCType<at::ScalarType::BFloat16> {
   // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
   // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
   // TODO: remove once the bug is fixed.
-  static at::BFloat16 t;
+  static type t;
 };
 
 template<>
@@ -55,7 +55,7 @@ struct ScalarTypeToCType<at::ScalarType::Bool> {
   // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
   // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
   // TODO: remove once the bug is fixed.
-  static bool t;
+  static type t;
 };
 
 inline at::ScalarType scalar_type(at::ScalarType s) {
