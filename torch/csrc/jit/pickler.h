@@ -214,11 +214,8 @@ class Unpickler {
   Unpickler(
       std::istream& in,
       const std::vector<at::Tensor>* tensor_table,
-      ClassResolver
-          class_resolver)
-        : in_(in),
-        tensor_table_(tensor_table),
-        class_resolver_(class_resolver) {}
+      ClassResolver class_resolver)
+      : in_(in), tensor_table_(tensor_table), class_resolver_(class_resolver) {}
 
   std::vector<IValue> parse_ivalue_list();
 

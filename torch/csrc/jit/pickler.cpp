@@ -362,8 +362,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<OpCode>(OpCode::TUPLE);
 
   // requires_grad
-  addIValue(true);
-  // addIValue(tensor.requires_grad());
+  addIValue(tensor.requires_grad());
 
   // backward_hooks
   pushGlobal("collections", "OrderedDict");

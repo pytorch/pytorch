@@ -88,7 +88,10 @@ std::string SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
                                        srs->serialize(range.range)};
     ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
-  return Pickle(ivalues);
+  std::vector<at::Tensor> table;
+  auto result = Pickle(ivalues, &table);
+  TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
+  return result;
 }
 
 ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
