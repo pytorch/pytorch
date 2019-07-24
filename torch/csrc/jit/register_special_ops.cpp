@@ -20,10 +20,12 @@ namespace jit {
 namespace {
 
 void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
+  std::string op_name = node->kind().toDisplayString();
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
     auto error = script::ErrorReport(node->sourceRange());
-    error << "Input list to torch.tensor must be of ints, floats, or bools, "
+    error << "Input list to " << op_name
+          << " must be of ints, floats, or bools, "
           << "got " << elem_type->python_str();
     // special case empty list torch.tensor([])
     if (elem_type->isSubtypeOf(TensorType::get())) {
@@ -368,7 +370,7 @@ RegisterOperators reg({
           push(stack, std::move(tensor));                                     \
           return 0;                                                           \
         };                                                                    \
-      }),                                                                     \
+      }),
 
     DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
@@ -413,7 +415,7 @@ RegisterOperators reg({
         "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None, bool requires_grad=False) -> Tensor",
         createTensorFromList<true>),
     Operator(
-        "aten::as_tensor(Tensor data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
+        "aten::as_tensor(Tensor(a) data, *, ScalarType? dtype=None, Device? device=None) -> Tensor(a|b)",
         [](const Node* node) {
           auto input = node->inputs().at(0);
           return [](Stack& stack) {

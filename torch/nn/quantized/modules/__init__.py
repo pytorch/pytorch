@@ -14,5 +14,5 @@ __all__ = [
     'Linear',
     'MaxPool2d',
     'Quantize',
-    'ReLU'
+    'ReLU',
 ]

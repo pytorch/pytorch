@@ -529,6 +529,8 @@ class ShapePropagator {
       }
       case aten::tensor:
       case aten::as_tensor: {
+        // if the input is a tensor, we delegate the shape
+        // propagation in PropagateTensorShapeOnNode
         if (node->inputs().at(0)->type()->isSubtypeOf(TensorType::get())) {
           break;
         }
