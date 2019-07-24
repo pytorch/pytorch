@@ -110,7 +110,7 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  Unpickler up(data.get(), size, nullptr, nullptr);
+  Unpickler up(data.get(), size, nullptr, nullptr, nullptr, c10::nullopt);
   auto ivalues = up.parse_ivalue_list();
 
   unpickled_records = std::make_shared<SourceRangeRecords>();

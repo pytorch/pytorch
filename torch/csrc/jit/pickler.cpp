@@ -576,6 +576,12 @@ static IValue toSpecializedList(const IValue& generic) {
   return IValue(std::move(specialized));
 }
 
+static std::vector<int64_t> tupleToIntList(const IValue& v) {
+  return fmap(v.toTuple()->elements(), [](const IValue& v) -> int64_t {
+    return v.toInt();
+  });
+}
+
 OpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
@@ -723,6 +729,48 @@ OpCode Unpickler::readInstruction() {
               AT_ERROR("Unknown pickler class id");
           }
         });
+      } else if (
+          module_name == "torch._utils" && class_name == "_rebuild_tensor_v2") {
+        globals_.emplace_back([this] {
+          auto tup = pop(stack_).toTuple();
+          const auto& elements = tup->elements();
+          auto storage_tensor = elements.at(0).toTensor();
+          int64_t storage_offset = elements.at(1).toInt();
+          std::vector<int64_t> size = tupleToIntList(elements.at(2));
+          std::vector<int64_t> stride = tupleToIntList(elements.at(3));
+          bool requires_grad = elements.at(4).toBool();
+          // elements[5] is empty backwards hooks
+          at::Tensor result =
+              at::empty({0}, storage_tensor.options())
+                  .set_(storage_tensor.storage(), storage_offset, size, stride);
+          result = autograd::make_variable(result, requires_grad);
+          stack_.push_back(std::move(result));
+        });
+      } else if (module_name == "collections" && class_name == "OrderedDict") {
+        globals_.emplace_back([this] {
+          // drop the Tuple that was argument to OrderedDict, and replace it
+          // with None OrderedDicts only appear in tensor deserialization and
+          // their value is never used
+          stack_.back() = IValue();
+        });
+      } else if (module_name == "torch") {
+        c10::optional<c10::ScalarType> scalar_type;
+#define CHECK_SCALAR(_, name, _2)      \
+  if (class_name == #name "Storage") { \
+    scalar_type = c10::k##name;        \
+  }
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CHECK_SCALAR)
+#undef CHECK_SCALAR
+        // NOTE: this does not put a global into the global table,
+        // like the other branches here because no REDUCE or BUILD will
+        // be called on this value. Instead, we just put it on the stack
+        // and return early
+        AT_ASSERT(
+            scalar_type.has_value(),
+            "class name not understood: torch.",
+            class_name);
+        stack_.emplace_back(int64_t(*scalar_type));
+        return opcode;
       } else {
         AT_ASSERT(class_resolver_);
         at::StrongTypePtr type =
@@ -767,12 +815,45 @@ OpCode Unpickler::readInstruction() {
       // stack is: <functor_arg>
       globals_.at(idx)();
     } break;
-    default:
+    case OpCode::BINPERSID: {
+      auto args = pop(stack_).toTuple()->elements();
+      AT_ASSERT(
+          args.at(0).toStringRef() == "storage",
+          "unknown PERSID key ",
+          args.at(0).toStringRef());
+      at::ScalarType type = args.at(1).toScalarType();
+      const std::string& key = args.at(2).toStringRef();
+      at::Device device(args.at(3).toStringRef());
+      if (device_) {
+        device = *device_;
+      }
+      at::DataPtr storage_ptr = read_record_(key);
+      int64_t numel = args.at(4).toInt();
+      at::Storage storage(
+          at::CPU(type).typeMeta(),
+          numel,
+          std::move(storage_ptr),
+          /*allocator=*/nullptr,
+          /*resizable=*/false); // NB: we didn't set any allocator for the
+                                // tensor
+      at::Tensor tensor = at::empty({0}, at::CPU(type).options()).set_(storage);
+
+      if (device.type() == at::DeviceType::CUDA) {
+        tensor = tensor.to(device, tensor.scalar_type());
+      } else if (device.type() != at::DeviceType::CPU) {
+        AT_ERROR(
+            "supported devices include CPU and CUDA, however got ",
+            at::DeviceTypeName(device.type(), false));
+      }
+      stack_.push_back(std::move(tensor));
+    } break;
+    default: {
       AT_ERROR(
           "Unknown opcode for unpickling at ",
           reinterpret_cast<void*>(opcode),
           ": ",
           static_cast<uint8_t>(opcode));
+    } break;
   }
   return opcode;
 }

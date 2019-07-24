@@ -172,7 +172,7 @@ void ScriptModuleDeserializer::deserialize(
 
   loadTensorTable(&model_def);
   if (model_def.proto_version() >= 2) {
-    pickled_ivalues_ = loadPickleArchive("attributes.pkl");
+    pickled_ivalues_ = loadPickleArchive("attributes");
   }
 
   // TODO: this can be simplified when C++/Python interop lands,
@@ -190,7 +190,9 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
 std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
-  std::tie(attributes_ptr, attributes_size) = reader_.getRecord(name);
+  std::stringstream fname;
+  fname << name << ".pkl";
+  std::tie(attributes_ptr, attributes_size) = reader_.getRecord(fname.str());
   Unpickler unpickler(
       attributes_ptr.get(),
       attributes_size,
@@ -199,7 +201,14 @@ std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::strin
         importCallback(qn.prefix());
         auto cu = main_module_.class_compilation_unit();
         return c10::StrongTypePtr(cu, cu->get_class(qn));
-      });
+      },
+      [&](const std::string& key) {
+        std::stringstream ss;
+        ss << name << "/" << key;
+        auto r = reader_.getRecord(ss.str());
+        return std::get<0>(std::move(r));
+      },
+      device_);
   return unpickler.parse_ivalue_list();
 }
 

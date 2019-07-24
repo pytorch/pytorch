@@ -144,6 +144,10 @@ class Pickler {
   void startTuple();
   void endTuple();
 
+  const std::vector<WriteableTensorData>& tensorData() {
+    return tensor_data_;
+  }
+
  private:
   void pushIValueImpl(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
@@ -232,11 +236,15 @@ class Unpickler {
       size_t size,
       const std::vector<at::Tensor>* tensor_table,
       std::function<c10::StrongTypePtr(const c10::QualifiedName&)>
-          class_resolver)
+          class_resolver,
+      std::function<at::DataPtr(const std::string&)> read_record,
+      c10::optional<at::Device> device)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
         tensor_table_(tensor_table),
-        class_resolver_(class_resolver) {}
+        class_resolver_(class_resolver),
+        read_record_(std::move(read_record)),
+        device_(std::move(device)) {}
 
   std::vector<IValue> parse_ivalue_list();
 
@@ -275,6 +283,9 @@ class Unpickler {
   // optionally nullptr, needs to be present for creating classes
   std::function<c10::StrongTypePtr(const c10::QualifiedName&)> class_resolver_;
   IValue empty_tuple_;
+
+  std::function<at::DataPtr(const std::string&)> read_record_;
+  c10::optional<at::Device> device_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

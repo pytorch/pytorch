@@ -698,8 +698,7 @@ void ScriptModuleSerializer::convertModel(
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
 
-
-  writePickleArchive("attributes.pkl", pickled_ivalues_);
+  writePickleArchive("attributes", pickled_ivalues_);
 
   writeTensorTable(model_def);
   writeLibs(model_def);
@@ -776,7 +775,10 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
-  Pickler pickler(&tensor_table_);
+  // XXX - removing the tensor_table_ here causes the pickler to write tensors
+  // directly in the archive. This is wrong because they are no longer
+  // de-duplicated with module parameters.
+  Pickler pickler(false ? &tensor_table_ : nullptr);
   pickler.protocol();
   pickler.startTuple();
   for (const IValue& ivalue : ivalues) {
@@ -784,7 +786,16 @@ void ScriptModuleSerializer::writePickleArchive(
   }
   pickler.endTuple();
   pickler.stop();
-  writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size());
+  std::stringstream fname;
+  fname << name << ".pkl";
+  writer_.writeRecord(
+      fname.str(), pickler.stack().data(), pickler.stack().size());
+  size_t key = 0;
+  for (const WriteableTensorData& data : pickler.tensorData()) {
+    std::stringstream ss;
+    ss << name << "/" << key++;
+    writer_.writeRecord(ss.str(), data.data(), data.sizeInBytes());
+  }
 }
 
 void ScriptModuleSerializer::convertModule(

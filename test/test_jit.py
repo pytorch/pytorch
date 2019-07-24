@@ -59,6 +59,7 @@ import types
 import unittest
 import warnings
 import zipfile
+import struct
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -12756,7 +12757,18 @@ a")
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
-            out = pickle.load(io.BytesIO(pickled_data))
+            up = pickle.Unpickler(io.BytesIO(pickled_data))
+
+            def persistent_load(saved_id):
+                _, data_type, root_key, location, size, view_metadata = saved_id
+                obj = data_type(size)
+                data = archive.read(os.path.join(archive_name, 'attributes', root_key))
+                sized_data = struct.pack("Q", size) + data
+                obj._set_from_file(io.BytesIO(sized_data), None, False)
+                return obj
+
+            up.persistent_load = persistent_load
+            out = up.load()
 
             def is_tensor_value(item):
                 if isinstance(item, torch.Tensor):
