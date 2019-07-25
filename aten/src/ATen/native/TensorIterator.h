@@ -142,8 +142,10 @@ struct CAFFE2_API TensorIterator {
 
   void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
 
-  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator unary_op(Tensor& out, const Tensor& a);
+  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
+    bool check_internal_overlap = false);
+  static TensorIterator unary_op(Tensor& out, const Tensor& a,
+    bool check_internal_overlap = false);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
@@ -256,6 +258,7 @@ struct CAFFE2_API TensorIterator {
   bool is_final_output() const { return final_output_; }
 
 protected:
+  void check_internal_overlap();
   void mark_outputs();
   void compute_shape();
   void compute_strides();
@@ -310,10 +313,15 @@ struct TensorIterator::Builder {
     iter_.resize_outputs_ = false;
   }
 
+  void check_internal_overlap(bool check_internal_overlap) {
+    check_internal_overlap_ = check_internal_overlap;
+  }
+
   TensorIterator build();
 
 protected:
   TensorIterator iter_;
+  bool check_internal_overlap_ = false;
 };
 
 /// A container-like struct that acts as if it contains splits of a

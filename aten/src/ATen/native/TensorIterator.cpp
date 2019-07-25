@@ -3,6 +3,7 @@
 #include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at {
 
@@ -500,19 +501,23 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
   }
 }
 
-TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
+  const Tensor& b, bool check_internal_overlap) {
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
   builder.add_input(b);
   builder.iter_.allow_cpu_scalars_ = true;
+  builder.check_internal_overlap(check_internal_overlap);
   return builder.build();
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
+  bool check_internal_overlap) {
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
+  builder.check_internal_overlap(check_internal_overlap);
   return builder.build();
 }
 
@@ -555,6 +560,12 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   builder.iter_.resize_outputs_ = false;
   builder.iter_.is_reduction_ = true;
   return builder.build();
+}
+
+void TensorIterator::check_internal_overlap() {
+  for (int i = 0; i < num_outputs_; i++) {
+    at::assert_no_internal_overlap(operands_[i].tensor);
+  }
 }
 
 void TensorIterator::mark_outputs() {
@@ -686,6 +697,9 @@ SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
 }
 
 TensorIterator TensorIterator::Builder::build() {
+  if (check_internal_overlap_) {
+    iter_.check_internal_overlap();
+  }
   // set is_output and is_read_write flags on appropriate tensors
   iter_.mark_outputs();
   // compute the broadcasted shape
