@@ -83,30 +83,21 @@ void Pickler::torchSaveStop() {
   // keys for each tensor (see torch/serialization.py)
   protocol();
   push<OpCode>(OpCode::MARK);
-  for (const auto& tensor : literal_tensors_) {
-    std::string key =
-        std::to_string(int64_t(tensor.storage().unsafeGetStorageImpl()));
+  for (size_t i = 0; i < tensor_data_.size(); ++i) {
+    std::string key = std::to_string(i);
     push<OpCode>(OpCode::BINUNICODE);
     push<uint32_t>(key.size());
     pushBytes(key);
   }
   push<OpCode>(OpCode::TUPLE);
-  push<OpCode>(OpCode::STOP);
+  stop();
 
   // Now dump the tensor binary data
-  for (const auto& tensor : literal_tensors_) {
-    pushTensorData(tensor);
+  for (const auto& data : tensor_data_) {
+    // first dump size
+    push<size_t>(data.numel());
+    stack_.insert(stack_.end(), data.data(), data.data() + data.sizeInBytes());
   }
-}
-
-void Pickler::pushTensorData(const at::Tensor& tensor) {
-  // first dump size
-  auto numel = tensor.numel();
-  auto numel_ptr = reinterpret_cast<const char*>(&numel);
-  stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
-
-  WriteableTensorData data = getWriteableTensorData(tensor);
-  stack_.insert(stack_.end(), data.data(), data.data() + data.sizeInBytes());
 }
 
 void Pickler::torchSaveStart() {
@@ -298,7 +289,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   data_type << toString(tensor.scalar_type()) << "Storage";
   pushGlobal("torch", data_type.str());
   // root_key
-  pushString(std::to_string(intptr_t(addr)));
+  pushString(std::to_string(tensor_data_.size()));
   // location
   pushString("cpu");
   // size
@@ -309,7 +300,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   push<OpCode>(OpCode::BINPERSID);
 
   memoized_storage_map_[addr] = pushNextBinPut();
-  literal_tensors_.push_back(tensor);
+  tensor_data_.push_back(getWriteableTensorData(tensor));
 }
 
 void Pickler::pushBytes(const std::string& string) {
