@@ -84,7 +84,8 @@ void Pickler::finish() {
     start();
     push<OpCode>(OpCode::MARK);
     for (const auto& tensor : literal_tensors_) {
-      std::string key = std::to_string(getStorageKey(tensor));
+      std::string key =
+          std::to_string(int64_t(tensor.storage().unsafeGetStorageImpl()));
       push<OpCode>(OpCode::BINUNICODE);
       push<uint32_t>(key.size());
       pushBytes(key);
@@ -105,11 +106,8 @@ void Pickler::pushTensorData(const at::Tensor& tensor) {
   auto numel_ptr = reinterpret_cast<const char*>(&numel);
   stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
 
-  uint64_t record_size;
-  at::Tensor storage_tensor;
-  std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
-  auto storage_byte_ptr = reinterpret_cast<uint8_t*>(storage_tensor.storage().data());
-  stack_.insert(stack_.end(), storage_byte_ptr, storage_byte_ptr + record_size);
+  WriteableTensorData data = getWriteableTensorData(tensor);
+  stack_.insert(stack_.end(), data.data(), data.data() + data.sizeInBytes());
 }
 
 void Pickler::pushMetadata() {
@@ -283,6 +281,38 @@ void Pickler::pushString(const std::string& string) {
   }
 }
 
+void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
+  const at::Storage& storage = tensor.storage();
+  void* addr = storage.unsafeGetStorageImpl();
+  auto it = memoized_storage_map_.find(addr);
+  if (it != memoized_storage_map_.end()) {
+    pushBinGet(it->second);
+    return;
+  }
+
+  // Tuple for persistent_load
+  push<OpCode>(OpCode::MARK);
+  // typename
+  pushString("storage");
+  // data_type
+  std::stringstream data_type;
+  data_type << toString(tensor.scalar_type()) << "Storage";
+  pushGlobal("torch", data_type.str());
+  // root_key
+  pushString(std::to_string(intptr_t(addr)));
+  // location
+  pushString("cpu");
+  // size
+  pushInt(tensor.numel());
+  // view_metadata
+  push<OpCode>(OpCode::NONE);
+  push<OpCode>(OpCode::TUPLE);
+  push<OpCode>(OpCode::BINPERSID);
+
+  memoized_storage_map_[addr] = pushNextBinPut();
+  literal_tensors_.push_back(tensor);
+}
+
 void Pickler::pushBytes(const std::string& string) {
   stack_.insert(stack_.end(), string.begin(), string.end());
 }
@@ -328,24 +358,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   pushGlobal("torch._utils", "_rebuild_tensor_v2");
   push<OpCode>(OpCode::MARK);
 
-  // Tuple for persistent_load
-  push<OpCode>(OpCode::MARK);
-  // typename
-  pushString("storage");
-  // data_type
-  std::stringstream data_type;
-  data_type << toString(tensor.scalar_type()) << "Storage";
-  pushGlobal("torch", data_type.str());
-  // root_key
-  pushString(std::to_string(getStorageKey(tensor)));
-  // location
-  pushString("cpu");
-  // size
-  pushInt(tensor.numel());
-  // view_metadata
-  push<OpCode>(OpCode::NONE);
-  push<OpCode>(OpCode::TUPLE);
-  push<OpCode>(OpCode::BINPERSID);
+  pushStorageOfTensor(tensor);
 
   // storage offset
   int64_t storage_offset = 0;
@@ -378,9 +391,6 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
 
   // Call torch._utils._rebuild_tensor_v2
   push<OpCode>(OpCode::REDUCE);
-
-  // Store tensor so it can be placed into the binary after the pickle program
-  literal_tensors_.push_back(ivalue.toTensor());
 }
 
 void Pickler::pushClass(PicklerClass cls) {
@@ -862,15 +872,16 @@ OpCode Unpickler::readOpCode() {
   return static_cast<OpCode>(read<uint8_t>());
 }
 
-std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
-  at::Tensor storage_tensor = tensor;
-  uint64_t record_size = tensor.element_size() * tensor.storage().size();
+WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
+  WriteableTensorData result;
+  result.tensor_ = tensor;
+  result.size_ = tensor.element_size() * tensor.storage().size();
   // TODO HIP support
   if (tensor.storage().device_type() == at::DeviceType::CUDA) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
-    storage_tensor = at::empty({0}, tensor.options())
+    result.tensor_ = at::empty({0}, tensor.options())
                          .set_(
                              tensor.storage(),
                              /* storage_offset = */ 0,
@@ -879,17 +890,11 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
                              /* stride = */ {1})
                          .cpu();
     TORCH_CHECK(
-        storage_tensor.element_size() * storage_tensor.storage().size() ==
-            record_size,
+        result.tensor_.element_size() * result.tensor_.storage().size() ==
+            result.size_,
         "Storage tensor size did not match record size");
   }
-
-  return std::make_pair(storage_tensor, record_size);
-}
-
-uint64_t getStorageKey(const at::Tensor& tensor) {
-  at::StorageImpl* storage_key = tensor.storage().unsafeGetStorageImpl();
-  return reinterpret_cast<intptr_t>(storage_key);
+  return result;
 }
 
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {

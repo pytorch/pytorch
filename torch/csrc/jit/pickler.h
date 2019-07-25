@@ -142,6 +142,7 @@ class Pickler {
   void pushString(const std::string& string);
   // unmemoized version
   void pushStringImpl(const std::string& string);
+  void pushStorageOfTensor(const at::Tensor& tensor);
 
   void pushBinGet(uint32_t memo_id);
   void pushClass(PicklerClass cls);
@@ -178,9 +179,6 @@ class Pickler {
   // are serialized directly into the pickle
   std::vector<at::Tensor>* tensor_table_;
 
-  // List of tensors to serialize in the same binary as the pickle data
-  std::vector<at::Tensor> literal_tensors_;
-
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
   uint32_t memo_id_ = 0;
@@ -194,6 +192,11 @@ class Pickler {
   // Otherwise, it is possible that a raw address gets reused for another
   // object, and we will alias it to the old object at that address.
   std::vector<IValue> memoized_ivalues_;
+
+  // List of tensor storages to serialize in the same binary as the pickle data
+  // similar to ivalues, they are memoized using BINPUT
+  std::vector<at::Tensor> literal_tensors_;
+  std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
@@ -257,9 +260,23 @@ class Unpickler {
   IValue empty_tuple_;
 };
 
+struct WriteableTensorData {
+  const char* data() const {
+    return static_cast<const char*>(tensor_.storage().data());
+  }
+  size_t sizeInBytes() const {
+    return size_;
+  }
+
+ private:
+  friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
+  at::Tensor tensor_;
+  uint64_t size_;
+};
+
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
 // if necessary
-std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor);
+WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
 
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);
