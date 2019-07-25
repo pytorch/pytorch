@@ -104,10 +104,11 @@ class IntrinsicQATModuleTest(TestCase):
         bn_op.bias = qat_op.beta
 
         def compose(functions):
-            return reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
-        func_list = [bn_op, conv_op]
+            # functions are reversed for natural reading order
+            return reduce(lambda f, g: lambda x: f(g(x)), functions[::-1], lambda x: x)
+        func_list = [conv_op, bn_op]
         if use_relu:
-            func_list.insert(0, relu_op)
+            func_list.append(relu_op)
         ref_op = compose(func_list)
 
         result_ref = ref_op(input)

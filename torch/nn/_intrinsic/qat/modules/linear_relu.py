@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn.qat import Linear as QATLinear
-from torch.nn._intrinsic import LinearReLU2d as NNLinearReLU2d
+from torch.nn._intrinsic import LinearReLU as NNLinearReLU
 from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
@@ -28,7 +28,7 @@ class LinearReLU(QATLinear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __FLOAT_MODULE__ = NNLinearReLU2d
+    __FLOAT_MODULE = NNLinearReLU
 
     def __init__(self, in_features, out_features, bias=True,
                  activation_fake_quant=default_qat_qconfig.activation,

@@ -592,11 +592,13 @@ struct to_ir {
         List<Stmt>::create(r, {ret}));
 
     CompilationUnit cu;
-    // set optimize to false since we don't need to run it in optimize mode
-    cu.set_optimized(false);
     cu.define(c10::nullopt, {def}, {resolver}, nullptr);
     Stack stack;
+    // XXX: We need to turn optimization off here because otherwise we try to
+    // recursively initialize stuff in DecomposeOps.
+    setGraphExecutorOptimize(false);
     cu.get_function(def.name().name()).run(stack);
+    setGraphExecutorOptimize(true);
     return stack.at(0).toTuple()->elements();
   }
 
@@ -3066,7 +3068,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     }
   }
   auto fn = torch::make_unique<Function>(
-      std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
+      std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
     self->getClassType()->addMethod(fn.get());

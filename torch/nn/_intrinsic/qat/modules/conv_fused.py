@@ -33,7 +33,7 @@ class ConvBn2d(_ConvNdBase):
         weight_fake_quant: fake quant module for weight
 
     """
-    __FLOAT_MODULE__ = NNConvBn2d
+    __FLOAT_MODULE = NNConvBn2d
 
     def __init__(self,
                  # conv2d args
@@ -157,8 +157,8 @@ class ConvBn2d(_ConvNdBase):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls.__FLOAT_MODULE__, ' qat.' + cls.__name__ + '.from_float only works for ' + \
-            cls.__FLOAT_MODULE__.__name__
+        assert type(mod) == cls.__FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
+            cls.__FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
@@ -183,50 +183,50 @@ class ConvBn2d(_ConvNdBase):
         return qat_convbn
 
 class ConvBnReLU2d(ConvBn2d):
-        r"""
-        A ConvBn2d module is a module fused from Conv2d, BatchNorm2d and ReLU,
-        attached with FakeQuantize modules for both output activation and weight,
-        used in quantization aware training.
+    r"""
+    A ConvBn2d module is a module fused from Conv2d, BatchNorm2d and ReLU,
+    attached with FakeQuantize modules for both output activation and weight,
+    used in quantization aware training.
 
-        We combined the interface of :class:`torch.nn.Conv2d` and
-        :class:`torch.nn.BatchNorm2d` and :class:`torch.nn.ReLU`.
+    We combined the interface of :class:`torch.nn.Conv2d` and
+    :class:`torch.nn.BatchNorm2d` and :class:`torch.nn.ReLU`.
 
-        Implementation details: https://arxiv.org/pdf/1806.08342.pdf
+    Implementation details: https://arxiv.org/pdf/1806.08342.pdf
 
-        Similar to `torch.nn.Conv2d`, with FakeQuantize modules initialized to
-        default.
+    Similar to `torch.nn.Conv2d`, with FakeQuantize modules initialized to
+    default.
 
-        Attributes:
-            observer: fake quant module for output activation, it's called observer
-                to align with post training flow
-            weight_fake_quant: fake quant module for weight
+    Attributes:
+        observer: fake quant module for output activation, it's called observer
+            to align with post training flow
+        weight_fake_quant: fake quant module for weight
 
-        """
-        __FLOAT_MODULE__ = NNConvBnReLU2d
+    """
+    __FLOAT_MODULE = NNConvBnReLU2d
 
-        def __init__(self,
-                     # conv2d args
-                     in_channels, out_channels, kernel_size, stride=1,
-                     padding=0, dilation=1, groups=1,
-                     bias=True, padding_mode='zeros',
-                     # bn args
-                     # num_features: enforce this matches out_channels before fusion
-                     eps=1e-05, momentum=0.1,
-                     # affine: enforce this is True before fusion?
-                     # tracking_running_stats: enforce this is True before fusion
-                     # args for this module
-                     freeze_bn=False,
-                     activation_fake_quant=None,
-                     weight_fake_quant=None):
-            super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
-                                               padding, dilation, groups, bias,
-                                               padding_mode, eps, momentum,
-                                               freeze_bn,
-                                               activation_fake_quant,
-                                               weight_fake_quant)
+    def __init__(self,
+                 # conv2d args
+                 in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=True, padding_mode='zeros',
+                 # bn args
+                 # num_features: enforce this matches out_channels before fusion
+                 eps=1e-05, momentum=0.1,
+                 # affine: enforce this is True before fusion?
+                 # tracking_running_stats: enforce this is True before fusion
+                 # args for this module
+                 freeze_bn=False,
+                 activation_fake_quant=None,
+                 weight_fake_quant=None):
+        super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
+                                           padding, dilation, groups, bias,
+                                           padding_mode, eps, momentum,
+                                           freeze_bn,
+                                           activation_fake_quant,
+                                           weight_fake_quant)
 
-        def forward(self, input):
-            return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
+    def forward(self, input):
+        return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
 
 class ConvReLU2d(QATConv2d):
     r"""
@@ -245,7 +245,7 @@ class ConvReLU2d(QATConv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    __FLOAT_MODULE__ = NNConvReLU2d
+    __FLOAT_MODULE = NNConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
