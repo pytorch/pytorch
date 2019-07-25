@@ -161,22 +161,23 @@ class ConvBn2d(_ConvNdBase):
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
             qconfig = mod.qconfig
-        qat_convbn = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
-                         mod.stride, mod.padding, mod.dilation,
-                         mod.groups, mod.bias is not None,
-                         mod.padding_mode,
-                         mod.eps, mod.momentum,
+        conv, bn = mod[0], mod[1]
+        qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
+                         conv.stride, conv.padding, conv.dilation,
+                         conv.groups, conv.bias is not None,
+                         conv.padding_mode,
+                         bn.eps, bn.momentum,
                          False,
                          qconfig.activation,
                          qconfig.weight)
 
-        qat_convbn.weight = mod.weight
-        qat_convbn.bias = mod.bias
-        qat_convbn.gamma = mod.gamma
-        qat_convbn.beta = mod.beta
-        qat_convbn.running_mean = mod.running_mean
-        qat_convbn.running_var = mod.running_var
-        qat_convbn.num_batches_tracked = mod.num_batches_tracked
+        qat_convbn.weight = conv.weight
+        qat_convbn.bias = conv.bias
+        qat_convbn.gamma = bn.weight
+        qat_convbn.beta = bn.bias
+        qat_convbn.running_mean = bn.running_mean
+        qat_convbn.running_var = bn.running_var
+        qat_convbn.num_batches_tracked = bn.num_batches_tracked
         return qat_convbn
 
 class ConvBnReLU2d(ConvBn2d):
