@@ -83,6 +83,21 @@ def rpc_sync(to, op, *args, **kargs):
 
     Returns:
         The return value of ``op`` on ``args`` and ``kargs``.
+
+    Example::
+
+        On worker 0:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', ...)
+        >>> dist.init_rpc("worker0")
+        >>> ret = dist.rpc_sync("worker1", "aten::add", torch.ones(2, 2), 3)
+        >>> dist.barrier()
+
+        One worker 1:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', ...)
+        >>> dist.init_rpc("worker1")
+        >>> dist.barrier()
     """
     future = rpc_async(to, op, *args, **kargs)
     future.wait()

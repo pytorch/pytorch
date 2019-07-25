@@ -59,7 +59,8 @@ ProcessGroupAgent::ProcessGroupAgent(
       stop_(false),
       pg_(std::move(pg)),
       nextId_(0) {
-
+  TORCH_CHECK(nameMap_.size() > 1, "ProcessGroupAgent requires world_size to "
+      "be at least 2, but got ", nameMap_.size());
   auto workerRankIter = nameMap_.find(workerName_);
   TORCH_CHECK(workerRankIter != nameMap_.end(),
       "Failed to resolve worker name ", workerName_, " to a ProcessGroup rank.");
@@ -102,7 +103,7 @@ void ProcessGroupAgent::shutdown() {
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
-    std::string to, Message message) {
+    const std::string& to, Message&& message) {
 
   auto dstRankIter = nameMap_.find(to);
   TORCH_CHECK(dstRankIter != nameMap_.end(), "Unknown destination worker ", to);
@@ -113,7 +114,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
-  if (message.isOp()) {
+  if (message.isRequest()) {
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       futures_[requestId] = future;
@@ -123,8 +124,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     future->markCompleted();
   }
 
-  SendWork work(dstRank, std::move(message));
-  enqueue(std::move(work));
+  enqueue(SendWork(dstRank, std::move(message)));
   return future;
 }
 
@@ -191,9 +191,9 @@ void ProcessGroupAgent::listenLoop() {
 
     Message message = deserialize(ss);
 
-    if (message.isOp()) {
+    if (message.isRequest()) {
       cb_(names_[srcRank], std::move(message), *this);
-    } else if (message.isRet()) {
+    } else if (message.isResponse()) {
       auto id = message.id();
       {
         std::lock_guard<std::mutex> lock{futureMutex_};

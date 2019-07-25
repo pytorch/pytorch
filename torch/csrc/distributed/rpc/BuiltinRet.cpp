@@ -16,13 +16,13 @@ Message BuiltinRet::toMessage() {
   std::vector<torch::Tensor> tensor_table;
   Pickler pickler(&tensor_table);
 
-  pickler.start();
+  pickler.protocol();
   pickler.startTuple();
   for (auto& value: values_) {
-    pickler.addIValue(value);
+    pickler.pushIValue(value);
   }
   pickler.endTuple();
-  pickler.finish();
+  pickler.stop();
 
   auto meta = pickler.stack();
   return Message(std::move(meta),

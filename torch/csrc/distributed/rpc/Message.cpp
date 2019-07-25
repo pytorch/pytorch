@@ -21,6 +21,8 @@ Message::Message(
 
 Message::Message(const Message& other) = default;
 
+Message::Message(Message&& other) = default;
+
 Message& Message::operator=(Message const& rhs) & {
   auto meta = rhs.meta_;
   auto tensors = rhs.tensors_;
@@ -57,12 +59,12 @@ const MessageType& Message::type() const {
   return type_;
 }
 
-bool Message::isOp() const {
+bool Message::isRequest() const {
   return MessageType::BUILTIN_OP == type_
       || MessageType::PYTHON_UDF_OP == type_;
 }
 
-bool Message::isRet() const {
+bool Message::isResponse() const {
   return MessageType::BUILTIN_RET == type_
       || MessageType::PYTHON_UDF_RET == type_;
 }

@@ -22,14 +22,14 @@ Message BuiltinOp::toMessage() {
   std::vector<torch::Tensor> tensor_table;
   Pickler pickler(&tensor_table);
 
-  pickler.start();
+  pickler.protocol();
   pickler.startTuple();
   for (auto& value: stack_) {
-    pickler.addIValue(value);
+    pickler.pushIValue(value);
   }
-  pickler.addIValue(toString(op_->schema()));
+  pickler.pushIValue(toString(op_->schema()));
   pickler.endTuple();
-  pickler.finish();
+  pickler.stop();
 
   auto meta = pickler.stack();
   return Message(std::move(meta),

@@ -100,6 +100,17 @@ class RpcTest(TestCase):
         self._test_multiprocess(RpcTest._test_add, self.world_size)
 
     @classmethod
+    def _test_scalar_add(cls, rank, world_size):
+        n = rank + 1
+        dstRank = n % world_size
+        ret = dist.rpc_sync('worker%d' % dstRank,
+                            'aten::add', torch.ones(n, n), n)
+        return ret, (torch.ones(n, n) + n)
+
+    def test_scalar_add(self):
+        self._test_multiprocess(RpcTest._test_scalar_add, self.world_size)
+
+    @classmethod
     def _test_async_add(cls, rank, world_size):
         n = rank + 1
         dstRank = n % world_size

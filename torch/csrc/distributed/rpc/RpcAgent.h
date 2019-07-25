@@ -9,45 +9,43 @@ namespace distributed {
 namespace rpc {
 
 
+// RpcAgent is the base class for sending and receiving RPC messages. It
+// provides a unified ``send`` API for both request and response messages, and
+// will invoke the given ``RequestCallback`` to process received requests. It
+// should immediately become ready to serve request and accept response after
+// construction.
 class RpcAgent;
 
 // RpcAgent implementation should invoke ``RequestCallback`` to process received
-// requests. It takes the name of the request sender, the Message object,
-// and a reference to the RpcAgent itself. It means that, the implementation of
-// ``RequestCallback`` can be either blocking (finish processing request in this
-// method, and send the response out), or non-blocking (e.g., just enqueue the
-// message and the RpcAgent reference, and use a different set of threads to
-// process them). The current implementation is blocking.
+// requests. There is no restriction on the implementation's threading model.
+// This function takes the name of the request sender, the an rvalue reference
+// of the Message object, and a reference to the RpcAgent itself. Having a
+// reference to the RpcAgent allows the ``RequestCallback`` implementation to
+// be both stateless and non-blocking. It may enqueue the message and the
+// RpcAgent reference, and use a different set of threads to process them later.
 using RequestCallback = std::function<void(std::string, Message&&, RpcAgent&)>;
 
 class RpcAgent {
  public:
-  // It is up to the RpcAgent implementation to determine how to resolve names.
-  // ProcessGroupAgent just use map from name to rank. ThriftAgent could use
-  // a separate kv store or sth for that.
+  // The ``workerName`` is the globally unique name for this RpcAgent. It is up
+  // to the RpcAgent implementation to determine how to resolve names.
+  // The ``RequestCallback`` will be invoked to handle received requests. This
+  // RpcAgent base class makes no assumption on the thread-safeness of the
+  // ``RequestCallback``. RpcAgent implementations need to make sure that its
+  // threading model conform to ``RequestCallback``'s requirement.
   RpcAgent(std::string workerName, RequestCallback cb);
 
   virtual ~RpcAgent() noexcept(false);
 
-  // Send a message to the worker with name ``to`` and returns a FutureMessage.
-  // If message.isOp() is true, the FutureMessage will be completed when the
-  // response arrives. For other message types, the Future should be ignored by
-  // the caller.
+  // Send a message to the ``RpcAgent`` of name ``to`` and returns a
+  // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
+  // cannot block until it receives the response.
   //
-  // The Message object contains 4 fields:
-  //    meta (std::vector<char>): a binary chunk of data.
-  //    tensors (std::vector<torch::Tensor>): all tensors.
-  //    type (MessageType): type of the message.
-  //    id (int64_t): message id, this is used by ProcessGroupAgent to match
-  //                  request and response. Other implementation can ignore it
-  //                  if they have their own ways to do matching.
-  //
-  // Layers above ``RpcAgent`` only converts BuiltinOp, BuiltinRet, PythonUdfOp,
-  // and PythonUdfRet into a Message, and it is up to the RpcAgent
-  // implementation to determine how to serialize and commute a message. This
-  // should make future streaming serialization possible.
+  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
+  // when the response arrives. For other message types, the Future should be
+  // ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
-      std::string to, Message message) = 0;
+      const std::string& to, Message&& message) = 0;
 
   // This is a temporary solution to gracefully stop the listening loop.
   // ProcessGroupAgent does this by sending a SHUTDOWN message to the
