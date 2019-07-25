@@ -14,7 +14,7 @@ class TORCH_API BuiltinOp final {
   BuiltinOp(std::shared_ptr<Operator> op, std::vector<at::IValue>&& args);
   ~BuiltinOp();
 
-  std::shared_ptr<Operator> op();
+  std::shared_ptr<Operator> op() const;
   // return the argument stack of this builtin operator
   std::vector<at::IValue>& stack();
   Message toMessage();

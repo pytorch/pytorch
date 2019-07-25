@@ -4,7 +4,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-py::object to_py_obj(Message message) {
+py::object to_py_obj(const Message& message) {
   switch (message.type()) {
     case MessageType::BUILTIN_RET: {
       BuiltinRet ret = BuiltinRet::fromMessage(message);

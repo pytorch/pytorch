@@ -10,7 +10,7 @@ BuiltinOp::BuiltinOp(
 
 BuiltinOp::~BuiltinOp() = default;
 
-std::shared_ptr<Operator> BuiltinOp::op() {
+std::shared_ptr<Operator> BuiltinOp::op() const {
   return op_;
 }
 

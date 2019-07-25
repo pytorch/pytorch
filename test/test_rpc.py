@@ -21,7 +21,6 @@ if NO_MULTIPROCESSING_SPAWN:
     print('spawn not available, skipping tests')
     sys.exit(0)
 
-# tests with scalar args requires https://github.com/pytorch/pytorch/pull/22817
 class RpcTest(TestCase):
 
     world_size = 2

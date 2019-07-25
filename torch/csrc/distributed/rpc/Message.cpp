@@ -19,20 +19,16 @@ Message::Message(
     int64_t id)
     : meta_(meta), tensors_(tensors), type_(type), id_(id) {}
 
-Message::Message(const Message & other)
-    : meta_(other.meta_),
-      tensors_(other.tensors_),
-      type_(other.type_),
-      id_(other.id_) {}
+Message::Message(const Message& other) = default;
 
-Message& Message::operator=(Message const & rhs) & {
+Message& Message::operator=(Message const& rhs) & {
   auto meta = rhs.meta_;
   auto tensors = rhs.tensors_;
   Message(std::move(meta), std::move(tensors), rhs.type_, rhs.id_).swap(*this);
   return *this;
 }
 
-Message& Message::operator=(Message && rhs) & {
+Message& Message::operator=(Message&& rhs) & {
   Message(std::move(rhs.meta_),
           std::move(rhs.tensors_),
           std::move(rhs.type_),
@@ -40,7 +36,7 @@ Message& Message::operator=(Message && rhs) & {
   return *this;
 }
 
-void Message::swap(Message & rhs) noexcept {
+void Message::swap(Message& rhs) noexcept {
   std::swap(meta_, rhs.meta_);
   std::swap(tensors_, rhs.tensors_);
   std::swap(type_, rhs.type_);

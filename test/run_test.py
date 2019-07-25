@@ -41,6 +41,7 @@ TESTS = [
     'numba_integration',
     'optim',
     'quantized',
+    'rpc',
     'sparse',
     'torch',
     'type_info',

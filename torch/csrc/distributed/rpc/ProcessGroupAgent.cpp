@@ -7,12 +7,12 @@ namespace rpc {
 namespace {
 
 // Write the message into the given ostream
-void serialize(Message& message, std::ostream& os) {
+void serialize(const Message& message, std::ostream& os) {
   // We cast const void* to void* here because we need to create a tensor using
   // that memory space. If is fine as that tensor stays function-local, and will
   // not be modified during its lifetime.
-  auto meta =
-      const_cast<void*>(static_cast<const void*>(message.meta().data()));
+  auto meta = const_cast<void*>(
+      static_cast<const void*>(message.meta().data())); // NOLINT
   auto meta_size = message.meta().size();
 
   // getting tensor table from the message
@@ -76,7 +76,7 @@ ProcessGroupAgent::ProcessGroupAgent(
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() noexcept(false) {
-  TORCH_CHECK(stop_, "ProcessGroupAgent cannot be destroyed before shutdown.");
+  TORCH_CHECK(stop_, "Cannot destroy ProcessGroupAgent before shutdown.");
 }
 
 void ProcessGroupAgent::shutdown() {
@@ -129,7 +129,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 }
 
 void ProcessGroupAgent::enqueue(SendWork work) {
-//void ProcessGroupAgent::enqueue(const int dst, torch::Tensor tensor) {
   std::unique_lock<std::mutex> lock(sendQueueMutex_);
   sendQueue_.emplace_back(std::move(work));
   lock.unlock();
@@ -193,7 +192,7 @@ void ProcessGroupAgent::listenLoop() {
     Message message = deserialize(ss);
 
     if (message.isOp()) {
-      cb_(names_[srcRank], message, *this);
+      cb_(names_[srcRank], std::move(message), *this);
     } else if (message.isRet()) {
       auto id = message.id();
       {

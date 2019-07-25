@@ -8,6 +8,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+
 class RpcAgent;
 
 // RpcAgent implementation should invoke ``RequestCallback`` to process received
@@ -17,11 +18,11 @@ class RpcAgent;
 // method, and send the response out), or non-blocking (e.g., just enqueue the
 // message and the RpcAgent reference, and use a different set of threads to
 // process them). The current implementation is blocking.
-using RequestCallback = std::function<void(std::string, Message, RpcAgent&)>;
+using RequestCallback = std::function<void(std::string, Message&&, RpcAgent&)>;
 
 class RpcAgent {
  public:
-  // It is up to the RpcAgent implement to determine how to resolve names.
+  // It is up to the RpcAgent implementation to determine how to resolve names.
   // ProcessGroupAgent just use map from name to rank. ThriftAgent could use
   // a separate kv store or sth for that.
   RpcAgent(std::string workerName, RequestCallback cb);

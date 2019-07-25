@@ -5,7 +5,7 @@ namespace distributed {
 namespace rpc {
 
 void processRequestBlocking(
-    std::string from, Message request, RpcAgent& agent) {
+    std::string from, Message&& request, RpcAgent& agent) {
   switch (request.type()) {
     case MessageType::BUILTIN_OP: {
       BuiltinOp op = BuiltinOp::fromMessage(request);

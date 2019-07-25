@@ -17,7 +17,7 @@ struct TORCH_API FutureMessage final {
   void markCompleted(Message message);
   void markCompleted();
   const Message& message();
-  bool completed();
+  bool completed() const;
 
   // If completed() the callback will be invoked in-place.
   void addCallback(const Callback& callback);

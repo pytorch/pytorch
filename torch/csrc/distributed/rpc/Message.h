@@ -32,10 +32,10 @@ class TORCH_API Message final {
           MessageType type,
           int64_t id);
 
-  Message(const Message & other);
-  Message& operator=(Message const & rhs) &;
-  Message& operator=(Message && rhs) &;
-  void swap(Message & rhs) noexcept;
+  Message(const Message& other);
+  Message& operator=(Message const& rhs) &;
+  Message& operator=(Message&& rhs) &;
+  void swap(Message& rhs) noexcept;
   ~Message();
 
   const std::vector<char>& meta() const;

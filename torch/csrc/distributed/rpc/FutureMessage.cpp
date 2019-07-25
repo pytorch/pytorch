@@ -32,7 +32,7 @@ const Message& FutureMessage::message() {
   return message_;
 }
 
-bool FutureMessage::completed() {
+bool FutureMessage::completed() const {
   return completed_;
 }
 
