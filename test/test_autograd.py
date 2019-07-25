@@ -2241,7 +2241,7 @@ class TestAutograd(TestCase):
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
                     run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor)
+                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
         #_test_cdist_for_size((S, S, S))
@@ -3396,12 +3396,12 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
 
 
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
-                          f_args_variable, f_args_tensor):
+                          f_args_variable, f_args_tensor, run_gradgradcheck=True):
     output_variable = apply_fn(*f_args_variable)
 
     if run_grad_checks:
         run_grad_and_gradgrad_checks(test_case, name, test_name, apply_fn,
-                                     output_variable, f_args_variable)
+                                     output_variable, f_args_variable, run_gradgradcheck=run_gradgradcheck)
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
