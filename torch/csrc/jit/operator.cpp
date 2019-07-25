@@ -132,13 +132,20 @@ void registerOperator(Operator&& op) {
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
-    if (op.isC10Op() && !aliasAnalysisHasSpecialCaseFor(s) &&
-        op.aliasAnalysisKind() == AliasAnalysisKind::DEFAULT) {
+    if (!aliasAnalysisHasSpecialCaseFor(s) &&
+        op.aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE) {
       AT_ERROR(
           "Missing special case in alias analysis for non-schematized"
           " operator ",
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
+    }
+    if (aliasAnalysisHasSpecialCaseFor(s) &&
+        op.aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA) {
+      AT_ERROR(
+          "The operator ",
+          op.schema().name(),
+          " is special cased and cannot use explicit alias analysis.");
     }
   }
   getRegistry().registerOperator(std::move(op));

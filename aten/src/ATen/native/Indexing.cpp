@@ -201,7 +201,7 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
   return AdvancedIndex(self, indices);
 }
 
-static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
+static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
   if (!is_expandable_to(value.sizes(), info.src.sizes())) {
     AT_ERROR("shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", info.src.sizes());
@@ -217,7 +217,7 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
   return builder.build();
 }
 
-static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
+static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   auto builder = TensorIterator::Builder();
   builder.dont_compute_common_dtype();
   builder.add_output(Tensor(), info.src.device(), info.src.scalar_type());
@@ -235,8 +235,8 @@ Tensor index(const Tensor & self, TensorList indices) {
 
   auto info = make_info(self, indices);
   auto iter = make_index_iterator(info);
-  index_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides);
-  return iter->output();
+  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
+  return iter.output();
 }
 
 Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
@@ -253,7 +253,7 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
   }
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
-  index_put_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides, accumulate);
+  index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
   return self;
 }
 
