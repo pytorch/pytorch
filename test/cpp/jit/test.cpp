@@ -90,6 +90,7 @@ namespace jit {
   _(ClassImport)                       \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
+  _(InsertConstant)                    \
   _(DCE)
 
 #define TH_FORALL_TESTS_CUDA(_) \
