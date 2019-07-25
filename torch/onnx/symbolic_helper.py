@@ -122,6 +122,12 @@ def _unpack_list(list_value):
     return list(list_node.inputs())
 
 
+# Check if list_value is output from prim::ListConstruct
+# This is usually called before _unpack_list to ensure the list can be unpacked.
+def _is_packed_list(list_value):
+    return _is_value(list_value) and list_value.node().kind() == "prim::ListConstruct"
+
+
 def parse_args(*arg_descriptors):
     def decorator(fn):
         fn._arg_descriptors = arg_descriptors
