@@ -464,7 +464,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(
-          c10::DeviceTypeName(at::computeDeviceType(torch::tensors::get_default_tensor_type_id()),
+          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_tensor_type_id()),
                               /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }

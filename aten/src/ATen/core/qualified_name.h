@@ -13,7 +13,7 @@ struct QualifiedName {
 
   // `name` can be a dotted string, like "foo.bar.baz", or just a bare name.
   /* implicit */ QualifiedName(const std::string& name) {
-    AT_ASSERT(!name.empty());
+    TORCH_CHECK(!name.empty());
     // split the string into its atoms.
     size_t startSearchFrom = 0;
     size_t pos = name.find(delimiter_, startSearchFrom);
@@ -32,6 +32,17 @@ struct QualifiedName {
         finalAtom.size() > 0, "Invalid name for qualified name: '", name, "'");
     atoms_.push_back(std::move(finalAtom));
 
+    cacheAccessors();
+  }
+
+  /* implicit */ QualifiedName(const std::vector<std::string>& atoms) {
+    for (const auto& atom : atoms) {
+      TORCH_CHECK(!atom.empty(), "Atom cannot be empty");
+      TORCH_CHECK(
+          atom.find(delimiter_) == std::string::npos,
+          "Delimiter not allowed in atom");
+    }
+    atoms_ = atoms;
     cacheAccessors();
   }
   // Unnecessary copy. Ideally we'd use somoething like std::string_view.

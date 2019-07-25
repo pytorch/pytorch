@@ -885,8 +885,6 @@ bool Node::hasSideEffects() const {
     case prim::Print:
     case prim::RaiseException:
     case prim::SetAttr:
-    case aten::clear:
-    case aten::setdefault:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
@@ -1359,7 +1357,13 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
-    AT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    TORCH_CHECK(
+        v->type()->isSubtypeOf(elem_type),
+        "Expected a list element that subtypes '",
+        elem_type->python_str(),
+        "' but got an element of type '",
+        v->type()->python_str(),
+        "'");
   }
   n->output()->setType(ListType::create(elem_type));
   return n;

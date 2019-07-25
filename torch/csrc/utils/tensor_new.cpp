@@ -63,7 +63,7 @@ Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
 
 TensorOptions options(c10::TensorTypeId type_id, at::ScalarType scalar_type, const c10::optional<Device>& device=c10::nullopt) {
   auto options = TensorOptions(scalar_type)
-      .device(at::computeDeviceType(type_id))
+      .device(computeDeviceType(type_id))
       .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
       .is_variable(true);
   if (device.has_value()) {
@@ -243,7 +243,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(at::computeDeviceType(type_id)));
+    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(computeDeviceType(type_id)));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -254,7 +254,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
     auto tensor = autograd::make_variable(tensor_from_cuda_array_interface(data), /*requires_grad=*/false);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : at::Device(at::computeDeviceType(type_id));
+    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -264,7 +264,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : at::Device(at::computeDeviceType(type_id));
+    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -277,7 +277,7 @@ Tensor internal_new_from_data(
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       inferred_scalar_type, tensor.dtype().itemsize(), data);
-  auto device = device_opt.has_value() ? *device_opt : at::Device(at::computeDeviceType(type_id));
+  auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
@@ -304,10 +304,10 @@ Tensor legacy_new_from_sequence(
 
 void check_legacy_ctor_device(c10::TensorTypeId type_id, c10::optional<Device> device) {
   if (device.has_value()) {
-    TORCH_CHECK(at::computeDeviceType(type_id) == device.value().type(),
-             "legacy constructor for device type: ", at::computeDeviceType(type_id),
+    TORCH_CHECK(computeDeviceType(type_id) == device.value().type(),
+             "legacy constructor for device type: ", computeDeviceType(type_id),
              " was passed device type: ", device.value().type(),
-             ", but device type must be: ", at::computeDeviceType(type_id));
+             ", but device type must be: ", computeDeviceType(type_id));
   }
 }
 
@@ -400,13 +400,13 @@ Tensor legacy_sparse_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
 c10::TensorTypeId typeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::TensorTypeId type_id) {
-  auto device_type = r.isNone(device_idx) ? at::computeDeviceType(type_id) : r.device(device_idx).type();
+  auto device_type = r.isNone(device_idx) ? computeDeviceType(type_id) : r.device(device_idx).type();
   return backendToTensorTypeId(backendToBackendOfDeviceType(tensorTypeIdToBackend(type_id), device_type));
 }
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
 c10::TensorTypeId denseTypeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::TensorTypeId type_id) {
-  auto device_type = r.isNone(device_idx) ? at::computeDeviceType(type_id) : r.device(device_idx).type();
+  auto device_type = r.isNone(device_idx) ? computeDeviceType(type_id) : r.device(device_idx).type();
   return backendToTensorTypeId(toDense(backendToBackendOfDeviceType(tensorTypeIdToBackend(type_id), device_type)));
 }
 } // namespace

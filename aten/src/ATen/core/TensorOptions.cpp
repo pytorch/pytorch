@@ -7,7 +7,7 @@
 
 #include <iostream>
 
-namespace at {
+namespace c10 {
 
 std::ostream& operator<<(
     std::ostream& stream,
@@ -19,4 +19,4 @@ std::ostream& operator<<(
                 << options.requires_grad() << ")";
 }
 
-} // namespace at
+} // namespace c10

@@ -138,6 +138,31 @@ struct QuantizedCellParams {
   }
 };
 
+struct QuantizedCellParamsFP16 {
+  QuantizedCellParamsFP16(const Tensor &_packed_ih, const Tensor &_packed_hh,
+                          const Tensor &_b_ih, const Tensor &_b_hh)
+      : packed_ih(_packed_ih), packed_hh(_packed_hh),
+        b_ih(_b_ih), b_hh(_b_hh) {}
+
+  const Tensor &packed_ih;
+  const Tensor &packed_hh;
+  const Tensor &b_ih;
+  const Tensor &b_hh;
+
+  Tensor matmul_ih(Tensor /* unused */) const {
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+  }
+  Tensor matmul_hh(Tensor /* unused */) const {
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+  }
+  Tensor linear_ih(Tensor input) const {
+    return at::fbgemm_linear_fp16_weight(input, packed_ih, b_ih);
+  }
+  Tensor linear_hh(Tensor h) const {
+    return at::fbgemm_linear_fp16_weight(h, packed_hh, b_hh);
+  }
+};
+
 // Gathers every two elements of a vector in a vector of pairs
 template<typename T>
 static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
@@ -193,6 +218,17 @@ static std::vector<QuantizedCellParams> gather_quantized_params(TensorList param
   return result;
 }
 
+static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(
+    TensorList params) {
+  static at::Tensor undefined;
+  std::vector<QuantizedCellParamsFP16> result;
+  TORCH_CHECK(params.size() % 4 == 0,
+              "incorrect number of quantized RNN parameters FP16");
+  for (size_t i = 0; i < params.size(); i += 4) {
+    result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3]);
+  }
+  return result;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // HIDDEN STATE FUNCTIONS
@@ -936,30 +972,46 @@ Tensor rnn_relu_cell(
 // Quantized implementations
 //
 // These implementations use FBGEMM to do the i2h and h2h linear layers with
-// an int8 quantized weight. This is advantageous in small-batch-size scenarios
-// where runtime is dominated by memory fetches of the weight matrix.
+// an int8 or float16 quantized weight. This is advantageous in small-batch-size
+// scenarios where runtime is dominated by memory fetches of the weight matrix.
 
 std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      bool batch_first, c10::optional<ScalarType> dtype) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
+                    num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
   }
+  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   check_device(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
-  auto params = gather_quantized_params(_params);
-  auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-      input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
+  TORCH_CHECK(result_dtype == at::kChar || result_dtype == at::kHalf,
+              "dtype is not supported");
+
+  std::tuple<Tensor, Tensor, Tensor> results;
+  if (result_dtype == at::kChar) {
+    auto params = gather_quantized_params(_params);
+    results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+        input, params, hx[0], hx[1], num_layers,
+        dropout_p, train, bidirectional);
+  } else {
+    auto params = gather_quantized_params_fp16(_params);
+    results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+        input, params, hx[0], hx[1], num_layers,
+        dropout_p, train, bidirectional);
+  }
+
   if (batch_first) {
     std::get<0>(results) = std::get<0>(results).transpose(0, 1);
   }
   return results;
+
 }
 
 #define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \
