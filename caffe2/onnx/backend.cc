@@ -604,8 +604,6 @@ Caffe2Ops Caffe2Backend::CreateNonZeroOp(
     const ConversionContext& ctx) {
   // Native Caffe2 doesn't support NonZero, fallback to ATen.
   // ATen nonzero is equivalent to Transpose(ONNX::NonZero).
-  const auto& node = onnx_node->node;
-
   onnx::NodeProto converted;
   converted.CopyFrom(onnx_node->node);
 
