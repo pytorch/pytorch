@@ -9,9 +9,13 @@ from torch._six import inf
 from .optimizer import Optimizer
 
 
-EPOCH_DEPRECATION_WARNING = ("The epoch parameter is being deprecated. If epoch "
-                             "is different from None, the closed form is used "
-                             "whenever available instead of the chainable form.")
+EPOCH_DEPRECATION_WARNING = (
+    "The behavior of schedulers has been changed from their closed form to their "
+    "chainable form. As such, the epoch parameter no longer applies, and is being "
+    "deprecated. The new approach is to invoke step without the epoch parameter "
+    "during the iteration. During the deprecation, if epoch is different from None, "
+    " the closed form is used whenever available instead of the chainable form."
+)
 
 
 def _attach_opt(self, optimizer):
@@ -33,8 +37,6 @@ class _LRScheduler(object):
         if last_epoch == -1:
             for group in optimizer.param_groups:
                 group.setdefault('initial_lr', group['lr'])
-            # last_epoch = 0
-            # step_last_epoch = None
         else:
             for i, group in enumerate(optimizer.param_groups):
                 if 'initial_lr' not in group:
@@ -54,8 +56,6 @@ class _LRScheduler(object):
                 return func(*args, **kwargs)
             wrapper._with_counter = True
             return wrapper
-
-        self._last_computed_values = [float('nan') for group in self.optimizer.param_groups]
 
         self.optimizer.step = with_counter(self.optimizer.step, self.optimizer)
         self.optimizer._step_count = 0
@@ -80,21 +80,29 @@ class _LRScheduler(object):
 
     def get_computed_values(self):
         # Return last computed learning rate by current scheduler
-        return self._last_computed_values
+        try:
+            return self._last_computed_values
+        except AttributeError:
+            raise RuntimeError("Scheduler needs to step to get last computed values.")
 
     def _compute_values(self):
-        # NOTE [LR Chainable Form] Compute learning rate using chainable form of the scheduler
+        # Chainable Form] Compute learning rate using chainable form of the scheduler
         raise NotImplementedError
 
     def _compute_values_closed_form(self):
-        # NOTE [LR Closed Form] Compute learning rate using closed form of the scheduler
+        # Compute learning rate using closed form of the scheduler
         raise NotImplementedError
 
     def get_lr(self):
         warnings.warn(
-            "get_computed_values is now the supported method to obtain the last "
-            "computed learning rate. get_lr now returns the same, but will be "
-            "deprecated in favor of get_computed_values.", DeprecationWarning
+            "Schedulers for other parameters such as weights are in discussion, and a "
+            "common interface is in development. As such, get_computed_values is "
+            "now the supported method to obtain the last computed learning rate. "
+            "get_lr now returns the same, but will be deprecated in favor of "
+            "get_computed_values. Prior to this, get_lr was internally used to compute "
+            "the upcoming values in step, thus also leading to unexpected behavior "
+            "when invoking get_lr directly.",
+            DeprecationWarning
         )
         return self.get_computed_values()
 
