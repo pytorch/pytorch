@@ -64,6 +64,12 @@ THTensor *THTensor_(new)(void)
   ).release();
 }
 
+/* Pointer-copy init */
+THTensor *THTensor_(newWithTensor)(THTensor *tensor)
+{
+  return at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+}
+
 /* Storage init */
 THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
   if (strides.data()) {
@@ -159,21 +165,21 @@ THTensor *THTensor_(newContiguous)(THTensor *self)
 
 THTensor *THTensor_(newSelect)(THTensor *tensor, int dimension_, int64_t sliceIndex_)
 {
-  THTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+  THTensor *self = THTensor_(newWithTensor)(tensor);
   THTensor_(select)(self, NULL, dimension_, sliceIndex_);
   return self;
 }
 
 THTensor *THTensor_(newNarrow)(THTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_)
 {
-  THTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+  THTensor *self = THTensor_(newWithTensor)(tensor);
   THTensor_(narrow)(self, NULL, dimension_, firstIndex_, size_);
   return self;
 }
 
 THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimension2_)
 {
-  THTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+  THTensor *self = THTensor_(newWithTensor)(tensor);
   THTensor_(transpose)(self, NULL, dimension1_, dimension2_);
   return self;
 }
@@ -784,7 +790,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
     for (int j = 0; j < numInputs; j++) {
       if (!should_skip(inputs[j])) {
         int64_t dimSize = inputs[j]->size(dimension);
-        THTensor *nt = at::native::alias(THTensor_wrap(result)).unsafeGetTensorImpl();
+        THTensor *nt = THTensor_(newWithTensor)(result);
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
         at::Tensor nt__wrap = THTensor_wrap(nt);
         at::Tensor inputs_wrap = THTensor_wrap(inputs[j]);

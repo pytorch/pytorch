@@ -898,10 +898,6 @@ Tensor numpy_T(const Tensor &self) {
 
 Tensor view(const Tensor& self, IntArrayRef size) {
   auto inferred_size = at::infer_size(size, self.numel());
-  if (self.sizes() == inferred_size) {
-    return self;
-  }
-
   auto stride = at::detail::computeStride(self.sizes(),
                                           self.strides(),
                                           inferred_size);

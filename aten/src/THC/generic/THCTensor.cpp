@@ -70,6 +70,12 @@ THCTensor *THCTensor_(new)(THCState *state)
   ).release();
 }
 
+/* Pointer-copy init */
+THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
+{
+  return at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+}
+
 /* Storage init */
 THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
   if (strides.data()) {
@@ -162,21 +168,21 @@ THCTensor *THCTensor_(newContiguous)(THCState *state, THCTensor *self)
 
 THCTensor *THCTensor_(newSelect)(THCState *state, THCTensor *tensor, int dimension_, int64_t sliceIndex_)
 {
-  THCTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+  THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
   THCTensor_(select)(state, self, NULL, dimension_, sliceIndex_);
   return self;
 }
 
 THCTensor *THCTensor_(newNarrow)(THCState *state, THCTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_)
 {
-  THCTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+  THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
   THCTensor_(narrow)(state, self, NULL, dimension_, firstIndex_, size_);
   return self;
 }
 
 THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dimension1_, int dimension2_)
 {
-  THCTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+  THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
   THCTensor_(transpose)(state, self, NULL, dimension1_, dimension2_);
   return self;
 }

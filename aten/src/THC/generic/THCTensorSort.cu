@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorSort.cu"
 #else
 
-#include <ATen/NativeFunctions.h>
-
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
@@ -193,8 +191,8 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // implementation here is a catch-all, so we're not looking for
   // efficiency, but instead correctness.
   THCTensor_(copy)(state, sorted, input);
-  THCTensor* trKeys = at::native::alias(THTensor_wrap(sorted)).unsafeGetTensorImpl();
-  THCudaLongTensor* trIndices = at::native::alias(THTensor_wrap(indices)).unsafeGetTensorImpl();
+  THCTensor* trKeys = THCTensor_(newWithTensor)(state, sorted);
+  THCudaLongTensor* trIndices = THCudaLongTensor_newWithTensor(state, indices);
 
   // Transpose dim to innermost
   if (dim != nDims - 1) {

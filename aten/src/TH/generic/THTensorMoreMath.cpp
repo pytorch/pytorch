@@ -5,7 +5,6 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
-#include <ATen/NativeFunctions.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -170,12 +169,12 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       return;
     }
 
-    THTensor *tempValues_ = at::native::alias(THTensor_wrap(values_)).unsafeGetTensorImpl();
+    THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
     // tempValues_.expand_as(t)
     tempValues_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
     tempValues_->set_stride(dimension, 0);
 
-    THLongTensor *tempIndices_ = at::native::alias(THTensor_wrap(indices_)).unsafeGetTensorImpl();
+    THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
     // tempIndices_.expand_as(t)
     tempIndices_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
     tempIndices_->set_stride(dimension, 0);
@@ -254,12 +253,12 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       return;
     }
 
-    THTensor *tempValues_ = at::native::alias(THTensor_wrap(values_)).unsafeGetTensorImpl();
+    THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
     // tempValues_.expand_as(t)
     tempValues_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
     tempValues_->set_stride(dimension, 0);
 
-    THLongTensor *tempIndices_ = at::native::alias(THTensor_wrap(indices_)).unsafeGetTensorImpl();
+    THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
     // tempIndices_.expand_as(t)
     tempIndices_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
     tempIndices_->set_stride(dimension, 0);
@@ -302,6 +301,40 @@ void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
   THTensor_(resizeAs)(r, t);
   TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
                    *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
+}
+
+void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
+{
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
+      dimension);
+
+  THTensor_(resizeAs)(r_, t);
+
+  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
+                       accreal cumsum = 0;
+                       int64_t i;
+                       for(i = 0; i < t_size; i++)
+                       {
+                         cumsum += t_data[i*t_stride];
+                         r__data[i*r__stride] = (scalar_t)cumsum;
+                       });
+}
+
+void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
+{
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
+      dimension);
+
+  THTensor_(resizeAs)(r_, t);
+
+  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
+                       accreal cumprod = 1;
+                       int64_t i;
+                       for(i = 0; i < t_size; i++)
+                       {
+                         cumprod *= t_data[i*t_stride];
+                         r__data[i*r__stride] = (scalar_t)cumprod;
+                       });
 }
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
@@ -403,7 +436,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
                            *r__data = (scalar_t)prod;);
     } else {
       THTensor_(fill)(r_, 1);
-      THTensor *temp_ = at::native::alias(THTensor_wrap(r_)).unsafeGetTensorImpl();
+      THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
       temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
       temp_->set_stride(dimension, 0);
@@ -415,40 +448,6 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
   if (!keepdim) {
     THTensor_(squeeze1d)(r_, r_, dimension);
   }
-}
-
-void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(resizeAs)(r_, t);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       accreal cumsum = 0;
-                       int64_t i;
-                       for(i = 0; i < t_size; i++)
-                       {
-                         cumsum += t_data[i*t_stride];
-                         r__data[i*r__stride] = (scalar_t)cumsum;
-                       });
-}
-
-void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(resizeAs)(r_, t);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       accreal cumprod = 1;
-                       int64_t i;
-                       for(i = 0; i < t_size; i++)
-                       {
-                         cumprod *= t_data[i*t_stride];
-                         r__data[i*r__stride] = (scalar_t)cumprod;
-                       });
 }
 
 accreal THTensor_(trace)(THTensor *t)

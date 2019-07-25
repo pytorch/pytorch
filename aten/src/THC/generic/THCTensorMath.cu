@@ -3,7 +3,6 @@
 #else
 
 #include "ATen/cuda/CUDAContext.h"
-#include <ATen/NativeFunctions.h>
 
 void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
 {
@@ -234,7 +233,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     {
       if (should_skip(inputs[j])) continue;
       int64_t dimSize = THCTensor_(size)(state, inputs[j], dimension);
-      THCTensor *nt = at::native::alias(THTensor_wrap(result)).unsafeGetTensorImpl();
+      THCTensor *nt = THCTensor_(newWithTensor)(state, result);
       THCTensor_(narrow)(state, nt, NULL, dimension, offset, dimSize);
       THCTensor_(copy)(state, nt, inputs[j]);
       THCTensor_(free)(state, nt);
