@@ -5681,7 +5681,7 @@ a")
             return a, torch.as_tensor(input, dtype=torch.float)
 
         g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
-        FileCheck().check("Double(*, *) = aten::as_tensor").check("Float(*, *)").run(g)
+        FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *) = aten::as_tensor").run(g)
 
 
     def test_tensor_requires_grad(self):
@@ -12692,6 +12692,17 @@ a")
 
         with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
             m2.forward(torch.ones(1))
+
+    def test_module_error(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, foo):
+                return foo
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be compiled since it inherits from nn.Module"):
+            torch.jit.script(MyModule)
 
     def test_view_write(self):
         def fn(x, y):
