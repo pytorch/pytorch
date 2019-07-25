@@ -42,6 +42,11 @@ c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
   return p;
 }
 
+template<class T, class U>
+intrusive_ptr<T> static_intrusive_pointer_cast(intrusive_ptr<U> r) {
+  return intrusive_ptr<T>::reclaim(static_cast<T*>(r.release()));
+}
+
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
   AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Future>();
@@ -449,8 +454,7 @@ T generic_to(
     using ElemType = typename std::remove_pointer<T>::type::element_type;
     auto obj = ivalue.toObject();
     auto capsule = obj->getAttr("capsule");
-    auto capsulePtr = capsule.toCapsule().release();
-    return c10::intrusive_ptr<ElemType>::reclaim(static_cast<ElemType*>(capsulePtr));
+    return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
 }
 
 template <typename T>
@@ -742,7 +746,7 @@ IValue from_(T x, std::false_type) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
   auto retObject = ivalue::Object::create(res->second, 1);
-  auto objPtr = c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(static_cast<intrusive_ptr_target*>(x.release()));
+  auto objPtr = c10::static_intrusive_pointer_cast<c10::intrusive_ptr_target>(x);
 
   retObject->setAttr("capsule", IValue(objPtr));
   auto resIVal = IValue(std::move(retObject));
