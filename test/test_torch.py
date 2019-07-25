@@ -3444,7 +3444,8 @@ class _TestTorchMixin(object):
                 x = torch.tensor((1, 1), dtype=dt, device=device)
                 y = x.clone()
                 if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: self.assertEqual(x, y))
+                    # `x - y` is used inside of the assertEqual
+                    self.assertRaises(RuntimeError, lambda: x - y)
                     continue
                 self.assertEqual(x, y)
 
