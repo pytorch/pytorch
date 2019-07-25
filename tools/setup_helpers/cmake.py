@@ -260,8 +260,6 @@ class CMake:
             'BUILD_TEST': build_test,
             'USE_CUDA': USE_CUDA,
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
-            'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
-                               check_negative_env_flag('USE_FBGEMM')),
             'USE_NUMPY': USE_NUMPY,
             'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
