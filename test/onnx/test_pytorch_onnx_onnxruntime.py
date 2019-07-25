@@ -101,17 +101,6 @@ class TestONNXRuntime(unittest.TestCase):
     def test_word_language_model_GRU(self):
         self.run_word_language_model("GRU")
 
-    def _test_index_generic(self, fn):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-
-            def forward(self, input):
-                return fn(input)
-
-        x = torch.randn(3, 4)
-        self.run_test(MyModel(), x)
-
     def test_index_1d(self):
         self._test_index_generic(lambda input: input[0])
 
