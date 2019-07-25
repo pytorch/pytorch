@@ -297,10 +297,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::BailOut:
       TORCH_INTERNAL_ASSERT(
           node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
-      makePointerTo(node->inputs().at(1), node->output());
+      makePointerTo(node->output(), node->inputs().at(1));
       return;
     case prim::Guard:
-      makePointerTo(node->inputs().at(0), node->output());
+      makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::CallFunction:
     case prim::CallMethod:
