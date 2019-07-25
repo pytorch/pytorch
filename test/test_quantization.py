@@ -275,17 +275,15 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         # Check if observers are inserted
         self.checkObservers(model)
 
-        test_only_eval_fn(model, self.calib_data)
         convert_dynamic(model)
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.fc1)
-            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize_dynamic(SingleLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        model = quantize_dynamic(SingleLayerLinearModel().eval(), qconfig_dict)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -300,18 +298,16 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         self.checkObservers(model)
 
-        test_only_eval_fn(model, self.calib_data)
         convert_dynamic(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), torch.nn.Linear)
             self.checkDynamicQuantizedLinear(model.fc2)
-            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize_dynamic(TwoLayerLinearModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
         checkQuantized(model)
 
     def test_nested1(self):
@@ -330,7 +326,6 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         model = prepare_dynamic(model, qconfig_dict)
         checkPrepModules(model, True)
-        test_only_eval_fn(model, self.calib_data)
         convert_dynamic(model)
 
         def checkQuantized(model):
@@ -338,12 +333,11 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.fc3)
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkLinear(model.sub2.fc2)
-            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
 
@@ -364,7 +358,6 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkPrepModules(model)
 
-        test_only_eval_fn(model, self.calib_data)
         convert_dynamic(model)
 
         def checkQuantized(model):
@@ -373,12 +366,11 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
-            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
     def test_nested3(self):
@@ -405,19 +397,17 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkPrepModules(model, True)
 
-        test_only_eval_fn(model, self.calib_data)
         convert_dynamic(model)
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
-            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
     def test_type_match_rule(self):

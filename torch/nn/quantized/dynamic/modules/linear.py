@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
-from ....modules.module import Module
 from ....modules.linear import Linear as NNLinear
 
 class Linear(NNLinear):
@@ -71,6 +70,6 @@ class Linear(NNLinear):
         qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long().item(), torch.qint8)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
-        qlinear.bias = mod.bias.float()
+        qlinear.bias = mod.bias
 
         return qlinear
