@@ -1,4 +1,6 @@
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/FastPathBinaryOps.h>
+#include <ATen/native/FastPathConditions.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
@@ -14,6 +16,11 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 
+DEFINE_DISPATCH(fast_path_add_stub);
+DEFINE_DISPATCH(fast_path_sub_stub);
+DEFINE_DISPATCH(fast_path_mul_stub);
+DEFINE_DISPATCH(fast_path_div_stub);
+
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
     if (self.is_sparse()) {
@@ -26,8 +33,14 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   }
   at::assert_no_internal_overlap(result, "add");
-  auto iter = TensorIterator::binary_op(result, self, other);
-  add_stub(iter.device_type(), iter, alpha);
+  if (binary_op_fast_path_conditions::enable_contiguous_eq_size_cpu_fastpath
+      (self, other)) {
+    fast_path_add_stub(self.device().type(), result, self, other, alpha);
+  }
+  else {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    add_stub(iter.device_type(), iter, alpha);
+  }
   return result;
 }
 
@@ -37,9 +50,17 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
     result = at::empty({0}, self.options());
     return native::add_out(result, self, other, alpha);
   }
-  auto iter = TensorIterator::binary_op(result, self, other);
-  add_stub(iter.device_type(), iter, alpha);
-  return iter.output();
+  if (binary_op_fast_path_conditions::enable_contiguous_eq_size_cpu_fastpath
+      (self, other)) {
+    result = at::native::empty_like(self);
+    fast_path_add_stub(self.device().type(), result, self, other, alpha);
+    return result;
+  }
+  else {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    add_stub(iter.device_type(), iter, alpha);
+    return iter.output();
+  }
 }
 
 Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
@@ -55,8 +76,14 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_div_zerodim_out(result, self, other);
   }
   at::assert_no_internal_overlap(result, "div");
-  auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter.device_type(), iter);
+  if (binary_op_fast_path_conditions::enable_contiguous_eq_size_cpu_fastpath
+      (self, other)) {
+    fast_path_div_stub(self.device().type(), result, self, other);
+  }
+  else {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    div_stub(iter.device_type(), iter);
+  }
   return result;
 }
 
@@ -66,9 +93,17 @@ Tensor div(const Tensor& self, const Tensor& other) {
     result = at::empty({0}, self.options());
     return native::div_out(result, self, other);
   }
-  auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter.device_type(), iter);
-  return iter.output();
+  if (binary_op_fast_path_conditions::enable_contiguous_eq_size_cpu_fastpath
+      (self, other)) {
+    result = at::native::empty_like(self);
+    fast_path_div_stub(self.device().type(), result, self, other);
+    return result;
+  }
+  else {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    div_stub(iter.device_type(), iter);
+    return iter.output();
+  }
 }
 
 Tensor& div_(Tensor& self, const Tensor& other) {
@@ -80,8 +115,14 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_mul_out(result, self, other);
   }
   at::assert_no_internal_overlap(result, "mul");
-  auto iter = TensorIterator::binary_op(result, self, other);
-  mul_stub(iter.device_type(), iter);
+  if (binary_op_fast_path_conditions::enable_contiguous_eq_size_cpu_fastpath
+      (self, other)) {
+    fast_path_mul_stub(self.device().type(), result, self, other);
+  }
+  else {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    mul_stub(iter.device_type(), iter);
+  }
   return result;
 }
 
@@ -91,9 +132,17 @@ Tensor mul(const Tensor& self, const Tensor& other) {
     result = at::empty({0}, self.options());
     return native::mul_out(result, self, other);
   }
-  auto iter = TensorIterator::binary_op(result, self, other);
-  mul_stub(iter.device_type(), iter);
-  return iter.output();
+  if (binary_op_fast_path_conditions::enable_contiguous_eq_size_cpu_fastpath
+      (self, other)) {
+    result = at::native::empty_like(self);
+    fast_path_mul_stub(self.device().type(), result, self, other);
+    return result;
+  }
+  else {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    mul_stub(iter.device_type(), iter);
+    return iter.output();
+  }
 }
 
 Tensor& mul_(Tensor& self, const Tensor& other) {
@@ -115,8 +164,14 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("sub(sparse, dense) is not supported. Use sub(dense, sparse) instead.");
   }
   at::assert_no_internal_overlap(result, "sub");
-  auto iter = TensorIterator::binary_op(result, self, other);
-  sub_stub(iter.device_type(), iter, alpha);
+  if (binary_op_fast_path_conditions::enable_contiguous_eq_size_cpu_fastpath
+      (self, other)) {
+    fast_path_sub_stub(self.device().type(), result, self, other, alpha);
+  }
+  else {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    sub_stub(iter.device_type(), iter, alpha);
+  }
   return result;
 }
 
@@ -126,9 +181,17 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
     result = at::empty({0}, self.options());
     return native::sub_out(result, self, other, alpha);
   }
-  auto iter = TensorIterator::binary_op(result, self, other);
-  sub_stub(iter.device_type(), iter, alpha);
-  return iter.output();
+  if (binary_op_fast_path_conditions::enable_contiguous_eq_size_cpu_fastpath
+      (self, other)) {
+    result = at::native::empty_like(self);
+    fast_path_sub_stub(self.device().type(), result, self, other, alpha);
+    return result;
+  }
+  else {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    sub_stub(iter.device_type(), iter, alpha);
+    return iter.output();
+  }
 }
 
 Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
