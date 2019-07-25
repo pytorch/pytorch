@@ -750,7 +750,7 @@ add_docstr(torch.bitwise_not,
 bitwise_not(input, out=None) -> Tensor
 
 Computes the bitwise NOT of the given input tensor. The input must be of
-integer or Boolean types.
+integral or Boolean types.
 
 Args:
     input (Tensor): the input tensor
