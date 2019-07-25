@@ -26,7 +26,7 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
 
 void sign_kernel_cuda(TensorIterator& iter){
     if (iter.dtype() == ScalarType::Bool) {
-      gpu_kernel(iter, []GPU_LAMBDA(bool x){ 
+      gpu_kernel(iter, []GPU_LAMBDA(bool a){ 
         return a; 
       });
     }else{
