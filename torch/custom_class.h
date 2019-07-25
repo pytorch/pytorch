@@ -77,7 +77,7 @@ class class_ {
 
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute
-    classCu = std::make_shared<script::CompilationUnit>();
+    classCu = torch::jit::get_python_cu();
     classTypePtr =
         ClassType::create(c10::QualifiedName(qualClassName), classCu);
     classTypePtr->addAttribute("capsule", CapsuleType::get());
@@ -87,7 +87,7 @@ class class_ {
     c10::getTypeMap().insert({typeid(c10::ivalue_holder<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
 
-    torch::jit::get_python_cu()->register_class(classTypePtr);
+    classCu->register_class(classTypePtr);
   }
 
   template <typename... Types>
@@ -101,7 +101,7 @@ class class_ {
           static_cast<intrusive_ptr_target*>(classObj.release()));
       auto capsule = IValue(genericPtr);
       auto object = self.ivalue.toObject();
-      object->setAttr("capsule", capsule);
+      object->setSlot(0, capsule);
     };
 
     auto graph = std::make_shared<Graph>();

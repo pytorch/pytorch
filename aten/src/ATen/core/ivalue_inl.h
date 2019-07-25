@@ -453,7 +453,7 @@ T generic_to(
     _fake_type<T>) {
     using ElemType = typename std::remove_pointer<T>::type::element_type;
     auto obj = ivalue.toObject();
-    auto capsule = obj->getAttr("capsule");
+    auto capsule = obj->getSlot(0);
     return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
 }
 
@@ -747,7 +747,7 @@ IValue from_(T x, std::false_type) {
   auto retObject = ivalue::Object::create(res->second, 1);
   auto objPtr = c10::static_intrusive_pointer_cast<c10::intrusive_ptr_target>(x);
 
-  retObject->setAttr("capsule", IValue(objPtr));
+  retObject->setSlot(0, IValue(objPtr));
   auto resIVal = IValue(std::move(retObject));
   return resIVal;
 }
