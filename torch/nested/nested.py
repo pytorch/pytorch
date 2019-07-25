@@ -17,16 +17,17 @@ def interpolate(*args, **kwargs):
     if is_nested_tensor(args[0]):
         # feat_shape = inner_lateral.shape[-2:]
         # inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
-        ret = []
+        ret_list = []
+        input_ = args[0]
         # TODO: Implement size parameter
-        for i in range(len(last_inner)):
-            ret = F.interpolate(last_inner._tensors[i].view((1,) + last_inner._tensors[i].size()),
-                          size=tuple(inner_lateral._tensors[i].shape[-2:]),
+        for i in range(len(input_)):
+            ret = F.interpolate(input_._tensors[i].view((1,) + input_._tensors[i].size()),
+                          size=tuple(input_._tensors[i].shape[-2:]),
                           mode="nearest")
-            ret.append(ret.view(ret.size()[1:]))
-        return torch.nested.NestedTensor(ret)
+            ret_list.append(ret.view(ret.size()[1:]))
+        return as_nested_tensor(ret_list)
     else:
-        orig_interpolate(*args, **kwargs)
+        return orig_interpolate(*args, **kwargs)
 
 orig_max_pool2d = torch.max_pool2d
 
@@ -41,7 +42,7 @@ def max_pool2d(*args, **kwargs):
             ret.append(ret_.view(*(ret_.size()[1:])))
         return NestedTensor(ret)
     else:
-        orig_max_pool2d(*args, **kwargs)
+        return orig_max_pool2d(*args, **kwargs)
 
 orig_conv2d = F.conv2d
 
