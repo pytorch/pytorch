@@ -61,8 +61,6 @@ struct DictImpl final : public c10::intrusive_ptr_target {
 
 namespace impl {
 template<class Key, class Value, class Iterator> class DictIterator;
-template<class Key, class Value, class Iterator>
-bool operator==(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 
 /**
  * A reference to an entry in the Dict.
@@ -100,7 +98,6 @@ private:
   Iterator iterator_;
   friend class DictIterator<Key, Value, Iterator>;
   friend class Dict<Key, Value>;
-  friend bool operator==<Key, Value, Iterator>(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 };
 
 // this wraps map_type::iterator to make sure user code can't rely
@@ -148,28 +145,32 @@ public:
 private:
   explicit DictIterator(Iterator iterator): entryRef_(std::move(iterator)) {}
 
+  const Iterator& get_iterator_() const {
+    return entryRef_.iterator_;
+  }
+
   friend bool operator==(const DictIterator& lhs, const DictIterator& rhs) {
-    return lhs.entryRef_.iterator_ == rhs.entryRef_.iterator_;
+    return lhs.get_iterator_() == rhs.get_iterator_();
   }
 
   friend bool operator!=(const DictIterator& lhs, const DictIterator& rhs) {
-    return !(lhs == rhs);
+    return lhs.get_iterator_() != rhs.get_iterator_();
   }
 
   friend bool operator<(const DictIterator& lhs, const DictIterator& rhs) {
-    return lhs.entryRef_.iterator_ < rhs.entryRef_.iterator_;
+    return lhs.get_iterator_() < rhs.get_iterator_();
   }
 
   friend bool operator<=(const DictIterator& lhs, const DictIterator& rhs) {
-    return lhs.entryRef_.iterator_ <= rhs.entryRef_.iterator_;
+    return lhs.get_iterator_() <= rhs.get_iterator_();
   }
 
   friend bool operator>(const DictIterator& lhs, const DictIterator& rhs) {
-    return lhs.entryRef_.iterator_ > rhs.entryRef_.iterator_;
+    return lhs.get_iterator_() > rhs.get_iterator_();
   }
 
   friend bool operator>=(const DictIterator& lhs, const DictIterator& rhs) {
-    return lhs.entryRef_.iterator_ >= rhs.entryRef_.iterator_;
+    return lhs.get_iterator_() >= rhs.get_iterator_();
   }
 
   DictEntryRef<Key, Value, Iterator> entryRef_;
