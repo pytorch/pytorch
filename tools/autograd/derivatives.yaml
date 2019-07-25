@@ -311,6 +311,9 @@
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
 
+- name: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
+  self: fake_quantize_per_tensor_affine_backward(grad, self, scale, zero_point, quant_min, quant_max)
+
 - name: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
   self: zeros_like(grad)
 
@@ -663,9 +666,6 @@
 
 - name: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim).to(self.scalar_type())
-
-- name: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
-  self: not_implemented("pstrf")
 
 - name: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   self: grad.clone().put_(index, zeros_like(source), accumulate)
@@ -1120,11 +1120,11 @@
 - name: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
   self: adaptive_max_pool3d_backward(grad, self, result1)
 
-- name: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
-  self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
+- name: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
+  self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
 
-- name: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
-  self: avg_pool3d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
+- name: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
+  self: avg_pool3d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
 
 - name: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples) -> (Tensor, Tensor)
   self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, result1)
@@ -1215,12 +1215,12 @@
   grad_output: max_pool_double_backward(grad, indices, 3)
   self: zeros_like(self)
 
-- name: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
-  grad_output: avg_pool2d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
+- name: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
+  grad_output: avg_pool2d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
   self: zeros_like(self)
 
-- name: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
-  grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
+- name: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
+  grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
   self: zeros_like(self)
 
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output) -> Tensor

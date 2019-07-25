@@ -15,7 +15,8 @@ using namespace vec256;
 
 void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
-    cpu_kernel(iter, [=](bool a, bool b) -> bool { return a + b; });
+    auto alpha = alpha_scalar.to<bool>();
+    cpu_kernel(iter, [=](bool a, bool b) -> bool { return a + b * alpha; });
   } else {
     AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_cpu", [&]() {
       auto alpha = alpha_scalar.to<scalar_t>();
