@@ -6542,7 +6542,7 @@ a")
             for out, ref in zip(final_hiddens_fp16, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            def compare_quantized_unquantized(ScriptWrapper, cell): 
+            def compare_quantized_unquantized(ScriptWrapper, cell):
                 wrapper = ScriptWrapper(cell)
 
                 # Compare quantize scripted module to unquantized
@@ -12309,7 +12309,7 @@ a")
         ''')
         cu = torch.jit.CompilationUnit(code)
         g = cu.tanh.graph
-        FileCheck().check_count("prim::Function_0", 2).check("%_return : int = prim::If") \
+        FileCheck().check_count("prim::Function_0", 2).check("int = prim::If") \
                    .run(g)
 
         code = dedent('''
@@ -12492,22 +12492,45 @@ a")
         self.assertIs(none_ret(), None)
         FileCheck().check(": None").run(none_ret.graph)
 
-    def test_early_returns_error(self):
-        with self.assertRaisesRegex(RuntimeError, "within loops"):
-            @torch.jit.script
-            def nest_while_ret(x):
-                while bool(x > 4):
-                    if bool(x < 3):
-                        return 4
-                return 5
+    def test_early_returns_loops(self):
+        def nest_while_ret(x: int):
+            y = 4
+            while bool(x < 4):
+                if bool(x < 3):
+                    return y
+                else:
+                    y = y + 1
+                    break
+                y = y + 2
+            y = y + 1
+            return y
 
-        with self.assertRaisesRegex(RuntimeError, "within loops"):
-            @torch.jit.script
-            def nest_for_ret(x):
-                for _ in range(3):
-                    if bool(x < 3):
-                        return 4
-                return 5
+        self.checkScript(nest_while_ret, (2,))
+        self.checkScript(nest_while_ret, (3,))
+        self.checkScript(nest_while_ret, (4,))
+
+        def loop_ret(x, y):
+            # type: (int, int) -> (int)
+            i = 0
+            for i in range(x):
+                if x == y:
+                    return x + y
+                i = i + y
+            i = i - 1
+            return i
+
+        self.checkScript(loop_ret, (3, 3))
+        self.checkScript(loop_ret, (2, 3))
+        self.checkScript(loop_ret, (3, 1))
+
+        def test_will_ret(y):
+            # type: (int) -> int
+            for i in range(y):
+                return 2
+            return 1
+
+        self.checkScript(test_will_ret, (0,))
+        self.checkScript(test_will_ret, (1,))
 
     def test_nn_init(self):
         tests = (
