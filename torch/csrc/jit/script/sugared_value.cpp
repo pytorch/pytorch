@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
@@ -35,33 +36,29 @@ std::shared_ptr<SugaredValue> SortedValue::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  auto& g = *m.graph();
-  if (!attributes.empty())
-    throw ErrorReport(loc) << "sorted doesn't accept any keyword arguments";
+  const auto schema = parseSchema("aten::sorted([]t input) -> ([]t)");
+  auto match_schema = matchSchema(schema, loc, *m.graph(), inputs, attributes);
+  TORCH_INTERNAL_ASSERT(match_schema.inputs.size() == 1 && inputs.size() == 1);
+  auto inp = NamedValue(inputs[0].name(), match_schema.inputs[0]);
 
-  if (inputs.size() != 1)
-    throw ErrorReport(loc)
-        << "sorted currently only accept any keyword arguments";
-
-  std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
-  TORCH_INTERNAL_ASSERT(lowered_inputs.size() == 1);
-
-  auto input = lowered_inputs[0];
-  if (auto dict_input = input->type()->cast<DictType>()) {
-    input = emitBuiltinCall(
-        loc, g, aten::keys, /*self*/ c10::nullopt, inputs, attributes, true);
-  } else if (input->type()->cast<ListType>()) {
-    // aten::sort is inplace, so we copy the list here then modify it
-    input = emitBuiltinCall(
-        loc, g, aten::copy, /*self*/ c10::nullopt, inputs, attributes, true);
-  } else {
-    throw ErrorReport(loc)
-        << "sorted currently only accepts Lists and Dictionaries, got "
-        << input->type()->python_str();
-  }
+  // aten::sort is inplace, so we copy the list here then modify it
+  auto input = emitBuiltinCall(
+      loc,
+      *m.graph(),
+      aten::copy,
+      /*self*/ c10::nullopt,
+      {inp},
+      attributes,
+      true);
 
   emitBuiltinCall(
-      loc, g, aten::sort, /*self*/ c10::nullopt, {input}, attributes, true);
+      loc,
+      *m.graph(),
+      aten::sort,
+      /*self*/ c10::nullopt,
+      {input},
+      attributes,
+      true);
   return std::make_shared<SimpleValue>(input);
 }
 
