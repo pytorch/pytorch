@@ -1,6 +1,6 @@
 foo(Tensor x, (Tensor, Tensor) y) -> (Tensor, Tensor)
 foo(Tensor x, (Tensor, Tensor) y) -> (Tensor, Tensor)
-foo(string x, (Tensor, Tensor) y) -> (string, string)
+foo(str x, (Tensor, Tensor) y) -> (str, str)
 foo(int x, (Tensor, Tensor) y) -> (int, int)
 foo(bool x, (Tensor, Tensor) y) -> (bool, bool)
 foo(float[] x, (Tensor, Tensor) y) -> (float[], float[])

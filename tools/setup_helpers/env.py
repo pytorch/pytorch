@@ -73,7 +73,7 @@ class BuildType(object):
     ``None``, then the build type will be inferred from ``CMakeCache.txt``. If ``CMakeCache.txt`` does not exist,
     os.environ['CMAKE_BUILD_TYPE'] will be used.
 
-    Args:
+    Arguments:
 
         cmake_build_type_env (str): The value of os.environ['CMAKE_BUILD_TYPE']. If None, the actual build type will be
             inferred.
