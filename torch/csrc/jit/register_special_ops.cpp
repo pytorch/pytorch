@@ -19,6 +19,12 @@ namespace jit {
 
 namespace {
 
+c10::OperatorOptions aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+
 void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
@@ -163,10 +169,12 @@ RegisterOperators reg({
           drop(stack, 3);
           pack(stack, c10::impl::toList(std::move(result)));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::Size(int[] sizes) -> int[]",
-        [](Stack& stack) { return 0; }),
+        [](Stack& stack) { return 0; },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::size(Tensor self) -> int[]",
         [](Stack& stack) {
@@ -175,7 +183,8 @@ RegisterOperators reg({
           auto t = std::move(pop(stack)).toTensor();
           pack(stack, t.sizes().vec());
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
@@ -192,7 +201,8 @@ RegisterOperators reg({
 
           push(stack, std::move(list));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
@@ -202,7 +212,8 @@ RegisterOperators reg({
             push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
         [](const Node* node) {
@@ -222,7 +233,8 @@ RegisterOperators reg({
 
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::format(str self, ...) -> str",
         [](const Node* node) {
@@ -255,7 +267,8 @@ RegisterOperators reg({
             push(stack, ss.str());
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)     \
   Operator(                                                                   \
@@ -283,7 +296,8 @@ RegisterOperators reg({
           push(stack, std::move(tensor));                                     \
           return 0;                                                           \
         };                                                                    \
-      }),
+      },                                                                      \
+      aliasAnalysisFromSchema()),
 
     DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
@@ -303,7 +317,8 @@ RegisterOperators reg({
             push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
         [](const Node* node) {
@@ -323,7 +338,8 @@ RegisterOperators reg({
 
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None, bool requires_grad=False) -> Tensor",
         [](const Node* node) {
@@ -379,7 +395,8 @@ RegisterOperators reg({
             push(stack, std::move(tensor));
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
         [](const Node* node) {
@@ -389,11 +406,13 @@ RegisterOperators reg({
             drop(stack, 3);
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
         "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
-        [](Stack& stack) { return 0; }),
+        [](Stack& stack) { return 0; },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)",
         [](Stack& stack) {
@@ -406,7 +425,8 @@ RegisterOperators reg({
           pop(stack, tensor, a, b);
           push(stack, tensor.uniform_(a, b));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)",
         [](Stack& stack) {
@@ -419,7 +439,8 @@ RegisterOperators reg({
           pop(stack, tensor, mean, std);
           push(stack, tensor.normal_(mean, std));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)",
         [](Stack& stack) {
@@ -431,7 +452,8 @@ RegisterOperators reg({
           pop(stack, tensor, val);
           push(stack, at::fill_(tensor, val));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_zero_(Tensor(a!) tensor) -> Tensor(a!)",
         [](Stack& stack) {
@@ -442,7 +464,8 @@ RegisterOperators reg({
           pop(stack, tensor);
           push(stack, at::zero_(tensor));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
 
 });
 } // namespace
