@@ -6506,7 +6506,7 @@ a")
                 requires_grad=False)
 
             ref = copy.deepcopy(cell)
-            cell_int8 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.uint8)
+            cell_int8 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.int8)
             cell_fp16 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.float16)
 
             niter = 10
@@ -12698,6 +12698,17 @@ a")
         with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
             m2.forward(torch.ones(1))
 
+    def test_module_error(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, foo):
+                return foo
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be compiled since it inherits from nn.Module"):
+            torch.jit.script(MyModule)
+
     def test_view_write(self):
         def fn(x, y):
             l = []
@@ -13084,6 +13095,15 @@ a")
     def test_pickle_checkpoint(self):
         self._test_pickle_checkpoint('cpu')
         self._test_pickle_checkpoint_views('cpu')
+
+    def test_pickle_checkpoint_tup(self):
+        @torch.jit.script
+        def foo(fname):
+            # type: (str) -> None
+            torch.save((3, 4), fname)
+        with TemporaryFileName() as name:
+            foo(name)
+            self.assertEqual(torch.load(name), (3, 4))
 
     def test_string_list(self):
         def fn(string):
