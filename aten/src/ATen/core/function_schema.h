@@ -106,7 +106,7 @@ inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::opt
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
-          && lhs.type() == rhs.type()
+          && *lhs.type() == *rhs.type()
           && lhs.N() == rhs.N()
           && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
           && lhs.kwarg_only() == rhs.kwarg_only()
