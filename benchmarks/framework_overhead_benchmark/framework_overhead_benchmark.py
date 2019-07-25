@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from utils import ms_to_us, benchmark_module, BenchmarkConfig, ModuleConfig
+from utils import ms_to_us, benchmark_module, BenchmarkConfig, ModuleConfig, gen_shapes
 import argparse
 from C2Module import C2SimpleNet
 
@@ -49,13 +49,14 @@ def benchmark_simple_fn(args, config, module_config, module_type, result):
     benchmark_c2_net = args.benchmark_c2_net
     print("Benchmarking {}".format(module_type.__name__))
     if benchmark_c2_net:
-        op_name = module_config.c2_op
+        key_name = module_config.c2_op + "_" + str(module_config.size)
         num_inputs = module_config.num_params
         module = C2SimpleNet(op_name, num_inputs=num_inputs, debug=args.debug)
         latency_per_iter_ms = benchmark_module(config, module)
-        result[op_name] = latency_per_iter_ms
+        result[key_name] = latency_per_iter_ms
     else:
         f_name = module_config.pt_fn.__name__ + ":Num Operands=" + str(module_config.num_params)
+        f_name += "_" + str(module_config.size)
         graph_mode_str = "Graph mode" + ":" + str(module_config.graph_mode)
         result_key = ','.join((f_name, graph_mode_str))
         module = WrapperModule(module_type, module_config, args.debug, args.save)
@@ -80,6 +81,9 @@ def main():
     assert not (args.benchmark_c2_net and args.use_throughput_benchmark), \
         "Benchmarking of C2 net via throughput benchmarking is not yet supported"
 
+    #scalar_sizes = [8, 16, 32, 64, 128, 256, 512]
+    scalar_sizes = [1]
+    tensor_sizes = gen_shapes(scalar_sizes, 1)
     num_warmup_iters = args.num_warmup_iters
     num_iters = args.num_iters
     config = BenchmarkConfig(num_warmup_iters, num_iters)
@@ -90,10 +94,13 @@ def main():
     if args.op == "add_op":
         num_params = 2
         if args.benchmark_c2_net:
-            module_config = ModuleConfig(None, 'Sum', num_params, None)
+            for tensor_size in tensor_sizes:
+                module_config = ModuleConfig(None, 'Sum', num_params, tensor_size, None)
+                benchmark_simple_fn(args, config, module_config, SimpleAddModule, result)
         else:
-            module_config = ModuleConfig(add_tensors_loop, None, num_params, graph_mode)
-        benchmark_simple_fn(args, config, module_config, SimpleAddModule, result)
+            for tensor_size in tensor_sizes:
+                module_config = ModuleConfig(add_tensors_loop, None, num_params, tensor_size, graph_mode)
+                benchmark_simple_fn(args, config, module_config, SimpleAddModule, result)
     print_results(result)
 
 if __name__ == "__main__":

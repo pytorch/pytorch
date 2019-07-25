@@ -18,12 +18,15 @@ class C2SimpleNet(object):
     needed for the op.
     Provides forward method to run the net niter times.
     """
-    def __init__(self, op_name, num_inputs=1, debug=False):
+    def __init__(self, module_config, debug=False):
+        op_name = module_config.c2_op
+        num_inputs = module_config.num_params
+        tensor_size = module_config.size
         self.input_names = []
         self.net = core.Net("framework_benchmark_net")
         self.input_names = ["in_{}".format(i) for i in range(num_inputs)]
         for i in range(num_inputs):
-            add_blob(workspace, self.input_names[i], [1])
+            add_blob(workspace, self.input_names[i], tensor_size)
         self.net.AddExternalInputs(self.input_names)
         op_constructor = getattr(self.net, op_name)
         op_constructor(self.input_names)

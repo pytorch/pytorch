@@ -5,7 +5,7 @@ from torch.utils import ThroughputBenchmark
 
 NUM_LOOP_ITERS = 1000
 BenchmarkConfig = namedtuple('BenchmarkConfig', 'num_warmup_iters num_iters')
-ModuleConfig = namedtuple('ModuleConfig', 'pt_fn c2_op num_params graph_mode')
+ModuleConfig = namedtuple('ModuleConfig', 'pt_fn c2_op num_params size graph_mode')
 
 def ms_to_us(time_ms):
     return (time_ms * 1e3)
@@ -33,3 +33,11 @@ def benchmark_module(config, module, use_throughput_benchmark=False):
     end = time.time()
     time_elapsed_s = (end - start)
     return (secs_to_ms(time_elapsed_s) / config.num_iters / NUM_LOOP_ITERS)
+
+def gen_shapes(sizes, num_dims=1):
+    assert num_dims > 0
+    return_sizes = []
+    for s in sizes:
+        tensor_size = [s for _ in range(num_dims)]
+        return_sizes.append(tensor_size)
+    return return_sizes
