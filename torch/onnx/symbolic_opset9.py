@@ -769,18 +769,15 @@ def wrap_logical_op_with_negation(func):
     return wrap_with_not
 
 
-@wrap_logical_op_with_cast_to('Bool')
 def eq(g, self, other):
     return g.op("Equal", self, other)
 
 
-@wrap_logical_op_with_cast_to('Bool')
 @wrap_logical_op_with_negation
 def ne(g, self, other):
     return g.op("Equal", self, other)
 
 
-@wrap_logical_op_with_cast_to('Bool')
 def gt(g, input, other):
     return gt_impl(g, input, other)
 
@@ -790,7 +787,6 @@ def gt_impl(g, input, other):
     return g.op("Greater", input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to('Bool')
 def lt(g, input, other):
     return lt_impl(g, input, other)
 
@@ -800,14 +796,12 @@ def lt_impl(g, input, other):
     return g.op("Less", input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to('Bool')
 @wrap_logical_op_with_negation
 def ge(g, input, other):
     other = sym_help._maybe_get_scalar(other)
     return lt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to('Bool')
 @wrap_logical_op_with_negation
 def le(g, input, other):
     other = sym_help._maybe_get_scalar(other)
@@ -1599,7 +1593,6 @@ def nonzero(g, input):
 @parse_args('v')
 def isnan(g, input):
     output = g.op('IsNaN', input)
-    output = sym_help._cast_func_template(sym_help.cast_pytorch_to_onnx['Byte'], g, output, None)
     return output
 
 
