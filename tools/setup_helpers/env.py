@@ -14,6 +14,8 @@ CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
 
 IS_64BIT = (struct.calcsize("P") == 8)
 
+BUILD_DIR = 'build'
+
 
 def check_env_flag(name, default=''):
     return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
@@ -65,5 +67,37 @@ def hotpatch_build_env_vars():
 
 hotpatch_build_env_vars()
 
-DEBUG = check_env_flag('DEBUG')
-REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
+
+class BuildType(object):
+    """Checks build type. This avoids checking os.environ['CMAKE_BUILD_TYPE'] directly, which is error-prone.
+
+    Args:
+        cmake_build_type_env (str): The value of os.environ['CMAKE_BUILD_TYPE'].
+    """
+
+    def __init__(self, cmake_build_type_env):
+        self.build_type_string = cmake_build_type_env
+
+    def is_debug(self):
+        "Checks Debug build."
+        return self.build_type_string == 'Debug'
+
+    def is_rel_with_deb_info(self):
+        "Checks RelWithDebInfo build."
+        return self.build_type_string == 'RelWithDebInfo'
+
+    def is_release(self):
+        "Checks Release build."
+        return self.build_type_string == 'Release'
+
+
+# Determining build type. 'CMAKE_BUILD_TYPE' always prevails over DEBUG or REL_WITH_DEB_INFO.
+if 'CMAKE_BUILD_TYPE' not in os.environ:  # hotpatch environment variable 'CMAKE_BUILD_TYPE'
+    if check_env_flag('DEBUG'):
+        os.environ['CMAKE_BUILD_TYPE'] = 'Debug'
+    elif check_env_flag('REL_WITH_DEB_INFO'):
+        os.environ['CMAKE_BUILD_TYPE'] = 'RelWithDebInfo'
+    else:
+        os.environ['CMAKE_BUILD_TYPE'] = 'Release'
+
+build_type = BuildType(os.environ['CMAKE_BUILD_TYPE'])

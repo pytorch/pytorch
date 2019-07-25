@@ -580,10 +580,11 @@ RegisterOperators reg(
 
            // Pickle the tensor
            Pickler p;
-           p.pushMetadata();
-           p.start();
-           p.addIValue(value);
-           p.finish();
+           p.torchSaveStart();
+           p.protocol();
+           p.pushIValue(value);
+           p.stop();
+           p.torchSaveStop();
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
@@ -997,9 +998,10 @@ RegisterOperators reg(
                return 0;
              };
            } else {
+             TypePtr elementType = lt->getElementType();
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               auto vals = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+               auto vals = c10::impl::GenericList(elementType);
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -1018,8 +1020,13 @@ RegisterOperators reg(
              throw std::runtime_error(
                  "DictConstruct must have an even number of inputs");
            }
+           TORCH_INTERNAL_ASSERT(node->outputs().size() == 1, "DictConstruct must have exactly one output");
+           TypePtr output_type = node->outputs()[0]->type();
+           TORCH_INTERNAL_ASSERT(output_type->kind() == TypeKind::DictType, "DictConstruct output must be of Dict type.");
+           TypePtr key_type = static_cast<const DictType*>(output_type.get())->getKeyType();
+           TypePtr value_type = static_cast<const DictType*>(output_type.get())->getValueType();
            return [=](Stack& stack) {
-             auto vals = c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
+             auto vals = c10::impl::GenericDict(key_type, value_type);
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
@@ -1685,56 +1692,56 @@ int dictLen(Stack& stack) {
   return 0;
 }
 
-int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  auto keys = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
-  keys.reserve(dict.size());
-  for (auto& item : dict) {
-    keys.push_back(item.key());
-  }
-  push(stack, IValue(keys));
-  return 0;
-}
-
-template <typename Elem>
-c10::List<Elem> makeListForDictValues(
+template <unsigned int Index, typename Elem>
+c10::List<Elem> makeListForDictKeysOrValues(
     const std::vector<std::pair<IValue, IValue>>& order) {
   c10::List<Elem> values;
   values.reserve(order.size());
   for (const auto& item : order) {
-    values.push_back(item.second.to<Elem>());
+    values.push_back(std::get<Index>(item).template to<Elem>());
   }
   return values;
 }
 
-template <>
-c10::impl::GenericList makeListForDictValues<IValue>(
+template <unsigned int Index>
+c10::impl::GenericList makeGenericListForDictKeysOrValues(
     const std::vector<std::pair<IValue, IValue>>& order) {
   auto values = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   values.reserve(order.size());
   for (const auto& item : order) {
-    values.push_back(item.second);
+    values.push_back(std::get<Index>(item));
   }
   return values;
 }
 
-Operation dictValues(const Node* n) {
+template <unsigned int Index>
+Operation dictKeysOrValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
     const auto& order = iterationOrder(pop(stack).toGenericDict());
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
-      push(stack, makeListForDictValues<at::Tensor>(order));
+      push(stack, makeListForDictKeysOrValues<Index, at::Tensor>(order));
     } else if (outputType->getElementType() == IntType::get()) {
-      push(stack, makeListForDictValues<int64_t>(order));
+      push(stack, makeListForDictKeysOrValues<Index, int64_t>(order));
     } else if (outputType->getElementType() == FloatType::get()) {
-      push(stack, makeListForDictValues<double>(order));
+      push(stack, makeListForDictKeysOrValues<Index, double>(order));
     } else if (outputType->getElementType() == BoolType::get()) {
-      push(stack, makeListForDictValues<bool>(order));
+      push(stack, makeListForDictKeysOrValues<Index, bool>(order));
     } else {
-      push(stack, makeListForDictValues<IValue>(order));
+      push(stack, makeGenericListForDictKeysOrValues<Index>(order));
     }
     return 0;
   };
+}
+
+Operation dictKeys(const Node* n) {
+  // getting first dict pair
+  return dictKeysOrValues<0>(n);
+}
+
+Operation dictValues(const Node* n) {
+  // getting second of dict pair
+  return dictKeysOrValues<1>(n);
 }
 
 int dictIndex(Stack& stack) {

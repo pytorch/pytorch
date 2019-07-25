@@ -557,6 +557,8 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("_copy_into", &Module::copy_into)
+      .def_property_readonly(
+          "name", [](const Module& self) { return self.name().name(); })
       .def(
           "clone_method", [](Module& m, Module& orig, const std::string& name) {
             m.clone_method(orig, name);
@@ -736,14 +738,24 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
+        if (classDef.superclass().present()) {
+          throw ErrorReport(classDef.range())
+              << "Torchscript does not support class inheritance.";
+        }
         auto cu = get_python_cu();
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
         cu->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
-        for (const auto& def : classDef.defs()) {
-          methodDefs.push_back(def);
+        for (const auto& def : classDef.body()) {
+          if (def.kind() != TK_DEF) {
+            throw ErrorReport(def.range())
+                << "Currently class bodies can only contain method "
+                   "definitions. File an issue on Github if you want "
+                   "something else!";
+          }
+          methodDefs.emplace_back(Def(def));
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
@@ -759,7 +771,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def(
       "import_ir_module",
-      [](ModuleLookup module_lookup,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& filename,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -769,11 +781,15 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, filename, optional_device, extra_files);
+        return import_ir_module(
+            std::move(cu),
+            filename,
+            optional_device,
+            extra_files);
       });
   m.def(
       "import_ir_module_from_buffer",
-      [](ModuleLookup module_lookup,
+      [](std::shared_ptr<CompilationUnit> cu,
          const std::string& buffer,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -784,7 +800,8 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, in, optional_device, extra_files);
+        return import_ir_module(
+            std::move(cu), in, optional_device, extra_files);
       });
 
   m.def(
@@ -900,6 +917,12 @@ void initJitScriptBindings(PyObject* module) {
       "_logging_set_logger",
       [](logging::LoggerBase* logger) { return logging::setLogger(logger); },
       py::return_value_policy::reference);
+  m.def("_set_graph_executor_optimize", [](bool optimize) {
+    setGraphExecutorOptimize(optimize);
+  });
+
+  m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
   py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
