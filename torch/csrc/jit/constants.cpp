@@ -95,12 +95,11 @@ c10::optional<Value*> tryInsertConstant(
         !inferred_type->isSubtypeOf(result_type)) {
       // None doesn't subtype Optional, but an Optional can be None, so handle
       // that here
-      if (result_type->kind() == TypeKind::OptionalType) {
-        n->output()->setType(result_type);
-      } else {
-        // Implicitly wrap non-optionals
-        n->output()->setType(OptionalType::create(result_type));
-      }
+      TORCH_CHECK(
+          result_type->kind() == TypeKind::OptionalType,
+          "Expected OptionalType or NoneType, got ",
+          result_type->python_str());
+      n->output()->setType(result_type);
     } else if (!(inferred_type->isSubtypeOf(TensorType::get()) &&
                  result_type->isSubtypeOf(inferred_type))) {
       // Retain more type information in case of tensor constant

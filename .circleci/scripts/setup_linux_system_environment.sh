@@ -37,6 +37,9 @@ sudo apt-get purge -y unattended-upgrades
 
 cat /etc/apt/sources.list
 
+# For the bestest luck, kill -9 now
+sudo pkill -9 apt-get || true
+
 # Bail out early if we detect apt/dpkg is stuck
 ps auxfww | (! grep '[a]pt')
 ps auxfww | (! grep '[d]pkg')
