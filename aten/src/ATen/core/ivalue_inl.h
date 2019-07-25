@@ -740,11 +740,10 @@ IValue from_(T x, std::true_type) {
 }
 template <typename T>
 IValue from_(T x, std::false_type) {
-  auto tmap = c10::getTypeMap();
-  auto res = tmap.find(typeid(T).name());
-  if (res == tmap.end()) {
+  if (!isCustomClassRegistered<T>()) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
+  auto res = getCustomClassType<T>();
   auto retObject = ivalue::Object::create(res->second, 1);
   auto objPtr = c10::static_intrusive_pointer_cast<c10::intrusive_ptr_target>(x);
 

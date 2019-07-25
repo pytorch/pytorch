@@ -576,6 +576,21 @@ struct StrongTypePtr {
 };
 
 TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getTypeMap();
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  auto tmap = c10::getTypeMap();
+  auto res = tmap.find(typeid(T).name());
+  if (res == tmap.end()) {
+    throw c10::Error("Can't find class id in custom class type map", "");
+  }
+  return res->second;
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  auto tmap = c10::getTypeMap();
+  return tmap.find(typeid(T).name()) != tmap.end();
+}
 }
 
 #include <ATen/core/ivalue_inl.h>

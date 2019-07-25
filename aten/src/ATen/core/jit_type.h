@@ -1286,12 +1286,11 @@ namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
-    auto tmap = c10::getTypeMap();
-    auto res = tmap.find(typeid(T).name());
-    if (res == tmap.end()) {
-        throw c10::Error("Trying to convert a class that's not registered.", typeid(T).name());
+    if (!isCustomClassRegistered<T>()) {
+      throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
     }
-    return std::dynamic_pointer_cast<Type>(res->second.type_);
+    auto res = getCustomClassType<T>();
+    return std::dynamic_pointer_cast<Type>(res.type_);
   }
 };
 
