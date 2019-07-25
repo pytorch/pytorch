@@ -23,12 +23,12 @@ class TORCH_API Message final {
 
   Message();
 
-  Message(std::vector<char> meta,
-          std::vector<torch::Tensor> tensors,
+  Message(std::vector<char>&& meta,
+          std::vector<torch::Tensor>&& tensors,
           MessageType type);
 
-  Message(std::vector<char> meta,
-          std::vector<torch::Tensor> tensors,
+  Message(std::vector<char>&& meta,
+          std::vector<torch::Tensor>&& tensors,
           MessageType type,
           int64_t id);
 
@@ -39,18 +39,17 @@ class TORCH_API Message final {
   ~Message();
 
   const std::vector<char>& meta() const;
-  std::vector<char>& unsafe_meta();
   const std::vector<torch::Tensor>& tensors() const;
   const MessageType& type() const;
 
-  bool isOp();
-  bool isRet();
-  bool isShutdown();
+  bool isOp() const;
+  bool isRet() const;
+  bool isShutdown() const;
 
   // id is an optional field to match request/response. If an RpcAgent
   // implementation is able to do the matching without using this id, it can be
   // dropped during message serialization.
-  int64_t id();
+  int64_t id() const;
   void setId(int64_t id);
 
  private:

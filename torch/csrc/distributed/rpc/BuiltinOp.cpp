@@ -4,6 +4,12 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+BuiltinOp::BuiltinOp(
+    std::shared_ptr<Operator> op, std::vector<at::IValue>&& args)
+    : op_(std::move(op)), stack_(args) {}
+
+BuiltinOp::~BuiltinOp() = default;
+
 std::shared_ptr<Operator> BuiltinOp::op() {
   return op_;
 }
@@ -25,12 +31,13 @@ Message BuiltinOp::toMessage() {
   pickler.endTuple();
   pickler.finish();
 
-  return Message(pickler.stack(),
+  auto meta = pickler.stack();
+  return Message(std::move(meta),
                  std::move(tensor_table),
                  MessageType::BUILTIN_OP);
 }
 
-BuiltinOp BuiltinOp::fromMessage(Message message) {
+BuiltinOp BuiltinOp::fromMessage(const Message& message) {
   auto meta = static_cast<const void*>(message.meta().data());
   auto meta_size = message.meta().size();
   Unpickler unpickler(meta, meta_size, &message.tensors(), nullptr);
@@ -42,7 +49,7 @@ BuiltinOp BuiltinOp::fromMessage(Message message) {
 
   const std::string& str_schema = values.back().toStringRef();
   // extract symbol from the schema
-  auto str_symbol = str_schema.substr(0, str_schema.find("("));
+  auto str_symbol = str_schema.substr(0, str_schema.find('('));
   auto symbol = at::Symbol::fromQualString(str_symbol);
   auto op = matchOperator(symbol, str_schema);
   // remove str_schema from values

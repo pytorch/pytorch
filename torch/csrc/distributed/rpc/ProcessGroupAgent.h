@@ -14,9 +14,9 @@ namespace rpc {
 
 struct SendWork {
   SendWork(const int dstRank,
-           Message message)
+           Message&& message)
       : dstRank_(dstRank),
-        message_(std::move(message)) {}
+        message_(message) {}
 
   const int dstRank_;
   Message message_;
@@ -45,7 +45,7 @@ class ProcessGroupAgent : public RpcAgent {
   // sending out the message
   void sendLoop();
   // receiving messages
-  void listen();
+  void listenLoop();
 
   int64_t nextId() {
     std::lock_guard<std::mutex> lock{idMutex_};

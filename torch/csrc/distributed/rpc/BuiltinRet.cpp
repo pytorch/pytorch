@@ -4,6 +4,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+BuiltinRet::BuiltinRet(std::vector<at::IValue>&& values) : values_(values) {}
+
+BuiltinRet::~BuiltinRet() = default;
+
 std::vector<at::IValue>& BuiltinRet::values() {
   return values_;
 }
@@ -20,12 +24,13 @@ Message BuiltinRet::toMessage() {
   pickler.endTuple();
   pickler.finish();
 
-  return Message(pickler.stack(),
+  auto meta = pickler.stack();
+  return Message(std::move(meta),
                  std::move(tensor_table),
                  MessageType::BUILTIN_RET);
 }
 
-BuiltinRet BuiltinRet::fromMessage(Message message) {
+BuiltinRet BuiltinRet::fromMessage(const Message& message) {
   auto meta = static_cast<const void*>(message.meta().data());
   auto meta_size = message.meta().size();
   Unpickler unpickler(meta, meta_size, &message.tensors(), nullptr);

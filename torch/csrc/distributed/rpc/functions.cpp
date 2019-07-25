@@ -8,11 +8,12 @@ void processRequestBlocking(
     std::string from, Message request, RpcAgent& agent) {
   switch (request.type()) {
     case MessageType::BUILTIN_OP: {
-      BuiltinOp op = BuiltinOp::fromMessage(std::move(request));
+      BuiltinOp op = BuiltinOp::fromMessage(request);
       op.op()->getOperation()(op.stack());
-      auto response = BuiltinRet(op.stack()).toMessage();
+      auto ret = op.stack();
+      auto response = BuiltinRet(std::move(ret)).toMessage();
       response.setId(request.id());
-      agent.send(from, std::move(response));
+      agent.send(std::move(from), std::move(response));
       break;
     }
     default: {

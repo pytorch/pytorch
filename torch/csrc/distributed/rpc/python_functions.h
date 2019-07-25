@@ -18,10 +18,10 @@ py::object to_py_obj(Message message);
 
 std::shared_ptr<FutureMessage> py_rpc(
     RpcAgent& agent,
-    std::string dstName,
-    std::string opName,
-    py::args args,
-    py::kwargs kwargs);
+    const std::string& dstName,
+    const std::string& opName,
+    const py::args& args,
+    const py::kwargs& kwargs);
 
 }
 }

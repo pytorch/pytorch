@@ -6,9 +6,7 @@ namespace rpc {
 
 void FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
-  while (!completed_) {
-    finished_cv_.wait(lock);
-  }
+  finished_cv_.wait(lock, [this]{return completed_.load();});
 }
 
 void FutureMessage::markCompleted(Message message) {
@@ -29,7 +27,7 @@ void FutureMessage::markCompleted() {
 
 const Message& FutureMessage::message() {
   std::unique_lock<std::mutex> lock(mutex_);
-  TORCH_CHECK(completed());
+  TORCH_CHECK(completed(), "Cannot retrieve message before completed.");
 
   return message_;
 }
@@ -38,7 +36,7 @@ bool FutureMessage::completed() {
   return completed_;
 }
 
-void FutureMessage::addCallback(FutureMessage::Callback callback) {
+void FutureMessage::addCallback(const FutureMessage::Callback& callback) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (completed()) {
     lock.unlock();

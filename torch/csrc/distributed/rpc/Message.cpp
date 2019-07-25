@@ -4,25 +4,20 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-Message::Message() : type_(MessageType::UNKNOWN) {}
+Message::Message() : Message({}, {}, MessageType::UNKNOWN) {}
 
 Message::Message(
-    std::vector<char> meta,
-    std::vector<torch::Tensor> tensors,
+    std::vector<char>&& meta,
+    std::vector<torch::Tensor>&& tensors,
     MessageType type)
-    : meta_(std::move(meta)),
-      tensors_(std::move(tensors)),
-      type_(type) {}
+    : meta_(meta), tensors_(tensors), type_(type), id_(-1) {}
 
 Message::Message(
-    std::vector<char> meta,
-    std::vector<torch::Tensor> tensors,
+    std::vector<char>&& meta,
+    std::vector<torch::Tensor>&& tensors,
     MessageType type,
     int64_t id)
-    : meta_(std::move(meta)),
-      tensors_(std::move(tensors)),
-      type_(type),
-      id_(id) {}
+    : meta_(meta), tensors_(tensors), type_(type), id_(id) {}
 
 Message::Message(const Message & other)
     : meta_(other.meta_),
@@ -31,7 +26,9 @@ Message::Message(const Message & other)
       id_(other.id_) {}
 
 Message& Message::operator=(Message const & rhs) & {
-  Message(rhs.meta_, rhs.tensors_, rhs.type_, rhs.id_).swap(*this);
+  auto meta = rhs.meta_;
+  auto tensors = rhs.tensors_;
+  Message(std::move(meta), std::move(tensors), rhs.type_, rhs.id_).swap(*this);
   return *this;
 }
 
@@ -50,13 +47,9 @@ void Message::swap(Message & rhs) noexcept {
   std::swap(id_, rhs.id_);
 }
 
-Message::~Message() {}
+Message::~Message() = default;
 
 const std::vector<char>& Message::meta() const {
-  return meta_;
-}
-
-std::vector<char>& Message::unsafe_meta() {
   return meta_;
 }
 
@@ -68,21 +61,21 @@ const MessageType& Message::type() const {
   return type_;
 }
 
-bool Message::isOp() {
+bool Message::isOp() const {
   return MessageType::BUILTIN_OP == type_
       || MessageType::PYTHON_UDF_OP == type_;
 }
 
-bool Message::isRet() {
+bool Message::isRet() const {
   return MessageType::BUILTIN_RET == type_
       || MessageType::PYTHON_UDF_RET == type_;
 }
 
-bool Message::isShutdown() {
+bool Message::isShutdown() const {
   return MessageType::SHUTDOWN == type_;
 }
 
-int64_t Message::id() {
+int64_t Message::id() const {
   return id_;
 }
 

@@ -11,14 +11,12 @@ namespace rpc {
 // Return value of a builtin operator
 class TORCH_API BuiltinRet final {
  public:
-  explicit BuiltinRet(std::vector<at::IValue> values)
-      : values_(std::move(values)) {}
-
-  ~BuiltinRet() {}
+  explicit BuiltinRet(std::vector<at::IValue>&& values);
+  ~BuiltinRet();
 
   std::vector<at::IValue>& values();
   Message toMessage();
-  static BuiltinRet fromMessage(Message message);
+  static BuiltinRet fromMessage(const Message& message);
 
  private:
   std::vector<at::IValue> values_;

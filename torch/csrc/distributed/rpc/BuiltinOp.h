@@ -11,17 +11,14 @@ namespace rpc {
 // A buildin operator
 class TORCH_API BuiltinOp final {
  public:
-  BuiltinOp(std::shared_ptr<Operator> op,
-            std::vector<at::IValue> args)
-      : op_(std::move(op)), stack_(std::move(args)) {}
-
-  ~BuiltinOp() {}
+  BuiltinOp(std::shared_ptr<Operator> op, std::vector<at::IValue>&& args);
+  ~BuiltinOp();
 
   std::shared_ptr<Operator> op();
   // return the argument stack of this builtin operator
   std::vector<at::IValue>& stack();
   Message toMessage();
-  static BuiltinOp fromMessage(Message message);
+  static BuiltinOp fromMessage(const Message& message);
   static std::shared_ptr<Operator> matchOperator(
       at::Symbol& symbol, const std::string& str_schema);
 

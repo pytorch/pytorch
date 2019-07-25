@@ -7,14 +7,18 @@ namespace rpc {
 namespace {
 
 // Write the message into the given ostream
-void serialize(Message message, std::ostream& os) {
-  auto data = static_cast<void*>(message.unsafe_meta().data());
-  auto size = message.meta().size();
+void serialize(Message& message, std::ostream& os) {
+  // We cast const void* to void* here because we need to create a tensor using
+  // that memory space. If is fine as that tensor stays function-local, and will
+  // not be modified during its lifetime.
+  auto meta =
+      const_cast<void*>(static_cast<const void*>(message.meta().data()));
+  auto meta_size = message.meta().size();
 
   // getting tensor table from the message
   std::vector<torch::Tensor> tensors = message.tensors();
   // append meta as a tensor
-  tensors.push_back(torch::from_blob(data, size, {torch::kChar}));
+  tensors.push_back(torch::from_blob(meta, meta_size, {torch::kChar}));
   // append id and type as a tensor
   tensors.push_back(torch::tensor(
       {message.id(), (int64_t) message.type()}, {torch::kInt64}
@@ -64,11 +68,11 @@ ProcessGroupAgent::ProcessGroupAgent(
       " does not match ProcessGroup rank ", pg_->getRank());
 
   names_.resize(nameMap_.size());
-  for (auto entry : nameMap_) {
+  for (auto& entry : nameMap_) {
     names_[entry.second] = entry.first;
   }
   sendThread_ = std::thread(&ProcessGroupAgent::sendLoop, this);
-  listenerThread_ = std::thread(&ProcessGroupAgent::listen, this);
+  listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() noexcept(false) {
@@ -77,11 +81,15 @@ ProcessGroupAgent::~ProcessGroupAgent() noexcept(false) {
 
 void ProcessGroupAgent::shutdown() {
   // cannot put this into the destructor, as it is not safe to call virtual
-  // functions in constructor and destructor. We can drop this when we can
-  // gracefully abort a recvAnysource.
+  // functions in constructor and destructor.
+
+  // Every process i sends a SHUTDOWN message to process i + 1. This is
+  // necessary for now because:
+  // 1. There is no abort API for ProcessGrouprecv::Anysource yet. We have to
+  //    feed it a message or kill the thread.
+  // 2. A GLOO process cannot send message to itself. (there is an ongoing
+  //    effort to fix this problem).
   int dst = (pg_->getRank() + 1) % pg_->getSize();
-  std::unique_ptr<std::stringstream> stream(new std::stringstream);
-  *stream << 0;
   enqueue(SendWork(dst, std::move(Message({}, {}, MessageType::SHUTDOWN))));
   std::unique_lock<std::mutex> lock(sendQueueMutex_);
   workConsumeCV_.wait(lock, [&] { return sendQueue_.empty(); });
@@ -98,7 +106,10 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 
   auto dstRankIter = nameMap_.find(to);
   TORCH_CHECK(dstRankIter != nameMap_.end(), "Unknown destination worker ", to);
+
   const int dstRank = dstRankIter -> second;
+  TORCH_CHECK(dstRank != pg_->getRank(), "ProcessGroupAgent does not support "
+    "making RPC calls to self.")
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
@@ -144,17 +155,17 @@ void ProcessGroupAgent::sendLoop() {
 
 
     std::stringstream ss;
-    serialize(std::move(work.message_), ss);
+    serialize(work.message_, ss);
     std::string str = ss.str();
 
-    std::vector<torch::Tensor> header = {
+    std::vector<torch::Tensor> preamble = {
       torch::tensor(
         {
           (int64_t)pg_->getRank(),
           (int64_t)str.length(),
         }, {torch::kLong})
     };
-    pg_->send(header, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
+    pg_->send(preamble, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
     std::vector<torch::Tensor> payload =
         {torch::from_blob((void *)str.c_str(), str.length(), {torch::kChar})};
     pg_->send(payload, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
@@ -163,18 +174,19 @@ void ProcessGroupAgent::sendLoop() {
   }
 }
 
-void ProcessGroupAgent::listen() {
+void ProcessGroupAgent::listenLoop() {
   while (!stop_) {
     // rank, tensor size
-    std::vector<torch::Tensor> header = {torch::empty({2}, {torch::kInt64})};
-    pg_->recvAnysource(header, pg_->getRank())->wait();
-    int64_t* header_items = header.front().storage().data<int64_t>();
+    std::vector<torch::Tensor> preamble = {torch::empty({2}, {torch::kInt64})};
+    pg_->recvAnysource(preamble, pg_->getRank())->wait();
+    int64_t* header_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = header_items[0];
     auto size = header_items[1];
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
+
     std::stringstream ss(std::string(
       (char*)tensors[0].storage().data<signed char>(), tensors[0].numel()));
 
