@@ -186,7 +186,7 @@ struct ParserImpl {
     }
     return prefix;
   }
-  TreeRef parseAssignmentOp() {
+  c10::optional<TreeRef> maybeParseAssignmentOp() {
     auto r = L.cur().range;
     switch (L.cur().kind) {
       case TK_PLUS_EQ:
@@ -196,10 +196,12 @@ struct ParserImpl {
         int modifier = L.next().text()[0];
         return create_compound(modifier, r, {});
       } break;
-      default: {
-        L.expect('=');
+      case '=': {
+        L.next();
         return create_compound('=', r, {}); // no reduction
       } break;
+      default:
+        return c10::nullopt;
     }
   }
   TreeRef parseTrinary(
@@ -435,22 +437,34 @@ struct ParserImpl {
   // first[,other,lhs] = rhs
   TreeRef parseAssign(const Expr& lhs) {
     auto type = maybeParseTypeAnnotation();
-    auto op = parseAssignmentOp();
-    auto rhs = parseExpOrExpTuple();
-    L.expect(TK_NEWLINE);
-    if (op->kind() == '=') {
-      return Assign::create(lhs.range(), lhs, Expr(rhs), type);
-    } else {
-      // this is an augmented assignment
-      if (lhs.kind() == TK_TUPLE_LITERAL) {
-        throw ErrorReport(lhs.range())
-            << " augmented assignment can only have one LHS expression";
+    auto maybeOp = maybeParseAssignmentOp();
+    if (maybeOp) {
+      // There is an assignment operator, parse the RHS and generate the
+      // assignment.
+      auto rhs = parseExpOrExpTuple();
+      L.expect(TK_NEWLINE);
+      if (maybeOp.value()->kind() == '=') {
+        return Assign::create(
+            lhs.range(), lhs, Maybe<Expr>::create(rhs.range(), rhs), type);
+      } else {
+        // this is an augmented assignment
+        if (lhs.kind() == TK_TUPLE_LITERAL) {
+          throw ErrorReport(lhs.range())
+              << " augmented assignment can only have one LHS expression";
+        }
+        return AugAssign::create(
+            lhs.range(), lhs, AugAssignKind(*maybeOp), Expr(rhs));
       }
-      return AugAssign::create(lhs.range(), lhs, AugAssignKind(op), Expr(rhs));
+    } else {
+      // There is no assignment operator, so this is of the form `lhs : <type>`
+      TORCH_INTERNAL_ASSERT(type.present());
+      L.expect(TK_NEWLINE);
+      return Assign::create(
+          lhs.range(), lhs, Maybe<Expr>::create(lhs.range()), type);
     }
   }
 
-  TreeRef parseStmt() {
+  TreeRef parseStmt(bool in_class = false) {
     switch (L.cur().kind) {
       case TK_IF:
         return parseIf();
@@ -511,7 +525,7 @@ struct ParserImpl {
         return Pass::create(range);
       }
       case TK_DEF: {
-        return parseFunction(/*is_method=*/false);
+        return parseFunction(/*is_method=*/in_class);
       }
       default: {
         auto lhs = parseExpOrExpTuple();
@@ -530,11 +544,11 @@ struct ParserImpl {
       L.expect(TK_IF);
     auto cond = parseExp();
     L.expect(':');
-    auto true_branch = parseStatements();
+    auto true_branch = parseStatements(/*expect_indent=*/true);
     auto false_branch = makeList(L.cur().range, {});
     if (L.nextIf(TK_ELSE)) {
       L.expect(':');
-      false_branch = parseStatements();
+      false_branch = parseStatements(/*expect_indent=*/true);
     } else if (L.nextIf(TK_ELIF)) {
       // NB: this needs to be a separate statement, since the call to parseIf
       // mutates the lexer state, and thus causes a heap-use-after-free in
@@ -551,7 +565,7 @@ struct ParserImpl {
     auto cond = parseExp();
     L.expect(':');
     cur_loop_count++;
-    auto body = parseStatements();
+    auto body = parseStatements(/*expect_indent=*/true);
     cur_loop_count--;
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
@@ -562,19 +576,19 @@ struct ParserImpl {
     auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseLHSExp);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     cur_loop_count++;
-    auto body = parseStatements();
+    auto body = parseStatements(/*expect_indent=*/true);
     cur_loop_count--;
     return For::create(r, targets, itrs, body);
   }
 
-  TreeRef parseStatements(bool expect_indent = true) {
+  TreeRef parseStatements(bool expect_indent, bool in_class = false) {
     auto r = L.cur().range;
     if (expect_indent) {
       L.expect(TK_INDENT);
     }
     TreeList stmts;
     do {
-      stmts.push_back(parseStmt());
+      stmts.push_back(parseStmt(in_class));
     } while (!L.nextIf(TK_DEDENT));
     return create_compound(TK_LIST, r, std::move(stmts));
   }
@@ -635,26 +649,22 @@ struct ParserImpl {
   TreeRef parseClassLike() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
+    Maybe<Expr> superclass = Maybe<Expr>::create(name.range());
     if (L.nextIf('(')) {
       // Only support inheriting from NamedTuple right now.
-      if (L.cur().kind == TK_IDENT && L.cur().text() == "NamedTuple") {
-        L.next();
+      auto id = parseExp();
+      if (id.kind() == TK_VAR && Var(id).name().name() == "NamedTuple") {
         return parseNamedTuple(name);
       } else {
-        L.reportError("Inheritance is not supported for TorchScript classes");
+        superclass = Maybe<Expr>::create(id.range(), id);
+        L.expect(')');
       }
     }
     L.expect(':');
-
-    L.expect(TK_INDENT);
-    std::vector<Def> methods;
-    while (L.cur().kind != TK_DEDENT) {
-      methods.push_back(Def(parseFunction(/*is_method=*/true)));
-    }
-    L.expect(TK_DEDENT);
-
+    const auto statements =
+        parseStatements(/*expect_indent=*/true, /*in_class=*/true);
     return ClassDef::create(
-        name.range(), name, List<Def>::create(name.range(), methods));
+        name.range(), name, superclass, List<Stmt>(statements));
   }
 
   TreeRef parseFunction(bool is_method) {

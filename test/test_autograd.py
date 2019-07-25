@@ -3329,14 +3329,14 @@ class TestAutograd(TestCase):
             branch1 = branch1 / branch1
             # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
             # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
-            # So the cpu thread will notify the gpu thread with an empty FunctionTask.
+            # So the cpu thread will notify the gpu thread with an empty NodeTask.
             branch2 = checkpoint(fn_on_gpu, inp)
             out = branch2 + branch1
             return out
 
         inp = torch.rand(2, requires_grad=True)
         out = parent_on_cpu(inp)
-        # This will segfault if the empty FunctionTask is not handled properly in the
+        # This will segfault if the empty NodeTask is not handled properly in the
         # gpu thread ReadyQueue
         out.sum().backward()
 

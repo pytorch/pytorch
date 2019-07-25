@@ -25,7 +25,9 @@ namespace script {
 //
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
-// ClassDef = ClassDef(Ident name, List<Def> body)                      TK_CLASS_DEF
+// ClassDef = ClassDef(Ident name,                                      TK_CLASS_DEF
+//                     Maybe<Expr> superclass,
+//                     List<Stmt> body)
 // NamedTupleDef = NamedTupleDef(Ident name, List<Ident> fields,
 //                               List<Maybe<Expr>> types)
 //
@@ -35,7 +37,7 @@ namespace script {
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       -- NB: the only type of Expr's allowed on lhs are Var
 //          Or a tuple containing Var with an optional terminating Starred
-//       | Assign(Expr lhs, Expr rhs, Maybe<Expr> type)                 TK_ASSIGN
+//       | Assign(Expr lhs, Maybe<Expr> rhs, Maybe<Expr> type)          TK_ASSIGN
 //       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
@@ -420,19 +422,24 @@ struct ClassDef : public TreeView {
   }
   ClassDef withName(std::string new_name) const {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
-    return create(range(), new_ident, defs());
+    return create(range(), new_ident, superclass(), body());
   }
   Ident name() const {
     return Ident(subtree(0));
   }
-  List<Def> defs() const {
-    return List<Def>(subtree(1));
+  Maybe<Expr> superclass() const {
+    return Maybe<Expr>(subtree(1));
+  }
+  List<Stmt> body() const {
+    return List<Stmt>(subtree(2));
   }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
-      const List<Def>& defs) {
-    return ClassDef(Compound::create(TK_CLASS_DEF, range, {name, defs}));
+      const Maybe<Expr>& superclass,
+      const List<Stmt>& body) {
+    return ClassDef(
+        Compound::create(TK_CLASS_DEF, range, {name, superclass, body}));
   }
 };
 
@@ -612,7 +619,7 @@ struct Assign : public Stmt {
   static Assign create(
       const SourceRange& range,
       const Expr& lhs,
-      const Expr& rhs,
+      const Maybe<Expr>& rhs,
       const Maybe<Expr>& type) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
   }
@@ -621,8 +628,8 @@ struct Assign : public Stmt {
     return Expr(subtree(0));
   }
 
-  Expr rhs() const {
-    return Expr(subtree(1));
+  Maybe<Expr> rhs() const {
+    return Maybe<Expr>(subtree(1));
   }
 
   Maybe<Expr> type() const {

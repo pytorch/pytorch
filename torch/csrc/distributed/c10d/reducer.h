@@ -62,10 +62,10 @@ class Reducer {
   std::shared_ptr<c10d::ProcessGroup> process_group_;
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
-  std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>>
+  std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Function*, VariableIndex> func_;
-  std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Function>>>
+  std::unordered_map<torch::autograd::Node*, VariableIndex> func_;
+  std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
   bool expect_autograd_hooks_;

@@ -357,5 +357,40 @@ class TestONNXOpset(TestCase):
         check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
 
 
+    def test_advanced_index(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return x[:, torch.tensor([[0, 2], [1, 1]]), :, torch.tensor([2, 1]), torch.tensor([0, 3])]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+
+        ops = [{'op_name': 'Constant'},
+               {'op_name': 'Constant'},
+               {'op_name': 'Constant'},
+               {'op_name': 'Shape'},
+               {'op_name': 'Constant'},
+               {'attributes': [{'i': 0, 'name': 'axis', 'type': 2}], 'op_name': 'Gather'},
+               {'op_name': 'Constant'},
+               {'attributes': [{'i': 0, 'name': 'axis', 'type': 2}], 'op_name': 'Gather'},
+               {'op_name': 'Constant'},
+               {'attributes': [{'i': 0, 'name': 'axis', 'type': 2}], 'op_name': 'Gather'},
+               {'op_name': 'Constant'},
+               {'attributes': [{'i': 0, 'name': 'axis', 'type': 2}], 'op_name': 'Gather'},
+               {'attributes': [{'ints': [1, 3, 4, 0, 2], 'name': 'perm', 'type': 7}], 'op_name': 'Transpose'},
+               {'attributes': [{'i': 3, 'name': 'axis', 'type': 2}], 'op_name': 'Flatten'},
+               {'op_name': 'Mul'},
+               {'op_name': 'Add'},
+               {'op_name': 'Mul'},
+               {'op_name': 'Mul'},
+               {'op_name': 'Add'},
+               {'attributes': [{'i': 0, 'name': 'axis', 'type': 2}], 'op_name': 'Gather'},
+               {'op_name': 'Shape'},
+               {'attributes': [{'i': 0, 'name': 'axis', 'type': 2}], 'op_name': 'Concat'},
+               {'op_name': 'Reshape'}]
+
+        ops = {9 : ops, 10 : ops}
+
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
 if __name__ == '__main__':
     run_tests()
