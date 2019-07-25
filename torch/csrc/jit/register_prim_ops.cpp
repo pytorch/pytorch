@@ -1844,7 +1844,7 @@ int dictUpdate(Stack& stack) {
   auto to_add = pop(stack).toGenericDict();
   auto dict = pop(stack).toGenericDict();
 
-  for (auto item : to_add) {
+  for (const auto& item : to_add) {
     dict.insert(item.key(), item.value());
   }
   return 0;
