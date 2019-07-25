@@ -182,15 +182,11 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    // see [custom operator aliasing]
-    const auto kind = Symbol::fromQualString(name_.name);
-    const auto is_custom_op = !kind.is_aten() && !kind.is_prim();
-    return is_custom_op ||
-        std::any_of(
-            arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-              const auto& aliasInfo = arg.alias_info();
-              return aliasInfo && aliasInfo.value().isWrite();
-            });
+    return std::any_of(
+        arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+          const auto& aliasInfo = arg.alias_info();
+          return aliasInfo && aliasInfo.value().isWrite();
+        });
   }
 
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
@@ -226,6 +222,20 @@ public:
       const std::unordered_map<std::string, IValue>& kwargs) const;
 
   void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
+
+  bool hasAnyAliasInfo() const {
+    for (const auto& arg : arguments_) {
+      if (arg.alias_info().has_value()) {
+        return true;
+      }
+    }
+    for (const auto& ret : returns_) {
+      if (ret.alias_info().has_value()) {
+        return true;
+      }
+    }
+    return false;
+  }
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
