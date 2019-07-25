@@ -129,10 +129,13 @@ namespace {
     auto osizeW = output_size[1];
 
     /* resize output */
-    if (input.ndimension() == 3)
+    if (input.ndimension() == 3 || input.size(-4) == 1)
     {
-      output.resize_({sizeD, osizeH, osizeW});
-
+      if (input.ndimension() == 3) {
+        output.resize_({sizeD, osizeH, osizeW});
+      } else {
+        output.resize_({1, sizeD, osizeH, osizeW});
+      }
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
           auto input_data = input.data<scalar_t>();
           auto output_data = output.data<scalar_t>();
@@ -260,7 +263,7 @@ namespace {
     auto gradOutput = gradOutput_.contiguous();
 
     /* backprop */
-    if (input.ndimension() == 3)
+    if (input.ndimension() == 3 || input.size(-4) == 1)
     {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool2d_backward_cpu", [&] {
