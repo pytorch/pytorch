@@ -12,7 +12,7 @@ import distutils.sysconfig
 from distutils.version import LooseVersion
 
 from . import escape_path, which
-from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_env_flag, check_negative_env_flag, build_type)
+from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag, build_type)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
