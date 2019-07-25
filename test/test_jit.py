@@ -6508,7 +6508,8 @@ a")
                 requires_grad=False)
 
             ref = copy.deepcopy(cell)
-            cell = torch.jit.quantized.quantize_rnn_modules(cell)
+            cell_int8 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.uint8)
+            cell_fp16 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.float16)
 
             niter = 10
             x = torch.tensor([[100, -155],
@@ -6525,26 +6526,39 @@ a")
             elif isinstance(ref, torch.nn.GRU):
                 hiddens = hx
 
-            # Compare quantized to unquantized
-            output, final_hiddens = cell(x, hiddens)
             ref_out, ref_hid = ref(x, hiddens)
 
-            torch.testing.assert_allclose(output, ref_out)
-            for out, ref in zip(final_hiddens, ref_hid):
+            # Compare int8 quantized to unquantized
+            output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
+
+            torch.testing.assert_allclose(output_int8, ref_out)
+            for out, ref in zip(final_hiddens_int8, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            if isinstance(cell, torch.jit.quantized.QuantizedLSTM):
-                class ScriptWrapper(torch.jit.ScriptModule):
-                    def __init__(self, cell):
-                        super(ScriptWrapper, self).__init__()
-                        self.cell = cell
+            # Compare fp16 quantized to unquantized
+            output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
 
-                    @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
-                        #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-                        return self.cell(x, hiddens)
-            elif isinstance(cell, torch.jit.quantized.QuantizedGRU):
+            torch.testing.assert_allclose(output_fp16, ref_out)
+            for out, ref in zip(final_hiddens_fp16, ref_hid):
+                torch.testing.assert_allclose(out, ref)
+
+            def compare_quantized_unquantized(ScriptWrapper, cell): 
+                wrapper = ScriptWrapper(cell)
+
+                # Compare quantize scripted module to unquantized
+                script_out, script_hid = wrapper(x, hiddens)
+                torch.testing.assert_allclose(script_out, ref_out)
+                for out, ref in zip(script_hid, ref_hid):
+                    torch.testing.assert_allclose(out, ref)
+
+                # Compare export/import to unquantized
+                export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
+                ei_out, ei_hid = export_import_wrapper(x, hiddens)
+                torch.testing.assert_allclose(ei_out, ref_out)
+                for out, ref in zip(ei_hid, ref_hid):
+                    torch.testing.assert_allclose(out, ref)
+
+            if isinstance(cell, torch.jit.quantized.QuantizedGRU):
                 class ScriptWrapper(torch.jit.ScriptModule):
                     def __init__(self, cell):
                         super(ScriptWrapper, self).__init__()
@@ -6555,20 +6569,20 @@ a")
                         # type: (torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
                         return self.cell(x, hiddens)
 
-            wrapper = ScriptWrapper(cell)
+                compare_quantized_unquantized(ScriptWrapper, cell)
+            elif isinstance(cell, torch.jit.quantized.QuantizedLSTM):
+                for cell in [cell_int8, cell_fp16]:
+                    class ScriptWrapper(torch.jit.ScriptModule):
+                        def __init__(self, cell):
+                            super(ScriptWrapper, self).__init__()
+                            self.cell = cell
 
-            # Compare quantize scripted module to unquantized
-            script_out, script_hid = wrapper(x, hiddens)
-            torch.testing.assert_allclose(script_out, ref_out)
-            for out, ref in zip(script_hid, ref_hid):
-                torch.testing.assert_allclose(out, ref)
-
-            # Compare export/import to unquantized
-            export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
-            ei_out, ei_hid = export_import_wrapper(x, hiddens)
-            torch.testing.assert_allclose(ei_out, ref_out)
-            for out, ref in zip(ei_hid, ref_hid):
-                torch.testing.assert_allclose(out, ref)
+                        @torch.jit.script_method
+                        def forward(self, x, hiddens):
+                            # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                            #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                            return self.cell(x, hiddens)
+                    compare_quantized_unquantized(ScriptWrapper, cell)
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
@@ -12670,6 +12684,17 @@ a")
         with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
             m2.forward(torch.ones(1))
 
+    def test_module_error(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, foo):
+                return foo
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be compiled since it inherits from nn.Module"):
+            torch.jit.script(MyModule)
+
     def test_view_write(self):
         def fn(x, y):
             l = []
@@ -13056,6 +13081,15 @@ a")
     def test_pickle_checkpoint(self):
         self._test_pickle_checkpoint('cpu')
         self._test_pickle_checkpoint_views('cpu')
+
+    def test_pickle_checkpoint_tup(self):
+        @torch.jit.script
+        def foo(fname):
+            # type: (str) -> None
+            torch.save((3, 4), fname)
+        with TemporaryFileName() as name:
+            foo(name)
+            self.assertEqual(torch.load(name), (3, 4))
 
     def test_string_list(self):
         def fn(string):

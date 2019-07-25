@@ -226,13 +226,11 @@ def quantize_qat(model, run_fn, run_args, qconfig_dict=None):
     convert(model)
     return model
 
-def quantize_dynamic(model, run_fn=None, run_args=None, qconfig_dict=None):
+def quantize_dynamic(model, qconfig_dict=None):
     r"""Converts a float model to dynamic quantized model. Do dynamic training and output a quantized model.
     """
     model.eval()
     model = prepare_dynamic(model, qconfig_dict)
-    if run_fn is not None:
-        run_fn(model, run_args)
     convert(model, DEFAULT_DYNAMIC_MODULE_MAPPING)
     return model
 

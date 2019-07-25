@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 import torch
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from common_utils import TestCase, run_tests, tempfile
@@ -33,24 +34,27 @@ class FunctionalAPITest(TestCase):
 
 
 class ModuleAPITest(TestCase):
-    def test_dynamic_linear_api(self):
-        """test API functionality for nn.quantized.DynamicLinear"""
-        batch_size = 1
-        in_features = 2
-        out_features = 2
+    @given(
+        batch_size=st.integers(1, 5),
+        in_features=st.integers(16, 32),
+        out_features=st.integers(4, 8),
+        use_bias=st.booleans(),
+    )
+    def test_dynamic_linear_api(self, batch_size, in_features, out_features, use_bias):
+        """test API functionality for nn.quantized.dynamic.Linear"""
         W = torch.rand(out_features, in_features).float()
         W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
         W_q = torch.quantize_linear(W, W_scale, W_zp, torch.qint8)
         W_pack_col_offset = torch.ops.quantized.fbgemm_linear_prepack(W_q)
         X = torch.rand(batch_size, in_features).float()
-        B = torch.rand(out_features).float()
-        qlinear = nnq.DynamicLinear(in_features, out_features)
+        B = torch.rand(out_features).float() if use_bias else None
+        qlinear = nnqd.Linear(in_features, out_features)
         qlinear._packed_weight = W_pack_col_offset
         qlinear.bias = B
-
         Z_dq = qlinear(X)
+        # Check if the module implementation matches calling the
+        # ops directly
         Z_ref = torch.ops.quantized.fbgemm_linear_dynamic(X, W_pack_col_offset, B)
-
         self.assertEqual(Z_ref, Z_dq)
 
     @given(
@@ -191,8 +195,8 @@ class ModuleAPITest(TestCase):
         result_reference = qF.conv2d(qX, qw, bias=qb,
                                      scale=scale, zero_point=zero_point,
                                      stride=1, padding=0,
-                                     dilation=1, groups=g,
-                                     prepacked=False, dtype=torch.quint8).permute([0, 3, 1, 2])
+                                     dilation=1, groups=g, dtype=torch.quint8
+                                     )
 
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")

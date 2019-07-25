@@ -19,7 +19,6 @@ namespace utils {
 // build, which is not good UX.
 //
 void cuda_lazy_init();
-void set_run_yet_variable_to_false();
 
 }
 }

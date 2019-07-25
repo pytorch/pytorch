@@ -167,7 +167,7 @@ class Linear(NNLinear):
         activation_observer = mod.observer
         act_scale, act_zp = activation_observer.calculate_qparams()
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        bias_scale = (wt_scale * act_scale).float()
+        bias_scale = (wt_scale * act_scale)
         qweight = torch.quantize_linear(mod.weight.float(), wt_scale, wt_zp.long().item(), torch.qint8)
         qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         qlinear = Linear(mod.in_features, mod.out_features)
