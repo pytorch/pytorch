@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn import Conv2d as NNConv2d
-from torch.quantization.QConfig import default_qat_qconfig
 
 class Conv2d(NNConv2d):
     r"""
@@ -25,8 +24,8 @@ class Conv2d(NNConv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros',
-                 activation_fake_quant=default_qat_qconfig.activation,
-                 weight_fake_quant=default_qat_qconfig.weight):
+                 activation_fake_quant=None,
+                 weight_fake_quant=None):
         super(Conv2d, self).__init__(in_channels, out_channels, kernel_size,
                                      stride=stride, padding=padding, dilation=dilation,
                                      groups=groups, bias=bias, padding_mode=padding_mode)

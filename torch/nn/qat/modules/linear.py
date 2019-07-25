@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from ...modules.linear import Linear as NNLinear
-from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
 class Linear(NNLinear):
@@ -24,8 +23,8 @@ class Linear(NNLinear):
     __FLOAT_MODULE__ = NNLinear
 
     def __init__(self, in_features, out_features, bias=True,
-                 activation_fake_quant=default_qat_qconfig.activation,
-                 weight_fake_quant=default_qat_qconfig.weight):
+                 activation_fake_quant=None,
+                 weight_fake_quant=None):
         super(Linear, self).__init__(in_features, out_features, bias)
         self.observer = activation_fake_quant()
         self.weight_fake_quant = weight_fake_quant()

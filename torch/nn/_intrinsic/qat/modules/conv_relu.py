@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from torch.nn.qat import Conv2d as QATConv2d
-from torch.nn._intrinsic import ConvReLU2d as NNConvReLU2d
-from torch.quantization.QConfig import default_qat_qconfig
+from ....qat.modules.conv import Conv2d as QATConv2d
+from ...modules.fused import ConvReLU2d as NNConvReLU2d
 import torch.nn.functional as F
 
 class ConvReLU2d(QATConv2d):
@@ -26,8 +25,8 @@ class ConvReLU2d(QATConv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros',
-                 activation_fake_quant=default_qat_qconfig.activation,
-                 weight_fake_quant=default_qat_qconfig.weight):
+                 activation_fake_quant=None,
+                 weight_fake_quant=None):
         super(ConvReLU2d, self).__init__(in_channels, out_channels, kernel_size,
                                          stride=stride, padding=padding, dilation=dilation,
                                          groups=groups, bias=bias, padding_mode=padding_mode)
