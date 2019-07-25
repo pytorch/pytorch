@@ -12,60 +12,6 @@ namespace data {
 /// ChunkDataset API bindings
 void init_dataset_bindings(PyObject* module);
 
-namespace samplers {
-/// This class creates a trampoline for virtual methods of `Sampler`
-template <typename BatchRequest = std::vector<size_t>>
-class PySampler : public Sampler<BatchRequest> {
- public:
-  // Inherit the constructors
-  using Sampler<BatchRequest>::Sampler;
-
-  // Trampoline (need one for each virtual function)
-  void reset(optional<size_t> new_size) override {
-    PYBIND11_OVERLOAD_PURE(void, Sampler<BatchRequest>, reset, new_size);
-  }
-  optional<BatchRequest> next(size_t batch_size) override {
-    PYBIND11_OVERLOAD_PURE(
-        optional<BatchRequest>, Sampler<BatchRequest>, next, batch_size);
-  }
-  void save(serialize::OutputArchive& archive) const override {
-    PYBIND11_OVERLOAD_PURE(void, Sampler<BatchRequest>, save, archive);
-  }
-  void load(serialize::InputArchive& archive) override {
-    PYBIND11_OVERLOAD_PURE(void, Sampler<BatchRequest>, load, archive);
-  }
-};
-
-/// This class creates a trampoline for virtual methods of `DistributedSampler`
-template <typename BatchRequest = std::vector<size_t>>
-class PyDistributedSampler : public DistributedSampler<BatchRequest> {
- public:
-  // Inherit the constructors
-  using DistributedSampler<BatchRequest>::DistributedSampler;
-
-  // Trampoline (need one for each virtual function)
-  void reset(optional<size_t> new_size) override {
-    PYBIND11_OVERLOAD_PURE(
-        void, DistributedSampler<BatchRequest>, reset, new_size);
-  }
-  optional<BatchRequest> next(size_t batch_size) override {
-    PYBIND11_OVERLOAD_PURE(
-        optional<BatchRequest>,
-        DistributedSampler<BatchRequest>,
-        next,
-        batch_size);
-  }
-  void save(serialize::OutputArchive& archive) const override {
-    PYBIND11_OVERLOAD_PURE(
-        void, DistributedSampler<BatchRequest>, save, archive);
-  }
-  void load(serialize::InputArchive& archive) override {
-    PYBIND11_OVERLOAD_PURE(
-        void, DistributedSampler<BatchRequest>, load, archive);
-  }
-};
-} // namespace samplers
-
 namespace datasets {
 /// This class creates a trampoline for virtual methods of `ChunkDataReader`
 template <typename DataType>
