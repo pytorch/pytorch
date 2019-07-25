@@ -57,6 +57,13 @@ def main():
     )
 
     parser.add_argument(
+        "--num_runs",
+        help="Run each test for num_runs. Each run executes an operator for number of <--iterations>",
+        type=int,
+        default=1,
+    )
+
+    parser.add_argument(
         "--min_time_per_test",
         help="Set the minimum time (unit: seconds) to run each test",
         type=int,
@@ -92,6 +99,12 @@ def main():
     )
 
     parser.add_argument(
+        "--use_jit",
+        help="Run operators with PyTorch JIT mode",
+        action='store_true'
+    )
+
+    parser.add_argument(
         "--forward_only",
         help="Only run the forward path of operators",
         action='store_true'
@@ -102,7 +115,7 @@ def main():
         help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
         default="Caffe2,PyTorch")
 
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     if benchmark_utils.is_caffe2_enabled(args.framework):
         workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])

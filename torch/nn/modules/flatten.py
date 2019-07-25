@@ -1,8 +1,5 @@
 from .module import Module
-from ..._jit_internal import weak_module, weak_script_method
 
-
-@weak_module
 class Flatten(Module):
     r"""
     Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
@@ -28,6 +25,5 @@ class Flatten(Module):
         self.start_dim = start_dim
         self.end_dim = end_dim
 
-    @weak_script_method
     def forward(self, input):
         return input.flatten(self.start_dim, self.end_dim)

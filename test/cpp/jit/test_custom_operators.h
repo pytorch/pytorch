@@ -15,7 +15,7 @@ namespace test {
 
 void testCustomOperators() {
   {
-    RegisterOperators reg("foo::bar", [](double a, at::Tensor b) { return a + b; });
+    torch::RegisterOperators reg("foo::bar", [](double a, at::Tensor b) { return a + b; });
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
     ASSERT_EQ(ops.size(), 1);
 
@@ -39,7 +39,7 @@ void testCustomOperators() {
     ASSERT_TRUE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
   }
   {
-    RegisterOperators reg("foo::bar_with_schema(float a, Tensor b) -> Tensor",
+    torch::RegisterOperators reg("foo::bar_with_schema(float a, Tensor b) -> Tensor",
         [](double a, at::Tensor b) { return a + b; });
 
     auto& ops =
@@ -68,11 +68,11 @@ void testCustomOperators() {
   }
   {
     // Check that lists work well.
-    RegisterOperators reg(
+    torch::RegisterOperators reg(
         "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
-        [](const std::vector<int64_t>& ints,
-           const std::vector<double>& floats,
-           std::vector<at::Tensor> tensors) { return floats; });
+        [](torch::List<int64_t> ints,
+           torch::List<double> floats,
+           torch::List<at::Tensor> tensors) { return floats; });
 
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
     ASSERT_EQ(ops.size(), 1);
@@ -108,9 +108,9 @@ void testCustomOperators() {
     ASSERT_EQ(output.get(1), 2.0);
   }
   {
-    RegisterOperators reg(
+    torch::RegisterOperators reg(
         "foo::lists2(Tensor[] tensors) -> Tensor[]",
-        [](std::vector<at::Tensor> tensors) { return tensors; });
+        [](torch::List<at::Tensor> tensors) { return tensors; });
 
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists2"));
     ASSERT_EQ(ops.size(), 1);
@@ -139,7 +139,7 @@ void testCustomOperators() {
 }
 
 void testCustomOperatorAliasing() {
-  RegisterOperators reg(
+  torch::RegisterOperators reg(
       "foo::aliasing", [](at::Tensor a, at::Tensor b) -> at::Tensor {
         a.add_(b);
         return a;

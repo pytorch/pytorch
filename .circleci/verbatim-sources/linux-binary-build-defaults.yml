@@ -21,23 +21,18 @@ binary_linux_build: &binary_linux_build
         retry yum -q -y install epel-release
         retry yum -q -y install expect moreutils
   - run:
-      name: Upgrade gcc version (based on env var)
+      name: Update compiler to devtoolset7
       command: |
         set -eux -o pipefail
         source /env
         if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
-          source "/builder/upgrade_gcc_abi.sh"
+          source "/builder/update_compiler.sh"
 
           # Env variables are not persisted into the next step
           echo "export PATH=$PATH" >> /env
           echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> /env
-
-          # We need to set this variable manually because
-          # https://github.com/pytorch/pytorch/blob/master/torch/abi-check.cpp
-          # sets the ABI to 0 by default
-          echo "export _GLIBCXX_USE_CXX11_ABI=1" >> /env
         else
-          echo "Not upgrading gcc version"
+          echo "Not updating compiler"
         fi
   - run:
       name: Build
