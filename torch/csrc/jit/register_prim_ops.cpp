@@ -1110,8 +1110,7 @@ RegisterOperators reg(
        const auto slot = type->getAttributeSlot(field);
        return [slot](Stack& stack) {
          auto v = pop(stack);
-         auto iv = pop(stack);
-         auto userObj = iv.toObject();
+         auto userObj = pop(stack).toObject();
          userObj->setSlot(slot, std::move(v));
          return 0;
        };
