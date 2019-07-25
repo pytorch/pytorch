@@ -71,6 +71,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_roialign.*'  # Needs implementation
                      '|test_bitshift.*'  # Needs implementation
                      '|test_round.*'  # Needs implementation
+                     '|test_cumsum.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
