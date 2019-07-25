@@ -4,7 +4,7 @@ import torch
 import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
     default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
-    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
+    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, HistogramObserver
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -319,7 +319,6 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 
-
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
         import torch.nn._intrinsic.modules.fused as torch_fused
@@ -369,6 +368,19 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d,
                          "Non-fused submodule BN")
 
+class ObserverTest(QuantizationTestCase):
+    def test_histogram_observer(self):
+        myobs = HistogramObserver(bins=10)
+        x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
+        myobs(x)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 1.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        self.assertEqual(myobs.histogram, [1., 2., 0., 1., 2., 2., 2., 1., 1., 1.])
+        qparams = myobs.calculate_qparams()
+        self.assertAlmostEqual(qparams[0].item(), 0.0313725, delta=1e-5)
+        self.assertEqual(qparams[1].item(), 0.0)
 
 if __name__ == '__main__':
     run_tests()

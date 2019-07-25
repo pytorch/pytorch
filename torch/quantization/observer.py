@@ -1,50 +1,63 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import torch.nn as nn
-import torch
+
+import math
+from abc import ABC, abstractmethod
 from functools import partial
 
-class Observer(nn.Module):
-    r"""Default Observer Module
-    A default implementation of the observer module, only works for
-    `per_tensor_affine` quantization scheme.
-    The module will record the running average of max and min value of the
-    observed Tensor and calulate_qparams will calculate the scale and zero_point
+import torch
+import torch.nn as nn
 
-    Other types of Observers should follow the same API, it can take arbitrary
-    number of keyward arguments. In forward, it will update the statistics of
-    the observed Tensor. And it should provide a `calculate_qparam` function
-    that computes the quantization parameters given the collected statistics.
-    TODO: Maybe add an abstract Observer class that enforces these rules?
+
+class ObserverBase(ABC, nn.Module):
+    r"""Observer base Module
+    Any concrete observer implementation should derive from this class.
+
+    Concrete observers should follow the same API. In forward, they will update
+    the statistics of the observed Tensor. And they should provide a
+    `calculate_qparams` function that computes the quantization parameters given
+    the collected statistics.
     """
+
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine):
-        super(Observer, self).__init__()
+        super(ObserverBase, self).__init__()
         self.dtype = dtype
         self.qscheme = qscheme
-        assert self.qscheme in (torch.per_tensor_affine, torch.per_tensor_symmetric), \
-            'Default Observer only works for per_tensor_affine and \
-                per_tensor_symmetric quantization scheme'
-        assert self.dtype in (torch.qint8, torch.quint8), \
-            'Default Observer only works for qint8 and quint data type'
-        self.min_val = None
-        self.max_val = None
+        assert self.qscheme in (
+            torch.per_tensor_affine,
+            torch.per_tensor_symmetric,
+        ), "Default Observer only works for per_tensor_affine and \
+                per_tensor_symmetric quantization scheme"
+        assert self.dtype in (
+            torch.qint8,
+            torch.quint8,
+        ), "Default Observer only works for qint8 and quint data type"
 
+    @abstractmethod
     def forward(self, x):
-        if self.min_val is None or self.max_val is None:
-            self.min_val = torch.min(x)
-            self.max_val = torch.max(x)
-        else:
-            self.min_val = torch.min(torch.min(x), self.min_val)
-            self.max_val = torch.max(torch.max(x), self.max_val)
+        pass
 
-    def calculate_qparams(self):
+    @abstractmethod
+    def calculate_qparams(self, **kwargs):
+        pass
+
+    def _calculate_qparams(self, min_val, max_val):
+        """
+        Given min and max values, this function calculates quantization parameters
+        """
+        assert min_val <= max_val, "min {} should be less than max {}".format(
+            min_val, max_val
+        )
+
         if self.dtype == torch.qint8:
             qmin, qmax = -128, 127
         else:
             qmin, qmax = 0, 255
-        n_levels = 255.0
-        if self.max_val is None or self.min_val is None:
-            raise Exception('must run observer before calling calculate_qparams!')
-        max_val, min_val = self.max_val.item(), self.min_val.item()
+        n_levels = qmax - qmin
+
+        # extend min/max values to include 0 to meet the requirement that 0 is
+        # exactly repsentable
+        min_val = min(min_val, 0.)
+        max_val = max(max_val, 0.)
         if max_val == min_val:
             scale = 1.0
             zero_point = 0
@@ -63,13 +76,298 @@ class Observer(nn.Module):
 
         return torch.tensor([scale, zero_point])
 
+
+class MinMaxObserver(ObserverBase):
+    r"""Default Observer Module
+    A default implementation of the observer module, only works for
+    `per_tensor_affine` quantization scheme.  The module will record the
+    running average of max and min value of the observed Tensor and
+    calculate_qparams will calculate scale and zero_point
+    """
+
+    def __init__(self, **kwargs):
+        super(MinMaxObserver, self).__init__(**kwargs)
+        self.min_val = None
+        self.max_val = None
+
+    def forward(self, x):
+        if self.min_val is None or self.max_val is None:
+            self.min_val = torch.min(x)
+            self.max_val = torch.max(x)
+        else:
+            self.min_val = torch.min(torch.min(x), self.min_val)
+            self.max_val = torch.max(torch.max(x), self.max_val)
+
+    def calculate_qparams(self, **kwargs):
+        if self.max_val is None or self.min_val is None:
+            raise Exception("must run observer before calling calculate_qparams!")
+        return self._calculate_qparams(self.min_val.item(), self.max_val.item())
+
+
+class HistogramObserver(ObserverBase):
+    r"""
+    The module records the running histogram of tensor values along with
+    min/max values. calculate_qparams will calculate scale and zero_point
+    """
+
+    def __init__(self, bins=2048, **kwargs):
+        super(HistogramObserver, self).__init__(**kwargs)
+        self.bins = bins
+        self.histogram = None
+        self.min_val = None
+        self.max_val = None
+
+    @staticmethod
+    def _get_norm(delta_begin, delta_end, density, norm_type):
+        # assume values are uniformly distributed within each histogram bin
+        # err = density * (integral_{begin, end} x^2)
+        #     = density * (end^3 - begin^3) / 3
+        assert norm_type == "L2", "Only L2 norms are currently supported"
+        norm = 0.0
+        if norm_type == "L2":
+            norm = (
+                delta_end * delta_end * delta_end
+                - delta_begin * delta_begin * delta_begin
+            ) / 3
+        return density * norm
+
+    def _include_zero(self):
+        """
+        0 should be included in the histogram so that we can represent 0.0f
+        exactly in quantized domain.
+        """
+        bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
+
+        # Pad histogram to include zero
+        if self.min_val > 0.0:
+            additional_nbins = math.ceil(self.min_val.item() / bin_width)
+            self.bins += additional_nbins
+            self.min_val -= additional_nbins * bin_width
+            self.histogram = torch.cat((torch.zeros(additional_nbins), self.histogram), dim=0)
+        elif self.max_val < 0.0:
+            additional_nbins = math.ceil(-self.max_val.item() / bin_width)
+            self.bins += additional_nbins
+            self.max_val += additional_nbins * bin_width
+            self.histogram = torch.cat((self.histogram, torch.zeros(additional_nbins)), dim=0)
+
+    def _non_linear_param_search(self, norm_type):
+        """
+        An approximation for L2 error minimization for selecting min/max.
+        By selecting new min/max, we filter out outliers in input distribution.
+        This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
+        caffe2/quantization/server/norm_minimization.cc
+        """
+        assert self.histogram.size()[0] == self.bins, "bins mistmatch"
+        self._include_zero()
+        dst_nbins = 256
+        bin_width = (self.max_val - self.min_val) / self.bins
+
+        # cumulative sum
+        total = sum(self.histogram)
+        cSum = torch.cumsum(self.histogram, dim=0)
+
+        stepsize = 1e-5
+        alpha = 0.0
+        beta = 1.0
+        start_bin = 0
+        end_bin = self.bins - 1
+        norm_min = float("inf")
+
+        while alpha < beta:
+            next_alpha = alpha + stepsize
+            next_beta = beta - stepsize
+            # find the left and right bins between the quantile bounds
+            i = start_bin
+            j = end_bin
+
+            while i < end_bin and cSum[i] < next_alpha * total:
+                i = i + 1
+
+            while j > start_bin and cSum[j] > next_beta * total:
+                j = j - 1
+
+            next_start_bin = start_bin
+            next_end_bin = end_bin
+            if (i - start_bin) > (end_bin - j):
+                next_start_bin = i
+                alpha = next_alpha
+            else:
+                next_end_bin = j
+                beta = next_beta
+
+            if next_start_bin == start_bin and next_end_bin == end_bin:
+                continue
+
+            # calculate the norm
+            norm = 0.0
+            dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / dst_nbins
+            for src_bin in range(self.bins):
+                # distances from the beginning of first dst_bin to the beginning and
+                # end of src_bin
+                src_bin_begin = (src_bin - next_start_bin) * bin_width
+                src_bin_end = src_bin_begin + bin_width
+
+                # which dst_bins the beginning and end of src_bin belong to?
+                dst_bin_of_begin = min(
+                    dst_nbins - 1, max(0., math.floor(src_bin_begin / dst_bin_width))
+                )
+                dst_bin_of_end = min(
+                    dst_nbins - 1, max(0., math.floor(src_bin_end / dst_bin_width))
+                )
+                dst_bin_of_begin_center = (
+                    dst_bin_of_begin * dst_bin_width + dst_bin_width / 2
+                )
+
+                density = self.histogram[src_bin] / bin_width
+                if dst_bin_of_begin == dst_bin_of_end:
+                    # if src_bin is entirely within 1 dst_bin
+                    delta_begin = src_bin_begin - dst_bin_of_begin_center
+                    delta_end = src_bin_end - dst_bin_of_begin_center
+                    norm = norm + self._get_norm(
+                        delta_begin, delta_end, density, norm_type
+                    )
+                else:
+                    delta_begin = src_bin_begin - dst_bin_of_begin_center
+                    delta_end = dst_bin_width / 2
+                    norm = norm + self._get_norm(
+                        delta_begin, delta_end, density, norm_type
+                    )
+
+                    norm = norm + (
+                        dst_bin_of_end - dst_bin_of_begin - 1
+                    ) * self._get_norm(
+                        -dst_bin_width / 2, dst_bin_width / 2, density, norm_type
+                    )
+
+                    dst_bin_of_end_center = (
+                        dst_bin_of_end * dst_bin_width + dst_bin_width / 2
+                    )
+
+                    delta_begin = -dst_bin_width / 2
+                    delta_end = src_bin_end - dst_bin_of_end_center
+                    norm = norm + self._get_norm(
+                        delta_begin, delta_end, density, norm_type
+                    )
+
+            if norm > norm_min:
+                break
+            norm_min = norm
+            start_bin = next_start_bin
+            end_bin = next_end_bin
+
+        new_min = self.min_val + bin_width * start_bin
+        new_max = self.min_val + bin_width * (end_bin + 1)
+        return new_min, new_max
+
+    def _combine_histograms(
+        self, dst_histogram, dst_min, dst_max, src_histogram, src_min, src_max
+    ):
+        bins_dst = dst_histogram.size()[0]
+        bins_src = src_histogram.size()[0]
+
+        dst_bin_width = (dst_max - dst_min) / bins_dst
+        src_bin_width = (src_max - src_min) / bins_src
+
+        for i in range(bins_src):
+            src_bin_count = src_histogram[i].item()
+            if src_bin_count == 0:
+                continue
+
+            src_bin_begin = src_min + src_bin_width * i
+            src_bin_end = src_bin_begin + src_bin_width
+
+            dst_bin = 0
+            if dst_bin_width:
+                dst_bin = int((src_bin_begin - dst_min) / dst_bin_width)
+
+            dst_bin_begin = dst_min + dst_bin_width * dst_bin
+            dst_bin_end = dst_bin_begin + dst_bin_width
+
+            dst_bin2 = 0
+            if dst_bin_width:
+                dst_bin2 = min(
+                    int((src_bin_end - dst_min) / dst_bin_width), bins_dst - 1
+                )
+
+            assert dst_bin2 <= dst_bin + 2, "1 src_bin is mapped to at most 2 dst_bins"
+            # dst_bin_cnt is the count from src_bin that should go to dst_bin
+            # the remainder should go to dst_bin2
+            dst_bin_cnt = 0
+            if src_bin_width == 0 or dst_bin_width == 0:
+                dst_bin_cnt = src_bin_count
+            else:
+                # We divide counts in src_bin in proportion to range overlap with dst_bin
+                dst_bin_cnt = min(
+                    round(
+                        (dst_bin_end - src_bin_begin) / src_bin_width * src_bin_count
+                    ),
+                    src_bin_count,
+                )
+
+            dst_histogram[dst_bin] += dst_bin_cnt
+
+            # remaining should go to dst_bin2
+            if dst_bin_cnt < src_bin_count:
+                dst_histogram[dst_bin2] += src_bin_count - dst_bin_cnt
+
+    def forward(self, x):
+        if self.min_val is None or self.max_val is None or self.histogram is None:
+            self.min_val = torch.min(x)
+            self.max_val = torch.max(x)
+            self.histogram = torch.histc(x, self.bins)
+        else:
+            new_min = torch.min(x)
+            new_max = torch.max(x)
+            new_histogram = torch.histc(x, self.bins)
+            # combine the existing histogram and new histogram into 1 histogram
+            combined_histogram = torch.zeros_like(self.histogram)
+            combined_min = torch.min(new_min, self.min_val)
+            combined_max = torch.max(new_max, self.max_val)
+            self._combine_histograms(
+                combined_histogram,
+                combined_min.item(),
+                combined_max.item(),
+                self.histogram,
+                self.min_val.item(),
+                self.max_val.item(),
+            )
+            self._combine_histograms(
+                combined_histogram,
+                combined_min.item(),
+                combined_max.item(),
+                new_histogram,
+                new_min.item(),
+                new_max.item(),
+            )
+            self.histogram = combined_histogram
+            self.min_val = combined_min
+            self.max_val = combined_max
+
+    def calculate_qparams(self, norm_type="L2", search_type="NonLinear", **kwargs):
+        if self.histogram is None:
+            raise Exception("must run observer before calling calculate_qparams!")
+        assert self.bins == len(self.histogram), (
+            "The number of bins in histogram should be equal to the number of bins "
+            "supplied while making this observer"
+        )
+
+        assert (
+            search_type == "NonLinear"
+        ), "Only non-linear search type for min/max is currently supported (aka L2 approx) "
+        new_min, new_max = self._non_linear_param_search(norm_type)
+
+        return self._calculate_qparams(new_min.item(), new_max.item())
+
+
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
+
 def default_observer(**kwargs):
-    return observer(Observer, **kwargs)
+    return observer(MinMaxObserver, **kwargs)
+
 
 def default_weight_observer(**kwargs):
-    kwargs.setdefault('dtype', torch.qint8)
-    kwargs.setdefault('qscheme', torch.per_tensor_symmetric)
-    return observer(Observer, **kwargs)
+    kwargs.setdefault("dtype", torch.qint8)
+    kwargs.setdefault("qscheme", torch.per_tensor_symmetric)
+    return observer(MinMaxObserver, **kwargs)
