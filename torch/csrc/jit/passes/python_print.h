@@ -29,6 +29,14 @@ TORCH_API void PythonPrint(
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable = false);
 
+TORCH_API void LEGACY_PythonPrint(
+    std::ostream& out,
+    SourceRangeRecords& source_ranges_out,
+    const script::Module& module,
+    std::vector<at::Tensor>& tensor_table,
+    std::vector<c10::NamedTypePtr>& class_table,
+    bool enforce_importable);
+
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);
 } // namespace jit
 } // namespace torch

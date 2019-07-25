@@ -1685,23 +1685,98 @@ jobs:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_build:
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_build:
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+    docker:
+      - image: "soumith/manylinux-cuda80"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+    docker:
+      - image: "soumith/manylinux-cuda80"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
+    docker:
+      - image: "soumith/manylinux-cuda80"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
     docker:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_build:
+  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+    docker:
+      - image: "soumith/manylinux-cuda92"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+    docker:
+      - image: "soumith/manylinux-cuda92"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
+    docker:
+      - image: "soumith/manylinux-cuda92"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
+    docker:
+      - image: "soumith/manylinux-cuda100"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+    docker:
+      - image: "soumith/manylinux-cuda100"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+    docker:
+      - image: "soumith/manylinux-cuda100"
+    <<: *binary_linux_build
+
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -2070,19 +2145,76 @@ jobs:
       BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_upload:
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_upload:
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_upload:
+  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+    <<: *binary_linux_upload
+
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_upload:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
   binary_macos_wheel_2.7_cpu_upload:
@@ -2723,11 +2855,11 @@ workflows:
             - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_devtoolset7_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_build:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
           requires:
             - setup
       # TODO we should test a libtorch cuda build, but they take too long
-      # - binary_linux_libtorch_2.7m_cu90_devtoolset7_build
+      # - binary_linux_libtorch_2.7m_cu90_devtoolset7_static-without-deps_build
       - binary_macos_wheel_3.6_cpu_build:
           requires:
             - setup
@@ -2948,13 +3080,40 @@ workflows:
       - binary_linux_conda_3.7_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_build:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_build:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_build:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build:
           requires:
             - setup
       - binary_macos_wheel_2.7_cpu_build:
@@ -3212,21 +3371,66 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3.7_cu100_devtoolset7_test
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_upload:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_build
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_upload:
+            - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_upload:
+            - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_build
+            - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build
+      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_build
+      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_build
+      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_build
+      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build
       - binary_macos_wheel_2.7_cpu_upload:
           context: org-member
           requires:

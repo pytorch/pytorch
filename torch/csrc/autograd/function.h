@@ -201,13 +201,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return sequence_nr_;
   }
 
-  /// Returns a shared pointer to `this`. `PyNode`s are not managed by
-  /// `shared_ptr`s by default, but are bound to the lifetime of their Python
-  /// object instead.
-  virtual std::shared_ptr<Node> get_shared_ptr() {
-    return shared_from_this();
-  }
-
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 

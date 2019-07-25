@@ -291,6 +291,7 @@ void Module::clone_method(
   const auto this_method_name = getNameForMethod(method.name());
   auto copied =
       class_compilation_unit()->create_function(this_method_name, graph);
+  type()->addMethod(copied);
   copied->setSchema(std::move(schema));
 }
 

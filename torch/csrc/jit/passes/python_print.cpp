@@ -1307,6 +1307,12 @@ struct PythonPrintPass {
     int64_t source_offset = out.tellp();
     body_.print(out, &source_ranges_out, source_offset);
   }
+
+  void LEGACY_printModuleMethods(const script::Module& module) {
+    for (const auto method : module.type()->methods()) {
+      printFunction(*method);
+    }
+  }
 };
 
 void PythonPrint(
@@ -1333,6 +1339,20 @@ void PythonPrint(
   pp.printClass(classType);
   pp.print(out, source_ranges_out);
 }
+
+void LEGACY_PythonPrint(
+    std::ostream& out,
+    SourceRangeRecords& source_ranges_out,
+    const script::Module& module,
+    std::vector<at::Tensor>& tensor_table,
+    std::vector<c10::NamedTypePtr>& class_table,
+    bool enforce_importable) {
+  PythonPrintPass pp(
+      tensor_table, class_table, enforce_importable, /*isMethod=*/true);
+  pp.LEGACY_printModuleMethods(module);
+  pp.print(out, source_ranges_out);
+}
+
 
 bool printerHasSpecialCaseFor(Symbol sym) {
   // WARNING: by adding a value to this set, you are asserting

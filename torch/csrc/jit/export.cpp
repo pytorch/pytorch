@@ -516,6 +516,14 @@ class ScriptModuleSerializer final {
       const script::Module& module,
       torch::ModelDef* model_def,
       const script::ExtraFilesMap& extra_files);
+  void LEGACY_writePickleArchive(
+      const std::string& name,
+      const std::vector<IValue>& ivalues);
+  void LEGACY_convertModule(
+      const script::Module& module,
+      const std::string& prefix,
+      const std::string& name,
+      torch::ModuleDef* module_def);
 
   // add a tensor to the tensorTable
   // returns the offset into the tensor table
@@ -557,6 +565,9 @@ class ScriptModuleSerializer final {
     SourceRangeRecords debug_info;
   };
   OrderedDict<c10::NamedTypePtr, ClassInfo> converted_classes_;
+
+  std::vector<IValue> LEGACY_pickled_ivalues_;
+  size_t proto_version_ = torch::ProtoVersion::PROTO_VERSION_NEWEST;
 };
 
 // ScriptModuleSerializer's methods
@@ -622,7 +633,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 
     // For the type, foo.bar.Baz
     const std::string filename = ImportExportHelpers::qualifierToPath(
-        class_type->qualifier(), torch::ProtoVersion::PROTO_VERSION_NEWEST);
+        class_type->qualifier(), proto_version_);
     // End state: filename is "foo/bar.py", in which we will define a class
     // named Baz
     auto& stream = fileToSrc[filename];
@@ -707,17 +718,22 @@ void ScriptModuleSerializer::convertModel(
   model_def->set_producer_name("pytorch");
   model_def->set_producer_version("1.0"); // TODO: set the producer version
                                           // using appropriate function call
-  model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
+  model_def->set_proto_version(proto_version_);
+  if (proto_version_ >= 6) {
+    // Serialize all code info.
+    convertClass(module.type());
+    // Then pickle the module
+    Pickler pickler(&tensor_table_);
+    pickler.protocol();
+    pickler.pushIValue(module.module_object());
+    pickler.stop();
+    writer_.writeRecord("data.pkl", pickler.stack().data(), pickler.stack().size());
+  } else {
+    LEGACY_convertModule(
+        module, "", writer_.archiveName(), model_def->mutable_main_module());
 
-  // Serialize all code info.
-  convertClass(module.type());
-
-  // Then pickle the module
-  Pickler pickler(&tensor_table_);
-  pickler.start();
-  pickler.addIValue(module.module_object());
-  pickler.finish();
-  writer_.writeRecord("data.pkl", pickler.stack().data(), pickler.stack().size());
+    LEGACY_writePickleArchive("attributes.pkl", LEGACY_pickled_ivalues_);
+  }
 
   writeTensorTable(model_def);
   writeLibs(model_def);
@@ -767,11 +783,9 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   auto* key = tensor.storage().unsafeGetStorageImpl();
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
-    uint64_t record_size;
-    at::Tensor storage_tensor;
-    std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
+    WriteableTensorData data = getWriteableTensorData(tensor);
     std::string name = "tensors/" + std::to_string(tensor_id);
-    writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
+    writer_.writeRecord(name, data.data(), data.sizeInBytes());
     storage_it = storageMap.insert({key, name}).first;
   }
 
@@ -790,6 +804,116 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
   for (const at::Tensor& t : tensor_table_) {
     auto* tensor_proto = model_def->add_tensors();
     convertAndWriteTensor(tensor_id++, t, tensor_proto, storageMap);
+  }
+}
+
+void ScriptModuleSerializer::LEGACY_writePickleArchive(
+    const std::string& name,
+    const std::vector<IValue>& ivalues) {
+  Pickler pickler(&tensor_table_);
+  pickler.protocol();
+  pickler.startTuple();
+  for (const IValue& ivalue : ivalues) {
+    pickler.pushIValue(ivalue);
+  }
+  pickler.endTuple();
+  pickler.stop();
+  writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size());
+}
+
+void ScriptModuleSerializer::LEGACY_convertModule(
+    const script::Module& module,
+    const std::string& prefix,
+    const std::string& name,
+    torch::ModuleDef* module_def) {
+  module_def->set_name(name);
+  module_def->set_optimize(true);
+
+  // If __getstate__ and __setstate__ methods are provided, use those for
+  // serializing instead of serializing the attributes directly
+  bool user_provided_serialization =
+      checkHasValidSetGetState(module.module_object()->type());
+  if (user_provided_serialization) {
+    // Run the '__getstate__' method on the module and store the result
+    LEGACY_pickled_ivalues_.emplace_back(moduleGetState(module));
+    module_def->set_get_state_attribute_id(LEGACY_pickled_ivalues_.size() - 1);
+  }
+
+  // Add all the parameters
+  for (const auto& param : module.get_parameters()) {
+    torch::ParameterDef* param_def = module_def->add_parameters();
+    param_def->set_name(param.name());
+    param_def->set_is_buffer(false);
+    if (user_provided_serialization) {
+      // If a __getstate__ was used, don't write the actual tensor
+      param_def->set_tensor_id(-1);
+    } else {
+      param_def->set_tensor_id(addTensor(param.value().toTensor()));
+    }
+  }
+
+  // Add all the attributes
+  for (const auto& attribute : module.get_attributes()) {
+    // Add attribute to ModuleDef
+    torch::AttributeDef* attribute_def = module_def->add_attributes();
+    attribute_def->set_name(attribute.name());
+    attribute_def->set_type(attribute.type()->python_str());
+
+    if (!user_provided_serialization) {
+      // Write the attribute's index if it's actually saved, -1 if it needs to
+      // come from __getstate__
+      LEGACY_pickled_ivalues_.push_back(attribute.value());
+      attribute_def->set_id(LEGACY_pickled_ivalues_.size() - 1);
+    } else {
+      // The module had a __setstate__, so write the attribute name/type so
+      // it can be correctly imported, but it has no entry in the
+      // LEGACY_pickled_ivalues_ table
+      attribute_def->set_id(-1);
+    }
+  }
+
+  std::stringstream module_name;
+  if (prefix != "")
+    module_name << prefix << "_";
+  module_name << name;
+
+  if (module.type()->methods().size() > 0) {
+    std::ostringstream methods;
+    SourceRangeRecords source_ranges;
+    methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
+    LEGACY_PythonPrint(
+        methods,
+        source_ranges,
+        module,
+        tensor_table_,
+        class_table_,
+        /*enforce_importable=*/true);
+    torch::RecordRef* record = module_def->mutable_torchscript_arena();
+
+    std::stringstream filename;
+    filename << "code/" << module_name.str() << ".py";
+    std::string methods_str = methods.str();
+    writer_.writeRecord(
+        filename.str(), methods_str.c_str(), methods_str.size());
+    record->set_key(filename.str());
+
+    // Write out debug records
+    torch::RecordRef* debug_record =
+        module_def->mutable_torchscript_debug_arena();
+
+    SourceRangePickler source_range_pickler;
+    source_range_pickler.pickle(source_ranges);
+    const auto& range_data = source_range_pickler.get_data();
+    std::stringstream debug_filename;
+    debug_filename << "debug/" << module_name.str() << ".pkl";
+    writer_.writeRecord(
+        debug_filename.str(), range_data.data(), range_data.size());
+    debug_record->set_key(debug_filename.str());
+  }
+
+  for (script::Slot s : module.get_module_slots()) {
+    torch::ModuleDef* sub_def = module_def->add_submodules();
+    LEGACY_convertModule(s.to_module(), module_name.str(), s.name(), sub_def);
   }
 }
 
