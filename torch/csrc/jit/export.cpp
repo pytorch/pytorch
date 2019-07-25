@@ -749,11 +749,9 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   auto* key = tensor.storage().unsafeGetStorageImpl();
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
-    uint64_t record_size;
-    at::Tensor storage_tensor;
-    std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
+    WriteableTensorData data = getWriteableTensorData(tensor);
     std::string name = "tensors/" + std::to_string(tensor_id);
-    writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
+    writer_.writeRecord(name, data.data(), data.sizeInBytes());
     storage_it = storageMap.insert({key, name}).first;
   }
 
