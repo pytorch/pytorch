@@ -285,8 +285,9 @@ class TestDynamicQuantizedLinear(TestCase):
     @given(
         use_bias=st.booleans(),
         use_relu=st.booleans(),
+        use_multi_dim_input=st.booleans(),
     )
-    def test_qlinear(self, use_bias, use_relu):
+    def test_qlinear(self, use_bias, use_relu, use_multi_dim_input):
         batch_size = 1
         input_channels = 2
         output_channels = 2
@@ -297,7 +298,10 @@ class TestDynamicQuantizedLinear(TestCase):
         else:
             qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
 
-        X_fp32 = torch.tensor([[100, -150]], dtype=torch.float)
+        if use_multi_dim_input:
+            X_fp32 = torch.tensor([[[100, -150]]], dtype=torch.float)
+        else:
+            X_fp32 = torch.tensor([[100, -150]], dtype=torch.float)
         W_fp32 = torch.tensor([[-150, 100], [100, -150]], dtype=torch.float)
         b_fp32 = torch.tensor([13, -20], dtype=torch.float) if use_bias else None
 
@@ -329,13 +333,19 @@ class TestQuantizedLinear(unittest.TestCase):
            input_channels=st.integers(16, 32),
            output_channels=st.integers(4, 8),
            use_bias=st.booleans(),
-           use_relu=st.booleans())
-    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias, use_relu):
+           use_relu=st.booleans(),
+           use_multi_dim_input=st.booleans(),
+    )
+    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
+                     use_relu, use_multi_dim_input):
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         if use_relu:
             qlinear = torch.ops.quantized.fbgemm_linear_relu
         else:
             qlinear = torch.ops.quantized.fbgemm_linear
+
+        if use_multi_dim_input:
+            batch_size *= 3 # Test the multi-dim input tensor
 
         X_scale = 1.5
         X_zp = 5
@@ -391,9 +401,15 @@ class TestQuantizedLinear(unittest.TestCase):
         Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
         if use_relu:
             Y_q_ref[Y_q_ref < Y_zp] = Y_zp
+        if use_multi_dim_input:
+            Y_q_ref = np.reshape(Y_q_ref, (3, int(batch_size/3), output_channels))
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
+
+        if use_multi_dim_input:
+            X_q = X_q.view(3, int(batch_size/3), input_channels)
+
         # Quantized Linear operator with prepacked weight
         Y_q = qlinear(X_q, W_prepack, b_q, Y_scale, Y_zp)
 
