@@ -2243,7 +2243,7 @@ class TestAutograd(TestCase):
                     run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
-        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((3, 3))
         #_test_cdist_for_size((S, S, S))
 
 
@@ -2262,7 +2262,7 @@ class TestAutograd(TestCase):
                     run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
-        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((3, 3))
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
