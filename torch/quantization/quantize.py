@@ -1,8 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+
+import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.qat as qat
-import torch
+
+from . import make_module
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
@@ -276,5 +279,8 @@ def swap_module(mod, mapping):
     if hasattr(mod, 'observer'):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
+        elif hasattr(mod, 'operation'):
+            # Try making a quantized module from function.
+            new_mod = make_module.make_module(mod.operation, quantized=True)
 
     return new_mod

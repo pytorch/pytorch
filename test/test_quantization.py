@@ -8,8 +8,9 @@ from torch.quantization import QConfig, \
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
-    TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
-    ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
+    TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, ModelForFunctionQuant, \
+    ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, \
+    test_only_train_fn
 
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
@@ -260,6 +261,20 @@ class PostTrainingQuantTest(QuantizationTestCase):
         # test one line API
         model = quantize(ManualQuantModel().eval(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+
+    def test_make_module(self):
+        model = ModelForFunctionQuant()
+        self.assertTrue(hasattr(model.add, 'operation'))
+        self.assertTrue(hasattr(torch, '_ops_Add'))
+        self.assertEqual(type(model.add), torch._ops_Add)
+
+        model = prepare(model)
+        test_only_eval_fn(model, self.calib_data)
+        model = convert(model)
+
+        self.assertTrue(hasattr(torch, '_ops_Add_quantized'))
+        self.assertEqual(type(model.add), torch._ops_Add_quantized)
+
 
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
