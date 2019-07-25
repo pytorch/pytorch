@@ -1046,8 +1046,16 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
+        # If this type is a `nn.Module` subclass, they probably meant to pass
+        # an instance instead of a Module
+        if issubclass(obj, torch.nn.Module):
+            raise RuntimeError("Type '{}' cannot be compiled since it inherits"
+                               " from nn.Module,"
+                               " pass an instance instead".format(obj))
+
         if not _is_new_style_class(obj):
-            raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
+            raise RuntimeError("TorchScript classes must be new-style classes. "
+                               "Please inherit from 'object'")
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
