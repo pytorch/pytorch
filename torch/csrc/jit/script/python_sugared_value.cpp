@@ -26,11 +26,6 @@ c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
   return c10::nullopt;
 }
 
-thread_local bool recurse_on_python_ops = false;
-bool& getRecursiveScriptMode() {
-  return recurse_on_python_ops;
-}
-
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
     const size_t n_binders) {
@@ -244,11 +239,6 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
                          << err.str();
 }
 
-bool should_recurse(py::object obj) {
-  return py::cast<bool>(py::module::import("torch.jit")
-                            .attr("_is_recursive_script_enabled")(obj));
-}
-
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
@@ -287,7 +277,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         self_, py::cast<std::vector<std::string>>(overloads));
   }
   if (!py::hasattr(py_module_, field.c_str())) {
-    throw ErrorReport(loc) << "module has no attribute '" << field;
+    throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   py::object attr = py::getattr(py_module_, field.c_str());
 
@@ -310,35 +300,33 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<ConstantParameterList>(list);
   }
 
-  // If recursive script mode is on, create a ScriptModule and register it as
+  // Recursively create a ScriptModule and register it as
   // as submodule or register a python method as a script::Method
-  if (should_recurse(attr)) {
-    if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
-      // If the module is a submodule of the py_module, convert it to a
-      // ScriptModule and add it as a submodule to the script::Module. This
-      // enables lazy strong-ification of modules.
-      auto result =
-          py::module::import("torch.jit")
-              .attr("_make_strong_submodule")(field, attr, py_module_);
-      if (!result.is_none()) {
-        auto submodule = as_module(result);
-        TORCH_CHECK(
-            submodule,
-            "Result of torch.jit._make_strong_submodule "
-            "was not a ScriptModule");
-        // The module was a submodule of the nn.Module, so register it here
-        // and return the submodule.
-        module_.register_module(field, *submodule);
-        auto v = module_.find_module(field);
-        return std::make_shared<ModuleValue>(
-            m.graph()->insertGetAttr(self_, field), *v, result);
-      }
-    } else if (py::isinstance<py::function>(attr)) {
-      auto stub = py::module::import("torch.jit")
-                      .attr("_create_method_from_fn")(py_module_, attr);
-      if (!stub.is_none()) {
-        return SimpleValue(self_).attr(loc, m, field);
-      }
+  if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
+    // If the module is a submodule of the py_module, convert it to a
+    // ScriptModule and add it as a submodule to the script::Module. This
+    // enables lazy strong-ification of modules.
+    auto result =
+        py::module::import("torch.jit")
+            .attr("_make_strong_submodule")(field, attr, py_module_);
+    if (!result.is_none()) {
+      auto submodule = as_module(result);
+      TORCH_CHECK(
+          submodule,
+          "Result of torch.jit._make_strong_submodule "
+          "was not a ScriptModule");
+      // The module was a submodule of the nn.Module, so register it here
+      // and return the submodule.
+      module_.register_module(field, *submodule);
+      auto v = module_.find_module(field);
+      return std::make_shared<ModuleValue>(
+          m.graph()->insertGetAttr(self_, field), *v, result);
+    }
+  } else if (py::isinstance<py::function>(attr)) {
+    auto stub = py::module::import("torch.jit")
+                    .attr("_create_method_from_fn")(py_module_, attr);
+    if (!stub.is_none()) {
+      return SimpleValue(self_).attr(loc, m, field);
     }
   }
 
@@ -442,6 +430,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     Function& m,
     SourceRange loc,
     bool is_constant) {
+
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
   // f = python_constant
@@ -499,10 +488,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   if (py::isinstance<py::function>(obj)) {
     if (typeString(obj) == "builtin_function_or_method") {
-      throw ErrorReport(loc)
-          << "You are calling a python builtin_function_or_method "
-          << "which is currently not supported in Torchscript."
-          << "Please open a feature request to add it.";
+      throw ErrorReport(loc) << "Python builtin " << py::str(obj)
+                             << " is currently not supported in Torchscript";
     }
   }
 
@@ -516,13 +503,36 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
-    auto pyCu = CompilationUnit::_get_python_cu();
+    auto pyCu = get_python_cu();
     if (auto classType = pyCu->get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
+    } else {
+      // If we can't get the source code for the type, it's implemented in C and
+      // probably part of the standard library, so give up and leave it as a
+      // call to Python
+      bool can_compile_class = py::cast<bool>(
+          py::module::import("torch._jit_internal").attr("can_compile_class")(obj));
+      if (can_compile_class) {
+        // Register class
+        auto rcb = py::module::import("torch._jit_internal")
+                       .attr("createResolutionCallbackForClassMethods")(obj);
+        py::module::import("torch.jit")
+            .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
+
+        // Return class
+        auto newClassType = pyCu->get_class(c10::QualifiedName(qualifiedName));
+        AT_ASSERT(
+            newClassType,
+            "Class '",
+            qualifiedName,
+            "' should have been compiled but was not");
+        return std::make_shared<ClassValue>(newClassType);
+      }
     }
   }
 
-  if (should_recurse(obj) && py::isinstance<py::function>(obj)) {
+  py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
+  if (py::cast<bool>(isFunction)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {

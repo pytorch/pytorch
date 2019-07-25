@@ -331,3 +331,5 @@ change in a future interface.
 Functions
 --------------------------
 .. autofunction:: export
+.. autofunction:: set_training
+.. autofunction:: is_in_onnx_export
