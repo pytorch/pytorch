@@ -113,6 +113,17 @@ struct ScalarTypeToCPPType<c10::ScalarType::Bool> {
   // TODO: remove once the bug is fixed.
   static type t;
 };
+
+template<>
+struct ScalarTypeToCPPType<c10::ScalarType::Long> {
+  using type = int64_t;
+
+  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
+  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
+  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
+  // TODO: remove once the bug is fixed.
+  static type t;
+};
 }
 
 #define AT_FORALL_SCALAR_TYPES(_) \
@@ -233,7 +244,7 @@ static inline size_t elementSize(ScalarType t) {
 static inline bool isIntegralType(ScalarType t) {
   return (
       t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
-      t == ScalarType::Long || t == ScalarType::Short);
+      t == ScalarType::Long || t == ScalarType::Short || t == ScalarType::Bool);
 }
 
 static inline bool isFloatingType(ScalarType t) {
