@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 #include <new>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
@@ -61,22 +62,6 @@ THTensor *THTensor_(new)(void)
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
     at::CPUTensorId()
   ).release();
-}
-
-/* Pointer-copy init */
-THTensor *THTensor_(newWithTensor)(THTensor *tensor)
-{
-  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId()
-  ).release();
-  THTensor_(setStorageNd)(self,
-                          THTensor_getStoragePtr(tensor),
-                          tensor->storage_offset(),
-                          tensor->dim(),
-                          THTensor_getSizePtr(tensor),
-                          THTensor_getStridePtr(tensor));
-  return self;
 }
 
 /* Storage init */
@@ -174,21 +159,21 @@ THTensor *THTensor_(newContiguous)(THTensor *self)
 
 THTensor *THTensor_(newSelect)(THTensor *tensor, int dimension_, int64_t sliceIndex_)
 {
-  THTensor *self = THTensor_(newWithTensor)(tensor);
+  THTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
   THTensor_(select)(self, NULL, dimension_, sliceIndex_);
   return self;
 }
 
 THTensor *THTensor_(newNarrow)(THTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_)
 {
-  THTensor *self = THTensor_(newWithTensor)(tensor);
+  THTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
   THTensor_(narrow)(self, NULL, dimension_, firstIndex_, size_);
   return self;
 }
 
 THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimension2_)
 {
-  THTensor *self = THTensor_(newWithTensor)(tensor);
+  THTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
   THTensor_(transpose)(self, NULL, dimension1_, dimension2_);
   return self;
 }
@@ -799,7 +784,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
     for (int j = 0; j < numInputs; j++) {
       if (!should_skip(inputs[j])) {
         int64_t dimSize = inputs[j]->size(dimension);
-        THTensor *nt = THTensor_(newWithTensor)(result);
+        THTensor *nt = at::native::alias(THTensor_wrap(result)).unsafeGetTensorImpl();
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
         at::Tensor nt__wrap = THTensor_wrap(nt);
         at::Tensor inputs_wrap = THTensor_wrap(inputs[j]);

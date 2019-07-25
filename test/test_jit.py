@@ -1222,8 +1222,9 @@ graph(%Ra, %Rb):
                 return grad_output
 
         x = torch.tensor([0.], requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
-            torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
+        with warnings.catch_warnings(record=True):
+            with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
+                torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
 
     def test_inplace_transplant(self):
         x = torch.tensor([0.], requires_grad=True)
@@ -4526,7 +4527,8 @@ a")
                 return foo(x)
 
         f = io.BytesIO()
-        torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
+        with warnings.catch_warnings(record=True):
+            torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
 
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_cast(self):
@@ -6506,7 +6508,8 @@ a")
                 requires_grad=False)
 
             ref = copy.deepcopy(cell)
-            cell = torch.jit.quantized.quantize_rnn_modules(cell)
+            cell_int8 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.uint8)
+            cell_fp16 = torch.jit.quantized.quantize_rnn_modules(cell, dtype=torch.float16)
 
             niter = 10
             x = torch.tensor([[100, -155],
@@ -6523,26 +6526,39 @@ a")
             elif isinstance(ref, torch.nn.GRU):
                 hiddens = hx
 
-            # Compare quantized to unquantized
-            output, final_hiddens = cell(x, hiddens)
             ref_out, ref_hid = ref(x, hiddens)
 
-            torch.testing.assert_allclose(output, ref_out)
-            for out, ref in zip(final_hiddens, ref_hid):
+            # Compare int8 quantized to unquantized
+            output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
+
+            torch.testing.assert_allclose(output_int8, ref_out)
+            for out, ref in zip(final_hiddens_int8, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            if isinstance(cell, torch.jit.quantized.QuantizedLSTM):
-                class ScriptWrapper(torch.jit.ScriptModule):
-                    def __init__(self, cell):
-                        super(ScriptWrapper, self).__init__()
-                        self.cell = cell
+            # Compare fp16 quantized to unquantized
+            output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
 
-                    @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
-                        #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-                        return self.cell(x, hiddens)
-            elif isinstance(cell, torch.jit.quantized.QuantizedGRU):
+            torch.testing.assert_allclose(output_fp16, ref_out)
+            for out, ref in zip(final_hiddens_fp16, ref_hid):
+                torch.testing.assert_allclose(out, ref)
+
+            def compare_quantized_unquantized(ScriptWrapper, cell): 
+                wrapper = ScriptWrapper(cell)
+
+                # Compare quantize scripted module to unquantized
+                script_out, script_hid = wrapper(x, hiddens)
+                torch.testing.assert_allclose(script_out, ref_out)
+                for out, ref in zip(script_hid, ref_hid):
+                    torch.testing.assert_allclose(out, ref)
+
+                # Compare export/import to unquantized
+                export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
+                ei_out, ei_hid = export_import_wrapper(x, hiddens)
+                torch.testing.assert_allclose(ei_out, ref_out)
+                for out, ref in zip(ei_hid, ref_hid):
+                    torch.testing.assert_allclose(out, ref)
+
+            if isinstance(cell, torch.jit.quantized.QuantizedGRU):
                 class ScriptWrapper(torch.jit.ScriptModule):
                     def __init__(self, cell):
                         super(ScriptWrapper, self).__init__()
@@ -6553,20 +6569,20 @@ a")
                         # type: (torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
                         return self.cell(x, hiddens)
 
-            wrapper = ScriptWrapper(cell)
+                compare_quantized_unquantized(ScriptWrapper, cell)
+            elif isinstance(cell, torch.jit.quantized.QuantizedLSTM):
+                for cell in [cell_int8, cell_fp16]:
+                    class ScriptWrapper(torch.jit.ScriptModule):
+                        def __init__(self, cell):
+                            super(ScriptWrapper, self).__init__()
+                            self.cell = cell
 
-            # Compare quantize scripted module to unquantized
-            script_out, script_hid = wrapper(x, hiddens)
-            torch.testing.assert_allclose(script_out, ref_out)
-            for out, ref in zip(script_hid, ref_hid):
-                torch.testing.assert_allclose(out, ref)
-
-            # Compare export/import to unquantized
-            export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
-            ei_out, ei_hid = export_import_wrapper(x, hiddens)
-            torch.testing.assert_allclose(ei_out, ref_out)
-            for out, ref in zip(ei_hid, ref_hid):
-                torch.testing.assert_allclose(out, ref)
+                        @torch.jit.script_method
+                        def forward(self, x, hiddens):
+                            # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                            #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                            return self.cell(x, hiddens)
+                    compare_quantized_unquantized(ScriptWrapper, cell)
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
@@ -6984,9 +7000,9 @@ a")
             m.sub = nn.Linear(5, 5)
 
     def test_script_inline_trace_multiple_args(self):
-        class M(torch.jit.ScriptModule):
+        class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__(False)
+                super(M, self).__init__()
 
             def forward(self, input, input2):
                 return input + input2
@@ -12227,10 +12243,11 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                pass
+                return None
 
             @torch.jit.export
-            def __setstate__(self):
+            def __setstate__(self, _):
+                # type: (None) -> None
                 self.buffer1 = torch.ones(2, 2) + 10
                 self.buffer2 = torch.ones(2, 2) + 10
 
@@ -12667,6 +12684,17 @@ a")
         with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
             m2.forward(torch.ones(1))
 
+    def test_module_error(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, foo):
+                return foo
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be compiled since it inherits from nn.Module"):
+            torch.jit.script(MyModule)
+
     def test_view_write(self):
         def fn(x, y):
             l = []
@@ -13054,6 +13082,15 @@ a")
         self._test_pickle_checkpoint('cpu')
         self._test_pickle_checkpoint_views('cpu')
 
+    def test_pickle_checkpoint_tup(self):
+        @torch.jit.script
+        def foo(fname):
+            # type: (str) -> None
+            torch.save((3, 4), fname)
+        with TemporaryFileName() as name:
+            foo(name)
+            self.assertEqual(torch.load(name), (3, 4))
+
     def test_string_list(self):
         def fn(string):
             # type: (str) -> List[str]
@@ -13413,6 +13450,22 @@ class TestRecursiveScript(JitTestCase):
                 self.a = 4
                 self.inner = Inner()
 
+        @torch.jit.script
+        class SFoo(object):
+            def __init__(self):
+                self.a = 4
+                self.inner = Inner()
+
+            def __setstate__(self, obj):
+                # type: (Tuple[int, Inner]) -> None
+                a, inner = obj
+                self.a = a
+                self.inner = inner
+
+            def __getstate__(self):
+                return (self.a, self.inner)
+
+
         untyped_values = (
             ('my_dict', {"I": "am", "a test": "test"}),
             ('my_float', 2.3),
@@ -13432,6 +13485,7 @@ class TestRecursiveScript(JitTestCase):
             ('my_empty_dict', {}),
             ('my_none', None),
             ('my_object', Foo()),
+            ('my_object2', SFoo()),
         )
 
         class M(torch.nn.Module):
@@ -13461,6 +13515,8 @@ class TestRecursiveScript(JitTestCase):
                     self.my_none,
                     self.my_object.a,
                     self.my_object.inner.b,
+                    self.my_object.a,
+                    self.my_object2.inner.b,
                 )
 
         # TODO: as a followup, fix this test
@@ -13477,6 +13533,7 @@ class TestRecursiveScript(JitTestCase):
             'my_empty_dict': Dict[str, int],
             'my_none': Optional[int],
             'my_object': Foo,
+            'my_object2': SFoo,
         }
 
         m = M()
@@ -16431,6 +16488,14 @@ class TestDict(JitTestCase):
             return list(x.keys())
 
         self.assertEqual(set(keys(self.dict())), set(self.dict().keys()))
+
+        @torch.jit.script
+        def specialized_list():
+            li = {1: 1, 2: 2}.keys()
+            li.append(3)
+            return li
+
+        self.assertTrue(set(specialized_list()) == set([1, 2, 3]))
 
     def test_values(self):
         @torch.jit.script

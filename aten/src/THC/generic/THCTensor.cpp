@@ -70,23 +70,6 @@ THCTensor *THCTensor_(new)(THCState *state)
   ).release();
 }
 
-/* Pointer-copy init */
-THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
-{
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId()
-  ).release();
-  THCTensor_(setStorageNd)(state,
-                           self,
-                           THTensor_getStoragePtr(tensor),
-                           tensor->storage_offset(),
-                           tensor->dim(),
-                           THTensor_getSizePtr(tensor),
-                           THTensor_getStridePtr(tensor));
-  return self;
-}
-
 /* Storage init */
 THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
   if (strides.data()) {
@@ -179,21 +162,21 @@ THCTensor *THCTensor_(newContiguous)(THCState *state, THCTensor *self)
 
 THCTensor *THCTensor_(newSelect)(THCState *state, THCTensor *tensor, int dimension_, int64_t sliceIndex_)
 {
-  THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
+  THCTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
   THCTensor_(select)(state, self, NULL, dimension_, sliceIndex_);
   return self;
 }
 
 THCTensor *THCTensor_(newNarrow)(THCState *state, THCTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_)
 {
-  THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
+  THCTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
   THCTensor_(narrow)(state, self, NULL, dimension_, firstIndex_, size_);
   return self;
 }
 
 THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dimension1_, int dimension2_)
 {
-  THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
+  THCTensor *self = at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
   THCTensor_(transpose)(state, self, NULL, dimension1_, dimension2_);
   return self;
 }

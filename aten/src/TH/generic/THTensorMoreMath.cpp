@@ -5,6 +5,7 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -169,12 +170,12 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       return;
     }
 
-    THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
+    THTensor *tempValues_ = at::native::alias(THTensor_wrap(values_)).unsafeGetTensorImpl();
     // tempValues_.expand_as(t)
     tempValues_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
     tempValues_->set_stride(dimension, 0);
 
-    THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
+    THLongTensor *tempIndices_ = at::native::alias(THTensor_wrap(indices_)).unsafeGetTensorImpl();
     // tempIndices_.expand_as(t)
     tempIndices_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
     tempIndices_->set_stride(dimension, 0);
@@ -253,12 +254,12 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       return;
     }
 
-    THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
+    THTensor *tempValues_ = at::native::alias(THTensor_wrap(values_)).unsafeGetTensorImpl();
     // tempValues_.expand_as(t)
     tempValues_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
     tempValues_->set_stride(dimension, 0);
 
-    THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
+    THLongTensor *tempIndices_ = at::native::alias(THTensor_wrap(indices_)).unsafeGetTensorImpl();
     // tempIndices_.expand_as(t)
     tempIndices_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
     tempIndices_->set_stride(dimension, 0);
@@ -402,7 +403,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
                            *r__data = (scalar_t)prod;);
     } else {
       THTensor_(fill)(r_, 1);
-      THTensor *temp_ = THTensor_(newWithTensor)(r_);
+      THTensor *temp_ = at::native::alias(THTensor_wrap(r_)).unsafeGetTensorImpl();
       // r_.expand_as(t)
       temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
       temp_->set_stride(dimension, 0);
