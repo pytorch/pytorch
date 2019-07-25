@@ -1345,7 +1345,7 @@ class TestCuda(TestCase):
 
         # Bool test case
         t = torch.tensor([[False, True], [True, True]], device='cuda')
-        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')), 
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')),
                          torch.tensor([[False, False], [True, True]], device='cuda'))
 
     def test_gather(self):
@@ -2145,7 +2145,7 @@ class TestCuda(TestCase):
         # makeing sure half to float promotion is also properly working.
         x = x.half()
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected device cpu but got device cuda:0'):
+                                    'expected dtype Float but got dtype Half'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm
