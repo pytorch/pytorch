@@ -66,7 +66,6 @@ class Linear(NNLinear):
         weight_observer = mod.qconfig.weight()
         weight_observer(mod.weight)
         wt_qparams = weight_observer.calculate_qparams()
-        bias_scale = (wt_qparams[0]).float()
         qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long().item(), torch.qint8)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
