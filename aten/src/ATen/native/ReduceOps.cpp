@@ -191,7 +191,7 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
     return result.scalar_type();
   }
   ScalarType src_type = self.scalar_type();
-  if (promote_integers && (at::isIntegralType(src_type) || src_type == ScalarType::Bool)) {
+  if (promote_integers && at::isIntegralType(src_type)) {
     return kLong;
   }
   return src_type;

@@ -310,6 +310,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     global __IN_ONNX_EXPORT
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True
+    if isinstance(model, torch.nn.DataParallel):
+        model = model.module
     try:
         from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
         from torch.onnx.symbolic_helper import _set_operator_export_type

@@ -226,12 +226,9 @@ void AliasDb::analyze(Node* node) {
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
   const Operator& op = getOperatorFor(node);
   auto analysis = op.aliasAnalysisKind();
-  switch (analysis) {
-    case AliasAnalysisKind::PURE:
-      analyzeCreator(node);
-      return true;
-    case AliasAnalysisKind::DEFAULT:
-      return false;
+  if (AliasAnalysisKind::PURE == analysis) {
+    analyzeCreator(node);
+    return true;
   }
   return false;
 }
@@ -242,6 +239,35 @@ bool AliasDb::tryRegisteredAnalysis(Node* node) {
 //      information to the outputs. For unschematized nodes, a special analyzer
 //      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
+  auto op = findOperatorFor(node);
+  const bool hasSpecialCase = aliasAnalysisHasSpecialCaseFor(node->kind());
+  if (op) {
+    const auto analysis = op->aliasAnalysisKind();
+
+    const bool registeredAsSpecialCase =
+        analysis == AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+    if (C10_UNLIKELY(registeredAsSpecialCase && !hasSpecialCase)) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Op ",
+          node->kind().toDisplayString(),
+          " is registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but doesn't have a special case.");
+    } else if (C10_UNLIKELY(!registeredAsSpecialCase && hasSpecialCase)) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Op ",
+          node->kind().toDisplayString(),
+          " has a special case and should be registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but is registered with ",
+          toString(analysis));
+    }
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        hasSpecialCase,
+        "We don't have an op for ",
+        node->kind().toDisplayString(),
+        " but it isn't a special case.");
+  }
+
   // These nodes are not schematized, so we need to handle them specially
   switch (node->kind()) {
     case prim::If:
@@ -306,14 +332,63 @@ void AliasDb::analyzeImpl(Node* node) {
       if (tryRegisteredAnalysis(node)) {
         return;
       }
-      TORCH_INTERNAL_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
-  const auto& schema = node->schema();
-  // see [custom operator aliasing]
-  if (!node->kind().is_aten() && !node->kind().is_prim()) {
+  TORCH_INTERNAL_ASSERT(op, "We should have an op schema if we get to here");
+  const AliasAnalysisKind analysis = op->aliasAnalysisKind();
+  TORCH_INTERNAL_ASSERT(
+      analysis != AliasAnalysisKind::INTERNAL_SPECIAL_CASE &&
+          !aliasAnalysisHasSpecialCaseFor(node->kind()),
+      "Special cases should be handled already if we're here.");
+
+  if (node->kind().is_aten() || node->kind().is_prim()) {
+    // TODO This assert is only introduced to check that we don't break the
+    // current code base. Remove this later to allow aten:: and prim:: ops to
+    // use other alias analysis kinds.
+    TORCH_INTERNAL_ASSERT(
+        analysis == AliasAnalysisKind::FROM_SCHEMA,
+        "aten:: and prim:: operators should use AliasAnalysisKind::FROM_SCHEMA but ",
+        node->kind().toDisplayString(),
+        " doesn't. Note: Ideally, prim:: operators actually shouldn't have a schema ",
+        "and then use AliasAnalysisKind::INTERNAL_SPECIAL_CASE instead.");
+  }
+
+  if (analysis == AliasAnalysisKind::CONSERVATIVE) {
+    TORCH_INTERNAL_ASSERT(
+        !node->kind().is_aten() && !node->kind().is_prim(),
+        "aten:: and prim:: operators should not use AliasAnalysisKind::CONSERVATIVE but ",
+        node->kind().toDisplayString(),
+        " does.");
+
+    // TODO A previous implementation of alias analysis always accessed
+    // node->schema , which cause the schema caches in the Node class to be
+    // filled for the full graph. Unfortunately, our JIT passes started relying
+    // on that, so we need to keep doing this. Details: in
+    // caffe2/torch/onnx/utils.py, _jit_pass_onnx is called on an invalid JIT
+    // graph because we called _jit_pass_erase_number_types right before and
+    // ints are now Tensors instead. So if _jit_pass_onnx tries to look up
+    // operator schemas, it will crash. However, _jit_pass_constant_propagation,
+    // which is called before it, runs alias analysis and prefills the schema
+    // cache in the all Node instances so that _jit_pass_onnx doesn't look up
+    // operators to get the schemas anymore. We should fix this.
+    node->schema(); // fill the schema cache in the Node class
+
     return analyzeConservative(node);
   }
+
+  TORCH_INTERNAL_ASSERT(
+      analysis == AliasAnalysisKind::FROM_SCHEMA,
+      "AliasAnalysisKind::CONSERVATIVE/PURE/INTERNAL_SPECIAL_CASE should already have been handled above");
+  const auto& schema = node->schema();
+
+  // TODO This assert is only introduced to check that we don't break the
+  // current code base. Remove this later to allow other ops to use
+  // AliasAnalysisKind::FROM_SCHEMA
+  TORCH_INTERNAL_ASSERT(
+      node->kind().is_prim() || node->kind().is_aten(),
+      "The current code base should only have AliasAnalysisKind::FROM_SCHEMA for aten:: and prim:: ops but we found it for ",
+      node->kind().toDisplayString(),
+      ". We want to open this up though.");
 
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
@@ -1129,6 +1204,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::SetAttr,
       prim::profile,
       prim::Print,
+      prim::CallFunction,
+      prim::CallMethod,
       aten::wait,
   };
 
