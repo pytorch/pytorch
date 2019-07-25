@@ -2245,6 +2245,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cpu_1(self):
         def _test_cdist_for_size(sizes):
@@ -2263,6 +2266,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cpu_2(self):
         def _test_cdist_for_size(sizes):
@@ -2281,6 +2287,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cpu_3(self):
         def _test_cdist_for_size(sizes):
@@ -2299,6 +2308,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cpu_15(self):
         def _test_cdist_for_size(sizes):
@@ -2317,6 +2329,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cpu_25(self):
         def _test_cdist_for_size(sizes):
@@ -2335,6 +2350,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cpu_inf(self):
         def _test_cdist_for_size(sizes):
@@ -2372,6 +2390,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cuda_1(self):
         def _test_cdist_for_size(sizes):
@@ -2390,6 +2411,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cuda_2(self):
         def _test_cdist_for_size(sizes):
@@ -2408,6 +2432,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cuda_3(self):
         def _test_cdist_for_size(sizes):
@@ -2426,6 +2453,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cuda_15(self):
         def _test_cdist_for_size(sizes):
@@ -2444,6 +2474,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cuda_25(self):
         def _test_cdist_for_size(sizes):
@@ -2462,6 +2495,9 @@ class TestAutograd(TestCase):
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_cdist_cuda_inf(self):
         def _test_cdist_for_size(sizes):
@@ -3600,7 +3636,7 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
     if "test_cdist" in test_name:
         printDebug = True
         eps = 1e-3
-        atol = 2e-4
+        atol = 1e-3
 
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=eps, atol=atol, printDebug=printDebug))
     if not run_gradgradcheck or name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
