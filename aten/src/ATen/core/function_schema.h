@@ -12,6 +12,23 @@ namespace c10 {
 // errors. These objects should be constructed from C10 schema once those
 // are available.
 
+struct Argument;
+struct FunctionSchema;
+
+namespace detail {
+inline bool defaultValueEquals_(
+    const c10::optional<IValue>& lhs,
+    const c10::optional<IValue>& rhs) {
+  if (lhs.has_value()) {
+    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
+  } else {
+    return !rhs.has_value();
+  }
+}
+} // namespace detail
+
+bool operator==(const Argument& lhs, const Argument& rhs);
+
 struct Argument {
   Argument(
       std::string name = "",
@@ -78,6 +95,38 @@ struct Argument {
     return Argument(name_, new_type, N_, default_value_, kwarg_only_, alias_info_);
   }
 
+  // this function check whether this Argument is backward compatible with
+  // the old_argument. we intent to be conservative, if necessary, we may
+  // relax the checks in future. we consider the following the situations are
+  // backward compatible:
+  //   1) two arguments are equal
+  //   2) old_argument's type is T, and this Argument's type is Optional[T]
+  //   3) old_argument has no default value, and this Argument provides default
+  //      value
+  bool isBackwardCompatibleWith(const Argument& old_argument) const {
+    if (*this == old_argument) {
+      return true;
+    }
+    if (!(name() == old_argument.name()
+        && kwarg_only() == old_argument.kwarg_only()
+        && N() == old_argument.N()
+        && alias_info() == old_argument.alias_info())) {
+      return false;
+    }
+    if (!(*type() == *old_argument.type() ||
+          (type()->isSubclass(TypeKind::OptionalType) &&
+           type()->cast<OptionalType>()->getElementType()))) {
+      return false;
+    }
+    if (!(detail::defaultValueEquals_(default_value(),
+                                      old_argument.default_value())
+          || (default_value().has_value() &&
+              !old_argument.default_value().has_value()))) {
+      return false;
+    }
+    return true;
+  }
+
 private:
   std::string name_;
   TypePtr type_;
@@ -94,16 +143,6 @@ private:
   bool is_inferred_type_;
 };
 
-namespace detail {
-inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::optional<IValue>& rhs) {
-  if (lhs.has_value()) {
-    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
-  } else {
-    return !rhs.has_value();
-  }
-}
-}
-
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
           && *lhs.type() == *rhs.type()
@@ -117,6 +156,8 @@ struct OperatorName final {
   std::string name;
   std::string overload_name;
 };
+
+bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
 struct FunctionSchema {
   FunctionSchema(
@@ -146,6 +187,49 @@ struct FunctionSchema {
             std::move(std::move(returns)),
             is_vararg,
             is_varret) {}
+
+  // check whether this schema is backward compatible with old_schema,
+  // which means all the existing call sites of old_schema can execute with
+  // this schema. we intent to be conservative, and if necessary, we may
+  // relax the checks in future. the following conditions are considered as
+  // this schema is backward compatible with old_schema:
+  //   1) two schemas are equal
+  //   2) two schemas have same number of arguments, and this schema's
+  //      arguments are backward compatible with the corresponding ones in
+  //      argument list of old_schema.
+  //   3) this schema has m argument, old_argument has n argument, m > n.
+  //      the first n arguments of this schema are backward compatible with
+  //      the corresponding arguments of old_schema. the remaning arguments
+  //      must be either OptionalType or provide default values.
+  bool isBackwardCompatibleWith(const FunctionSchema& old_schema) const {
+    if (*this == old_schema) {
+      return true;
+    }
+    if (!(name() == old_schema.name()
+      && overload_name() == old_schema.overload_name()
+      && is_vararg() == old_schema.is_vararg()
+      && is_varret() == old_schema.is_varret()
+      && returns() == old_schema.returns()
+      && arguments().size() >= old_schema.arguments().size())) {
+      return false;
+    }
+    for (size_t i = 0; i < old_schema.arguments().size(); ++i) {
+      if (!arguments().at(i).isBackwardCompatibleWith(
+            old_schema.arguments().at(i))) {
+        return false;
+      }
+    }
+    for (size_t i = old_schema.arguments().size(); i < arguments().size();
+        ++i) {
+      const Argument& arg = arguments().at(i);
+      if (!(arg.default_value()
+            || arg.type()->isSubclass(TypeKind::OptionalType))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
 
 private:
   OperatorName name_;
