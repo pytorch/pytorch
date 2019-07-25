@@ -301,7 +301,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
                                      'sign:%s\ndiff:%s\nerr:%s\nsigns:%\nserr_zero:%s\n'
                                      'output:%s\ntupled_inputs:%s\n'
-                                     'numerical:%s\nanalytical:%s\n' % (i, j, sign, diff, err, signs, err_p, o, tupled_inputs, n, a))
+                                     'eps:%s\nrtol:%s\natol:%s\n'
+                                     'numerical:%s\nanalytical:%s\n' % (i, j, sign, diff, err, signs, err_p, o, tupled_inputs, eps, rtol, atol, n, a))
                 #else:
                 #    if printDebug:
                 #        print("=================CDIST=======================")
