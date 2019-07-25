@@ -176,12 +176,6 @@ struct TORCH_API CompilationUnit {
     return nullptr;
   }
 
-  /**
-   * Python compilation unit methods
-   *
-   * Right now there is a single compilation unit that owns all ScriptClasses
-   * defined in Python. Below are accessors methods for it.
-   */
   c10::NamedTypePtr get_type(const c10::QualifiedName& name) const {
     auto it = classDict_.find(name);
     if (it == classDict_.end()) {

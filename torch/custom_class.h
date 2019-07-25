@@ -22,6 +22,7 @@ namespace py = pybind11;
 namespace torch {
 namespace jit {
 
+
 namespace detail {
 template <class R, class...>
 struct types {
@@ -97,8 +98,7 @@ class class_ {
 
     auto func = [](c10::ivalue_holder<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
-      auto genericPtr = c10::intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
-          static_cast<intrusive_ptr_target*>(classObj.release()));
+      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::torchbind_class>(classObj);
       auto capsule = IValue(genericPtr);
       auto object = self.ivalue.toObject();
       object->setSlot(0, capsule);

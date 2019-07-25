@@ -7,6 +7,7 @@
 
 namespace torch {
 namespace jit {
+class torchbind_class : public c10::intrusive_ptr_target {};
 struct Function;
 namespace script {
 struct CompilationUnit;
@@ -53,6 +54,7 @@ struct Object;
   _(Object) \
   _(Uninitialized) \
   _(Capsule) \
+
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -151,12 +153,12 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
   // Capsule
-  IValue(intrusive_ptr<intrusive_ptr_target> blob);
+  IValue(intrusive_ptr<torch::jit::torchbind_class> blob);
   bool isCapsule() const {
     return Tag::Capsule == tag;
   }
-  c10::intrusive_ptr<intrusive_ptr_target> toCapsule() &&;
-  c10::intrusive_ptr<intrusive_ptr_target> toCapsule() const &;
+  c10::intrusive_ptr<torch::jit::torchbind_class> toCapsule() &&;
+  c10::intrusive_ptr<torch::jit::torchbind_class> toCapsule() const &;
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
