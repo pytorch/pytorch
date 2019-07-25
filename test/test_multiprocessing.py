@@ -469,6 +469,7 @@ class TestMultiprocessing(TestCase):
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
 
+    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_wrong_cuda_fork(self):
         results = self.run_process_no_exception("""\
