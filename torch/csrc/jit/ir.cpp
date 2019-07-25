@@ -895,14 +895,40 @@ bool Node::hasSideEffects() const {
     case prim::BailoutTemplate:
       return true;
   }
-  // All other builtin ops are known to be safe.
-  // see [custom operator aliasing]
-  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+
+  auto op = findOperatorFor(this);
+  if (!op) {
+    TORCH_INTERNAL_ASSERT(
+        kind_.is_prim(),
+        "Only prim ops are allowed to not have a registered operator but ",
+        kind_.toDisplayString(),
+        " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
-
-  // Custom ops may have arbitrary side effects
-  return true;
+  if (kind_.is_prim() || kind_.is_aten()) {
+    // TODO This assert is only introduced to check that we don't break the
+    // current code base. Remove this later to allow other ops to use
+    // AliasAnalysisKind::FROM_SCHEMA
+    TORCH_INTERNAL_ASSERT(
+        op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+        kind_.toDisplayString(),
+        " has ",
+        toString(op->aliasAnalysisKind()));
+  }
+  switch (op->aliasAnalysisKind()) {
+    case AliasAnalysisKind::PURE:
+      return false;
+    case AliasAnalysisKind::FROM_SCHEMA:
+      return false;
+    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
+      return false;
+    case AliasAnalysisKind::CONSERVATIVE:
+      return true;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
+  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and

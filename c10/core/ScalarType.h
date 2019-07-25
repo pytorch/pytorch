@@ -205,7 +205,7 @@ static inline size_t elementSize(ScalarType t) {
 static inline bool isIntegralType(ScalarType t) {
   return (
       t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
-      t == ScalarType::Long || t == ScalarType::Short);
+      t == ScalarType::Long || t == ScalarType::Short || t == ScalarType::Bool);
 }
 
 static inline bool isFloatingType(ScalarType t) {

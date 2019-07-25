@@ -186,6 +186,10 @@ class ProcessGroupGloo : public ProcessGroup {
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
+
+  // Every Gloo context represents a set of connections to its peers.
+  // In order to use more than one device (or allow for parallelism on
+  // a single device), you need multiple contexts.
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
   std::vector<std::thread> threads_;
   bool stop_;
@@ -198,6 +202,11 @@ class ProcessGroupGloo : public ProcessGroup {
 
   // Returns next collective tag to use (uses collectiveCounter_).
   uint32_t nextTag();
+
+  // Returns the context to use for the specified tag.
+  // With `nextTag` returning an increasing number, this should lead
+  // to contexts being used in a round-robin fashion.
+  std::shared_ptr<::gloo::Context> getContext(uint32_t tag);
 
   // Entrypoint for worker threads.
   void runLoop(int workerIndex);

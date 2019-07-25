@@ -789,8 +789,12 @@ struct CAFFE2_API DictType : public Type {
     }
   }
 
+  // aligned with the format in FunctionSchema
   std::string str() const override {
-    return python_str();
+    std::stringstream ss;
+    ss << "Dict(" << getKeyType()->str() << ", "
+       << getValueType()->str() << ")";
+    return ss.str();
   }
 
   std::string python_str() const override {
@@ -1086,7 +1090,8 @@ struct CAFFE2_API StringType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "string";
+    // we only use "str" (not "string") in both FunctionSchema and script
+    return python_str();
   }
   std::string python_str() const override {
     return "str";
