@@ -27,6 +27,7 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
+CPP_BUILD="$PWD/../cpp-build"
 OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/build/bin/test_api
 time python test/run_test.py --verbose -i distributed
 time python test/run_test.py --verbose -i c10d
