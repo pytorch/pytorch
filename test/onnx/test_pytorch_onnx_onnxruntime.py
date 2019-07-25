@@ -18,6 +18,7 @@ from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsuppor
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
 
+skip = unittest.skip
 
 def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
