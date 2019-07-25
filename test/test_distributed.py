@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
+import errno
 import fcntl
 import multiprocessing
 import os
@@ -35,10 +36,6 @@ INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
-
-
-if INIT_METHOD.startswith("file://"):
-    FOLDER = INIT_METHOD[7:]
 
 
 class _FC2(nn.Module):
@@ -1380,9 +1377,9 @@ class _DistTestBase(object):
 
             # save the model in the middle and reload
             if test_save and idx == 2 and INIT_METHOD.startswith("file://"):
-                _, filename = tempfile.mkstemp(prefix=FOLDER)
-                torch.save(model_DDP, filename)
-                model_DDP = torch.load(filename)
+                with tempfile.NamedTemporaryFile() as tmp:
+                    torch.save(model_DDP, tmp.name)
+                    model_DDP = torch.load(tmp.name)
 
         with tempfile.TemporaryFile() as tmp_file:
             torch.save(model_DDP, tmp_file)
@@ -1411,10 +1408,9 @@ class _DistTestBase(object):
         )
 
         # test serializable/unserializable
-        if INIT_METHOD.startswith("file://"):
-            _, filename = tempfile.mkstemp(prefix=FOLDER)
-            torch.save(model_DDP, filename)
-            model_DDP = torch.load(filename)
+        with tempfile.NamedTemporaryFile() as tmp:
+            torch.save(model_DDP, tmp.name)
+            model_DDP = torch.load(tmp.name)
 
         # dummy data initialization
         local_bs = len(gpu_subset)
@@ -1495,10 +1491,9 @@ class _DistTestBase(object):
         )
 
         # test serializable/unserializable
-        if INIT_METHOD.startswith("file://"):
-            _, filename = tempfile.mkstemp(prefix=FOLDER)
-            torch.save(model_DDP, filename)
-            model_DDP = torch.load(filename)
+        with tempfile.NamedTemporaryFile() as tmp:
+            torch.save(model_DDP, tmp.name)
+            model_DDP = torch.load(tmp.name)
 
         # dummy data initialization
         local_bs = len(gpu_subset)
@@ -1610,12 +1605,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         def setUp(self):
             super(TestDistBackend, self).setUp()
-            # Adding this hack until we fix the FileStore to delete its
-            # content at the end
+            # We rely on the manager process to delete the temporary file.
             global INIT_METHOD
+            self.temporary_file = None
             if INIT_METHOD.startswith("file://"):
-                _, filename = tempfile.mkstemp(prefix=FOLDER)
-                INIT_METHOD = "file://{}".format(filename)
+                self.temporary_file = tempfile.NamedTemporaryFile(delete=False)
+                INIT_METHOD = "file://{}".format(self.temporary_file.name)
 
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK
@@ -1625,6 +1620,16 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         def tearDown(self):
             super(TestDistBackend, self).tearDown()
+
+            # Clean up temporary file if we used one.
+            if self.temporary_file:
+                try:
+                    os.unlink(self.temporary_file.name)
+                except OSError as err:
+                    # ENOENT is OK because the test is supposed to clean it up.
+                    if err.errno != errno.ENOENT:
+                        raise
+
             for p in self.processes:
                 p.terminate()
 

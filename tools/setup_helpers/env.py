@@ -14,6 +14,8 @@ CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
 
 IS_64BIT = (struct.calcsize("P") == 8)
 
+BUILD_DIR = 'build'
+
 
 def check_env_flag(name, default=''):
     return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']

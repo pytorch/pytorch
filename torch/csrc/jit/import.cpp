@@ -286,7 +286,6 @@ script::Module ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
   moduleStack_.emplace_back(module_def.name());
   auto module = script::Module(moduleStack_, compilation_unit_);
-  module.set_optimized(module_def.optimize());
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     auto submodule = convertModule(sub_def);

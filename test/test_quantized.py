@@ -12,7 +12,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _requantize
 
 
@@ -562,6 +562,7 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
+@unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
 @unittest.skipIf(TEST_WITH_UBSAN,
                  "QNNPACK does not play well with UBSAN at the moment,"
                  " so we skip the test if we are in a UBSAN environment.")
