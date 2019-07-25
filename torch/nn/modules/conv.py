@@ -59,7 +59,7 @@ class _ConvNdBase(Module):
         return s.format(**self.__dict__)
 
     def __setstate__(self, state):
-        super(_ConvNd, self).__setstate__(state)
+        super(_ConvNdBase, self).__setstate__(state)
         if not hasattr(self, 'padding_mode'):
             self.padding_mode = 'zeros'
 
