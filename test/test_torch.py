@@ -226,6 +226,7 @@ class _TestTorchMixin(object):
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
                        'set_names_',  # BUILD_NAMEDTENSOR only
+                       'has_names',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
