@@ -759,10 +759,16 @@ struct to_ir {
       const FunctionSchema& schema,
       Block* block) {
     // rewrites ensure there is always a return statement in program
-    AT_ASSERT(def_stack_.back().merged_return_type_);
-    // outputs
-    Value* result = environment_stack->getVar("$return", range);
-    block->registerOutput(result);
+    auto ret_type = def_stack_.back().merged_return_type_;
+    AT_ASSERT(ret_type);
+
+    // in the ConvertToSSA pass, prim::ReturnStmts are lowered so that the
+    // correct return value is set. Until then, we have a correctly-typed
+    // placeholder return value. This is needed so that closures & graphs
+    // are correctly typed.
+    auto placeholder_return =
+        graph->insertNode(graph->createUninitialized(ret_type))->output();
+    block->registerOutput(placeholder_return);
     return Argument("", def_stack_.back().merged_return_type_);
   }
 
@@ -1203,13 +1209,6 @@ struct to_ir {
       }
     }
 
-    // if both branches exit don't emit any variables
-    // if one branch exits then we allow the all variables in the other branch
-    // to escape scope since they are well-defined
-    if (false_exits && true_exits) {
-      return;
-    }
-
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
       Value* tv;
@@ -1228,14 +1227,21 @@ struct to_ir {
         }
       }
 
-      if (true_exits) {
+      // if both branches exit don't emit any variables
+      // if one branch exits then we allow the all variables in the other branch
+      // to escape scope since they are well-defined
+      if (true_exits && false_exits) {
+        continue;
+      } else if (true_exits) {
         tv = graph->createUninitialized(fv->type())
                  ->insertBefore(true_block->return_node())
                  ->output();
+        graph->createStore(x, tv)->insertBefore(true_block->return_node());
       } else if (false_exits) {
         fv = graph->createUninitialized(tv->type())
                  ->insertBefore(false_block->return_node())
                  ->output();
+        graph->createStore(x, fv)->insertBefore(false_block->return_node());
       }
 
       auto unified = unifyTypes(tv->type(), fv->type());
