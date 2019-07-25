@@ -5541,7 +5541,6 @@ class TestNN(NNTestCase):
         log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
-        print(log_probs.shape, targets.shape, input_lengths, target_lengths)
         self.assertAlmostEqual(-log_probs.sum(0)[:, 0], loss, delta=3e-5)
 
         target_lengths = [0, 9, 0]
