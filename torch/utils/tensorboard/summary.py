@@ -112,6 +112,13 @@ def hparams(hparam_dict=None, metric_dict=None):
     # exp = Experiment(name='123', description='456', time_created_secs=100.0,
     # hparam_infos=[hp], metric_infos=[mt], user='tw')
 
+    if not isinstance(hparam_dict, dict):
+        logging.warning('parameter: hparam_dict should be a dictionary, nothing logged.')
+        raise TypeError('parameter: hparam_dict should be a dictionary, nothing logged.')
+    if not isinstance(metric_dict, dict):
+        logging.warning('parameter: metric_dict should be a dictionary, nothing logged.')
+        raise TypeError('parameter: metric_dict should be a dictionary, nothing logged.')
+
     hps = [HParamInfo(name=k) for k in hparam_dict.keys()]
     mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
 
@@ -125,6 +132,8 @@ def hparams(hparam_dict=None, metric_dict=None):
 
     ssi = SessionStartInfo()
     for k, v in hparam_dict.items():
+        if not isinstance(v, int) or not isinstance(v, float):
+            v = make_np(v)
         ssi.hparams[k].number_value = v
 
     content = HParamsPluginData(session_start_info=ssi,

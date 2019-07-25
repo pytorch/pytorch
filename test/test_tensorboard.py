@@ -382,6 +382,20 @@ if TEST_TENSORBOARD:
             mt = {'accuracy': 0.1, 'loss': 10}
             summary.hparams(hp, mt)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
+            mt = {'accuracy': torch.zeros(1), 'loss': torch.zeros(1)}
+            summary.hparams(hp, mt)
+
+        def test_hparams_wrong_parameter(self):
+            with self.assertRaises(TypeError):
+                summary.hparams([], {})
+            with self.assertRaises(TypeError):
+                summary.hparams({}, [])
+            with self.assertRaises(NotImplementedError):
+                res = summary.hparams({'pytorch': [1, 2]}, {'accuracy': 2.0})
+            with self.assertRaises(NotImplementedError):
+                with SummaryWriter() as writer:  # metric data is used outside summary.py
+                    writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
+
     def remove_whitespace(string):
         return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
