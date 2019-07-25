@@ -172,7 +172,7 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 """)
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
+grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
@@ -216,7 +216,7 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Function::peek_at_next_sequence_nr());
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 """)
 
 SELECT = CodeTemplate("""\
@@ -609,7 +609,7 @@ def emit_body(declaration):
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
             body = []
-            body.append(DECLARE_GRAD_FN.substitute(op='Function'))
+            body.append(DECLARE_GRAD_FN.substitute(op='Node'))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
                 args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
