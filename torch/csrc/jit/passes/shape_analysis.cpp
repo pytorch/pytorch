@@ -819,7 +819,7 @@ class ShapePropagator {
 
     // Requirements:
     //   dims           : broadcast all tensor args
-    //   scalar type    : always matching and preserved
+    //   scalar type    : promoted from input dtypes
     //   device         : always matching and preserved
     //   tensor inputs  : *
     //   tensor outputs : 1
