@@ -117,6 +117,8 @@ Once these are installed, you can use the backend for ONNXRuntime::
 
     print(outputs[0])
 
+Here is another `tutorial of exporting the SuperResolution model to ONNX. <https://pytorch.org/tutorials/advanced/super_resolution_with_onnxruntime.html>`_.
+
 In the future, there will be backends for other frameworks as well.
 
 Tracing vs Scripting
@@ -277,9 +279,22 @@ Limitations
 
     assert torch.all(torch.eq(out, torch.tensor(out_ort)))
 
-* TODO: Tensor List.
+* There is no concept of tensor list in ONNX.  Without this concept, it is very hard to export operators
+  that consume or produce tensor list, especially when the length of the tensor list is not known at export time.  ::
 
-* TODO: Shape/Type propagation.
+    x = torch.tensor([[1., 2., 3.], [4., 5., 6.], [7., 8., 9.]])
+
+    # This is not exportable
+    class Model(torch.nn.Module):
+        def forward(self, x):
+            return x.unbind(0)
+
+    # This is exportable.
+    # Note that in this example we know the split operator will always produce exactly three outputs,
+    # Thus we can export to ONNX without using tensor list.
+    class AnotherModel(torch.nn.Module):
+        def forward(self, x):
+            return [torch.squeeze(out, 0) for out in torch.split(x, [1,1,1], dim=0)]
 
 * PyTorch and ONNX backends(Caffe2, ONNXRuntime, etc) often have implementations of operators with some
   numeric differences.  Depending on model structure, these differences
@@ -652,7 +667,6 @@ Q: How to export models with loops in it?
 Functions
 --------------------------
 .. autofunction:: export
-.. autofunction:: _export
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: torch.onnx.operators.shape_as_tensor
 .. autofunction:: set_training
