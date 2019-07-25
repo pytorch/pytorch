@@ -1,12 +1,21 @@
 #ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/NamedTensorUtils.h>
+#include <bitset>
 #include <sstream>
 
 namespace at {
 
 void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names);
+}
+
+void internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
+#ifdef DEBUG
+  validate_names = true;
+#endif
+  impl::internal_set_names_inplace(
+      tensor.unsafeGetTensorImpl(), std::move(names), validate_names);
 }
 
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
@@ -142,13 +151,45 @@ unify_from_right(optional<DimnameList> names, optional<DimnameList> other_names)
 
 namespace namedinference {
 
-optional<std::vector<Dimname>> erase_name(optional<DimnameList> self_names, int64_t dim) {
-  if (self_names == nullopt) {
-    return nullopt;
+static std::bitset<64> compute_included_idxs(IntArrayRef excluded_idxs) {
+  std::bitset<64> included_idxs;
+  for (auto i : excluded_idxs) {
+    TORCH_INTERNAL_ASSERT(
+        i < 64,
+        "Named tensors must have dimension less than 64.");
+    included_idxs.set(i);
   }
-  auto outnames = self_names->vec();
-  outnames.erase(outnames.begin() + dim);
-  return outnames;
+  included_idxs.flip();
+  return included_idxs;
+}
+
+void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
+  auto src_names = src.names();
+  if (!src_names.has_value()) {
+    return;
+  }
+
+  auto result_dim = result.dim();
+  auto src_dim = src_names->size();
+  TORCH_INTERNAL_ASSERT(src_dim - excluded_idxs.size() == result_dim);
+
+  // fast path
+  if (excluded_idxs.size() == 1) {
+    std::vector<Dimname> outnames = src_names->vec();
+    outnames.erase(outnames.begin() + excluded_idxs[0]);
+    internal_set_names_inplace(result, std::move(outnames), /*validate_names=*/false);
+    return;
+  }
+
+  std::vector<Dimname> outnames;
+  outnames.reserve(result_dim);
+  auto included_idxs = compute_included_idxs(excluded_idxs);
+  for (size_t dim = 0; dim < src_dim; ++dim) {
+    if (included_idxs[dim]) {
+      outnames.push_back((*src_names)[dim]);
+    }
+  }
+  internal_set_names_inplace(result, std::move(outnames), /*validate_names=*/false);
 }
 
 void propagate_names(Tensor& result, const Tensor& src) {

@@ -338,7 +338,7 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                    \
     ::c10::detail::deprecated_AT_CHECK();                 \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(__VA_ARGS__)); \
-  } while (false);
+  } while (false)
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK
@@ -347,7 +347,7 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                              \
     ::c10::detail::deprecated_AT_ASSERT();                          \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)); \
-  } while (false);
+  } while (false)
 
 // Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro supports
 // both 0-ary and variadic calls, so having a separate message-accepting macro
@@ -361,7 +361,7 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                                        \
     ::c10::detail::deprecated_AT_ASSERTM();                                   \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__));     \
-  } while (false);
+  } while (false)
 
 // Deprecated alias; this alias was deprecated because it represents extra API
 // surface that makes it hard for people to understand what macro to use.
@@ -371,14 +371,14 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                                        \
     ::c10::detail::deprecated_AT_ERROR();                                     \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(false, ::c10::str(__VA_ARGS__)));  \
-  } while (false);
+  } while (false)
 
 // Deprecated alias; this alias was deprecated for consistency with TORCH_CHECK.
 #define AT_INDEX_ERROR(...)                                                         \
   do {                                                                              \
     ::c10::detail::deprecated_AT_INDEX_ERROR();                                     \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK_INDEX(false, ::c10::str(__VA_ARGS__)));  \
-  } while (false);
+  } while (false)
 
 // Deprecated alias; this alias was deprecated because it wasn't clear to
 // people that you should use a macro with AT_ prefix inside the torch/csrc
@@ -387,7 +387,7 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                    \
     ::c10::detail::deprecated_AT_WARN();                  \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_WARN(__VA_ARGS__));  \
-  } while (false);
+  } while (false)
 
 
 #endif // C10_UTIL_EXCEPTION_H_
