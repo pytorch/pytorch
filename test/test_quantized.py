@@ -511,7 +511,7 @@ class TestQuantizedConv(unittest.TestCase):
         W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
         b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        W_prepack = qconv_prepack(W_q, groups)
+        W_prepack = qconv_prepack(W_q, [stride_h, stride_w], [pad_h, pad_w], [dilation_h, dilation_w], groups)
         Y_scale = 7.3
         Y_zero_point = 5
 
@@ -536,23 +536,43 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
-    @given(W=hu.tensor(shapes=hu.array_shapes(4, 4,),
-                       qparams=hu.qparams(dtypes=torch.qint8,
-                                          zero_point_min=0,
-                                          zero_point_max=0)))
-    def test_qconv_unpack(self, W):
-        W, (W_scale, W_zp, torch_type) = W
+    @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
+                              min_in_channels=1, max_in_channels=7,
+                              min_out_channels=1, max_out_channels=7,
+                              H_range=(6, 12), W_range=(6, 12),
+                              kH_range=(3, 5), kW_range=(3, 5),
+                              max_groups=4,
+                              qparams=[hu.qparams(dtypes=torch.quint8,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0),
+                                       hu.qparams(dtypes=torch.qint8,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0),
+                                       hu.qparams(dtypes=torch.qint32,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0)]),
+           strideH=st.integers(1, 3), strideW=st.integers(1, 3),
+           padH=st.integers(1, 2), padW=st.integers(1, 2))
+    def test_qconv_unpack(self, X, strideH, strideW, padH, padW):
+        (inputs, filters, bias, groups) = X
+        inputs, (inputs_scale, inputs_zero_point, inputs_qtype) = inputs
+        filters, (filters_scale, filters_zero_point, filters_qtype) = filters
+        bias, (bias_scale, bias_zero_point, bias_qtype) = bias
+
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
         qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
 
         # Orig tensor is assumed to be in K(C/G)RS format
-        W = torch.from_numpy(W)
+        W = torch.from_numpy(filters).to(torch.float)
         # K(C/G)RS -> KRS(C/G)
         W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
-        W_q = torch.quantize_linear(W_KRSC, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+        W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
 
         # Pack weights using weight packing operator
-        W_packed = qconv_prepack(W_q, 1)
+        strides = [strideH, strideW]
+        paddings = [padH, padW]
+        dilations = [1, 1]
+        W_packed = qconv_prepack(W_q, strides, paddings, dilations, groups)
         # Unpack weights weight unpacking operator (Used for serialization)
         W_unpacked = qconv_unpack(W_packed)
 

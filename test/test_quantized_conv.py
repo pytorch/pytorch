@@ -75,7 +75,6 @@ class QuantizedConvTest(TestCase):
                                          inputs_zero_point, inputs_qtype)
         q_filters = torch.quantize_linear(filters, filters_scale,
                                           filters_zero_point, filters_qtype)
-        q_filters_ref = torch.ops.quantized.fbgemm_conv_prepack(q_filters.permute([0, 2, 3, 1]), groups)
         q_bias = torch.quantize_linear(bias, bias_scale, bias_zero_point,
                                        bias_qtype)
 
@@ -84,6 +83,11 @@ class QuantizedConvTest(TestCase):
 
         # Results check
         try:
+            q_filters_ref = torch.ops.quantized.fbgemm_conv_prepack(q_filters.permute([0, 2, 3, 1]),
+                                                                    stride,
+                                                                    i_padding,
+                                                                    dilation,
+                                                                    groups)
             ref_result = ref_op(q_inputs.permute([0, 2, 3, 1]), q_filters_ref,
                                 q_bias, stride,
                                 i_padding, dilation,
