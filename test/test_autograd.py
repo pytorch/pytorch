@@ -44,6 +44,7 @@ else:
     import pickle
 
 PRECISION = 1e-4
+EPSILON = 1e-6
 
 
 @contextlib.contextmanager
@@ -3570,10 +3571,15 @@ GRADCHECK_EPS_OVERRIDE = {
     'test_cdist': 1e-3,
 }
 
+GRADCHECK_PRECISION_OVERRIDE = {
+    'test_cdist': 2e-4,
+}
+
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    eps = 1e-6 if test_name not in GRADCHECK_EPS_OVERRIDE else GRADCHECK_EPS_OVERRIDE[test_name]
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=eps, atol=PRECISION))
+    eps = EPSILON if test_name not in GRADCHECK_EPS_OVERRIDE else GRADCHECK_EPS_OVERRIDE[test_name]
+    atol = PRECISION if test_name not in GRADCHECK_PRECISION_OVERRIDE else GRADCHECK_PRECISION_OVERRIDE[test_name]
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=eps, atol=atol))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
