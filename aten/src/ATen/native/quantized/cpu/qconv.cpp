@@ -99,11 +99,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     PackedConvWeight& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeight>(packed_weight);
     auto packB = pack_ptr.w.get();
-    // packB->printPackedMatrix("PackedB inside QConv2dInt8:");
     auto& col_offsets = pack_ptr.col_offsets;
     auto& kernel = pack_ptr.kernel;
 
-    int K = packB->numCols() * packB->numGroups();
+    int K = packB->outputChannels();
 
     std::vector<int32_t> row_offset_buf(
         fbgemm::PackAWithIm2Col<uint8_t>::rowOffsetBufferSize());
@@ -178,12 +177,12 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     // Do the GEMM
-    fbgemm::fbgemmPacked(
-        packA,
+    fbgemm::fbgemmConv(
+        conv_p,
+        act_ptr,
         *packB,
         reinterpret_cast<uint8_t*>(output.data<c10::quint8>()),
         buffer.data<int32_t>(),
-        K,
         outputProcObj,
         0 /* thread_id*/,
         1 /* num_threads */);
