@@ -59,7 +59,7 @@ def benchmark_simple_fn(args, config, module_config, module_type, result):
         f_name += "_" + str(module_config.size)
         graph_mode_str = "Graph mode" + ":" + str(module_config.graph_mode)
         result_key = ','.join((f_name, graph_mode_str))
-        module = WrapperModule(module_type, module_config, args.debug, args.save)
+        module = WrapperModule(module_type, module_config, args.debug, args.broadcast, args.save)
         latency_per_iter_ms = benchmark_module(config, module, args.use_throughput_benchmark)
         result[result_key] = latency_per_iter_ms
 
@@ -70,6 +70,7 @@ def main():
     parser.add_argument("--use_throughput_benchmark", default=False, dest="use_throughput_benchmark", action="store_true")
     parser.add_argument("--debug", default=False, dest="debug", action="store_true")
     parser.add_argument("--save", default=False, dest="save", action="store_true")
+    parser.add_argument("--broadcast", default=False, dest="broadcast", action="store_true")
     parser.add_argument("--eager_mode", default=False, dest="eager_mode", action="store_true")
     parser.add_argument("--num_warmup_iters", type=int, default=100)
     parser.add_argument("--num_iters", type=int, default=1000)
@@ -82,7 +83,7 @@ def main():
         "Benchmarking of C2 net via throughput benchmarking is not yet supported"
 
     #scalar_sizes = [8, 16, 32, 64, 128, 256, 512]
-    scalar_sizes = [1]
+    scalar_sizes = [1, 16, 64]
     tensor_sizes = gen_shapes(scalar_sizes, 1)
     num_warmup_iters = args.num_warmup_iters
     num_iters = args.num_iters
