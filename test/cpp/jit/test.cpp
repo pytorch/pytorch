@@ -90,6 +90,7 @@ namespace jit {
   _(ClassImport)                       \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
+  _(InsertConstant)                    \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)
 

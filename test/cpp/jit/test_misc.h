@@ -894,7 +894,7 @@ void testModuleDefine() {
       return self.foo + x + b
   )");
   auto result = m.run_method("add_it", torch::ones({}));
-  AT_ASSERT(result.toTensor().item<float>() == 6)
+  AT_ASSERT(result.toTensor().item<float>() == 6);
 }
 
 void testModuleConversion() {
@@ -1088,6 +1088,14 @@ void testProfiler() {
   auto tanh_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
   checkShape(*tanh_n, eltwise);
+}
+
+void testInsertConstant() {
+  Graph g;
+  ASSERT_THROWS_WITH(
+      insertConstant(
+          g, IValue(), TensorType::get(), c10::nullopt, c10::nullopt),
+      "Expected OptionalType");
 }
 
 } // namespace test

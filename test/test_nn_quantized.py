@@ -8,6 +8,9 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from common_utils import TestCase, run_tests, tempfile
+from hypothesis import given
+from hypothesis import strategies as st
+
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -15,6 +18,7 @@ quantized operator implementations correctly in the user facing APIs, these are
 not correctness test for the underlying quantized operators. For correctness
 test please see `caffe2/test/test_quantized.py`.
 '''
+
 
 class FunctionalAPITest(TestCase):
     def test_relu_api(self):
@@ -28,35 +32,39 @@ class FunctionalAPITest(TestCase):
 
 
 class ModuleAPITest(TestCase):
-    def test_linear_api(self):
+    @given(
+        batch_size=st.integers(1, 5),
+        in_features=st.integers(16, 32),
+        out_features=st.integers(4, 8),
+        use_bias=st.booleans(),
+    )
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias):
         """test API functionality for nn.quantized.linear"""
-        in_features = 10
-        out_features = 20
-        batch_size = 5
         W = torch.rand(out_features, in_features).float()
         W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
         W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
-        B = torch.rand(out_features).float()
-        B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32)
-        out_scale = 0.5
-        out_zero_point = 3
+        B = torch.rand(out_features).float() if use_bias else None
+        B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32) if use_bias else None
+        scale = 0.5
+        zero_point = 3
         qlinear = nnq.Linear(in_features, out_features)
         qlinear._packed_weight = W_pack
-        qlinear.bias = B_q
-        qlinear.out_scale = torch.tensor([out_scale])
-        qlinear.out_zero_point = torch.tensor([out_zero_point])
+        qlinear.bias = B_q if use_bias else None
+        qlinear.scale = torch.tensor([scale], dtype=torch.double)
+        qlinear.zero_point = torch.tensor([zero_point], dtype=torch.long)
         Z_q = qlinear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, out_scale, out_zero_point)
+        Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, scale, zero_point)
         self.assertEqual(Z_ref, Z_q)
 
         # Test serialization of quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
         self.assertEqual(model_dict['weight'], W_q)
-        self.assertEqual(model_dict['bias'], B_q)
+        if use_bias:
+            self.assertEqual(model_dict['bias'], B_q)
         with tempfile.NamedTemporaryFile() as f:
             torch.save(model_dict, f)
             f.seek(0)
@@ -69,9 +77,10 @@ class ModuleAPITest(TestCase):
         linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
         self.assertEqual(linear_unpack(qlinear._packed_weight),
                          linear_unpack(loaded_qlinear._packed_weight))
-        self.assertEqual(qlinear.bias, loaded_qlinear.bias)
-        self.assertEqual(qlinear.out_scale, loaded_qlinear.out_scale)
-        self.assertEqual(qlinear.out_zero_point, loaded_qlinear.out_zero_point)
+        if use_bias:
+            self.assertEqual(qlinear.bias, loaded_qlinear.bias)
+        self.assertEqual(qlinear.scale, loaded_qlinear.scale)
+        self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertTrue(hasattr(qlinear, '_packed_weight'))
         self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
@@ -90,8 +99,8 @@ class ModuleAPITest(TestCase):
         # state = qLinear.__getstate__()
         # compareUnpackedWeight(qLinear._packed_weight, loaded._packed_weight)
         # self.assertEqual(qLinear.bias, loaded.bias)
-        # self.assertEqual(qLinear.out_scale, loaded.out_scale)
-        # self.assertEqual(qLinear.out_zero_point, loaded.out_zero_point)
+        # self.assertEqual(qLinear.scale, loaded.scale)
+        # self.assertEqual(qLinear.zero_point, loaded.zero_point)
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -107,8 +116,10 @@ class ModuleAPITest(TestCase):
         rqr2 = dequant_m(qr2)
         self.assertEqual(rqr, rqr2)
 
-
-    def test_conv_api(self):
+    @given(
+        use_bias=st.booleans(),
+    )
+    def test_conv_api(self, use_bias):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
@@ -116,18 +127,18 @@ class ModuleAPITest(TestCase):
 
         N, iC, H, W = 10, 10, 10, 3
         oC, g, kH, kW = 16, 1, 3, 3
-        scale, zero_point = 1.0/255, 128
+        scale, zero_point = 1.0 / 255, 128
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
         X = X.permute([0, 2, 3, 1]).contiguous()
         qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
-        w = w.permute([0, 2, 3, 1]).contiguous()
+
         qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
-        b = torch.randn(oC, dtype=torch.float32)
-        qb = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32)
+        b = torch.randn(oC, dtype=torch.float32) if use_bias else None
+        qb = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
 
         conv_under_test = Conv2d(in_channels=iC,
                                  out_channels=oC,
@@ -136,20 +147,20 @@ class ModuleAPITest(TestCase):
                                  padding=0,
                                  dilation=1,
                                  groups=g,
-                                 bias=True,
+                                 bias=use_bias,
                                  padding_mode='zeros')
         conv_under_test.weight = qw
         conv_under_test.bias = qb
-        conv_under_test.scale = scale
-        conv_under_test.zero_point = zero_point
+        conv_under_test.scale = torch.tensor([scale], dtype=torch.double)
+        conv_under_test.zero_point = torch.tensor([zero_point], dtype=torch.long)
 
         # Test members
         self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
-        self.assertTrue(hasattr(conv_under_test, '_scale'))
-        self.assertTrue(hasattr(conv_under_test, '_zero_point'))
+        self.assertTrue(hasattr(conv_under_test, 'scale'))
+        self.assertTrue(hasattr(conv_under_test, 'zero_point'))
 
         # Test properties
-        # self.assertEqual(qw, conv_under_test.weight)
+        self.assertEqual(qw, conv_under_test.weight)
         self.assertEqual(qb, conv_under_test.bias)
         self.assertEqual(scale, conv_under_test.scale)
         self.assertEqual(zero_point, conv_under_test.zero_point)
@@ -159,11 +170,35 @@ class ModuleAPITest(TestCase):
         result_reference = qF.conv2d(qX, qw, bias=qb,
                                      scale=scale, zero_point=zero_point,
                                      stride=1, padding=0,
-                                     dilation=1, groups=g,
-                                     prepacked=False, dtype=torch.quint8)
+                                     dilation=1, groups=g, dtype=torch.quint8
+                                     )
 
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
+
+    def test_pool_api(self):
+        """Tests the correctness of the pool module.
+
+        The correctness is defined against the functional implementation.
+        """
+        N, C, H, W = 10, 10, 10, 3
+        kwargs = {
+            'kernel_size': 2,
+            'stride': None,
+            'padding': 0,
+            'dilation': 1
+        }
+
+        scale, zero_point = 1.0 / 255, 128
+
+        X = torch.randn(N, C, H, W, dtype=torch.float32)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch.quint8)
+        qX_expect = torch.nn.functional.max_pool2d(qX, **kwargs)
+
+        pool_under_test = torch.nn.quantized.MaxPool2d(**kwargs)
+        qX_hat = pool_under_test(qX)
+        self.assertEqual(qX_expect, qX_hat)
 
 if __name__ == '__main__':
     run_tests()
