@@ -338,6 +338,27 @@ void TensorSerializer::Serialize(
         }
       }
     } break;
+    case TensorProto_DataType_QINT8:
+      detail::CopyToProtoWithCast(
+          chunkSize,
+          input.template data<int8_t>() + chunkBegin,
+          proto.mutable_int32_data(),
+          uniq_ptr.get());
+      break;
+    case TensorProto_DataType_QUINT8:
+      detail::CopyToProtoWithCast(
+          chunkSize,
+          input.template data<uint8_t>() + chunkBegin,
+          proto.mutable_int32_data(),
+          uniq_ptr.get());
+      break;
+    case TensorProto_DataType_QINT32:
+      detail::CopyToProtoWithCast(
+          chunkSize,
+          input.template data<int32_t>() + chunkBegin,
+          proto.mutable_int32_data(),
+          uniq_ptr.get());
+      break;
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
@@ -633,6 +654,27 @@ void TensorDeserializer::DeserializeToTensor(
             1);
       }
     } break;
+    case TensorProto_DataType_QINT8:
+      detail::CopyFromProtoWithCast(
+          chunkSize,
+          tensor_proto.int32_data(),
+          tensor->template mutable_data<int8_t>() + chunkBegin,
+          context);
+      break;
+    case TensorProto_DataType_QUINT8:
+      detail::CopyFromProtoWithCast(
+          chunkSize,
+          tensor_proto.int32_data(),
+          tensor->template mutable_data<uint8_t>() + chunkBegin,
+          context);
+      break;
+    case TensorProto_DataType_QINT32:
+      detail::CopyFromProtoWithCast(
+          chunkSize,
+          tensor_proto.int32_data(),
+          tensor->template mutable_data<int32_t>() + chunkBegin,
+          context);
+      break;
       // Note: we intentially do not provide "default:" so if any new data types
   }
   context->FinishDeviceComputation();

@@ -62,6 +62,9 @@ message TensorProto {
     INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
+    QINT8 = 14;    // c10::qint8
+    QUINT8 = 15;   // c10::quint8
+    QINT32 = 16;   // c10::quint32
   }
   optional DataType data_type = 2 [default = FLOAT];
 

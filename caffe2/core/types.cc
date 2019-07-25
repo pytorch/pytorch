@@ -27,6 +27,9 @@ TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
     {TypeMeta::Id<int64_t>(), TensorProto_DataType_INT64},
     {TypeMeta::Id<at::Half>(), TensorProto_DataType_FLOAT16},
     {TypeMeta::Id<double>(), TensorProto_DataType_DOUBLE},
+    {TypeMeta::Id<c10::qint8>(), TensorProto_DataType_QINT8},
+    {TypeMeta::Id<c10::quint8>(), TensorProto_DataType_QUINT8},
+    {TypeMeta::Id<c10::qint32>(), TensorProto_DataType_QINT32},
   };
   const auto it = data_type_map.find(meta.id());
   return (it == data_type_map.end()
@@ -47,6 +50,9 @@ const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt) {
       {TensorProto_DataType_INT64, TypeMeta::Make<int64_t>()},
       {TensorProto_DataType_FLOAT16, TypeMeta::Make<at::Half>()},
       {TensorProto_DataType_DOUBLE, TypeMeta::Make<double>()},
+      {TensorProto_DataType_QINT8, TypeMeta::Make<c10::qint8>()},
+      {TensorProto_DataType_QUINT8, TypeMeta::Make<c10::quint8>()},
+      {TensorProto_DataType_QINT32, TypeMeta::Make<c10::qint32>()},
   };
   const auto it = type_meta_map.find(dt);
   if (it == type_meta_map.end()) {

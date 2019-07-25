@@ -258,15 +258,25 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
   }
 
   at::Tensor result;
-  if (device.type() == at::DeviceType::CPU) {
-    result =
-        at::empty({0}, at::CPU(type).options())
-            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
-  } else if (device.type() == at::DeviceType::CUDA) {
-    result =
-        at::empty(
-            {0}, c10::TensorOptions(type).device(storage_it->second.device()))
-            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+  if (tensor_proto.is_quantized()) {
+    result = at::_empty_affine_quantized(
+        {0},
+        type,
+        tensor_proto.scale(),
+        tensor_proto.zero_point())
+        .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+  }
+  else {
+    if (device.type() == at::DeviceType::CPU) {
+      result =
+          at::empty({0}, at::CPU(type).options())
+              .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    } else if (device.type() == at::DeviceType::CUDA) {
+      result =
+          at::empty(
+              {0}, c10::TensorOptions(type).device(storage_it->second.device()))
+              .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    }
   }
   AT_ASSERT(result.defined());
 
