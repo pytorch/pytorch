@@ -2446,7 +2446,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_" + device + "_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist", "cdist", f,
                                           True, f_args_variable, f_args_tensor)
 
         _test_cdist_for_size((S, S))
