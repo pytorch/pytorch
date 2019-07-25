@@ -20,7 +20,7 @@ class MultiStepLR(_LRScheduler):
 class ExponentialLR(_LRScheduler):
     def __init__(self, optimizer: Optimizer, gamma: float, last_epoch: int=...) -> None: ...
 
-class CosineAnnealingLr(_LRScheduler):
+class CosineAnnealingLR(_LRScheduler):
     def __init__(self, optimizer: Optimizer, T_max: int, eta_min: float, last_epoch: int=...) -> None: ...
 
 class ReduceLROnPlateau:

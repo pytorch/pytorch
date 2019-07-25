@@ -12,13 +12,9 @@ import distutils.sysconfig
 from distutils.version import LooseVersion
 
 from . import escape_path, which
-from .env import (IS_64BIT, IS_DARWIN, IS_WINDOWS,
-                  DEBUG, REL_WITH_DEB_INFO,
-                  check_env_flag, check_negative_env_flag)
+from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_env_flag, check_negative_env_flag, build_type)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
-from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
-                   NCCL_SYSTEM_LIB, USE_NCCL)
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 
 
@@ -39,16 +35,9 @@ USE_NINJA = (not check_negative_env_flag('USE_NINJA') and
 class CMake:
     "Manages cmake."
 
-    def __init__(self, build_dir):
+    def __init__(self, build_dir=BUILD_DIR):
         self._cmake_command = CMake._get_cmake_command()
         self.build_dir = build_dir
-
-        if DEBUG:
-            self._build_type = "Debug"
-        elif REL_WITH_DEB_INFO:
-            self._build_type = "RelWithDebInfo"
-        else:
-            self._build_type = "Release"
 
     @property
     def _cmake_cache_file(self):
@@ -236,6 +225,7 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
+             'CMAKE_BUILD_TYPE',
              'CMAKE_PREFIX_PATH',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'MKL_THREADING',
@@ -247,15 +237,15 @@ class CMake:
         })
 
         for var, val in my_env.items():
-            # We currently pass over all environment variables that start with "BUILD_" or "USE_". This is because we
-            # currently have no reliable way to get the list of all build options we have specified in CMakeLists.txt.
-            # (`cmake -L` won't print dependent options when the dependency condition is not met.) We will possibly
-            # change this in the future by parsing CMakeLists.txt ourselves (then additional_options would also not be
-            # needed to be specified here).
+            # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
+            # because we currently have no reliable way to get the list of all build options we have specified in
+            # CMakeLists.txt. (`cmake -L` won't print dependent options when the dependency condition is not met.) We
+            # will possibly change this in the future by parsing CMakeLists.txt ourselves (then additional_options would
+            # also not be needed to be specified here).
             true_var = additional_options.get(var)
             if true_var is not None:
                 build_options[true_var] = val
-            elif var.startswith(('USE_', 'BUILD_')):
+            elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')):
                 build_options[var] = val
 
         # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
@@ -264,36 +254,41 @@ class CMake:
         # "BUILD_" or "USE_" and must be overwritten here.
         build_options.update({
             # Note: Do not add new build options to this dict if it is directly read from environment variable -- you
-            # only need to add one in `CMakeLists.txt`. All build options that start with "BUILD_" or "USE_" are
-            # automatically passed to CMake; For other options you can add to additional_options above.
+            # only need to add one in `CMakeLists.txt`. All build options that start with "BUILD_", "USE_", or "CMAKE_"
+            # are automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
             'USE_CUDA': USE_CUDA,
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
-            'USE_FBGEMM': not (check_env_flag('NO_FBGEMM') or
-                               check_negative_env_flag('USE_FBGEMM')),
-            'USE_NCCL': USE_NCCL,
-            'USE_SYSTEM_NCCL': USE_SYSTEM_NCCL,
             'USE_NUMPY': USE_NUMPY,
             'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
+
+        # Options starting with CMAKE_
+        cmake__options = {
+            'CMAKE_INSTALL_PREFIX': install_dir,
+            'CMAKE_C_FLAGS': cflags,
+            'CMAKE_CXX_FLAGS': cflags,
+            'CMAKE_EXE_LINKER_FLAGS': ldflags,
+            'CMAKE_SHARED_LINKER_FLAGS': ldflags,
+        }
+
+        # We set some CMAKE_* options in our Python build code instead of relying on the user's direct settings. Emit an
+        # error if the user also attempts to set these CMAKE options directly.
+        specified_cmake__options = set(build_options).intersection(cmake__options)
+        if len(specified_cmake__options) > 0:
+            print(', '.join(specified_cmake__options) +
+                  ' should not be specified in the environment variable. They are directly set by PyTorch build script.')
+            sys.exit(1)
+        build_options.update(cmake__options)
 
         CMake.defines(args,
                       PYTHON_EXECUTABLE=escape_path(sys.executable),
                       PYTHON_LIBRARY=escape_path(cmake_python_library),
                       PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
                       TORCH_BUILD_VERSION=version,
-                      CMAKE_BUILD_TYPE=self._build_type,
                       INSTALL_TEST=build_test,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
-                      NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
-                      NCCL_ROOT_DIR=NCCL_ROOT_DIR,
-                      NCCL_SYSTEM_LIB=NCCL_SYSTEM_LIB,
-                      CMAKE_INSTALL_PREFIX=install_dir,
-                      CMAKE_C_FLAGS=cflags,
-                      CMAKE_CXX_FLAGS=cflags,
-                      CMAKE_EXE_LINKER_FLAGS=ldflags,
-                      CMAKE_SHARED_LINKER_FLAGS=ldflags,
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
                       **build_options)
 
@@ -328,8 +323,7 @@ class CMake:
         "Runs cmake to build binaries."
 
         max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
-        build_args = ['--build', '.', '--target',
-                      'install', '--config', self._build_type]
+        build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]
         # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
         # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
         # would be sufficient by then.

@@ -34,7 +34,7 @@ Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_gr
       "requires_grad should be false if grad_fn is set");
 }
 
-std::shared_ptr<Function> Variable::grad_accumulator() const {
+std::shared_ptr<Node> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
   if (autograd_meta->grad_fn_) {
     throw std::logic_error(
@@ -132,7 +132,7 @@ Variable::DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
 }
 
-const std::shared_ptr<Function>& Variable::grad_fn() const {
+const std::shared_ptr<Node>& Variable::grad_fn() const {
   if (is_view()) {
     auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
