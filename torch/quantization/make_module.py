@@ -8,10 +8,16 @@ _operation_from_float = {
 """Factory method to create a module wrapper.
 
 Args:
-    operation: The operation to wrap the module around
+    op: The operation to wrap the module around
+    quantized: Flag to indicate that the quantized counterpart is required.
 
 Returns:
     Module class
+
+Example::
+
+    >>> add = make_module(torch.add)
+    >>> q_add = make_module(torch.add, quantized=True)
 """
 def make_module(op=None, quantized=False):
     name = op.__name__.capitalize()
@@ -33,6 +39,7 @@ def make_module(op=None, quantized=False):
         return make_module(mod.op, name=name, quantized=True)
 
     _methods = {
+        "__doc__": r"""Wrapper module around function {}.""".format(type(op)),
         "__init__": _init,
         "forward": _forward
     }
