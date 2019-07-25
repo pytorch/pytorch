@@ -516,6 +516,9 @@ class CAFFE2_API Tensor {
   Tensor detach() const;
   Tensor & detach_();
   int64_t size(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  int64_t size(Dimname dim) const;
+  #endif
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
@@ -529,6 +532,9 @@ class CAFFE2_API Tensor {
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  int64_t stride(Dimname dim) const;
+  #endif
   Tensor sum(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor sum(IntArrayRef dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor sum_to_size(IntArrayRef size) const;
