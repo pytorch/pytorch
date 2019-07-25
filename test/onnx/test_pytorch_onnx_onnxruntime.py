@@ -18,7 +18,6 @@ from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsuppor
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
 
-skip = unittest.skip
 
 def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -308,7 +307,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
-    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedOpsetVersion([10])
     def test_interpolate_upsample(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
@@ -320,6 +319,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_interpolate_downsample(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
