@@ -48,6 +48,14 @@
 namespace torch {
 namespace jit {
 
+thread_local bool kOptimize = true;
+void setGraphExecutorOptimize(bool o) {
+  kOptimize = o;
+}
+bool getGraphExecutorOptimize() {
+  return kOptimize;
+}
+
 // for debugging it is helpful to be able to force autodiff subgraphs
 // to be created, to check their correctness, even when the
 // size of the of the subgraph is too small to be profitable.
@@ -64,7 +72,6 @@ thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
 }
-
 namespace {
 
 using tensor_list = std::vector<at::Tensor>;
@@ -111,7 +118,7 @@ struct CaptureList {
 
   void unpack(
       Stack& stack,
-      const std::shared_ptr<autograd::Function>& saved_for) {
+      const std::shared_ptr<autograd::Node>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
     auto size_it = sizes_.begin();
@@ -189,7 +196,7 @@ struct UnpackInstructions {
   std::vector<size_t> sizes_;
 };
 
-struct DifferentiableGraphBackward : public autograd::Function {
+struct DifferentiableGraphBackward : public autograd::Node {
   DifferentiableGraphBackward(
       GraphExecutor executor,
       size_t input_size,
@@ -213,7 +220,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     // Here stack.size()[=1] with a TensorList IValue of
     // backward graph output.
     // num_outputs()[=2], however, is the number of outputs of
-    // grad_fn (an autograd::Function). grad_fn's outputs are
+    // grad_fn (an autograd::Node). grad_fn's outputs are
     // grads with regard to Tensor/Variables `x`, but not
     // graph input TensorList [x, x]. These two grads will
     // be accumulated to x.grad later using autograd::InputBuffer.
@@ -262,7 +269,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
-      add_input_metadata(autograd::Function::undefined_input{});
+      add_input_metadata(autograd::Node::undefined_input{});
     }
   }
 
@@ -471,14 +478,15 @@ void GraphExecutorImplBase::run(Stack& stack) {
 // situation. GraphExecutor is completely unaware of tracing or module
 // parameters to keep the tracing concerns separated.
 struct GraphExecutorImpl : public GraphExecutorImplBase {
-  GraphExecutorImpl(const std::shared_ptr<Graph>& graph, bool optimize)
-      : GraphExecutorImplBase(graph, optimize), arg_spec_creator_(*graph) {
+  GraphExecutorImpl(const std::shared_ptr<Graph>& graph)
+      : GraphExecutorImplBase(graph), arg_spec_creator_(*graph) {
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
   ExecutionPlan getPlanFor(Stack& stack) override {
-    return optimize ? getOrCompile(stack) : getOrCompileFallback();
+    return getGraphExecutorOptimize() ? getOrCompile(stack)
+                                      : getOrCompileFallback();
   }
 
   GraphExecutorState getDebugState() override {
@@ -594,13 +602,12 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
-GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
+GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
     : pImpl(
-          getProfilingMode()
-              ? dynamic_cast<GraphExecutorImplBase*>(
-                    new ProfilingGraphExecutorImpl(graph, optimize))
-              : dynamic_cast<GraphExecutorImplBase*>(
-                    new GraphExecutorImpl(graph, optimize))) {}
+          getProfilingMode() ? dynamic_cast<GraphExecutorImplBase*>(
+                                   new ProfilingGraphExecutorImpl(graph))
+                             : dynamic_cast<GraphExecutorImplBase*>(
+                                   new GraphExecutorImpl(graph))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
