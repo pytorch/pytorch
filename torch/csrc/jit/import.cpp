@@ -284,9 +284,14 @@ void ScriptModuleDeserializer::moduleSetState(
 
 script::Module ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
-  moduleStack_.emplace_back(module_def.name());
+  // HACK: The current model exporter can create module_defs with invalid Python
+  // identifiers as names (they contain `.`)
+  const auto atoms = c10::QualifiedName(module_def.name()).atoms();
+  const size_t numPushed = atoms.size();
+  for (const auto& atom : atoms) {
+    moduleStack_.emplace_back(atom);
+  }
   auto module = script::Module(moduleStack_, compilation_unit_);
-  module.set_optimized(module_def.optimize());
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     auto submodule = convertModule(sub_def);
@@ -372,7 +377,9 @@ script::Module ScriptModuleDeserializer::convertModule(
     }
   }
 
-  moduleStack_.pop_back();
+  for (size_t i = 0; i < numPushed; i++) {
+    moduleStack_.pop_back();
+  }
   return module;
 }
 
