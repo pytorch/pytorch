@@ -6542,7 +6542,7 @@ a")
             for out, ref in zip(final_hiddens_fp16, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            def compare_quantized_unquantized(ScriptWrapper, cell): 
+            def compare_quantized_unquantized(ScriptWrapper, cell):
                 wrapper = ScriptWrapper(cell)
 
                 # Compare quantize scripted module to unquantized
@@ -11785,7 +11785,7 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
-    @unittest.skipIf(torch._C._jit_recursive_script, "# TODO: re-enable this when recursive script is the default")
+    @unittest.skipIf(False, "# TODO: re-enable this when recursive script is the default")
     def test_weak_module_isinstance(self):
         tester = self
 
@@ -13176,16 +13176,6 @@ a")
 
 
 class TestRecursiveScript(JitTestCase):
-<<<<<<< HEAD
-    """
-    Tests in this class are all run under `with torch.jit._enable_recursive_script()`
-    """
-    def run(self, result=None):
-        with torch.jit._recursive.enable_recursive_script():
-            super(TestRecursiveScript, self).run(result)
-
-=======
->>>>>>> 87d3f6650648dbd44fd1d6e91bd65227e0d68214
     def checkModule(self, nn_module, args):
         """
         Check that a nn.Module's results in Script mode match eager and that it
