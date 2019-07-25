@@ -10,6 +10,9 @@ folder.
 import sys
 import atexit
 
+# old private location of the ExceptionWrapper that some users rely on:
+from torch._utils import ExceptionWrapper  # noqa: F401
+
 
 IS_WINDOWS = sys.platform == "win32"
 
