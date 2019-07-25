@@ -81,7 +81,7 @@
 [submodule "third_party/sleef"]
     ignore = dirty
     path = third_party/sleef
-    url = https://github.com/shibatch/sleef
+    url = https://github.com/zdevito/sleef
 [submodule "third_party/ideep"]
     ignore = dirty
     path = third_party/ideep
