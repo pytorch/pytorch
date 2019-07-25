@@ -50,16 +50,6 @@ void init_dataset_bindings(PyObject* module) {
           "cache_size",
           &ChunkDatasetOptions::cache_size_,
           "Cache size to be preloaded before batching");
-
-  /// ChunkDataReader for all standard types
-  /// (uint8_t, int8_t, int16_t, int32_t, int64_t, float, double)
-  bind_chunkdatareader<ChunkDataReader<uint8_t>, PyChunkDataReader<uint8_t>>(chunk, "ChunkDataReaderUint8T");
-  bind_chunkdatareader<ChunkDataReader<int8_t>, PyChunkDataReader<int8_t>>(chunk, "ChunkDataReaderInt8T");
-  bind_chunkdatareader<ChunkDataReader<int16_t>, PyChunkDataReader<int16_t>>(chunk, "ChunkDataReaderInt16T");
-  bind_chunkdatareader<ChunkDataReader<int32_t>, PyChunkDataReader<int32_t>>(chunk, "ChunkDataReaderInt32T");
-  bind_chunkdatareader<ChunkDataReader<int64_t>, PyChunkDataReader<int64_t>>(chunk, "ChunkDataReaderInt64T");
-  bind_chunkdatareader<ChunkDataReader<float>, PyChunkDataReader<float>>(chunk, "ChunkDataReaderFloat");
-  bind_chunkdatareader<ChunkDataReader<double>, PyChunkDataReader<double>>(chunk, "ChunkDataReaderDouble");
 }
 
 } // namespace data

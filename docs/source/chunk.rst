@@ -12,6 +12,14 @@ so that users can leverage both C++ performance and Python flexibility!
 
 .. autoclass:: ChunkDatasetWrapper
 
+.. py:class:: ChunkDatasetOptions(preloader_count, batch_size, cache_size = 2048)
+
+  Create and return a new ChunkDatasetOptions instance
+
+  :param int preloader_count: Number of preloaders threads
+  :param int batch_size: Batch size
+  :param int cache_size: Cache size to be preloaded before batching
+
 Getting started
 ---------------
 
@@ -41,9 +49,13 @@ To achieve this, the main steps for both C++ and Python are:
 
 **C++ Steps:**
 
-* [optional] Make `std::vector<BUILT_IN_TYPE>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
+* [optional] Make `std::vector<BUILT_IN_TYPE>` opaque to Python through `PYBIND11_MAKE_OPAQUE()` *[1]*
+* [optional] Bind `std::vector<BUILT_IN_TYPE>` through `py::bind_vector()` (aka BatchType) *[1]*
+* Define `DummyChunkDataReader` class by extending `torch::data::datasets::ChunkDataReader`
+* Bind `DummyChunkDataReader` binding through `bind_chunkdatareader()` helper
+* Bind `DummyChunkDataset` binding through `bind_chunkdatareader()` helper
 
-Although opaque types prevent memory copy between C++ and Python,
+*[1]* Although opaque STL containers prevent memory copy between C++ and Python,
 we will not use this feature to keep the example as simple as possible.
 
 **Python Steps:**
@@ -62,6 +74,54 @@ we will not use this feature to keep the example as simple as possible.
 
 * Iterate over `DataLoader`
 
+**C++ snippet:**
+
+*Check `test/cpp/api/dataloader.h` and `test/cpp_extensions/extension.cpp` for full implementation*
+
+.. code-block:: cpp
+
+  #include <torch/extension.h>
+
+  using namespace torch::data::samplers;
+  using namespace torch::data::datasets;
+
+  /// Custom ChunkDataReader
+  class DummyChunkDataReader : public datasets::ChunkDataReader<int> {
+  public:
+    using BatchType = datasets::ChunkDataReader<int>::ChunkType;
+    using DataType = datasets::ChunkDataReader<int>::ExampleType;
+
+    /// Read an entire chunk.
+    BatchType read_chunk(size_t chunk_index) override {
+      BatchType batch_data;
+      int start_index = chunk_index == 0
+          ? 0
+          : std::accumulate(chunk_sizes, chunk_sizes + chunk_index, 0);
+
+      batch_data.resize(chunk_sizes[chunk_index]);
+
+      std::iota(batch_data.begin(), batch_data.end(), start_index);
+      return batch_data;
+    }
+
+    size_t chunk_count() override {
+      return chunk_count_;
+    };
+
+    void reset() override{};
+
+    const static size_t chunk_count_ = 3;
+    size_t chunk_sizes[chunk_count_] = {10, 5, 20};
+  };
+
+  PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    /// Specific DummyChunkDataReader implementation
+    auto dummy_reader = torch::data::datasets::bind_chunkdatareader<DummyChunkDataReader>(m, "DummyChunkDataReader");
+    dummy_reader.def(py::init<>(), "Create and return a new `DummyChunkDataReader` instance");
+
+    /// Specific DummyChunkDataset implementation
+    torch::data::datasets::bind_chunkdataset<DummyChunkDataReader>(m, "DummyChunkDataset");
+  }
 
 **Python snippet:**
 
@@ -102,13 +162,15 @@ In this scenario, the main steps are:
 * Define `FooExampleType` struct (aka ExampleType)
 * Define `FooChunkDataReader` class by extending `torch::data::datasets::ChunkDataReader<FooExampleType>`
 * Bind `FooExampleType` struct
-* [optional] Make `std::vector<FooExampleType>` opaque to Python through `PYBIND11_MAKE_OPAQUE()`
-* Bind `std::vector<FooExampleType>` through `py::bind_vector<FooExampleType>()` (aka BatchType)
+* [optional] Make `std::vector<FooExampleType>` opaque to Python through `PYBIND11_MAKE_OPAQUE()` *[2]*
+* [optional] Bind `std::vector<FooExampleType>` through `py::bind_vector<FooExampleType>()` (aka BatchType) *[2]*
 * Bind `FooChunkDataReader` binding through `bind_chunkdatareader<>()` helper
 * Bind `FooChunkDataset` binding through `bind_chunkdatareader<>()` helper
 
-Making opaque types prevent memory copy between C++ and Python as described at
-`pybind11 documentation <https://pybind11-rtdtest.readthedocs.io/en/stable/advanced.html#treating-stl-data-structures-as-opaque-objects>`_
+*[2]* Making Opaque STL containers prevent memory copy between C++ and Python as described at
+pybind11 documentation `here <https://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#making-opaque-types>`_,
+`also here <https://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#binding-stl-containers>`_,
+`and here <https://pybind11-rtdtest.readthedocs.io/en/stable/advanced.html#treating-stl-data-structures-as-opaque-objects>`_
 
 **Python Steps:**
 
@@ -288,53 +350,3 @@ Making opaque types prevent memory copy between C++ and Python as described at
                            worker_init_fn=worker_init_fn)
   for i, batch in enumerate(trainloader, 0):
     print('Batch {}: {}'.format(i, batch))
-
-Python bindings
----------------
-
-The following classes were implemented in C++
-(`torch/csrc/api/include/torch/data/datasets/chunk.h`) but also exposed
-to Python through `pybind11 <https://github.com/pybind/pybind11/>.`
-
-.. py:class:: ChunkDatasetOptions(preloader_count, batch_size, cache_size = 2048)
-
-  Create and return a new ChunkDatasetOptions instance
-
-  :param int preloader_count: Number of preloaders threads
-  :param int batch_size: Batch size
-  :param int cache_size: Cache size to be preloaded before batching
-
-.. py:class:: ChunkDataReaderUint8T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `uint8_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderInt8T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `int8_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderInt16T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `int16_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderInt32T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `int32_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderInt64T
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `int64_t` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderFloat
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `float` as Example type.
-  It performs data chunking and reading of entire data chunks
-
-.. py:class:: ChunkDataReaderDouble
-
-  Extends :py:class:`ChunkDataReader` backed by an array of `double` as Example type.
-  It performs data chunking and reading of entire data chunks

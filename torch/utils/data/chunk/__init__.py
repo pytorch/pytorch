@@ -1,7 +1,5 @@
 from ..dataset import IterableDataset  # noqa: F401
 from torch._C.data.chunk import ChunkDatasetOptions  # noqa: F401
-from torch._C.data.chunk import ChunkDataReaderUint8T, ChunkDataReaderInt8T, ChunkDataReaderInt16T, ChunkDataReaderInt32T  # noqa: F401
-from torch._C.data.chunk import ChunkDataReaderInt64T, ChunkDataReaderFloat, ChunkDataReaderDouble  # noqa: F401
 
 
 class ChunkDatasetWrapper(IterableDataset):
