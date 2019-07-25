@@ -161,7 +161,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         /*thread_id=*/0,
         /*num_threads=*/1);
 
-    return output.view(out_sizes);
+    return output;
   }
 #else // USE_FBGEMM
   at::Tensor operator()(
