@@ -777,13 +777,13 @@ void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
   Pickler pickler(&tensor_table_);
-  pickler.start();
+  pickler.protocol();
   pickler.startTuple();
   for (const IValue& ivalue : ivalues) {
-    pickler.addIValue(ivalue);
+    pickler.pushIValue(ivalue);
   }
   pickler.endTuple();
-  pickler.finish();
+  pickler.stop();
   writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size());
 }
 

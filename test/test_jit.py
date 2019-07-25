@@ -13082,6 +13082,15 @@ a")
         self._test_pickle_checkpoint('cpu')
         self._test_pickle_checkpoint_views('cpu')
 
+    def test_pickle_checkpoint_tup(self):
+        @torch.jit.script
+        def foo(fname):
+            # type: (str) -> None
+            torch.save((3, 4), fname)
+        with TemporaryFileName() as name:
+            foo(name)
+            self.assertEqual(torch.load(name), (3, 4))
+
     def test_string_list(self):
         def fn(string):
             # type: (str) -> List[str]
