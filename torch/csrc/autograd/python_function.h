@@ -32,8 +32,8 @@ struct VariableInfo {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
-struct PyFunction : public Function {
-  PyFunction(THPObjectPtr obj) : obj(obj.release()) {}
+struct PyNode : public Node {
+  PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
@@ -45,7 +45,7 @@ struct PyFunction : public Function {
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
-  ~PyFunction() {
+  ~PyNode() {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
     // TestAutograd.test_inplace_view_python called me out about it.
@@ -96,18 +96,18 @@ struct THPFunction {
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
 
-    // The actual PyFunction (in the autograd graph) that this data was
+    // The actual PyNode (in the autograd graph) that this data was
     // saved for.  This field may be NULL (because a user can construct
     // a THPFunction directly from Python), but when this field is non-NULL,
     // it is guaranteed that cdata.lock()->obj == this
     //
     // In most ordinary use, this field should always be non-NULL; e.g.,
-    // when we allocate a THPFunction because we are running Function.apply,
-    // after constructing a THPFunction, we immediately allocate a PyFunction
+    // when we allocate a THPFunction because we are running Node.apply,
+    // after constructing a THPFunction, we immediately allocate a PyNode
     // for it.  We can't enforce this directly in the constructor of
     // THPFunction though, because there's no way to keep it live long enough
-    // to save an owning reference to PyFunction into the grad_fn of a Variable.
-    std::weak_ptr<torch::autograd::PyFunction> cdata;
+    // to save an owning reference to PyNode into the grad_fn of a Variable.
+    std::weak_ptr<torch::autograd::PyNode> cdata;
 };
 
 bool THPFunction_initModule(PyObject *module);
