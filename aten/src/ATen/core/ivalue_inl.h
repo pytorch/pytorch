@@ -727,29 +727,40 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
 
 namespace ivalue {
 namespace detail {
-template<class> struct type_sink { typedef void type; }; // consumes a type, and makes it `void`
+// This code allows us to template on a function based on whether IValue has a
+// constructor for it. Specifically, has_constructor<T>{} inherits from std::true_type if
+// IValue(T) compiles, and inherits from std::false_type if IValue(T) doesn't.
+// We use it for calling the IValue constructor for `from` if it exists, and otherwise
+// attempt to use our custom class code.
+template<class> struct type_sink { typedef void type; };
 template<class T> using type_sink_t = typename type_sink<T>::type;
 template<class T, class=void> struct has_constructor : std::false_type {}; \
 template<class T> struct has_constructor<
   T,
   type_sink_t< decltype( IValue(std::declval<T>())) >
 >: std::true_type {};
+
 template <typename T>
 IValue from_(T x, std::true_type) {
   return IValue(x);
 }
 template <typename T>
-IValue from_(T x, std::false_type) {
-  if (!isCustomClassRegistered<T>()) {
+IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
+  using inputType = c10::intrusive_ptr<T>;
+  if (!isCustomClassRegistered<inputType>()) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
-  auto res = getCustomClassType<T>();
+  auto res = getCustomClassType<inputType>();
   auto retObject = ivalue::Object::create(res->second, 1);
   auto objPtr = c10::static_intrusive_pointer_cast<c10::intrusive_ptr_target>(x);
 
   retObject->setSlot(0, IValue(objPtr));
   auto resIVal = IValue(std::move(retObject));
   return resIVal;
+}
+template <typename T>
+IValue from_(T x, std::false_type) {
+  static_assert(guts::false_t<T>::value, "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
 }
 }
 
