@@ -134,43 +134,7 @@ struct Dist {
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) {
-      scalar_t d_a[Vec::size()];
-      auto d = Vec(dist);
-      d.store(d_a);
-
-      scalar_t eq_a[Vec::size()];
-      auto eq = (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - d).abs().ceil()));
-      eq.store(eq_a);
-
-      scalar_t s_a[Vec::size()];
-      auto s = sign(diff);
-      s.store(s_a);
-
-      scalar_t g_a[Vec::size()];
-      auto g = Vec(grad);
-      g.store(g_a);
-
-      scalar_t diff_a[Vec::size()];
-      diff.store(diff_a);
-
-      printf("input=");
-      for (int i = 0; i < 3; i++) {
-        printf("(%d: grad = %f diff = %f sign = %f dist = %f = %f),", i, g_a[i], diff_a[i], s_a[i], d_a[i], eq_a[i]);
-        //printf("i = %d grad = %f\n", i, g_a[i]);
-      }
-      printf("\noutput=");
-      auto res = g * s * eq;
-      scalar_t res_a[Vec::size()];
-      res.store(res_a);
-      for (int i = 0; i < 3; i++) {
-        printf("%f, ", i, res_a[i]);
-      }
-      printf("\n");
-
-      return res;
-      //return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil()));
-    }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
   template <typename F>
