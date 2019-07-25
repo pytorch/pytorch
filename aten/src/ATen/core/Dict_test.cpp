@@ -91,11 +91,7 @@ TEST(DictTest, whenInsertOrAssigningExistingKey_thenDoesModifyDict) {
 
 TEST(DictTest, givenEmptyDict_whenIterating_thenBeginIsEnd) {
   Dict<int64_t, string> dict;
-  const Dict<int64_t, string> cdict;
   EXPECT_EQ(dict.begin(), dict.end());
-  EXPECT_EQ(dict.cbegin(), dict.cend());
-  EXPECT_EQ(cdict.begin(), cdict.end());
-  EXPECT_EQ(cdict.cbegin(), cdict.cend());
 }
 
 TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
@@ -151,7 +147,7 @@ TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
   const Dict<int64_t, string>& dict = dict_;
   bool found_first = false;
   bool found_second = false;
-  for (Dict<int64_t, string>::const_iterator iter = dict.begin(); iter != dict.end(); ++iter) {
+  for (Dict<int64_t, string>::iterator iter = dict.begin(); iter != dict.end(); ++iter) {
     if (iter->key() == 3) {
       EXPECT_EQ("3", iter->value());
       EXPECT_FALSE(found_first);
@@ -197,13 +193,6 @@ TEST(DictTest, givenIterator_thenCanModifyValue) {
   dict.insert(3, "old_value");
   dict.begin()->setValue("new_value");
   EXPECT_EQ("new_value", dict.begin()->value());
-}
-
-TEST(DictTest, givenOneElementDict_whenErasingByConstIterator_thenDictIsEmpty) {
-  Dict<int64_t, string> dict;
-  dict.insert(3, "3");
-  dict.erase(dict.cbegin());
-  EXPECT_TRUE(dict.empty());
 }
 
 TEST(DictTest, givenOneElementDict_whenErasingByIterator_thenDictIsEmpty) {
@@ -265,7 +254,7 @@ TEST(DictTest, givenConstDict_whenCallingFindOnExistingKey_thenFindsCorrectEleme
   dict_.insert(3, "3");
   dict_.insert(4, "4");
   const Dict<int64_t, string>& dict = dict_;
-  Dict<int64_t, string>::const_iterator found = dict.find(3);
+  Dict<int64_t, string>::iterator found = dict.find(3);
   EXPECT_EQ(3, found->key());
   EXPECT_EQ("3", found->value());
 }
@@ -275,7 +264,7 @@ TEST(DictTest, givenConstDict_whenCallingFindOnNonExistingKey_thenReturnsEnd) {
   dict_.insert(3, "3");
   dict_.insert(4, "4");
   const Dict<int64_t, string>& dict = dict_;
-  Dict<int64_t, string>::const_iterator found = dict.find(5);
+  Dict<int64_t, string>::iterator found = dict.find(5);
   EXPECT_EQ(dict.end(), found);
 }
 
@@ -379,16 +368,7 @@ TEST(DictTest, whenMoveAssigningDict_thenOldIsEmpty) {
   EXPECT_TRUE(dict1.empty());
 }
 
-TEST(DictTest, givenMutableIterator_whenAssigningToConstIterator_thenWorks) {
-  Dict<int64_t, string> dict;
-  dict.insert(3, "3");
-  Dict<int64_t, string>::iterator iter = dict.begin();
-  Dict<int64_t, string>::const_iterator const_iter = iter;
-  EXPECT_EQ(3, const_iter->key());
-  EXPECT_EQ("3", const_iter->value());
-}
-
-TEST(DictTest, givenMutableIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
+TEST(DictTest, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
@@ -399,18 +379,7 @@ TEST(DictTest, givenMutableIterator_whenPostfixIncrementing_thenMovesToNextAndRe
   EXPECT_EQ(dict.begin()->key(), iter2->key());
 }
 
-TEST(DictTest, givenConstIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
-  Dict<int64_t, string> dict;
-  dict.insert(3, "3");
-  dict.insert(4, "4");
-
-  Dict<int64_t, string>::const_iterator iter1 = dict.cbegin();
-  Dict<int64_t, string>::const_iterator iter2 = iter1++;
-  EXPECT_NE(dict.begin()->key(), iter1->key());
-  EXPECT_EQ(dict.begin()->key(), iter2->key());
-}
-
-TEST(DictTest, givenMutableIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
+TEST(DictTest, givenIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
@@ -421,18 +390,7 @@ TEST(DictTest, givenMutableIterator_whenPrefixIncrementing_thenMovesToNextAndRet
   EXPECT_NE(dict.begin()->key(), iter2->key());
 }
 
-TEST(DictTest, givenConstIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
-  Dict<int64_t, string> dict;
-  dict.insert(3, "3");
-  dict.insert(4, "4");
-
-  Dict<int64_t, string>::const_iterator iter1 = dict.cbegin();
-  Dict<int64_t, string>::const_iterator iter2 = ++iter1;
-  EXPECT_NE(dict.begin()->key(), iter1->key());
-  EXPECT_NE(dict.begin()->key(), iter2->key());
-}
-
-TEST(DictTest, givenEqualMutableIterators_thenAreEqual) {
+TEST(DictTest, givenEqualIterators_thenAreEqual) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
@@ -443,7 +401,7 @@ TEST(DictTest, givenEqualMutableIterators_thenAreEqual) {
   EXPECT_FALSE(iter1 != iter2);
 }
 
-TEST(DictTest, givenDifferentMutableIterators_thenAreNotEqual) {
+TEST(DictTest, givenDifferentIterators_thenAreNotEqual) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
@@ -456,31 +414,7 @@ TEST(DictTest, givenDifferentMutableIterators_thenAreNotEqual) {
   EXPECT_TRUE(iter1 != iter2);
 }
 
-TEST(DictTest, givenEqualConstIterators_thenAreEqual) {
-  Dict<int64_t, string> dict;
-  dict.insert(3, "3");
-  dict.insert(4, "4");
-
-  Dict<int64_t, string>::const_iterator iter1 = dict.cbegin();
-  Dict<int64_t, string>::const_iterator iter2 = dict.cbegin();
-  EXPECT_TRUE(iter1 == iter2);
-  EXPECT_FALSE(iter1 != iter2);
-}
-
-TEST(DictTest, givenDifferentConstIterators_thenAreNotEqual) {
-  Dict<int64_t, string> dict;
-  dict.insert(3, "3");
-  dict.insert(4, "4");
-
-  Dict<int64_t, string>::const_iterator iter1 = dict.cbegin();
-  Dict<int64_t, string>::const_iterator iter2 = dict.cbegin();
-  iter2++;
-
-  EXPECT_FALSE(iter1 == iter2);
-  EXPECT_TRUE(iter1 != iter2);
-}
-
-TEST(DictTest, givenMutableIterator_whenDereferencing_thenPoint64_tsToCorrectElement) {
+TEST(DictTest, givenIterator_whenDereferencing_thenPointsToCorrectElement) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
 
@@ -491,18 +425,7 @@ TEST(DictTest, givenMutableIterator_whenDereferencing_thenPoint64_tsToCorrectEle
   EXPECT_EQ("3", iter->value());
 }
 
-TEST(DictTest, givenConstIterator_whenDereferencing_thenPoint64_tsToCorrectElement) {
-  Dict<int64_t, string> dict;
-  dict.insert(3, "3");
-
-  Dict<int64_t, string>::const_iterator iter = dict.cbegin();
-  EXPECT_EQ(3, (*iter).key());
-  EXPECT_EQ("3", (*iter).value());
-  EXPECT_EQ(3, iter->key());
-  EXPECT_EQ("3", iter->value());
-}
-
-TEST(DictTest, givenMutableIterator_whenWritingToValue_thenWorks) {
+TEST(DictTest, givenIterator_whenWritingToValue_thenChangesValue) {
   Dict<int64_t, string> dict;
   dict.insert(3, "3");
 
@@ -513,6 +436,19 @@ TEST(DictTest, givenMutableIterator_whenWritingToValue_thenWorks) {
 
   iter->setValue("new_value_2");
   EXPECT_EQ("new_value_2", dict.begin()->value());
+}
+
+TEST(ListTest_IValueBasedList, givenIterator_whenWritingToValueFromIterator_thenChangesValue) {
+  Dict<int64_t, string> dict;
+  dict.insert(3, "3");
+  dict.insert(4, "4");
+  dict.insert(5, "5");
+
+  (*dict.find(3)).setValue(dict.find(4)->value());
+  EXPECT_EQ("4", dict.find(3)->value());
+
+  dict.find(3)->setValue(dict.find(5)->value());
+  EXPECT_EQ("5", dict.find(3)->value());
 }
 
 TEST(DictTest, isReferenceType) {
