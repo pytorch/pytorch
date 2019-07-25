@@ -2260,7 +2260,7 @@ class TestAutograd(TestCase):
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
                     run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor)
+                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
 
@@ -3372,16 +3372,20 @@ GRADCHECK_EPS_OVERRIDE = {
 }
 
 GRADCHECK_PRECISION_OVERRIDE = {
-    'test_cdist': 2e-4,
+    'test_cdist': 1e-4,
 }
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
+    eps = EPSILON if test_name not in GRADCHECK_EPS_OVERRIDE else GRADCHECK_EPS_OVERRIDE[test_name]
+    atol = PRECISION if test_name not in GRADCHECK_PRECISION_OVERRIDE else GRADCHECK_PRECISION_OVERRIDE[test_name]
+
     printDebug = False
     if "test_cdist" in test_name:
         printDebug = True
-    eps = EPSILON if test_name not in GRADCHECK_EPS_OVERRIDE else GRADCHECK_EPS_OVERRIDE[test_name]
-    atol = PRECISION if test_name not in GRADCHECK_PRECISION_OVERRIDE else GRADCHECK_PRECISION_OVERRIDE[test_name]
+        eps = 1e-3
+        atol = 1e-4
+
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=eps, atol=atol, printDebug=printDebug))
     if not run_gradgradcheck or name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
