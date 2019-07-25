@@ -61,8 +61,6 @@ struct DictImpl final : public c10::intrusive_ptr_target {
 
 namespace impl {
 template<class Key, class Value, class Iterator> class DictIterator;
-template<class Key, class Value, class Iterator>
-bool operator==(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 
 /**
  * A reference to an entry in the Dict.
@@ -70,9 +68,6 @@ bool operator==(const DictIterator<Key, Value, Iterator>& lhs, const DictIterato
  */
 template<class Key, class Value, class Iterator>
 class DictEntryRef final {
-private:
-  static constexpr bool is_const_ref() { return std::is_const<typename Iterator::value_type>::value; }
-
 public:
   explicit DictEntryRef(Iterator iterator)
   : iterator_(std::move(iterator)) {}
@@ -87,16 +82,22 @@ public:
 
   template<class Value_>
   void setValue(Value_&& value) const {
-    static_assert(!is_const_ref(), "setValue() cannot be called on const_iterator.");
     static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of setValue()");
     iterator_->second = Value(std::forward<Value_>(value));
   }
 
 private:
+  // allow copying and moving, but only our friends (i.e. the Dict class) can do
+  // it. Copying/moving this reference wrapper would be too ambiguous to allow it
+  // in the public API.
+  DictEntryRef(const DictEntryRef&) = default;
+  DictEntryRef& operator=(const DictEntryRef&) = default;
+  DictEntryRef(DictEntryRef&&) noexcept = default;
+  DictEntryRef& operator=(DictEntryRef&& rhs) & noexcept = default;
+
   Iterator iterator_;
   friend class DictIterator<Key, Value, Iterator>;
   friend class Dict<Key, Value>;
-  friend bool operator==<Key, Value, Iterator>(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 };
 
 // this wraps map_type::iterator to make sure user code can't rely
@@ -107,10 +108,16 @@ public:
   explicit DictIterator() = default;
   ~DictIterator() = default;
 
-  DictIterator(const DictIterator&) = default;
-  DictIterator(DictIterator&&) noexcept = default;
-  DictIterator& operator=(const DictIterator&) = default;
-  DictIterator& operator=(DictIterator&&) = default;
+  DictIterator(const DictIterator& rhs): entryRef_(rhs.entryRef_) {}
+  DictIterator(DictIterator&& rhs) noexcept: entryRef_(std::move(rhs.entryRef_)) {}
+  DictIterator& operator=(const DictIterator& rhs) {
+    entryRef_ = rhs.entryRef_;
+    return *this;
+  }
+  DictIterator& operator=(DictIterator&& rhs) noexcept {
+    entryRef_ = std::move(rhs.entryRef_);
+    return *this;
+  }
 
   DictIterator& operator++() {
       ++entryRef_.iterator_;
@@ -131,35 +138,46 @@ public:
     return &entryRef_;
   }
 
-  // the template automatically disables the operator when we are already a
-  // const_iterator, because that would cause a lot of compiler warnings otherwise.
-  template<class const_iterator_ = typename detail::DictImpl::dict_map_type::const_iterator, class = guts::enable_if_t<!std::is_same<const_iterator_, Iterator>::value>>
-  /* implicit */ operator DictIterator<Key, Value, const_iterator_>() const
-  {
-      return DictIterator<Key, Value, const_iterator_> { const_iterator_ { entryRef_.iterator_ } };
+  friend typename std::iterator<std::random_access_iterator_tag, DictEntryRef<Key, Value, Iterator>>::difference_type operator-(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.entryRef_.iterator_ - rhs.entryRef_.iterator_;
   }
 
 private:
   explicit DictIterator(Iterator iterator): entryRef_(std::move(iterator)) {}
 
+  const Iterator& get_iterator_() const {
+    return entryRef_.iterator_;
+  }
+
+  friend bool operator==(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() == rhs.get_iterator_();
+  }
+
+  friend bool operator!=(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() != rhs.get_iterator_();
+  }
+
+  friend bool operator<(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() < rhs.get_iterator_();
+  }
+
+  friend bool operator<=(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() <= rhs.get_iterator_();
+  }
+
+  friend bool operator>(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() > rhs.get_iterator_();
+  }
+
+  friend bool operator>=(const DictIterator& lhs, const DictIterator& rhs) {
+    return lhs.get_iterator_() >= rhs.get_iterator_();
+  }
+
   DictEntryRef<Key, Value, Iterator> entryRef_;
 
   friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
   friend class Dict<Key, Value>;
-  friend bool operator==<Key, Value, Iterator>(const DictIterator& lhs, const DictIterator& rhs);
-
-  // TODO We also need comparison operators <, >, <=, >=, see ListIterator.
 };
-
-template<class Key, class Value, class Iterator>
-inline bool operator==(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs) {
-  return lhs.entryRef_.iterator_ == rhs.entryRef_.iterator_;
-}
-
-template<class Key, class Value, class Iterator>
-inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs) {
-  return !(lhs == rhs);
-}
 
 template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue> dict);
 template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value> dict);
@@ -207,7 +225,6 @@ public:
   using mapped_type = Value;
   using size_type = typename detail::DictImpl::dict_map_type::size_type;
   using iterator = impl::DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
-  using const_iterator = impl::DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::const_iterator>;
 
   /**
    * Creates an empty dict.
@@ -247,37 +264,13 @@ public:
    * Returns an iterator to the first element of the container.
    * If the container is empty, the returned iterator will be equal to end().
    */
-  iterator begin();
-
-  /**
-   * Returns an iterator to the first element of the container.
-   * If the container is empty, the returned iterator will be equal to end().
-   */
-  const_iterator begin() const;
-
-  /**
-   * Returns an iterator to the first element of the container.
-   * If the container is empty, the returned iterator will be equal to end().
-   */
-  const_iterator cbegin() const;
+  iterator begin() const;
 
   /**
    * Returns an iterator to the element following the last element of the container.
    * This element acts as a placeholder; attempting to access it results in undefined behavior.
    */
-  iterator end();
-
-  /**
-   * Returns an iterator to the element following the last element of the container.
-   * This element acts as a placeholder; attempting to access it results in undefined behavior.
-   */
-  const_iterator end() const;
-
-  /**
-   * Returns an iterator to the element following the last element of the container.
-   * This element acts as a placeholder; attempting to access it results in undefined behavior.
-   */
-  const_iterator cend() const;
+  iterator end() const;
 
   /**
    * Checks if the container has no elements.
@@ -293,7 +286,7 @@ public:
    * Erases all elements from the container. After this call, size() returns zero.
    * Invalidates any references, pointers, or iterators referring to contained elements. May also invalidate past-the-end iterators.
    */
-  void clear();
+  void clear() const;
 
   /**
    * Inserts element(s) into the container, if the container doesn't already contain an element with an equivalent key.
@@ -302,7 +295,7 @@ public:
    * @return A pair consisting of an iterator to the inserted element (or to the element that prevented the insertion) and a bool denoting whether the insertion took place.
    */
   template<class Key_, class Value_>
-  std::pair<iterator, bool> insert(Key_&& key, Value_&& value);
+  std::pair<iterator, bool> insert(Key_&& key, Value_&& value) const;
 
   /**
    * If an element with the given key already exists, it is overwritten with the given value.
@@ -312,14 +305,14 @@ public:
    * @return The bool component is true if the insertion took place and false if the assignment took place. The iterator component is pointing at the element that was inserted or updated.
    */
   template<class Key_, class Value_>
-  std::pair<iterator, bool> insert_or_assign(Key_&& key, Value_&& value);
+  std::pair<iterator, bool> insert_or_assign(Key_&& key, Value_&& value) const;
 
   /**
    * Removes the element pointed to by iter.
    * May invalidate any references, pointers, or iterators referring to contained elements.
    * The iterator iter must be valid and dereferenceable. Thus the end() iterator (which is valid, but is not dereferenceable) cannot be used as a value for iter.
    */
-  void erase(const_iterator iter);
+  void erase(iterator iter) const;
 
   /**
    * Removes the element with the given key, if it exists.
@@ -327,7 +320,7 @@ public:
    *
    * @return The number of elements removed. This is either '1' if an element with the key existed, or '0' if it didn't.
    */
-  C10_NODISCARD size_t erase(const Key& key);
+  C10_NODISCARD size_t erase(const Key& key) const;
 
   /**
    * Returns the mapped value of the element with key equivalent to key.
@@ -341,15 +334,7 @@ public:
    * @return Iterator to an element with key equivalent to key.
    *         If no such element is found, past-the-end (see end()) iterator is returned.
    */
-  iterator find(const Key& key);
-
-  /**
-   * Finds an element with key equivalent to key.
-   *
-   * @return Iterator to an element with key equivalent to key.
-   *         If no such element is found, past-the-end (see end()) iterator is returned.
-   */
-  const_iterator find(const Key& key) const;
+  iterator find(const Key& key) const;
 
   /**
    * Checks if there is an element with key equivalent to key in the container.
@@ -362,7 +347,7 @@ public:
    * Increase the capacity so that at least count elements can be stored without
    * having to reallocate or rehash.
    */
-  void reserve(size_type count);
+  void reserve(size_type count) const;
 };
 
 namespace impl {

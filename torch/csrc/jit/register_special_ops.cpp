@@ -19,12 +19,18 @@ namespace jit {
 
 namespace {
 
+c10::OperatorOptions aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+
 void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
-  std::string op_name = node->kind().toDisplayString();
+  std::string op_name = node->kind().toUnqualString();
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
     auto error = script::ErrorReport(node->sourceRange());
-    error << "Input list to " << op_name
+    error << "Input list to torch." << op_name
           << " must be of ints, floats, or bools, "
           << "got " << elem_type->python_str();
     // special case empty list torch.tensor([])
@@ -154,6 +160,8 @@ void recursiveStore(
 
 template<bool if_set_requires_grad>
 Operation createTensorFromList(const Node* node) {
+  // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
+  // we use the template arg to distinguish between these two cases
   auto input = node->inputs().at(0);
   auto elem_type = input->type();
   while (auto list_type = elem_type->cast<ListType>()) {
@@ -227,10 +235,12 @@ RegisterOperators reg({
           drop(stack, 3);
           pack(stack, c10::impl::toList(std::move(result)));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::Size(int[] sizes) -> int[]",
-        [](Stack& stack) { return 0; }),
+        [](Stack& stack) { return 0; },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::size(Tensor self) -> int[]",
         [](Stack& stack) {
@@ -239,7 +249,8 @@ RegisterOperators reg({
           auto t = std::move(pop(stack)).toTensor();
           pack(stack, t.sizes().vec());
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
@@ -256,7 +267,8 @@ RegisterOperators reg({
 
           push(stack, std::move(list));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
@@ -266,7 +278,8 @@ RegisterOperators reg({
             push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
         [](const Node* node) {
@@ -286,7 +299,8 @@ RegisterOperators reg({
 
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::format(str self, ...) -> str",
         [](const Node* node) {
@@ -319,7 +333,8 @@ RegisterOperators reg({
             push(stack, ss.str());
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)     \
   Operator(                                                                   \
@@ -347,7 +362,8 @@ RegisterOperators reg({
           push(stack, std::move(tensor));                                     \
           return 0;                                                           \
         };                                                                    \
-      }),                                                                     \
+      },                                                                      \
+      aliasAnalysisFromSchema()),                                             \
   Operator(                                                                   \
       "aten::as_tensor(" #operator_type                                       \
       " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor",        \
@@ -370,7 +386,8 @@ RegisterOperators reg({
           push(stack, std::move(tensor));                                     \
           return 0;                                                           \
         };                                                                    \
-      }),
+      },                                                                      \
+      aliasAnalysisFromSchema()),
 
     DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
@@ -390,7 +407,8 @@ RegisterOperators reg({
             push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
         [](const Node* node) {
@@ -410,10 +428,12 @@ RegisterOperators reg({
 
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None, bool requires_grad=False) -> Tensor",
-        createTensorFromList<true>),
+        createTensorFromList<true>,
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::as_tensor(Tensor(a) data, *, ScalarType? dtype=None, Device? device=None) -> Tensor(a|b)",
         [](const Node* node) {
@@ -432,7 +452,8 @@ RegisterOperators reg({
             push(stack, std::move(data));
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::as_tensor(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
         createTensorFromList<false>),
@@ -445,11 +466,13 @@ RegisterOperators reg({
             drop(stack, 3);
             return 0;
           };
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
         "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
-        [](Stack& stack) { return 0; }),
+        [](Stack& stack) { return 0; },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_get_tracing_state() -> bool",
         [](Stack& stack) {
@@ -468,7 +491,8 @@ RegisterOperators reg({
           pop(stack, tensor, a, b);
           push(stack, tensor.uniform_(a, b));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)",
         [](Stack& stack) {
@@ -481,7 +505,8 @@ RegisterOperators reg({
           pop(stack, tensor, mean, std);
           push(stack, tensor.normal_(mean, std));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)",
         [](Stack& stack) {
@@ -493,7 +518,8 @@ RegisterOperators reg({
           pop(stack, tensor, val);
           push(stack, at::fill_(tensor, val));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_zero_(Tensor(a!) tensor) -> Tensor(a!)",
         [](Stack& stack) {
@@ -504,7 +530,8 @@ RegisterOperators reg({
           pop(stack, tensor);
           push(stack, at::zero_(tensor));
           return 0;
-        }),
+        },
+        aliasAnalysisFromSchema()),
 
 });
 } // namespace
