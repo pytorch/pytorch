@@ -592,11 +592,13 @@ struct to_ir {
         List<Stmt>::create(r, {ret}));
 
     CompilationUnit cu;
-    // set optimize to false since we don't need to run it in optimize mode
-    cu.set_optimized(false);
     cu.define(c10::nullopt, {def}, {resolver}, nullptr);
     Stack stack;
+    // XXX: We need to turn optimization off here because otherwise we try to
+    // recursively initialize stuff in DecomposeOps.
+    setGraphExecutorOptimize(false);
     cu.get_function(def.name().name()).run(stack);
+    setGraphExecutorOptimize(true);
     return stack.at(0).toTuple()->elements();
   }
 
@@ -2478,7 +2480,15 @@ struct to_ir {
         return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
-        return graph->insertConstant(IValue(), type_hint, tree->range());
+        // A None can be inserted even if the type_hint is not an Optional or
+        // None (e.g. `torch.jit.annotate(Tensor, None)`)
+        TypePtr hint = type_hint;
+        if (hint != nullptr && !hint->isSubtypeOf(NoneType::get()) &&
+            hint->kind() != TypeKind::OptionalType) {
+          // Implicitly wrap in an Optional if necessary
+          hint = OptionalType::create(hint);
+        }
+        return graph->insertConstant(IValue(), hint, tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -3058,7 +3068,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     }
   }
   auto fn = torch::make_unique<Function>(
-      std::move(name), is_optimized(), std::make_shared<Graph>(), creator);
+      std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
     self->getClassType()->addMethod(fn.get());

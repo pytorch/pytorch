@@ -276,7 +276,7 @@ elif sha != 'Unknown':
     version += '+' + sha[:7]
 report("Building wheel {}-{}".format(package_name, version))
 
-cmake = CMake('build')
+cmake = CMake()
 
 # all the work we need to do _before_ setup runs
 def build_deps():
