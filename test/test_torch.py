@@ -3393,8 +3393,8 @@ class _TestTorchMixin(object):
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
                 x_clone = x.clone()
                 if (device == 'cuda' and dt == torch.bfloat16):
-                     self.assertRaises(RuntimeError, lambda: copy(x))
-                     continue
+                    self.assertRaises(RuntimeError, lambda: copy(x))
+                    continue
                 y = copy(x)
                 y.fill_(1)
                 # copy is a shallow copy, only copies the tensor view,
