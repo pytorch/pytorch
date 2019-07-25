@@ -440,7 +440,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize_dynamic(NestedModel().eval(), test_only_eval_fn, self.calib_data, qconfig_dict)
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
 
