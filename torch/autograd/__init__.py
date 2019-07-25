@@ -159,8 +159,8 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
 #
 # This function returns whether the checkpointing is valid i.e. torch.autograd.backward
 # or not i.e. torch.autograd.grad. The implementation works by maintaining a thread
-# local variable in torch/csrc/autograd/engine.cpp which looks at the FunctionTask
-# in the stack and before a FunctionTask is executed in evaluate_function, it
+# local variable in torch/csrc/autograd/engine.cpp which looks at the NodeTask
+# in the stack and before a NodeTask is executed in evaluate_function, it
 # checks for whether reentrant backwards is imperative or not.
 # See https://github.com/pytorch/pytorch/pull/4594 for more discussion/context
 def _is_checkpoint_valid():

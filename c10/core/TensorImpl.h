@@ -915,6 +915,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // changes `var`'s tensor metadata and expects its `allow_tensor_metadata_change_` to be ignored.
 
   /**
+   * One TensorImpl can be copied to another TensorImpl if they have the same
+   * type_id. The only two special cases (for legacy reason) are:
+   * CPUTensorId is compatible with CUDATensorId and SparseCPUTensorId is
+   * compatible with SparseCUDATensorId.
+   */
+  inline bool has_compatible_shallow_copy_type(TensorTypeId from) {
+    TensorTypeId self = type_id();
+    return (self == from) ||
+        ((self == CPUTensorId() || self == CUDATensorId() || self == HIPTensorId()) &&
+        (from == CPUTensorId() || from == CUDATensorId() || from == HIPTensorId())) ||
+        ((self == SparseCPUTensorId() || self == SparseCUDATensorId() || self == SparseHIPTensorId()) &&
+        (from == SparseCPUTensorId() || from == SparseCUDATensorId() || from == SparseHIPTensorId()));
+  }
+
+  /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`,
@@ -1530,7 +1545,19 @@ protected:
 
   c10::VariableVersion version_counter_;
 
-  PyObject* pyobj_ = nullptr; // weak reference
+  // This field contains a weak reference to a PyObject representing
+  // this Tensor.  It MUST NOT be a strong reference, as that would
+  // create a reference cycle between Tensor and the PyObject.  If
+  // pyobj is nullptr, when we transfer Tensor to Python, we allocate
+  // a new PyObject for it and set this field.  This is thread safe
+  // because all Python code is protected under the GIL.  This design does
+  // NOT WORK for Tensors which are shared across multiple Python
+  // subinterpreters (introduced in Python 3.8) since you don't have
+  // enough space to store the separate PyObject per subinterpreter.
+  // When a PyObject dies, you are obligated to clear this field
+  // (otherwise, you will try to use-after-free the pyobj); this currently
+  // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
+  PyObject* pyobj_ = nullptr;
 
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space

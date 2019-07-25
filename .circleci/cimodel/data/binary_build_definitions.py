@@ -46,10 +46,10 @@ class Conf(object):
 
         parts = [self.get_name_prefix(), self.os] + self.gen_build_env_parms()
 
-        if self.smoke:
-            if self.libtorch_variant:
-                parts.append(self.libtorch_variant)
-        else:
+        if self.libtorch_variant:
+            parts.append(self.libtorch_variant)
+
+        if not self.smoke:
             parts.append(build_or_test)
 
         return "_".join(parts)

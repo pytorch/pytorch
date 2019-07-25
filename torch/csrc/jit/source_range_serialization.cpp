@@ -82,15 +82,15 @@ SourceRangePickler::SourceRangePickler()
     : p(new Pickler()), srs(new SourceRangeSerializer()) {}
 
 void SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
-  p->start();
+  p->protocol();
   p->startTuple();
   for (const auto& range : ranges) {
     std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
                                        srs->serialize(range.range)};
-    p->addIValue(c10::ivalue::Tuple::create(std::move(row_elems)));
+    p->pushIValue(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
   p->endTuple();
-  p->finish();
+  p->stop();
 }
 
 const std::vector<char>& SourceRangePickler::get_data() {
@@ -110,7 +110,7 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  Unpickler up(data.get(), size, nullptr);
+  Unpickler up(data.get(), size, nullptr, nullptr);
   auto ivalues = up.parse_ivalue_list();
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
