@@ -52,8 +52,20 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
-    'sphinx.ext.imgmath',
+    'sphinxcontrib.katex',
 ]
+
+# katex options
+#
+#
+
+katex_options = r'''
+delimiters : [
+   {left: "$$", right: "$$", display: true},
+   {left: "\\(", right: "\\)", display: false},
+   {left: "\\[", right: "\\]", display: true}
+]
+'''
 
 napoleon_use_ivar = True
 
@@ -109,6 +121,12 @@ todo_include_todos = True
 autodoc_inherit_docstrings = False
 
 
+# -- katex javascript in header
+#
+#    def setup(app):
+#    app.add_javascript("https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.js")
+
+
 # -- Options for HTML output ----------------------------------------------
 #
 # The theme to use for HTML and HTML Help pages.  See the documentation for
@@ -149,6 +167,7 @@ def setup(app):
     # and can be moved outside of this function (and the setup(app) function
     # can be deleted).
     html_css_files = [
+        'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css'
     ]
 
     # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
