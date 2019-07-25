@@ -6,6 +6,8 @@ from torch.nn.modules.utils import _pair
 from torch.nn import init
 from torch.nn._intrinsic import ConvBn2d as NNConvBn2d
 from torch.nn._intrinsic import ConvBnReLU2d as NNConvBnReLU2d
+from torch.nn._intrinsic import ConvReLU2d as NNConvReLU2d
+from ....qat.modules.conv import Conv2d as QATConv2d
 from torch.nn import Parameter
 import torch.nn.functional as F
 
@@ -56,7 +58,7 @@ class ConvBn2d(_ConvNdBase):
                                        groups, bias, padding_mode)
         self.eps = eps
         self.momentum = momentum
-        self.freeze_bn = freeze_bn
+        self.freeze_bn = freeze_bn if self.training else True
         self.num_features = out_channels
         self.gamma = Parameter(torch.Tensor(out_channels))
         self.beta = Parameter(torch.Tensor(out_channels))
@@ -225,3 +227,39 @@ class ConvBnReLU2d(ConvBn2d):
 
         def forward(self, input):
             return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
+
+class ConvReLU2d(QATConv2d):
+    r"""
+    A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
+    FakeQuantize modules for both output activation and weight for
+    quantization aware training.
+
+    We adopt the same interface as :class:`~torch.nn.Conv2d`.
+
+    Similar to :class:`~torch.nn.Conv2d`, with FakeQuantize modules initialized to
+    default.
+
+    Attributes:
+        observer: fake quant module for output activation, it's called observer
+            to align with post training flow
+        weight_fake_quant: fake quant module for weight
+
+    """
+    __FLOAT_MODULE__ = NNConvReLU2d
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=True, padding_mode='zeros',
+                 activation_fake_quant=None,
+                 weight_fake_quant=None):
+        super(ConvReLU2d, self).__init__(in_channels, out_channels, kernel_size,
+                                         stride=stride, padding=padding, dilation=dilation,
+                                         groups=groups, bias=bias, padding_mode=padding_mode)
+        self.observer = activation_fake_quant()
+        self.weight_fake_quant = weight_fake_quant()
+
+    def forward(self, input):
+        return self.observer(F.relu(conv2d_forward(input, self.padding_mode,
+                             self.padding, self.weight_fake_quant(self.weight),
+                             self.bias, self.stride, self.dilation, self.groups),
+                             True))
