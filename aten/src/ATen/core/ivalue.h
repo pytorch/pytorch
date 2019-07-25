@@ -575,10 +575,10 @@ struct StrongTypePtr {
   std::shared_ptr<ClassType> type_;
 };
 
-TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getTypeMap();
+TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
 template<typename T>
 c10::StrongTypePtr getCustomClassType() {
-  auto tmap = c10::getTypeMap();
+  auto tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(typeid(T).name());
   if (res == tmap.end()) {
     throw c10::Error("Can't find class id in custom class type map", "");
@@ -588,7 +588,7 @@ c10::StrongTypePtr getCustomClassType() {
 
 template<typename T>
 inline bool isCustomClassRegistered() {
-  auto tmap = c10::getTypeMap();
+  auto tmap = c10::getCustomClassTypeMap();
   return tmap.find(typeid(T).name()) != tmap.end();
 }
 }

@@ -172,7 +172,7 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   return ordered;
 }
 
-std::unordered_map<std::string, c10::StrongTypePtr>& getTypeMap() {
+std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
     static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
     return tmap;
 }

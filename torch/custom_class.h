@@ -82,9 +82,9 @@ class class_ {
         ClassType::create(c10::QualifiedName(qualClassName), classCu);
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
-    c10::getTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
+    c10::getCustomClassTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
-    c10::getTypeMap().insert({typeid(c10::ivalue_holder<CurClass>).name(),
+    c10::getCustomClassTypeMap().insert({typeid(c10::ivalue_holder<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
 
     classCu->register_class(classTypePtr);
