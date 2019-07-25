@@ -119,14 +119,17 @@ struct TORCH_API Module {
     return *module_object()->type()->qualified_name_obj();
   }
 
-  // note this doesn't change the flags of existing methods just ones
-  // added afterward.
   void set_optimized(bool o) {
-    class_compilation_unit()->set_optimized(o);
+    AT_WARN(
+        "Module::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
   }
 
   bool is_optimized() const {
-    return class_compilation_unit()->is_optimized();
+    AT_WARN(
+        "Module::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   IValue forward(std::vector<IValue> inputs) {
