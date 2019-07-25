@@ -604,7 +604,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, input):
                 return fn(input)
 
-        m1 = torch.randn(3, 4)
+        m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(MyModel(), input=m1, train=False, batch_size=BATCH_SIZE)
 
     def test_index_1d(self):
@@ -622,16 +622,47 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
-    # TODO: Slicing along two dimensions is currently unsupported by the caffe2
-    # backend. Revisit if this becomes supported in the future.
-    """
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_2dimslice(self):
         self._test_index_generic(lambda input: input[0:1, 0:1])
-    """
-    """
+
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_neg_slice2dim(self):
         self._test_index_generic(lambda input: input[0:-1, 0:-1])
-    """
+
+    def test_tensor_index_1d(self):
+        self._test_index_generic(lambda input: input[torch.tensor([0, 2])])
+
+    def test_tensor_index_2d_1dconstant(self):
+        self._test_index_generic(lambda input: input[1, torch.tensor([0, 2])])
+
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_tensor_index_2d_1dslice(self):
+        self._test_index_generic(lambda input: input[torch.tensor([0, 2]), 0:1])
+
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_tensor_index_2d_1dslice_first(self):
+        self._test_index_generic(lambda input: input[1:3, torch.tensor([0, 2])])
+
+    def test_tensor_index_newaxis(self):
+        self._test_index_generic(lambda input: input[None, torch.tensor([0, 2])])
+
+    def test_tensor_index_advanced_indexing(self):
+        self._test_index_generic(
+            lambda input: input[:, torch.tensor([[0, 2], [1, 1]]), :, torch.tensor([2, 1]), torch.tensor([0, 3])])
+
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_tensor_index_advanced_indexing_with_slice(self):
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), None, 2:4, torch.tensor([[1, 3], [4, 0]])])
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([1]), 2:4, torch.tensor([[1], [4]])])
+
+    def test_tensor_index_advanced_indexing_consecutive(self):
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([[1, 3], [4, 0]]), None])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_tensor_index_advanced_indexing_masked(self):
+        self._test_index_generic(
+            lambda input: input[:, torch.tensor([1, 0, 1, 0], dtype=torch.uint8), torch.tensor([[1, 3], [4, 0]]), None])
 
     def test_chunk(self):
         class MyModel(torch.nn.Module):
@@ -714,6 +745,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 # support tuple comparison.
                 return input - 1
         self.run_model_test(MyModel(), train=False, batch_size=BATCH_SIZE)
+
+    def test_dataparallel(self):
+        model = nn.DataParallel(nn.ReflectionPad2d((1, 2, 3, 4)))
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
     def test_embedding(self):
         model = nn.Embedding(10, 3, padding_idx=-1)
@@ -1782,6 +1817,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test__dim_arange(self):
         class DimArange(torch.nn.Module):
             def forward(self, input):
@@ -1789,6 +1825,60 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.ones(5, 6)
         self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end_step(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
 
     def test_log2(self):
         class Log2Model(torch.nn.Module):

@@ -170,122 +170,14 @@ Tensor fbgemm_linear_int8_weight(
       "fbgemm_linear_int8_weight will be deprecated soon."
       "Please use fbgemm_linear_int8_weight_fp32_activation instead.");
 
-  // We make a strong guarantee that models using these operators will have the
-  // same numerics across different machines. Therefore, we do not provide a
-  // fallback path and rather fail loudly if we cannot run FBGEMM.
-  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
-
-  auto input_contig = input.contiguous();
-  auto* input_ptr = input_contig.data<float>();
-
-  TORCH_CHECK(input.dim() >= 2);
-  int64_t M = 1;
-  for (size_t i = 0; i < input.dim() - 1; ++i) {
-    M *= input.size(i);
-  }
-  int64_t K = input.size(input.dim() - 1);
-  TORCH_CHECK(weight.dim() == 2);
-  TORCH_CHECK(K == weight.size(1));
-  auto N = weight.size(0);
-  TORCH_CHECK(bias.dim() == 1);
-  TORCH_CHECK(bias.size(0) == N);
-  TORCH_CHECK(weight_scale.isFloatingPoint());
-  TORCH_CHECK(weight_zero_point.isIntegral());
-
-  // Calculate statistics for quantization of the input Tensor
-  float x_min, x_max;
-  fbgemm::FindMinMax(
-      /*m=*/input_ptr,
-      /*min=*/&x_min,
-      /*max=*/&x_max,
-      /*len=*/input.numel());
-
-  // Input tensor is quantized as 8-bit unsigned values
-  static constexpr int precision = 8;
-  static constexpr bool is_signed = false;
-
-  // Calculate scale and zero point for quantization of input tensor
-  auto q_params = fbgemm::ChooseQuantizationParams(
-      /*min=*/x_min,
-      /*max=*/x_max,
-      /*qmin=*/is_signed ? -(1 << (precision - 1)) : 0,
-      /*qmax=*/is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
-      /*preserve_sparsity=*/false);
-
-  q_params.precision = precision;
-
-  // This operation does the following:
-  // 1) Quantizes the input matrix given the statistics we've calculated above
-  // 2) Creates a "row buffer" vector with offset values that must be added
-  //    to the integer matrix multiplication operation to ensure correctness
-  // 3) Packs the resulting quantized matrix into vector-register and cache
-  //    friendly tiles.
-  //
-  //  Note this is not executed eagerly, but rather within the fbgemmPacked call
-  //  below.
-  fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
-      /*trans=*/fbgemm::matrix_op_t::NoTranspose,
-      /*nRow=*/M,
-      /*nCol=*/K,
-      /*smat=*/input_ptr,
-      /*ld=*/K,
-      /*pmat=*/nullptr, // packA manages ownership of `pmat`
-      /*scale=*/q_params.scale,
-      /*zero_pt=*/q_params.zero_point);
-
-  // ReQuantizeForFloat requires pointers to the scale and zero point values,
-  // since in the case of rowwise quantization these will be arrays rather than
-  // scalars. But in this case, we're doing whole-tensor quantization so we just
-  // pass a pointer to the scale values (and internally ReQuantizeFor Float
-  // won't index past 0
-  float weight_scale_float = static_cast<float>(weight_scale.to<double>());
-  int32_t weight_zero_point_int32 =
-      static_cast<int32_t>(weight_zero_point.to<int64_t>());
-
-  // This is the end of the pipeline, pass the resulting matrix through
-  fbgemm::DoNothing<float, float> doNothingObj{};
-
-  auto bias_contig = bias.contiguous();
-
-  // After the uint8 * int8 matrix multiplication is performed, this operation
-  // does:
-  //  1) Add in row and column offsets to the rows and columns, respectively
-  //  2) Dequantize the results into floating point
-  //  3) Add in the bias term
-  fbgemm::ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
-      /*nextop=*/doNothingObj,
-      /*Aq_scale=*/q_params.scale,
-      /*Bq_scale=*/&weight_scale_float,
-      /*Aq_zero_point=*/q_params.zero_point,
-      /*Bq_zero_point=*/&weight_zero_point_int32,
-      /*row_offsets=*/packA.getRowOffsetBuffer(),
-      /*col_offsets=*/col_offsets.data<int32_t>(),
-      /*bias=*/bias_contig.data<float>(),
-      /*nCol=*/N);
-
-  // Allocate output Tensor and a buffer for fbgemmPacked to use
-  auto output = at::zeros({M, N}, bias.options().dtype(at::kFloat));
-  auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
-
-  // Pull out the PackBMatrix instance from the owning tensor
-  auto& packB = cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
-
-  // Do the GEMM
-  fbgemm::fbgemmPacked(
-      /*packA=*/packA,
-      /*packB=*/packB,
-      /*C=*/output.data<float>(),
-      /*C_buffer=*/buffer.data<int32_t>(),
-      /*ldc=*/N,
-      /*outProcess=*/outputProcObj,
-      /*thread_id=*/0,
-      /*num_threads=*/1);
-
-  // The resulting matrix here is 2-D, let's view it with the original
-  // left hand dimensions of the input.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
-  out_sizes.back() = N;
-  return output.view(out_sizes);
+  return fbgemm_linear_int8_weight_fp32_activation(
+      input,
+      weight,
+      packed,
+      col_offsets,
+      weight_scale,
+      weight_zero_point,
+      bias);
 }
 
 namespace {
@@ -391,21 +283,7 @@ Tensor fbgemm_pack_quantized_matrix(
       "fbgemm_pack_quantized_matrix(weight, K, N) will be deprecated soon."
       "Please use fbgemm_pack_quantized_matrix(weight) instead.");
 
-  // We make a strong guarantee that models using these operators will have the
-  // same numerics across different machines. Therefore, we do not provide a
-  // fallback path and rather fail loudly if we cannot run FBGEMM.
-  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
-  auto weight_contig = weight.contiguous();
-  auto contiguous_ptr = weight_contig.data<int8_t>();
-  auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
-      /*trans=*/fbgemm::matrix_op_t::Transpose,
-      /*nRow=*/K,
-      /*nCol=*/N,
-      /*smat=*/contiguous_ptr,
-      /*ld=*/K,
-      /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
-      /*groups=*/1);
-  return cpp_custom_type_hack::create(std::move(ptr), weight.options());
+  return fbgemm_pack_quantized_matrix(weight);
 }
 
 float raw_uint16_to_fp16(unsigned short value) {
@@ -494,10 +372,11 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =
       cpp_custom_type_hack::cast<fbgemm::PackedGemmMatrixFP16>(packed_weight);
 
-  TORCH_CHECK(input.size(1) == packed_weight_fp16.numRows())
+  TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
   TORCH_CHECK(input.dim() >= 2);
-  int64_t M = input.size(0);
   TORCH_CHECK(bias.dim() == 1);
+
+  int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   int64_t N = packed_weight_fp16.numCols();
 
   auto output = at::empty({M, N}, bias.options().dtype(at::kFloat));
@@ -514,7 +393,9 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   // Add bias term
   output.add_(bias);
 
-  return output;
+  std::vector<int64_t> out_sizes = input.sizes().vec();
+  out_sizes.back() = N;
+  return output.view(out_sizes);
 }
 
 Tensor fbgemm_linear_fp16_weight(
@@ -525,39 +406,7 @@ Tensor fbgemm_linear_fp16_weight(
       "fbgemm_linear_fp16_weight will be deprecated soon."
       "Please use fbgemm_linear_fp16_weight_fp32_activation instead.");
 
-  // We make a strong guarantee that models using these operators will have the
-  // same numerics across different machines. Therefore, we do not provide a
-  // fallback path and rather fail loudly if we cannot run FBGEMM.
-  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
-
-  auto input_contig = input.contiguous();
-  auto* input_ptr = input_contig.data<float>();
-
-  // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
-  const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =
-      cpp_custom_type_hack::cast<fbgemm::PackedGemmMatrixFP16>(packed_weight);
-
-  TORCH_CHECK(input.size(1) == packed_weight_fp16.numRows())
-  TORCH_CHECK(input.dim() >= 2);
-  int64_t M = input.size(0);
-  TORCH_CHECK(bias.dim() == 1);
-  int64_t N = packed_weight_fp16.numCols();
-
-  auto output = at::empty({M, N}, bias.options().dtype(at::kFloat));
-
-  // Call the fp16 gemm interface
-  fbgemm::cblas_gemm_compute(
-      fbgemm::matrix_op_t::NoTranspose,
-      M,
-      input_ptr,
-      packed_weight_fp16,
-      0.f,
-      output.data<float>());
-
-  // Add bias term
-  output.add_(bias);
-
-  return output;
+  return fbgemm_linear_fp16_weight_fp32_activation(input, packed_weight, bias);
 }
 
 #else // USE_FBGEMM
