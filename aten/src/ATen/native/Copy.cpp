@@ -126,12 +126,12 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   builder.dont_compute_common_dtype();
   auto iter = builder.build();
 
-  if (iter->numel() == 0) {
+  if (iter.numel() == 0) {
     return self;
   }
 
-  DeviceType device_type = iter->device_type(0);
-  if (iter->device_type(1) == kCUDA) {
+  DeviceType device_type = iter.device_type(0);
+  if (iter.device_type(1) == kCUDA) {
     device_type = kCUDA;
   }
 
@@ -140,7 +140,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     return self;
   }
 
-  copy_stub(device_type, *iter, non_blocking);
+  copy_stub(device_type, iter, non_blocking);
   return self;
 }
 
