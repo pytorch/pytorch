@@ -8,7 +8,8 @@ from .module import Module
 from .utils import _single, _pair, _triple
 from ..._jit_internal import List
 
-class _ConvNdBase(Module):
+
+class _ConvNd(Module):
 
     __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias',
                      'padding_mode', 'output_padding', 'in_channels',
@@ -17,7 +18,7 @@ class _ConvNdBase(Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode):
-        super(_ConvNdBase, self).__init__()
+        super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
@@ -42,6 +43,14 @@ class _ConvNdBase(Module):
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
             self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
@@ -59,25 +68,10 @@ class _ConvNdBase(Module):
         return s.format(**self.__dict__)
 
     def __setstate__(self, state):
-        super(_ConvNdBase, self).__setstate__(state)
+        super(_ConvNd, self).__setstate__(state)
         if not hasattr(self, 'padding_mode'):
             self.padding_mode = 'zeros'
 
-class _ConvNd(_ConvNdBase):
-    def __init__(self, in_channels, out_channels, kernel_size, stride,
-                 padding, dilation, transposed, output_padding,
-                 groups, bias, padding_mode):
-        super(_ConvNd, self).__init__(in_channels, out_channels, kernel_size, stride,
-                                      padding, dilation, transposed, output_padding,
-                                      groups, bias, padding_mode)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
 
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over an input signal composed of several input

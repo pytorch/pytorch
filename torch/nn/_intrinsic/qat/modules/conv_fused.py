@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import math
 import torch
-from torch.nn.modules.conv import _ConvNdBase
+from torch.nn import Conv2d
 from torch.nn.modules.utils import _pair
 from torch.nn import init
 from torch.nn._intrinsic import ConvBn2d as NNConvBn2d
@@ -12,7 +12,7 @@ from torch.nn import Parameter
 import torch.nn.functional as F
 
 
-class ConvBn2d(_ConvNdBase):
+class ConvBn2d(Conv2d):
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
     attached with FakeQuantize modules for both output activation and weight,
@@ -49,13 +49,8 @@ class ConvBn2d(_ConvNdBase):
                  freeze_bn=False,
                  activation_fake_quant=None,
                  weight_fake_quant=None):
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
         super(ConvBn2d, self).__init__(in_channels, out_channels, kernel_size,
-                                       stride, padding, dilation, False, _pair(0),
-                                       groups, bias, padding_mode)
+                                       stride, padding, dilation, groups, bias, padding_mode)
         self.eps = eps
         self.momentum = momentum
         self.freeze_bn = freeze_bn if self.training else True
@@ -69,12 +64,17 @@ class ConvBn2d(_ConvNdBase):
         self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         self.observer = activation_fake_quant()
         self.weight_fake_quant = weight_fake_quant()
-        self.reset_parameters()
+        self.reset_bn_parameters()
 
     def reset_running_stats(self):
         self.running_mean.zero_()
         self.running_var.fill_(1)
         self.num_batches_tracked.zero_()
+
+    def reset_bn_parameters(self):
+        self.reset_running_stats()
+        init.uniform_(self.gamma)
+        init.zeros_(self.beta)
 
     def reset_parameters(self):
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
@@ -82,9 +82,9 @@ class ConvBn2d(_ConvNdBase):
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
-        self.reset_running_stats()
-        init.uniform_(self.gamma)
-        init.zeros_(self.beta)
+        # A hack to avoid resetting on undefined parameters
+        if hasattr(self, 'gamma'):
+            self.reset_bn_parameters()
 
     def enable_fake_quant(self):
         self.observer.enable()
@@ -95,16 +95,6 @@ class ConvBn2d(_ConvNdBase):
         self.observer.disable()
         self.weight_fake_quant.disable()
         return self
-
-    def conv2d_forward(self, input, weight):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[1] + 1) // 2, self.padding[1] // 2,
-                                (self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
-                            weight, self.bias, self.stride,
-                            _pair(0), self.dilation, self.groups)
-        return F.conv2d(input, weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
 
     def _forward(self, input):
         # exponential_average_factor is self.momentum set to
