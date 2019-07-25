@@ -104,18 +104,7 @@ class class_ {
       object->setSlot(0, capsule);
     };
 
-    auto graph = std::make_shared<Graph>();
-    auto qualOperatorName = className + "::__init__";
-    static auto classRegistry =
-        torch::RegisterOperators().op(qualOperatorName, std::move(func));
-
-    std::vector<Value*> inputs = addInputs(func, graph);
-    auto res = graph->insertNode(
-        graph->create(Symbol::fromQualString(qualOperatorName), inputs, 0));
-    graph->registerOutput(
-        graph->insertConstant(IValue())->setType(NoneType::get()));
-
-    classCu->create_function(qualClassName + ".__init__", graph);
+    defineMethod<void>("__init__", std::move(func), false);
     return *this;
   }
   template <typename Func>
@@ -163,24 +152,18 @@ class class_ {
   void addType(Value* v) {
     v->setType(getTypePtr<T>());
   }
-
-  template <typename Func, typename R, typename... Types>
-  class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {
-    pyClass->def(name.c_str(), f);
-
+  template<typename R, typename Func>
+  void defineMethod(std::string name, Func func, bool hasRet) {
+    auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
-    auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
-      return guts::invoke(f, *cur, args...);
-    };
     static auto classRegistry =
         torch::RegisterOperators().op(qualFuncName, std::move(func));
 
-    auto graph = std::make_shared<Graph>();
     std::vector<Value*> inputs = addInputs(func, graph);
     auto methodCall = graph->insertNode(graph->create(
-        Symbol::fromQualString(qualFuncName), inputs, funcInfo.hasRet));
+        Symbol::fromQualString(qualFuncName), inputs, hasRet));
     Value* res;
-    if (funcInfo.hasRet) {
+    if (hasRet) {
       res = methodCall->output();
       addType<R>(res);
     } else {
@@ -189,6 +172,15 @@ class class_ {
     graph->registerOutput(res);
 
     classCu->create_function(qualClassName + "." + name, graph);
+  }
+  template <typename Func, typename R, typename... Types>
+  class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {
+    pyClass->def(name.c_str(), f);
+
+    auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
+      return guts::invoke(f, *cur, args...);
+    };
+    defineMethod<R>(name, std::move(func), funcInfo.hasRet);
     return *this;
   }
 };
