@@ -18,6 +18,7 @@ import torch.jit.quantized
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
+import torch.nn.quantized as nnq
 import torch.optim as optim
 
 # Testing utils
@@ -2867,6 +2868,49 @@ graph(%Ra, %Rb):
         buffer.seek(0)
         model_loaded = torch.jit.load(buffer)
         self.assertEqual(model_loaded(), model())
+
+    def test_serialize_qmodule(self):
+        batch_size = 10
+        in_features = 16
+        out_features = 4
+
+        X = torch.rand(batch_size, in_features).float()
+        X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
+
+        W = torch.rand(out_features, in_features).float()
+        W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
+        W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
+
+        B = torch.rand(out_features).float()
+        B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32)
+
+        out_scale = 0.5
+        out_zero_point = 3
+        qlinear = nnq.Linear(in_features, out_features)
+        qlinear._packed_weight = W_pack
+        qlinear.bias = B_q
+        qlinear.scale = torch.tensor([out_scale], dtype=torch.double)
+        qlinear.zero_point = torch.tensor([out_zero_point], dtype=torch.long)
+        Z_q = qlinear(X_q)
+
+        model_dict = qlinear.state_dict()
+        self.assertEqual(model_dict['weight'], W_q)
+
+        with torch.no_grad():
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(model_dict, f)
+                f.seek(0)
+                loaded_dict = torch.load(f)
+            #traced = torch.jit.trace(qlinear, X_q)
+            traced = torch.jit.script(qlinear)
+            buffer = io.BytesIO()
+            #torch.jit.save(traced, buffer)
+            traced.save(buffer)
+            buffer.seek(0)
+            qlinear_loaded = torch.jit.load(buffer)
+            #qlinear_loaded._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(loaded_dict['weight'])
+            Z_q_loaded = qlinear_loaded(X_q)
+            self.assertEqual(Z_q_loaded, Z_q)
 
 class TestScript(JitTestCase):
     def test_sequence_parsing(self):

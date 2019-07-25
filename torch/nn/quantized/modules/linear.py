@@ -113,6 +113,15 @@ class Linear(NNLinear):
         self.register_buffer('zero_point',
                              torch.tensor([0], dtype=torch.long))
 
+    @torch.jit.export
+    def __getstate__(self):
+        return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        self._packed_weight.set_(
+            torch.ops.quantized.fbgemm_linear_prepack(state[0]))
+
     @property
     def weight(self):
         return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
