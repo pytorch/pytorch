@@ -298,9 +298,6 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                         if err_v[i].item() != 0:
                             err_p.append((i, a_v[i].item(), n_v[i].item()))
 
-                    print("======CDIST======")
-                    print(*err_p)
-
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
                                      'sign:%s\ndiff:%s\nerr:%s\nsigns:%s\n'
                                      'output:%s\ntupled_inputs:%s\n'
