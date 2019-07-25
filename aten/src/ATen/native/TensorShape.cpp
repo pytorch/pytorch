@@ -903,8 +903,8 @@ Tensor view(const Tensor& self, IntArrayRef size) {
   }
 
   auto stride = at::detail::computeStride(self.sizes(),
-                                           self.strides(),
-                                           inferred_size);
+                                          self.strides(),
+                                          inferred_size);
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
@@ -924,10 +924,12 @@ Tensor alias(const Tensor& self) {
                     Storage(self.storage()),
                     self.type_id(),
                     get_qtensorimpl(self)->quantizer());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
     self_ = Tensor(impl);
   } else {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()),
                                                 self.type_id());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
     self_ = Tensor(impl);
   }
   return self_;

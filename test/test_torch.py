@@ -8407,6 +8407,12 @@ class _TestTorchMixin(object):
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
+        # test viewing the same size
+        _tensor = tensor.view([3, 4])
+        tensor.resize_(6, 2)
+        self.assertEqual(_tensor.size(), [3, 4])
+        self.assertEqual(tensor.size(), [6, 2])
+
     def test_view(self):
         _TestTorchMixin._test_view(self, lambda x: x)
 
