@@ -36,6 +36,7 @@ Creation Ops
 .. autofunction:: tensor
 .. autofunction:: sparse_coo_tensor
 .. autofunction:: as_tensor
+.. autofunction:: as_strided
 .. autofunction:: from_numpy
 .. autofunction:: zeros
 .. autofunction:: zeros_like
@@ -189,7 +190,6 @@ Pointwise Ops
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2
-.. autofunction:: bitwise_not
 .. autofunction:: ceil
 .. autofunction:: clamp
 .. autofunction:: cos

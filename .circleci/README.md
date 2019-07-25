@@ -272,13 +272,13 @@ Manywheels are pip packages for linux distros. Note that these manywheels are no
 
 The entrypoint file `builder/manywheel/build_common.sh` is really really complicated because
 
-* This used to handle building for several different python versions at the same time. This is why there are loops everywhere
+* This used to handle building for several different python versions at the same time. The loops have been removed, but there's still unneccessary folders and movements here and there.
     * The script is never used this way anymore. This extra machinery could be removed.
 * This used to handle testing the pip packages too. This is why there’s testing code at the end that messes with python installations and stuff
     * The script is never used this way anymore. This extra machinery could be removed.
 * This also builds libtorch packages
     * This should really be separate. libtorch packages are c++ only and have no python. They should not share infra with all the python specific stuff in this file.
-* There is a lot of messing with rpaths. This is necessary, but could be made much much simpler if the loops for libtorch and separate python versions were removed.
+* There is a lot of messing with rpaths. This is necessary, but could be made much much simpler if the above issues were fixed.
 
 ## Wheels (MacOS pip and libtorch packages)
 
@@ -307,7 +307,6 @@ Libtorch packages are built in the wheel build scripts: manywheel/build_*.sh for
 * It’s confusinig. Most of those scripts deal with python specifics.
 * The extra conditionals everywhere severely complicate the wheel build scripts
 * The process for building libtorch is different from the official instructions (a plain call to cmake, or a call to a script)
-* For Linux specifically, the job is set up to build all libtorch varieties in a single go. This leads to 9+ hour builds times for CUDA 10.0 libtorch. This is more of a problem with the circleci setup though.
 
 ### Note on docker images / Dockerfiles
 

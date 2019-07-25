@@ -141,7 +141,7 @@ class DataLoader(object):
             self.dataset_kind = _DatasetKind.Iterable
             # NOTE [ Custom Samplers and `IterableDataset` ]
             #
-            # `IterableDataset` does not supports custom `batch_sampler` or
+            # `IterableDataset` does not support custom `batch_sampler` or
             # `sampler` since the key is irrelevant (unless we support
             # generator-style dataset one day...).
             #
