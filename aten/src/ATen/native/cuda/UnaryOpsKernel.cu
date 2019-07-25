@@ -25,12 +25,18 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
 
 
 void sign_kernel_cuda(TensorIterator& iter){
-    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "sign_cuda", [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-            scalar_t zero = scalar_t(0);
-            return (zero < a) - (a < zero);
-        });
-    });
+    if (iter.dtype() == ScalarType::Bool) {
+      gpu_kernel(iter, []GPU_LAMBDA(bool x){ 
+        return a; 
+      });
+    }else{
+      AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "sign_cuda", [&]() {
+          gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+              scalar_t zero = scalar_t(0);
+              return (zero < a) - (a < zero);
+          });
+      });
+    }
 }
 
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);

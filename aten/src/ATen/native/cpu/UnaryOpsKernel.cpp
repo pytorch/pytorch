@@ -99,22 +99,26 @@ static void neg_kernel(TensorIterator& iter) {
 }
 
 static void sign_kernel(TensorIterator& iter){
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
-      auto zero_vec = Vec256<scalar_t>((scalar_t)(0));
-      auto one_vec = Vec256<scalar_t>((scalar_t)(1));
+  if(iter.dtype() == at::ScalarType::Bool){
+      cpu_kernel(iter, [=](bool x) -> bool { return x; });
+  }else{
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
+        auto zero_vec = Vec256<scalar_t>((scalar_t)(0));
+        auto one_vec = Vec256<scalar_t>((scalar_t)(1));
 
-      cpu_kernel_vec(
-          iter,
-          [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
-          [=](Vec256<scalar_t> self_vec){
+        cpu_kernel_vec(
+            iter,
+            [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
+            [=](Vec256<scalar_t> self_vec){
 
-              // Comparision operators returns bitmask.
-              auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
-              auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+                // Comparision operators returns bitmask.
+                auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+                auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
 
-              return left - right;
-          });
-  });
+                return left - right;
+            });
+    });
+  }
 }
 
 static void sinh_kernel(TensorIterator& iter) {
