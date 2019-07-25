@@ -107,7 +107,7 @@ class TestFuser(JitTestCase):
             local_fusion_inputs = [t.clone().requires_grad_() for t in fusion_inputs]
 
             # Verifies outputs
-            fusion = torch.jit.trace(fn, local_fusion_inputs, check_trace=False, optimize=True)
+            fusion = torch.jit.trace(fn, local_fusion_inputs, check_trace=False)
             outputs = fn(*local_inputs)
             fusion_outputs = fusion(*local_fusion_inputs)
             outputs_half = [t.half() for t in outputs]
@@ -442,8 +442,8 @@ class TestFuser(JitTestCase):
     @skipIfRocm
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
-            def __init__(self, norm_module, optimize=True):
-                super(ResLike, self).__init__(optimize)
+            def __init__(self, norm_module):
+                super(ResLike, self).__init__()
                 self.nm = norm_module
 
             @torch.jit.script_method
@@ -452,7 +452,7 @@ class TestFuser(JitTestCase):
 
         def test_norm_decompose(nm, in_opt_graph, not_in_opt_graph, in_fusegraph):
             model = ResLike(nm).cuda()
-            model_noopt = ResLike(nm, optimize=False).cuda()
+            model_noopt = ResLike(nm).cuda()
             model_noopt.load_state_dict(model.state_dict())
             x = torch.randn(2, 16, 8, 8, device='cuda')
             y = torch.randn(2, 16, 8, 8, device='cuda')
@@ -463,8 +463,9 @@ class TestFuser(JitTestCase):
                 graph = model.graph_for(x, y)
                 rep = str(graph)
 
-                out_noopt = model_noopt(x, y)
-                rep_noopt = str(model_noopt.graph_for(x, y))
+                with torch.jit.optimized_execution(False):
+                    out_noopt = model_noopt(x, y)
+                    rep_noopt = str(model_noopt.graph_for(x, y))
                 self.assertEqual(out, out_noopt, prec=3e-5)
 
             # Check that normalization op has really been decomposed
