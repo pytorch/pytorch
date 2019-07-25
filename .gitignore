@@ -241,5 +241,3 @@ TAGS
 *.orig
 *.rej
 
-# Chilli
-test/custom_class/t/pybind11 
