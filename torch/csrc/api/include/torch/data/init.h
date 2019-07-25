@@ -43,12 +43,12 @@ class PyChunkDataReader : public ChunkDataReader<DataType> {
  * are manually binded by the user. This is necessary as the constructor
  * signature are implementation specific
  */
-template <typename SpecificChunkDataReader>
-py::class_<SpecificChunkDataReader>& bind_chunkdatareader(
+template <typename SpecificChunkDataReader, typename... Args>
+py::class_<SpecificChunkDataReader, Args...>  bind_chunkdatareader(
     py::module& m,
     const std::string& typestr) {
   // SpecificChunkDataReader
-  return py::class_<SpecificChunkDataReader>(
+  return (py::class_<SpecificChunkDataReader, Args...>(
              m,
              typestr.c_str(),
              "Performs data chunking and reading of entire chunks")
@@ -62,7 +62,7 @@ py::class_<SpecificChunkDataReader>& bind_chunkdatareader(
           "chunk_count",
           &SpecificChunkDataReader::chunk_count,
           "Returns the number of chunks")
-      .def("reset", &SpecificChunkDataReader::reset, "Not used");
+      .def("reset", &SpecificChunkDataReader::reset, "Not used"));
 }
 
 /* Generates Python bindings for a specific ChunkDataset implementation */

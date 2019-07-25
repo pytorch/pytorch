@@ -53,132 +53,13 @@ void init_dataset_bindings(PyObject* module) {
 
   /// ChunkDataReader for all standard types
   /// (uint8_t, int8_t, int16_t, int32_t, int64_t, float, double)
-  py::class_<ChunkDataReader<uint8_t>, PyChunkDataReader<uint8_t>>(
-      chunk,
-      "ChunkDataReaderUint8T",
-      "Chunk reader performs data chunking and reading of entire chunks with uint8_t data")
-      .def(
-          "read_chunk",
-          &ChunkDataReader<uint8_t>::read_chunk,
-          "Read an entire chunk",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &ChunkDataReader<uint8_t>::chunk_count,
-          "Returns the number of chunks available in this reader")
-      .def(
-          "reset",
-          &ChunkDataReader<uint8_t>::reset,
-          "Resets any internal state associate with this reader");
-  py::class_<ChunkDataReader<int8_t>, PyChunkDataReader<int8_t>>(
-      chunk,
-      "ChunkDataReaderInt8T",
-      "Chunk reader performs data chunking and reading of entire chunks with int8_t data")
-      .def(
-          "read_chunk",
-          &ChunkDataReader<int8_t>::read_chunk,
-          "Read an entire chunk",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &ChunkDataReader<int8_t>::chunk_count,
-          "Returns the number of chunks available in this reader")
-      .def(
-          "reset",
-          &ChunkDataReader<int8_t>::reset,
-          "Resets any internal state associate with this reader");
-  py::class_<ChunkDataReader<int16_t>, PyChunkDataReader<int16_t>>(
-      chunk,
-      "ChunkDataReaderInt16T",
-      "Chunk reader performs data chunking and reading of entire chunks with int16_t data")
-      .def(
-          "read_chunk",
-          &ChunkDataReader<int16_t>::read_chunk,
-          "Read an entire chunk",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &ChunkDataReader<int16_t>::chunk_count,
-          "Returns the number of chunks available in this reader")
-      .def(
-          "reset",
-          &ChunkDataReader<int16_t>::reset,
-          "Resets any internal state associate with this reader");
-  py::class_<ChunkDataReader<int32_t>, PyChunkDataReader<int32_t>>(
-      chunk,
-      "ChunkDataReaderInt32T",
-      "Chunk reader performs data chunking and reading of entire chunks with int32_t data")
-      .def(
-          "read_chunk",
-          &ChunkDataReader<int32_t>::read_chunk,
-          "Read an entire chunk",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &ChunkDataReader<int32_t>::chunk_count,
-          "Returns the number of chunks available in this reader")
-      .def(
-          "reset",
-          &ChunkDataReader<int32_t>::reset,
-          "Resets any internal state associate with this reader");
-  py::class_<ChunkDataReader<int64_t>, PyChunkDataReader<int64_t>>(
-      chunk,
-      "ChunkDataReaderInt64T",
-      "Chunk reader performs data chunking and reading of entire chunks with int64_t data")
-      .def(
-          "read_chunk",
-          &ChunkDataReader<int64_t>::read_chunk,
-          "Read an entire chunk",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &ChunkDataReader<int64_t>::chunk_count,
-          "Returns the number of chunks available in this reader")
-      .def(
-          "reset",
-          &ChunkDataReader<int64_t>::reset,
-          "Resets any internal state associate with this reader");
-  py::class_<ChunkDataReader<float>, PyChunkDataReader<float>>(
-      chunk,
-      "ChunkDataReaderFloat",
-      "Chunk reader performs data chunking and reading of entire chunks with float data")
-      .def(
-          "read_chunk",
-          &ChunkDataReader<float>::read_chunk,
-          "Read an entire chunk",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &ChunkDataReader<float>::chunk_count,
-          "Returns the number of chunks available in this reader")
-      .def(
-          "reset",
-          &ChunkDataReader<float>::reset,
-          "Resets any internal state associate with this reader");
-  py::class_<ChunkDataReader<double>, PyChunkDataReader<double>>(
-      chunk,
-      "ChunkDataReaderDouble",
-      "Chunk reader performs data chunking and reading of entire chunks with double data")
-      .def(
-          "read_chunk",
-          &ChunkDataReader<double>::read_chunk,
-          "Read an entire chunk",
-          py::arg("chunk_index"),
-          py::return_value_policy::take_ownership)
-      .def(
-          "chunk_count",
-          &ChunkDataReader<double>::chunk_count,
-          "Returns the number of chunks available in this reader")
-      .def(
-          "reset",
-          &ChunkDataReader<double>::reset,
-          "Resets any internal state associate with this reader");
+  bind_chunkdatareader<ChunkDataReader<uint8_t>, PyChunkDataReader<uint8_t>>(chunk, "ChunkDataReaderUint8T");
+  bind_chunkdatareader<ChunkDataReader<int8_t>, PyChunkDataReader<int8_t>>(chunk, "ChunkDataReaderInt8T");
+  bind_chunkdatareader<ChunkDataReader<int16_t>, PyChunkDataReader<int16_t>>(chunk, "ChunkDataReaderInt16T");
+  bind_chunkdatareader<ChunkDataReader<int32_t>, PyChunkDataReader<int32_t>>(chunk, "ChunkDataReaderInt32T");
+  bind_chunkdatareader<ChunkDataReader<int64_t>, PyChunkDataReader<int64_t>>(chunk, "ChunkDataReaderInt64T");
+  bind_chunkdatareader<ChunkDataReader<float>, PyChunkDataReader<float>>(chunk, "ChunkDataReaderFloat");
+  bind_chunkdatareader<ChunkDataReader<double>, PyChunkDataReader<double>>(chunk, "ChunkDataReaderDouble");
 }
 
 } // namespace data
