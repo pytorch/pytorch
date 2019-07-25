@@ -21,7 +21,7 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* rpc_init(PyObject* _unused) {
+PyObject* rpc_init(PyObject* /* unused */) {
   auto dist_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!dist_module) {
     throw python_error();

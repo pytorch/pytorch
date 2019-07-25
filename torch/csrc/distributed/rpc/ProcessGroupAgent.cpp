@@ -90,7 +90,7 @@ void ProcessGroupAgent::shutdown() {
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
   int dst = (pg_->getRank() + 1) % pg_->getSize();
-  enqueue(SendWork(dst, std::move(Message({}, {}, MessageType::SHUTDOWN))));
+  enqueue(SendWork(dst, Message({}, {}, MessageType::SHUTDOWN)));
   std::unique_lock<std::mutex> lock(sendQueueMutex_);
   workConsumeCV_.wait(lock, [&] { return sendQueue_.empty(); });
   stop_ = true;
