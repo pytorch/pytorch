@@ -1216,9 +1216,6 @@ struct CAFFE2_API CapsuleType : public Type {
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::CapsuleType;
-  }
   std::string str() const override {
     return "Capsule";
   }

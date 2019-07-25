@@ -9,5 +9,15 @@ getClassConverter() {
       classConverter;
   return classConverter;
 }
+
+c10::optional<py::object> tryToConvertToCustomClass(
+    c10::intrusive_ptr<c10::ivalue::Object> obj) {
+  if (obj->name().find("__torch__.torch.classes") == 0) {
+    auto objPtr = (void*)obj->getAttr("capsule").toCapsule().release();
+    auto classConverter = getClassConverter()[obj->name()];
+    return classConverter(objPtr);
+  }
+  return c10::nullopt;
+}
 } // namespace jit
 } // namespace torch

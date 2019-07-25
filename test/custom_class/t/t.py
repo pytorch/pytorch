@@ -32,3 +32,5 @@ def f():
     return val
 
 x = f()
+print(x)
+x.display()
