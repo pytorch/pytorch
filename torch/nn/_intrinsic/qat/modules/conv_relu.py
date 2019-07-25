@@ -10,9 +10,7 @@ class ConvReLU2d(QATConv2d):
     FakeQuantize modules for both output activation and weight for
     quantization aware training.
 
-    We adopt the same interface as `torch.nn.Conv2d`, please see
-    https://pytorch.org/docs/stable/nn.html?highlight=conv2d#torch.nn.Conv2d
-    for documentation.
+    We adopt the same interface as :class:`~torch.nn.Conv2d`.
 
     Similar to :class:`~torch.nn.Conv2d`, with FakeQuantize modules initialized to
     default.

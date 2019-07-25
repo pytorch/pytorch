@@ -157,7 +157,7 @@ class PyVersionConfigNode(ConfigNode):
         package_format = self.find_prop("package_format")
         os_name = self.find_prop("os_name")
 
-        has_libtorch_variants = smoke and package_format == "libtorch" and os_name == "linux"
+        has_libtorch_variants = package_format == "libtorch" and os_name == "linux"
         linking_variants = LINKING_DIMENSIONS if has_libtorch_variants else []
 
         return [LinkingVariantConfigNode(self, v) for v in linking_variants]
