@@ -1,10 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
-import torch.nn.Conv2d as Conv2d
-import torch.nn.ReLU as ReLU
-import torch.nn.Linear as Linear
-import torch.nn.BatchNorm2d as BatchNorm2d
-
+from torch.nn import Conv2d, ReLU, Linear, BatchNorm2d
 
 class ConvReLU2d(torch.nn.Sequential):
     def __init__(self, conv, relu):
