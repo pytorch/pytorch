@@ -746,6 +746,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return input - 1
         self.run_model_test(MyModel(), train=False, batch_size=BATCH_SIZE)
 
+    def test_dataparallel(self):
+        model = nn.DataParallel(nn.ReflectionPad2d((1, 2, 3, 4)))
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
     def test_embedding(self):
         model = nn.Embedding(10, 3, padding_idx=-1)
         input = torch.LongTensor(list(range(10))[::-1])
