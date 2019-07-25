@@ -66,8 +66,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
         # need data here to get around the version check because without .data,
         # the following code updates version but doesn't change content
         if x_tensor.is_sparse:
-            if printDebug:
-                print("==========SPARE===========")
             def get_stride(size):
                 dim = len(size)
                 tmp = 1
@@ -97,8 +95,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
                     r = (outb - outa) / (2 * eps)
                     d_tensor[d_idx] = r.detach().reshape(-1)
         elif x_tensor.layout == torch._mkldnn:
-            if printDebug:
-                print("==========_mkldnn===========")
             if len(input) != 1:
                 raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
                                  len(input))
@@ -120,8 +116,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
                 r = (outb - outa) / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
-            if printDebug:
-                print("==========ALL OTHER===========")
             x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
@@ -299,11 +293,11 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                                      'sign:%s\ndiff:%s\nerr:%s\nsigns:%s\n'
                                      'output:%s\ntupled_inputs:%s\n'
                                      'numerical:%s\nanalytical:%s\n' % (i, j, sign, diff, err, signs, o, tupled_inputs, n, a))
-                else:
-                    if printDebug:
-                        print("=================CDIST=======================")
-                        return fail_test('output:%s\ntupled_inputs:%s\n'
-                                         'numerical:%s\nanalytical:%s\n' % (o, tupled_inputs, n, a))
+                #else:
+                #    if printDebug:
+                #        print("=================CDIST=======================")
+                #        return fail_test('output:%s\ntupled_inputs:%s\n'
+                #                         'numerical:%s\nanalytical:%s\n' % (o, tupled_inputs, n, a))
 
         if not reentrant:
             return fail_test('Backward is not reentrant, i.e., running backward with same '
