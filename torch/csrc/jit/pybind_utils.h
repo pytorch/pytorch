@@ -39,6 +39,13 @@ namespace jit {
 // locations in libtorch code rather than user code.
 
 using tracer::TypedStack;
+
+inline std::shared_ptr<script::CompilationUnit> get_python_cu() {
+  return py::module::import("torch.jit")
+      .attr("_python_cu")
+      .cast<std::shared_ptr<script::CompilationUnit>>();
+}
+
 struct TypedIValue : public std::pair<IValue, TypePtr> {
   using pair::pair;
 
@@ -288,9 +295,9 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  auto elems = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto elems = c10::impl::GenericList(elem_type);
   for (auto elem : obj) {
-    elems.push_back(toIValue(elem, elem_type));
+    elems.push_back(toIValue(std::move(elem), elem_type));
   }
   return IValue(std::move(elems));
 }
@@ -414,9 +421,9 @@ inline IValue toIValue(
       auto classType = type->expect<ClassType>();
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
+      auto cu = classType->compilation_unit();
       auto userObj = c10::ivalue::Object::create(
-          c10::StrongTypePtr(classType->compilation_unit(), classType),
-          numAttrs);
+          c10::StrongTypePtr(cu, classType), numAttrs);
 
       // 2. copy all the contained types
       for (size_t slot = 0; slot < numAttrs; slot++) {
@@ -429,6 +436,11 @@ inline IValue toIValue(
       return userObj;
     }
     case TypeKind::NumberType:
+      if (py::isinstance<py::int_>(obj)) {
+        return py::cast<int64_t>(obj);
+      } else if (py::isinstance<py::float_>(obj)) {
+        return py::cast<double>(obj);
+      }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
@@ -559,7 +571,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
-    auto pyCu = script::CompilationUnit::_get_python_cu();
+    auto pyCu = get_python_cu();
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
@@ -717,7 +729,7 @@ inline py::object invokeScriptFunctionFromPython(
     AutoNoGIL no_gil_guard;
     callee.run(stack);
   }
-  AT_CHECK(
+  TORCH_CHECK(
       stack.size() > 0,
       "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
