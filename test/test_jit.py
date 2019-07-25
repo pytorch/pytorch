@@ -5563,7 +5563,7 @@ a")
             return {lhs} {op} {rhs}
         ''')
 
-        def test(op, const, swap_args):
+        def test(op, tensor, const, swap_args, template=template):
             args = ('t', const)
             if swap_args:
                 args = (const, 't')
@@ -5600,7 +5600,20 @@ a")
             if op == '%' and swap_args is True:
                 continue
 
-            test(op, const, swap_args)
+            test(op, tensor, const, swap_args)
+
+        alpha_template = dedent('''
+        def func(t):
+            return torch.{{op}}({{lhs}}, {{rhs}}, alpha={alpha})
+        ''')
+        template = alpha_template.format(alpha="5.2")
+        test('add', float_tensor, 1, False, template=template)
+        test('add', long_tensor, 1.5, False, template=template)
+        test('sub', float_tensor, 1.5, False, template=template)
+        test('sub', float_tensor, 2, False, template=template)
+        template = alpha_template.format(alpha="5")
+        test('add', long_tensor, 1, False, template=template)
+
 
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
@@ -6545,7 +6558,7 @@ a")
             for out, ref in zip(final_hiddens_fp16, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            def compare_quantized_unquantized(ScriptWrapper, cell): 
+            def compare_quantized_unquantized(ScriptWrapper, cell):
                 wrapper = ScriptWrapper(cell)
 
                 # Compare quantize scripted module to unquantized

@@ -219,14 +219,14 @@ class ShapePropagator {
   c10::ScalarType getScalarType(Node *node) {
     c10::ScalarType ret = c10::ScalarType::Undefined;
     auto& args = node->schema().arguments();
-    for (size_t i = 0 ; i < args.size() ; i++ ) { //auto arg : args ) {
+    for (size_t i = 0 ; i < args.size() ; i++ ) {
       auto arg = args[i];
       auto inputDtype = typeToScalarType(node->inputs()[i]->type());
       if (inputDtype) {
         if (ret == c10::ScalarType::Undefined) {
-          ret = inputDtype.value();
+          ret = *inputDtype;
         } else {
-          ret = c10::promoteTypes(ret, inputDtype.value());
+          ret = c10::promoteTypes(ret, *inputDtype);
         }
       }
     }

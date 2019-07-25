@@ -14,6 +14,9 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 
+static string alpha_mismatch_err =
+  "For integral input tensors, argument alpha must not be a floating point number.";
+
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
     if (self.is_sparse()) {
@@ -27,6 +30,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   at::assert_no_internal_overlap(result, "add");
   auto iter = TensorIterator::binary_op(result, self, other);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
   AT_ASSERT(result.scalar_type() == iter.output().dtype());
   result.copy_(iter.output());
@@ -40,6 +44,7 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
     return native::add_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -120,6 +125,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   at::assert_no_internal_overlap(result, "sub");
   auto iter = TensorIterator::binary_op(result, self, other);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
   sub_stub(iter.device_type(), iter, alpha);
   result.copy_(iter.output());
   return result;
@@ -132,6 +138,7 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
     return native::sub_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
   sub_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }

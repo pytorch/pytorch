@@ -164,6 +164,12 @@ class TestTypePromotion(TestCase):
         self.assertRaisesRegex(RuntimeError, err,
                                lambda: torch.lerp(x, torch.ones(4, dtype=torch.float), 1))
 
+    def test_alpha_mismatch(self):
+        x = torch.ones(4, dtype=torch.int)
+        err = 'alpha must not be'
+        self.assertRaisesRegex(RuntimeError, err,
+            lambda: torch.add(x, x, alpha=1.1))
+
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
