@@ -229,12 +229,12 @@ class TestQuantizedOps(TestCase):
 
         scale, zero_point, torch_type = qparams
         X = torch.from_numpy(X[0])
-        X_ref = torch.nn.functional.adaptive_avg_pool2d(X, output_size)
-        X_ref = torch.quantize_linear(X_ref, scale=scale, zero_point=zero_point,
-                                      dtype=torch_type)
-
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
+
+        # Run reference on int_repr + round to avoid double rounding error.
+        X_ref = torch.nn.functional.adaptive_avg_pool2d(
+            qX.int_repr().to(torch.float), output_size).round()
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.adaptive_avg_pool2d,
@@ -246,15 +246,17 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qX_hat = op(qX, output_size=output_size)
-            self.assertEqual(X_ref, qX_hat,
-                             message=error_message.format(name, X_ref, qX_hat))
+            qX_repr = qX_hat.int_repr()
+            self.assertEqual(X_ref, qX_repr,
+                             message=error_message.format(name, X_ref, qX_repr))
         # Quantized kernel signature is very rigid. Testing separately.
         name = "ops.quantized"
         op = torch.ops.quantized.adaptive_avg_pool2d
         output_size = _pair(output_size)
         qX_hat = op(qX, output_size=output_size)
-        self.assertEqual(X_ref, qX_hat,
-                         message=error_message.format(name, X_ref, qX_hat))
+        qX_repr = qX_hat.int_repr()
+        self.assertEqual(X_ref, qX_repr,
+                         message=error_message.format(name, X_ref, qX_repr))
 
 
     """Tests quantize concatenation (both fused and not)."""

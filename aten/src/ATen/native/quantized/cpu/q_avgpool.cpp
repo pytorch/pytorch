@@ -4,6 +4,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <vector>
 
@@ -51,11 +52,11 @@ static void adaptive_avg_pool2d_single_out_frame(scalar_t *input_p,
           scalar_t *op = output_p  + d*osizeH*osizeW + oh*osizeW + ow;
 
           /* compute local average: */
-          int32_t sum = 0;
+          int64_t sum = 0;
           int ih, iw;
           for(ih = 0; ih < kH; ih++) {
             for(iw = 0; iw < kW; iw++) {
-              int32_t val = (ip + ih*istrideH + iw*istrideW)->val_;
+              int64_t val = (ip + ih*istrideH + iw*istrideW)->val_;
               sum += val;
             }
           }
