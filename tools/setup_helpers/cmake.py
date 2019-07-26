@@ -229,7 +229,7 @@ class CMake:
              'MKLDNN_THREADING',
              'ONNX_ML',
              'ONNX_NAMESPACE',
-             'PARALLEL_BACKEND',
+             'ATEN_THREADING',
              'WERROR')
         })
 
