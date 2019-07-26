@@ -120,8 +120,8 @@ struct OperatorRegistry {
     registerPendingOperators();
     std::vector<std::shared_ptr<Operator>> values;
     values.clear();
-    for (auto it = operators.begin(); it != operators.end(); ++it) {
-      values.insert(values.end(), it->second.begin(), it->second.end());
+    for (auto & kv : operators) {
+      values.insert(values.end(), kv.second.begin(), kv.second.end());
     }
     return values;
   }
