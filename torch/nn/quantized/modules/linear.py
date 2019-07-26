@@ -91,8 +91,6 @@ class Linear(NNLinear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __constants__ = ['bias', 'in_features', 'out_features']
-
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__(in_features, out_features, bias)
         if bias:

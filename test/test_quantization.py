@@ -416,8 +416,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         """
         model = NestedModel().eval()
         qconfig_dict = {
-            'fc3': default_qconfig,
-            'sub2.fc1': default_qconfig,
+            'fc3': None,
+            'sub2.fc1': None,
             torch.nn.Linear: default_qconfig
         }
 
@@ -432,8 +432,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.sub1.fc)
-            self.checkDynamicQuantizedLinear(model.fc3)
-            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkLinear(model.fc3)
+            self.checkLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             test_only_eval_fn(model, self.calib_data)
 
