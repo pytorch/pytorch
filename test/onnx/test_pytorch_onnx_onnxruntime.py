@@ -206,6 +206,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviation()
         self.run_test(model, x)
 
+    def test_std_keepdim(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
     # TODO: enable for opset 10 when ONNXRuntime version will be updated 
     @skipIfUnsupportedOpsetVersion([10])
     def test_topk(self):
