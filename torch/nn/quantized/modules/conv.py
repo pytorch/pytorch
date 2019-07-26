@@ -48,8 +48,8 @@ class Conv2d(_ConvNd):
         qbias = torch._empty_affine_quantized([out_channels],
                                               scale=1, zero_point=0,
                                               dtype=torch.qint32)
-        self.register_buffer('_packed_weight',
-                             torch.ops.quantized.fbgemm_conv_prepack(qweight.permute([0, 2, 3, 1]), self.groups))
+        self.register_buffer('_packed_weight', torch.ops.quantized.fbgemm_conv_prepack(qweight.permute([0, 2, 3, 1]),
+                             self.stride, self.padding, self.dilation, self.groups))
         self.register_buffer('bias', qbias)
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
         self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
@@ -60,7 +60,11 @@ class Conv2d(_ConvNd):
 
     @weight.setter
     def weight(self, w):
-        self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(w.permute([0, 2, 3, 1]), self.groups)
+        self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(w.permute([0, 2, 3, 1]),
+                                                                      self.stride,
+                                                                      self.padding,
+                                                                      self.dilation,
+                                                                      self.groups)
 
     @property
     def scale(self):
@@ -121,7 +125,11 @@ class Conv2d(_ConvNd):
         qconv = Conv2d(mod.in_channels, mod.out_channels, mod.kernel_size,
                        mod.stride, mod.padding, mod.dilation, mod.groups,
                        mod.bias is not None, mod.padding_mode)
-        qconv._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(qweight, qconv.groups)
+        qconv._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(qweight,
+                                                                       qconv.stride,
+                                                                       qconv.padding,
+                                                                       qconv.dilation,
+                                                                       qconv.groups)
         if mod.bias is not None:
             qconv.bias = torch.quantize_linear(mod.bias, bias_scale, 0, torch.qint32)
         else:

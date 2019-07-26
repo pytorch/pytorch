@@ -168,7 +168,8 @@ CONSTRUCTOR = CodeTemplate("""\
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
-    ${op}
+    ${op},
+    atenOperatorOptions()
 ),
 """)
 
