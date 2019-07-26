@@ -33,7 +33,8 @@ class IntrinsicQATModuleTest(TestCase):
            padding_mode=st.sampled_from(['zeros', 'circular']),
            use_relu=st.booleans(),
            eps=st.sampled_from([1e-5, 1e-4, 1e-3, 0.01, 0.1]),
-           momentum=st.sampled_from([0.1, 0.2, 0.3]))
+           momentum=st.sampled_from([0.1, 0.2, 0.3]),
+           freeze_bn=st.booleans())
     def test_conv_bn_relu(
             self,
             batch_size,
@@ -54,8 +55,8 @@ class IntrinsicQATModuleTest(TestCase):
             use_relu,
             eps,
             momentum,
+            freeze_bn
     ):
-        freeze_bn = False
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         dilation_h = dilation_w = dilation
@@ -106,13 +107,23 @@ class IntrinsicQATModuleTest(TestCase):
         def compose(functions):
             # functions are reversed for natural reading order
             return reduce(lambda f, g: lambda x: f(g(x)), functions[::-1], lambda x: x)
-        func_list = [conv_op, bn_op]
-        if use_relu:
-            func_list.append(relu_op)
-        ref_op = compose(func_list)
+
+        if not use_relu:
+            def relu_op(x):
+                return x
+
+        if freeze_bn:
+            def ref_op(x):
+                x = conv_op(x)
+                x = (x - bn_op.running_mean.reshape([1, -1, 1, 1])) * \
+                    (bn_op.weight / torch.sqrt(bn_op.running_var + bn_op.eps)) \
+                    .reshape([1, -1, 1, 1]) + bn_op.bias.reshape([1, -1, 1, 1])
+                x = relu_op(x)
+                return x
+        else:
+            ref_op = compose([conv_op, bn_op, relu_op])
 
         result_ref = ref_op(input)
-        print('conv_ref:', conv_op(input))
         result_actual = qat_op(input)
         self.assertEqual(result_ref, result_actual)
 
