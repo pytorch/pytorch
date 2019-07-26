@@ -5,14 +5,6 @@
 #include <c10/macros/Macros.h>
 namespace c10 {
 
-namespace ivalue {
-Object::~Object() {
-  if (on_delete_) {
-    on_delete_(this);
-  }
-}
-} // namespace ivalue
-
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
     out << toString(value->scalarType()) << "(";
@@ -243,11 +235,15 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto dict_type = type->expect<DictType>();
     const auto dict = ivalue.toGenericDict();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::const_iterator::value_type& item) {
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::iterator::value_type& item) {
           return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
               isSubvalueOf(item.value(), dict_type->getValueType());
         });
   }
+  if (ivalue.isObject()) {
+    return ivalue.toObjectRef().type()->isSubtypeOf(type);
+  }
+
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }
 

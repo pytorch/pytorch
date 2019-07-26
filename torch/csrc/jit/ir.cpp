@@ -251,14 +251,13 @@ std::ostream& Node::print(
   }
 
   // In debug print, append file:line:col as a comment after each node
-  if (print_source_locations && source_range_ &&
-      source_range_->source()->filename()) {
-    const auto& range = sourceRange();
-    const auto& source = range.source();
-    auto lineno = source->lineno_for_offset(range.start());
-    auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);
-    out << " # " << source->filename().value() << ":"
-        << source->lineno_to_source_lineno(lineno) << ":" << col_offset;
+  if (print_source_locations) {
+    if (auto file_line_col = sourceRange().file_line_col()) {
+      std::string filename;
+      size_t line, col;
+      std::tie(filename, line, col) = *file_line_col;
+      out << " # " << filename << ":" << line << ":" << col;
+    }
   }
 
   out << "\n";
@@ -886,8 +885,6 @@ bool Node::hasSideEffects() const {
     case prim::Print:
     case prim::RaiseException:
     case prim::SetAttr:
-    case aten::clear:
-    case aten::setdefault:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
@@ -895,16 +892,43 @@ bool Node::hasSideEffects() const {
     case prim::TimePoint:
     case prim::CallFunction:
     case prim::CallMethod:
+    case prim::BailoutTemplate:
       return true;
   }
-  // All other builtin ops are known to be safe.
-  // see [custom operator aliasing]
-  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+
+  auto op = findOperatorFor(this);
+  if (!op) {
+    TORCH_INTERNAL_ASSERT(
+        kind_.is_prim(),
+        "Only prim ops are allowed to not have a registered operator but ",
+        kind_.toDisplayString(),
+        " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
-
-  // Custom ops may have arbitrary side effects
-  return true;
+  if (kind_.is_prim() || kind_.is_aten()) {
+    // TODO This assert is only introduced to check that we don't break the
+    // current code base. Remove this later to allow other ops to use
+    // AliasAnalysisKind::FROM_SCHEMA
+    TORCH_INTERNAL_ASSERT(
+        op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+        kind_.toDisplayString(),
+        " has ",
+        toString(op->aliasAnalysisKind()));
+  }
+  switch (op->aliasAnalysisKind()) {
+    case AliasAnalysisKind::PURE:
+      return false;
+    case AliasAnalysisKind::FROM_SCHEMA:
+      return false;
+    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
+      return false;
+    case AliasAnalysisKind::CONSERVATIVE:
+      return true;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
+  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1359,7 +1383,13 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
-    AT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    TORCH_CHECK(
+        v->type()->isSubtypeOf(elem_type),
+        "Expected a list element that subtypes '",
+        elem_type->python_str(),
+        "' but got an element of type '",
+        v->type()->python_str(),
+        "'");
   }
   n->output()->setType(ListType::create(elem_type));
   return n;
@@ -1389,15 +1419,6 @@ Node* Graph::createDict(
     n->addInput(values[i]);
   }
   n->output()->setType(DictType::create(key_type, value_type));
-  return n;
-}
-
-Node* Graph::createDictIndex(Value* dict, Value* index) {
-  auto dict_type = dict->type()->expect<DictType>();
-  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
-
-  auto n = create(prim::DictIndex, {dict, index});
-  n->output()->setType(dict_type->getValueType());
   return n;
 }
 
@@ -1454,7 +1475,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 }
 
 Value* Graph::insertFunctionCall(
-    std::shared_ptr<Function> callee,
+    Function* callee,
     script::MatchedSchema& matched) {
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->output()

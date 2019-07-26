@@ -92,6 +92,11 @@ def type_argument_translations(arg):
     elif re.match(r'std::array', t):
         raise RuntimeError("Please use array notation, e.g. bool[3] and not std::array."
                            "See [temp translations] for details.")
+    # Enables Dimname[x] by translating to DimnameList[x]. See [temp translations]
+    elif re.match(r'Dimname\[(\d+)\]', t):
+        match = re.match(r'Dimname\[(\d+)\]', t)
+        t = 'DimnameList'
+        size = int(match.group(1))
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':
@@ -396,6 +401,7 @@ def run(paths):
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
+                declaration['cpu_bfloat16'] = func.get('cpu_bfloat16', False)
                 declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)

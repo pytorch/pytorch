@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -107,14 +108,18 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)
+      .def("_jit_pass_onnx_remove_print", RemovePrintOps)
+      .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def("_jit_pass_onnx_cast_all_constant_to_floating", CastAllConstantToFloating)
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict) {
-            ConstantFoldONNX(graph->block(), paramsDict); // overload resolution
+             std::map<std::string, at::Tensor>& paramsDict,
+             int opset_version) {
+            ConstantFoldONNX(graph->block(), paramsDict, opset_version); // overload resolution
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -123,6 +128,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
+          })
+      .def(
+          "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
+          [](std::shared_ptr<Graph>& g) {
+            return EliminateDeadCode(g->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload resolution
           })
       .def(
           "_jit_pass_cse",
@@ -148,7 +158,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Function>& function_var,
+          [](const StrongFunctionPtr& function_var,
              py::function pyObserverFunction) {
             // Overloaded jit pass for pure functions instead of modules.
             // Create a new node that would be used in the insert observer pass:
@@ -156,7 +166,7 @@ void initJITBindings(PyObject* module) {
             Graph g;
             Node* new_node = g.createPythonOp(
                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(function_var, new_node);
+            InsertObserverNodes(function_var.function_, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })
@@ -418,29 +428,29 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_get_operation",
-      [](const std::string& qualified_name) {
+      [](const std::string& op_name) {
         try {
-          auto symbol = Symbol::fromQualString(qualified_name);
+          auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!operations.empty(), "No such operator ", qualified_name);
+          TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
           TORCH_CHECK(
               operations.size() == 1,
               "Found ",
               operations.size(),
               " overloads for operator ",
-              qualified_name,
+              op_name,
               "! Overloads are not supported from Python.");
           std::shared_ptr<Operator> op = operations[0];
           AT_ASSERT(op != nullptr);
           std::ostringstream docstring;
-          docstring << "Automatically bound operator '" << qualified_name
+          docstring << "Automatically bound operator '" << op_name
                     << "' with schema: " << op->schema();
           return py::cpp_function(
               [op](py::args args, py::kwargs kwargs) {
                 return invokeOperatorFromPython(
                     *op, std::move(args), std::move(kwargs));
               },
-              py::name(qualified_name.c_str()),
+              py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
         } catch (const c10::Error& error) {
           throw std::runtime_error(error.what_without_backtrace());
