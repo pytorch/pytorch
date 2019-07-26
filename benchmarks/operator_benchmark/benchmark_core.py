@@ -100,7 +100,7 @@ class BenchmarkRunner(object):
             # Output for AI-PEP
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
             for run in range(self.num_runs): 
-                print("Caffe2Observer " + json.dumps(
+                print("{}Observer ".format(test_case.framework) + json.dumps(
                     {
                         "type": test_name,
                         "metric": "latency",
