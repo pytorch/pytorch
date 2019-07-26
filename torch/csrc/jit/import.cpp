@@ -212,6 +212,9 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
       tensor_proto.strides().begin(), tensor_proto.strides().end());
   auto type = at::typeMetaToScalarType(
       caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
+  if (tensor_proto.is_quantized()) {
+    type = toQIntType(type);
+  }
   const std::string& record_key = tensor_proto.data().key();
   AT_ASSERT(tensor_proto.has_device() && !tensor_proto.device().empty());
   at::Device device(tensor_proto.device());
