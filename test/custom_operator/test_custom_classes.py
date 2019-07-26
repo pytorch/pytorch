@@ -2,9 +2,15 @@ import unittest
 import torch
 from torch import ops
 import torch.jit as jit
+import glob
+import os
 
 # from model import Model, get_custom_op_library_path
-
+def get_custom_class_library_path():
+    library_filename = glob.glob("build/*custom_class*")[0]
+    path = os.path.abspath(library_filename)
+    assert os.path.exists(path), path
+    return path
 
 def test_equality(f, cmp_key):
     obj1 = f()
@@ -13,7 +19,7 @@ def test_equality(f, cmp_key):
 
 class TestCustomOperators(unittest.TestCase):
     def setUp(self):
-        ops.load_library("build/custom_class.cpython-37m-darwin.so")
+        ops.load_library(get_custom_class_library_path())
 
     def test_no_return_class(self):
         def f():
