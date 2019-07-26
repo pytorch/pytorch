@@ -37,6 +37,12 @@ parser.add_argument(
     help="The list of extra directories in caffe2 to hipify",
     required=False)
 
+# Hipify using HIP-Clang launch.
+parser.add_argument(
+    '--hip-clang-launch',
+    action='store_true',
+    help=argparse.SUPPRESS)
+
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
@@ -136,18 +142,10 @@ if not args.out_of_place_only:
                     f.flush()
                     os.fsync(f)
 
-# Check if the compiler is hip-clang.
-def is_hip_clang():
-    try:
-        hip_path = os.getenv('HIP_PATH', '/opt/rocm/hip')
-        return 'HIP_COMPILER=clang' in open(hip_path + '/lib/.hipInfo').read()
-    except:
-        return False
-
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    hip_clang_launch=is_hip_clang())
+    hip_clang_launch=args.hip_clang_launch)
