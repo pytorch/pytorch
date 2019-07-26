@@ -13,7 +13,7 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
-from common_quantized import _quantize, _dequantize, _requantize
+from common_quantized import _quantize, _dequantize, _requantize, _calculate_dynamic_qparams
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -272,6 +272,50 @@ class TestQuantizedOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, "supported.*cat"):
             cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
                              zero_point=zero_point)
+
+
+@unittest.skipIf(
+    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+    " Quantized Linear requires FBGEMM. FBGEMM does not play"
+    " well with UBSAN at the moment, so we skip the test if"
+    " we are in a UBSAN environment.",
+)
+class TestDynamicQuantizedLinear(TestCase):
+    """Tests the correctness of the dynamic quantized linear and linear_relu op."""
+    @given(
+        use_bias=st.booleans(),
+        use_relu=st.booleans(),
+    )
+    def test_qlinear(self, use_bias, use_relu):
+        batch_size = 1
+        input_channels = 2
+        output_channels = 2
+
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        if use_relu:
+            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
+        else:
+            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
+
+        X_fp32 = torch.tensor([[100, -150]], dtype=torch.float)
+        W_fp32 = torch.tensor([[-150, 100], [100, -150]], dtype=torch.float)
+        b_fp32 = torch.tensor([13, -20], dtype=torch.float) if use_bias else None
+
+        W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
+        W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+
+        # Weight prepacking operator for dynamic quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Dynamic quantized Linear operator with prepacked weight
+        Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
+
+        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+        if use_relu:
+            Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+
+        self.assertEqual(Y_fp32, Y_fp32_ref,
+                         message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
+
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
@@ -586,6 +630,7 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
         np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
         np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
+
 
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
 @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
