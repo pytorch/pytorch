@@ -4,13 +4,13 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-Message::Message() : Message({}, {}, MessageType::UNKNOWN) {}
+Message::Message() = default;
 
 Message::Message(
     std::vector<char>&& meta,
     std::vector<torch::Tensor>&& tensors,
     MessageType type)
-    : meta_(meta), tensors_(tensors), type_(type), id_(-1) {}
+    : meta_(meta), tensors_(tensors), type_(type) {}
 
 Message::Message(
     std::vector<char>&& meta,

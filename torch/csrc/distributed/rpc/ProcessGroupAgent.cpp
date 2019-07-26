@@ -11,8 +11,8 @@ void serialize(const Message& message, std::ostream& os) {
   // We cast const void* to void* here because we need to create a tensor using
   // that memory space. If is fine as that tensor stays function-local, and will
   // not be modified during its lifetime.
-  auto meta = const_cast<void*>(
-      static_cast<const void*>(message.meta().data())); // NOLINT
+  auto meta = const_cast<void*>(  // NOLINT
+      static_cast<const void*>(message.meta().data()));
   auto meta_size = message.meta().size();
 
   // getting tensor table from the message

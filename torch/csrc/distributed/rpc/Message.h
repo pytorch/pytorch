@@ -74,10 +74,10 @@ class TORCH_API Message final {
  private:
   std::vector<char> meta_;
   std::vector<torch::Tensor> tensors_;
-  MessageType type_;
-  int64_t id_;
+  MessageType type_ = MessageType::UNKNOWN;
+  int64_t id_ = -1;
 };
 
-}
-}
-}
+} // rpc
+} // distributed
+} // torch
