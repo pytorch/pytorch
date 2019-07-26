@@ -1162,7 +1162,7 @@ RegisterOperators reg(
              return 0;
            };
          },
-         aliasAnalysisFromSchema()),
+         aliasAnalysisSpecialCase()),
      Operator(
          prim::CreateObject,
          [](const Node* node) {
