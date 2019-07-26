@@ -793,7 +793,7 @@ void ScriptModuleSerializer::convertModule(
     const std::string& name,
     torch::ModuleDef* module_def) {
   module_def->set_name(name);
-  module_def->set_optimize(module.is_optimized());
+  module_def->set_optimize(true);
 
   // If __getstate__ and __setstate__ methods are provided, use those for
   // serializing instead of serializing the attributes directly
