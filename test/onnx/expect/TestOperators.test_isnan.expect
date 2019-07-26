@@ -7,16 +7,6 @@ graph {
     output: "1"
     op_type: "IsNaN"
   }
-  node {
-    input: "1"
-    output: "2"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 2
-      type: INT
-    }
-  }
   name: "torch-jit-export"
   input {
     name: "0"
@@ -32,7 +22,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "1"
     type {
       tensor_type {
         elem_type: 9
