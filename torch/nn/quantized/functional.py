@@ -18,7 +18,7 @@ def relu(input, inplace=False):
       :attr:`inplace` is not supported for the quantized relu.
 
     Applies the rectified linear unit function element-wise. See
-    :class:`~torch.nn.quantized.ReLU` for more details.
+    :class:`~torch.nn.ReLU` for more details.
     """
     if inplace:
         raise NotImplementedError("`inplace` is not implemented in quantized relu")
@@ -29,7 +29,7 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
     r"""
     Applies a linear transformation to the incoming quantized data:
     :math:`y = xA^T + b`.
-    See :class:`~torch.nn.quantized.Linear`
+    See :class:`~torch.nn.Linear`
 
     .. note::
 
@@ -73,7 +73,7 @@ def conv2d(input, weight, bias,
     Applies a 2D convolution over a quantized 2D input composed of several input
     planes.
 
-    See :class:`~torch.nn.quantized.Conv2d` for details and output shape.
+    See :class:`~torch.nn.Conv2d` for details and output shape.
 
     Args:
         input: quantized input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`

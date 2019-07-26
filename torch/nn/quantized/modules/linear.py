@@ -1,8 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
-# from ...qat.modules.linear import Linear as QATLinear
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -20,8 +20,8 @@ class Quantize(Module):
         >>> qm = Quantize(scale, zero_point, dtype)
         >>> qt = qm(t)
         >>> print(qt)
-        >>> tensor([[ 1., -1.],
->         [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
+        tensor([[ 1., -1.],
+                [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
     """
 
     def __init__(self, out_scale, out_zero_point, out_dtype):
@@ -51,8 +51,8 @@ class DeQuantize(Module):
         >>> dqm = DeQuantize()
         >>> dequantized = dqm(quantized_input)
         >>> print(dequantized)
-        >>> tensor([[ 1., -1.],
-        >>>         [ 1., -1.]], dtype=torch.float32)
+        tensor([[ 1., -1.],
+                [ 1., -1.]], dtype=torch.float32)
     """
 
     def __init__(self):
@@ -67,13 +67,12 @@ class DeQuantize(Module):
 
 class Linear(NNLinear):
     r"""
-    A quantized linear module with quantized tensor as inputs
-    and outputs.
-    We adopt the same interface as `torch.nn.Linear`, please see https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
-    for documentation.
+    A quantized linear module with quantized tensor as inputs and outputs.
+    We adopt the same interface as `torch.nn.Linear`, please see
+    https://pytorch.org/docs/stable/nn.html#torch.nn.Linear for documentation.
 
-    Similar to `torch.nn.Linear`, attributes will be randomly initialized at
-        module creation time and will be overwritten later
+    Similar to :class:`~torch.nn.Linear`, attributes will be randomly
+    initialized at module creation time and will be overwritten later
 
     Attributes:
         weight (Tensor): the non-learnable quantized weights of the module of

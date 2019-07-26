@@ -18,7 +18,7 @@ class Conv2d(_ConvNd):
     several quantized input planes.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.quantized.Conv2d`.
+    :class:`~torch.nn.Conv2d`.
 
     .. note::
         Only `zeros` is supported for the :attr:`padding_mode` argument.
