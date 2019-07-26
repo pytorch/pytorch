@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 
 /**** access methods ****/
 THCStorage *THCTensor_(storage)(THCState *state, const THCTensor *self)
@@ -72,18 +73,7 @@ THCTensor *THCTensor_(new)(THCState *state)
 /* Pointer-copy init */
 THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId()
-  ).release();
-  THCTensor_(setStorageNd)(state,
-                           self,
-                           THTensor_getStoragePtr(tensor),
-                           tensor->storage_offset(),
-                           tensor->dim(),
-                           THTensor_getSizePtr(tensor),
-                           THTensor_getStridePtr(tensor));
-  return self;
+  return at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
 }
 
 /* Storage init */
@@ -197,34 +187,6 @@ THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dime
   return self;
 }
 
-THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayRef size)
-{
-  ptrdiff_t numel = THCTensor_(nElement)(state, tensor);
-  auto inferred_size = at::infer_size(size, numel);
-  auto stride = THTensor_compute_stride(tensor->sizes(),
-                                        tensor->strides(),
-                                        inferred_size);
-  THArgCheck(stride.has_value(), 2, "view size is "
-    "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Use .reshape(...) instead.");
-  auto stride_value = *stride;
-
-  // NOTE: This path of constructing the Tensor directly with the viewed Storage is necessary
-  // to allow `view` not to have a device_guard.  Taking the common TH path of allocating a storage
-  // on the current device [via THCTensor_(new)] and then swapping out the storage later can change
-  // the device out from under the tensor.  Having the device be consistent through a Tensor's lifetime
-  // is an invariant we wish to keep to support caching, simplicity, etc.
-  auto storage = tensor->storage();
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    std::move(storage),
-    at::CUDATensorId()
-  ).release();
-
-  THCTensor_setStorage(state, self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, stride_value);
-
-  return self;
-}
-
 // Collapses the first two dimensions of a tensor.
 // Assumes the input tensor is contiguous.
 THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
@@ -237,7 +199,7 @@ THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
   for (int i = 2; i < in_dims; i++) {
     new_size[i - 1] = THCTensor_(size)(state, input, i);
   }
-  THCTensor *output = THCTensor_(newView)(state, input, new_size);
+  THCTensor *output = at::native::view(THTensor_wrap(input), new_size).unsafeGetTensorImpl();
   return output;
 }
 
