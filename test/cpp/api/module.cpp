@@ -77,9 +77,7 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_module;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_module("name.with.dot", torch::nn::Linear(3, 4)),
       "Submodule name must not contain a dot (got 'name.with.dot')");
@@ -89,9 +87,7 @@ TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_module;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_module("linear", torch::nn::Linear(3, 4));
   ASSERT_THROWS_WITH(
@@ -99,10 +95,28 @@ TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
       "Submodule 'linear' already defined");
 }
 
-TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
+TEST_F(ModuleTest, ReplaceModuleThrowsForUnknownModuleName) {
+  torch::nn::Module model;
+  ASSERT_THROWS_WITH(
+      model.replace_module("linear", torch::nn::Linear(3, 4)),
+      "Submodule 'linear' is not defined");
+}
+
+TEST_F(ModuleTest, ReplaceModule) {
   struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_parameter;
+    torch::nn::Linear l1{nullptr};
+    TestModel() {
+      l1 = register_module("l1", torch::nn::Linear(3, 4));
+    }
   };
+  auto model = std::make_shared<TestModel>();
+  model->l1 = model->replace_module("l1", torch::nn::Linear(5, 6));
+  ASSERT_EQ(model->named_parameters()["l1.weight"].size(0), 6);
+  ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
+}
+
+TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_parameter("name.with.dot", torch::ones(5)),
       "Parameter name must not contain a dot (got 'name.with.dot')");
@@ -112,9 +126,7 @@ TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_parameter;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_parameter("p", torch::ones(5));
   ASSERT_THROWS_WITH(
@@ -123,9 +135,7 @@ TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
 }
 
 TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_buffer;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_buffer("name.with.dot", torch::ones(5)),
       "Buffer name must not contain a dot (got 'name.with.dot')");
@@ -135,9 +145,7 @@ TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterBufferThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_buffer;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_buffer("p", torch::ones(5));
   ASSERT_THROWS_WITH(
