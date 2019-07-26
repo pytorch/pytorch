@@ -27,7 +27,7 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # check the schema with the onnx checker
     onnx.checker.check_model(model)
 
-    # check target type and attributes 
+    # check target type and attributes
     graph = model.graph
     # ops should contain an object for each node
     # in graph.node, in the right order.
@@ -190,7 +190,7 @@ class TestONNXOpset(TestCase):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                return x[1:x.size(0)] 
+                return x[1:x.size(0)]
 
         ops_9 = [{"op_name" : "Constant"},
                  {"op_name" : "Constant"},
