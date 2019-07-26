@@ -28,14 +28,11 @@ class Linear(NNLinear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-
-    __constants__ = ['bias', 'in_features', 'out_features', 'scale', 'zero_point']
-
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__(in_features, out_features, bias)
         del self.weight
         del self.bias
-        bias_fp32 = torch.Tensor(out_features).float()
+        bias_fp32 = torch.Tensor(out_features)
         self.register_buffer('bias', bias_fp32)
 
         qweight = torch._empty_affine_quantized(
