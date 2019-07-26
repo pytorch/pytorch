@@ -821,6 +821,12 @@ inline Tensor Tensor::prod(int64_t dim, bool keepdim, c10::optional<ScalarType> 
     static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::prod(Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) const {
+    static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
+}
+#endif
 inline Tensor Tensor::t() const {
     static auto table = globalATenDispatch().getOpTable("aten::t(Tensor(a) self) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
