@@ -18,7 +18,7 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
     auto alpha = alpha_scalar.to<bool>();
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a + b * alpha; });
   } else {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_cpu/sub_cpu", [&]() {
       auto alpha = alpha_scalar.to<scalar_t>();
       auto alpha_vec = Vec256<scalar_t>(alpha);
       cpu_kernel_vec(iter,
@@ -31,9 +31,7 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sub_cpu", [&]() {
-    add_kernel(iter, -alpha_scalar);
-  });
+  add_kernel(iter, -alpha_scalar);
 }
 
 void mul_kernel(TensorIterator& iter) {
