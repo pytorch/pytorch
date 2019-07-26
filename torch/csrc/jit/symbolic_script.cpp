@@ -376,12 +376,27 @@ const std::vector<std::string> functions = {
                 out = torch.matmul(mat1, mat2)
             return out
 
+        def AD_matmul_special_fold(grad, self, self_size: List[int]):
+            self_fold = self.reshape(-1, self_size[-1])
+            grad_fold = grad.reshape(-1, grad.size()[-1])
+            return self_fold.t().mm(grad_fold)
+
         def matmul(self, other):
             def backward(grad_output):
                 self_size = self.size()
+                dim1 = self.dim()
                 other_size = other.size()
+                dim2 = other.dim()
                 grad_self = AD_matmul_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
-                grad_other = AD_matmul_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
+                # Fold batch into first dimension to save memory usage
+                if dim1 >= 3 and dim2 == 1:
+                    grad_output = grad_output.unsqueeze(-1)
+                    grad_other = AD_matmul_special_fold(grad_output, self, self_size)
+                    grad_other = grad_other.squeeze(-1)
+                elif dim1 >= 3 and dim2 == 2:
+                    grad_other = AD_matmul_special_fold(grad_output, self, self_size)
+                else:
+                    grad_other = AD_matmul_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
             return torch.matmul(self, other), backward
