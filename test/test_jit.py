@@ -12449,11 +12449,11 @@ a")
             if x:
                 if x == 2:
                     return 1
-                    assert False
+                    assert 1 == 2
                 else:
                     if x == 3:
                         return 2
-                        assert False
+                        assert 1 == 2
                     else:
                         a = 2
                         b = 3
@@ -12461,7 +12461,7 @@ a")
                 a = 4
                 b = 1
             return a + b
-            assert False
+            assert 1 == 2
 
         for i in range(4):
             self.checkScript(complicated, (i,))
