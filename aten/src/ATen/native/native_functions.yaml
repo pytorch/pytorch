@@ -39,10 +39,6 @@
   variants: method
   named_guard: False
 
-- func: align_to(Tensor self, DimnameList names) -> Tensor
-  variants: function, method
-  named_guard: False
-
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -3000,7 +2996,6 @@
     CPU: legacy::cpu::_th_set_
     CUDA: legacy::cuda::_th_set_
     QuantizedCPU: set_storage_cpu
-  named_guard: False
 
 - func: set_(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
@@ -3062,7 +3057,6 @@
     CUDA: view
     MkldnnCPU: mkldnn_view
     QuantizedCPU: view
-  named_guard: False
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
