@@ -69,8 +69,6 @@ def get_unary_functions():
         'sqrt',
         'tan',
         'tanh',
-        'tril',
-        'triu',
         'trunc']
 
 
@@ -144,6 +142,7 @@ def set_unary_method(cls, tfunc, method_name, inplace):
     setattr(cls, method_name, _gen_func(method_name))
 
 
+# TODO: Need to create nary_method specialization because of autograd
 def set_binary_method(cls, tfunc, method_name, inplace):
     def _gen_func(tfunc):
         def _func(self, other):
@@ -172,7 +171,7 @@ def get_binary_method_signatures():
 
     for method_name in ['add', 'mul', 'sub', 'div']:
         signatures.append(Signature(method_name, "__" + method_name + "__", False))
-        signatures.append(Signature(method_name, "__i" + method_name + "__", True))
+        # signatures.append(Signature(method_name, "__i" + method_name + "__", True))
     return signatures
 
 

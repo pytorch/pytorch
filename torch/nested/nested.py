@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 # Set this flag to true, if you want to enable additional verifications.
 DEBUG = False
@@ -7,12 +8,74 @@ DEBUG = False
 # NOTE: This is experimental code! Don't use this in production!
 # RFC: https://github.com/pytorch/pytorch/issues/22169
 
+
+
+orig_interpolate = F.interpolate
+
+def interpolate(*args, **kwargs):
+    print("CALLING INTO MONKEY")
+    if is_nested_tensor(args[0]):
+        # feat_shape = inner_lateral.shape[-2:]
+        # inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
+        ret_list = []
+        input_ = args[0]
+        # TODO: Implement size parameter
+        for i in range(len(input_)):
+            ret = F.interpolate(input_._tensors[i].view((1,) + input_._tensors[i].size()),
+                          size=tuple(input_._tensors[i].shape[-2:]),
+                          mode="nearest")
+            ret_list.append(ret.view(ret.size()[1:]))
+        return as_nested_tensor(ret_list)
+    else:
+        return orig_interpolate(*args, **kwargs)
+
+orig_max_pool2d = torch.max_pool2d
+
+def max_pool2d(*args, **kwargs):
+    print("CALLING INTO MONKEY")
+    if is_nested_tensor(args[0]):
+        ret = []
+        for tensor_ in args[0]._tensors:
+            tensor = tensor_.view(*((1,) + tensor_.size()))
+            args_ = (tensor,) + args[1:]
+            ret_ = orig_max_pool2d(*args_)
+            ret.append(ret_.view(*(ret_.size()[1:])))
+        return NestedTensor(ret)
+    else:
+        return orig_max_pool2d(*args, **kwargs)
+
+orig_conv2d = F.conv2d
+
+def conv2d(input, weight, bias, stride, padding, dilation, groups):
+    print("CALLING INTO MONKEY")
+    if is_nested_tensor(input):
+        ret = []
+        for tensor_ in input._tensors:
+            tensor = tensor_.view(*((1,) + tensor_.size()))
+            ret_ = orig_conv2d(tensor, weight, bias, stride,
+                               padding, dilation, groups)
+            ret.append(ret_.view(*(ret_.size()[1:])))
+        return NestedTensor(ret)
+    else:
+        return orig_conv2d(input, weight, bias, stride,
+                           padding, dilation, groups)
+orig_relu = F.relu
+
+def relu(input, inplace=False):
+    print("CALLING INTO MONKEY")
+    if is_nested_tensor(input):
+        ret = []
+        for tensor_ in input._tensors:
+            ret.append(orig_relu(tensor_, inplace))
+        return NestedTensor(ret)
+    else:
+        return orig_relu(input, inplace)
+
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
 
-
 # Arguments match torch.tensor
-def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False):
+def nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False):
     if is_nested_tensor(data):
         # This is consistent with torch.tensor(torch.Tensor)
         # but errors out.
@@ -42,9 +105,9 @@ def make_nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_m
                 new_data = new_data.pin_memory()
             tensors.append(new_data)
 
-        return NestedTensor(tensors)
+        return NestedTensor(tensors).contiguous()
 
-def as_nestedtensor(data, dtype=None, device=None):
+def as_nested_tensor(data, dtype=None, device=None):
     ret = NestedTensor(data)
     if dtype is not None:
         ret = ret.to(dtype)
@@ -120,6 +183,24 @@ class NestedTensor(object):
         return self._tensors[0].dim
 
     @property
+    def dtype(self):
+        if DEBUG:
+            _verify_tensors(self._tensors)
+        return self._tensors[0].dtype
+
+    @property
+    def layout(self):
+        if DEBUG:
+            _verify_tensors(self._tensors)
+        return self._tensors[0].layout
+
+    @property
+    def device(self):
+        if DEBUG:
+            _verify_tensors(self._tensors)
+        return self._tensors[0].device
+
+    @property
     def shape(self):
         raise NotImplementedError()
 
@@ -154,6 +235,11 @@ class NestedTensor(object):
             result += "  " + tensor.__repr__() + ",\n"
         result += "])"
         return result
+
+    def __iadd__(self, other):
+        for i in range(len(self)):
+            self._tensors[i].add_(other._tensors[i])
+        return self
 
     def is_empty(self):
         # This condition can never be true, since we disallow an empty list for now.
@@ -196,3 +282,43 @@ class NestedTensor(object):
 
     def backward(self, *args, **kwargs):
         self.__apply(lambda x: x.backward(*args, **kwargs))
+
+    # The overhead on this function is very heavy
+    def is_contiguous(self):
+        first_data_ptr = self._tensors[0].data_ptr()
+        current_offset = 0
+        is_cont = hasattr(self, 'buffer_')
+        for tensor in self._tensors:
+            if not is_cont:
+                return False
+            test_data_ptr = first_data_ptr + current_offset
+            is_cont = is_cont and tensor.data_ptr() == test_data_ptr
+            is_cont = is_cont and tensor.is_contiguous()
+            current_offset += tensor.numel() * tensor.element_size()
+        return is_cont
+
+    def contiguous(self):
+        flat_tensors = []
+        for tensor in self._tensors:
+            flat_tensors.append(tensor.view(-1))
+        self.buffer_ = torch.cat(flat_tensors)
+        current_offset = 0
+        for i in range(len(self._tensors)):
+            # This is an unnecessary allocation
+            new_tensor = torch.empty_like(self._tensors[i],
+                    dtype=self.dtype, layout=self.layout, device=self.device)
+            with torch.no_grad():
+                new_tensor.set_(self.buffer_.storage(),
+                                storage_offset=current_offset,
+                                size=self._tensors[i].size(),
+                                stride=self._tensors[i].stride())
+            new_tensor.requires_grad_(self.requires_grad)
+            self._tensors[i] = new_tensor
+            current_offset += self._tensors[i].numel()
+        return self
+
+    def numel(self):
+        all_numel = 0
+        for tensor in self._tensors:
+            all_numel += tensor.numel()
+        return all_numel
