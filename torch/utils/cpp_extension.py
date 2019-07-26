@@ -945,7 +945,7 @@ def _get_cuda_arch_flags(cflags=None):
     arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
     all_arches = {'3.5': '35', '5.2': '52', '6.0': '60', '6.1': '61',
-                  '7.0': '70', '7.0+PTX': '70',  '7.2': '72', '7.2+PTX': '72',
+                  '7.0': '70', '7.0+PTX': '70', '7.2': '72', '7.2+PTX': '72',
                   '7.5': '75', '7.5+PTX': '75',
                   'Kepler': '52', 'Tegra': '52', 'Maxwell': '52',
                   'Pascal': '60', 'Volta': '70', 'Turing': '75'}
@@ -958,7 +958,7 @@ def _get_cuda_arch_flags(cflags=None):
         arch_list = arch_list.split(' ')
 
     for arch in arch_list:
-        if not arch in all_arches.keys():
+        if arch not in all_arches.keys():
             raise ValueError("Unknown CUDA arch ({}) or GPU not supported".format(arch))
 
     arch_list = [all_arches[s] for s in arch_list]
