@@ -2228,149 +2228,17 @@ class TestAutograd(TestCase):
                               lambda y, x: torch.trapz(y, x),
                               True, f_args_variable, f_args_tensor)
 
-    def test_cdist_cpu_0(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [0]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
+    def test_cdist(self):
+        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+            f_args_variable = (torch.randn(S, S, requires_grad=True),
+                               torch.randn(S, S, requires_grad=True))
 
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
+            def f(a, b):
+                return torch.cdist(a, b, p)
 
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cpu_1(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [1]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cpu_2(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [2]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cpu_3(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [3]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cpu_15(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [1.5]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cpu_25(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [2.5]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cpu_inf(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [float('inf')]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cpu_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((3, 3))
-        #_test_cdist_for_size((S, S, S))
+            f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+            run_functional_checks(self, "test_cdist", "cdist", f,
+                                  True, f_args_variable, f_args_tensor)
 
 
     def test_cdist_cuda_0(self):
