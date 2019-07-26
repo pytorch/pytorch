@@ -24,17 +24,21 @@ namespace native {
 
 namespace {
 
-// this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1]) note that no bound-checking is done
-// __restrict__ impact to be measured, https://devblogs.nvidia.com/cuda-pro-tip-optimize-pointer-aliasing/
+// this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1])
+// so if l is l_0 l_1 ... l_(tl-1) then this looks up idx in
+// l' = BLANK l_0 BLANK l_1 BLANK ... BLANK l_(tl-1) BLANK
+// - note that no bound-checking is done
+// - it is important to only call it witth idx == 0 if the target length is 0
+// - __restrict__ impact to be measured, see
+//   https://devblogs.nvidia.com/cuda-pro-tip-optimize-pointer-aliasing/
 template <typename target_t>
 __device__ static inline int64_t get_target_prime(
     const target_t* __restrict__ target,
     int64_t offset,
     int64_t stride,
     int64_t idx,
-    int64_t target_length,
     int64_t BLANK) {
-  if (idx % 2 == 0 || target_length == 0) {
+  if (idx % 2 == 0) {
     return BLANK;
   } else {
     return target[offset + stride * (idx / 2)];
@@ -95,7 +99,6 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                              tg_batch_offset,
                                              tg_target_stride,
                                              1,
-                                             target_length,
                                              BLANK)];
       break;
     default:
@@ -117,7 +120,6 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
           tg_batch_offset,
           tg_target_stride,
           s,
-          target_length,
           BLANK);
       have_three =
           ((s > 1) &&
@@ -126,7 +128,6 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                 tg_batch_offset,
                 tg_target_stride,
                 s - 2,
-                target_length,
                 BLANK) != current_char));
     } else {
       current_char = BLANK;
@@ -313,13 +314,12 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
     scalar_t lb;
     if (s == 2*target_length) {
       lb = log_probs_data[lp_batch_offset + (input_length-1) * lp_input_stride + lp_char_stride * BLANK];
-    } else if (s == 2 * target_length - 1) { // false for target_lenght == 0
+    } else if (s == 2 * target_length - 1) { // false for target_length == 0
       int64_t current_target_prime = get_target_prime(
           targets_data,
           tg_batch_offset,
           tg_target_stride,
           s,
-          target_length,
           BLANK);
       lb = log_probs_data[lp_batch_offset + (input_length-1) * lp_input_stride + lp_char_stride * current_target_prime];
     } else {
@@ -335,13 +335,12 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
     int64_t s = threadIdx.x + block_s;
     int64_t current_target_prime;
     bool have_three;
-    if (s < 2*target_length+1) {
+    if (s < 2 * target_length + 1 && target_length > 0) {
       current_target_prime = get_target_prime(
           targets_data,
           tg_batch_offset,
           tg_target_stride,
           s,
-          target_length,
           BLANK);
       have_three =
           ((s < 2 * target_length - 1) &&
@@ -350,7 +349,6 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
                 tg_batch_offset,
                 tg_target_stride,
                 s + 2,
-                target_length,
                 BLANK) != current_target_prime));
     } else {
       current_target_prime = BLANK;
@@ -499,13 +497,12 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
 
   // collected[b, t, target'[s]] "log+=" log_alpha[t, s]+log_beta[t, s]
   for (int s = 0; s < 2*max_target_length+1; s++) {
-    if (s < 2 * target_length + 1) {
+    if (s < 2 * target_length + 1) { // if target_length == 0, s == 0
       int64_t current_target_prime = get_target_prime(
           targets_data,
           tg_batch_offset,
           tg_target_stride,
           s,
-          target_length,
           BLANK);
       scalar_t log_alpha_beta = (log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * s]
                                  + log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * s]);
