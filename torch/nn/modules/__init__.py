@@ -28,7 +28,8 @@ from .distance import PairwiseDistance, CosineSimilarity
 from .fold import Fold, Unfold
 from .adaptive import AdaptiveLogSoftmaxWithLoss
 from .transformer import TransformerEncoder, TransformerDecoder, \
-    TransformerEncoderLayer, TransformerDecoderLayer, Transformer 
+    TransformerEncoderLayer, TransformerDecoderLayer, Transformer
+from .flatten import Flatten
 
 __all__ = [
     'Module', 'Identity', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
@@ -50,6 +51,7 @@ __all__ = [
     'PairwiseDistance', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d',
     'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d', 'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad1d', 'ConstantPad2d',
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
-    'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder', 
+    'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder',
     'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
+    'Flatten'
 ]
