@@ -206,9 +206,9 @@ class intrusive_ptr final {
   // This is not public because we shouldn't make intrusive_ptr out of raw
   // pointers except from inside the make_intrusive() and
   // weak_intrusive_ptr::lock() implementations
-  explicit intrusive_ptr(TTarget* target) noexcept : target_(target) {}
 
  public:
+  explicit intrusive_ptr(TTarget* target) noexcept : target_(target) {}
   using element_type = TTarget;
 
   intrusive_ptr() noexcept : intrusive_ptr(NullType::singleton()) {}

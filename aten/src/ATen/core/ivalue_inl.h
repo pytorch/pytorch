@@ -762,6 +762,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
 template <typename T>
 IValue from_(T x, std::false_type) {
   static_assert(guts::false_t<T>::value, "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
+  return IValue();
 }
 }
 
