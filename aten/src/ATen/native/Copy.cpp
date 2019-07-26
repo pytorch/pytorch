@@ -119,12 +119,12 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
   }
 
-  auto builder = TensorIterator::Builder();
-  builder.add_output(self);
-  builder.add_input(src);
-  builder.dont_resize_outputs();
-  builder.dont_compute_common_dtype();
-  auto iter = builder.build();
+  auto iter = TensorIterator();
+  iter.add_output(self);
+  iter.add_input(src);
+  iter.dont_resize_outputs();
+  iter.dont_compute_common_dtype();
+  iter.build();
 
   if (iter.numel() == 0) {
     return self;
