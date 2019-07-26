@@ -138,7 +138,7 @@
 #   MIOPEN_LIBRARY
 #     specify where MIOpen is installed
 #
-#   NCCL_ROOT_DIR
+#   NCCL_ROOT
 #   NCCL_LIB_DIR
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
@@ -182,12 +182,10 @@ import importlib
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
-                                     check_env_flag,
-                                     DEBUG, REL_WITH_DEB_INFO)
+                                     check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
-from tools.setup_helpers.nccl import NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
 
 try:
     FileNotFoundError
@@ -278,7 +276,7 @@ elif sha != 'Unknown':
     version += '+' + sha[:7]
 report("Building wheel {}-{}".format(package_name, version))
 
-cmake = CMake('build')
+cmake = CMake()
 
 # all the work we need to do _before_ setup runs
 def build_deps():
@@ -289,7 +287,7 @@ def build_deps():
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(DEBUG)))
+        f.write("debug = {}\n".format(repr(build_type.is_debug())))
         f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
         f.write("git_version = {}\n".format(repr(sha)))
 
@@ -387,7 +385,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using MKLDNN')
         if cmake_cache_vars['USE_NCCL'] and cmake_cache_vars['USE_SYSTEM_NCCL']:
-            report('-- Using system provided NCCL library at ' + NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
+            report('-- Using system provided NCCL library at {}, {}'.format(cmake_cache_vars['NCCL_LIBRARIES'],
+                                                                            cmake_cache_vars['NCCL_INCLUDE_DIRS']))
         elif cmake_cache_vars['USE_NCCL']:
             report('-- Building NCCL library')
         else:
@@ -631,14 +630,14 @@ def configure_extension_build():
                     break
         library_dirs.append(cuda_lib_path)
 
-    if DEBUG:
+    if build_type.is_debug():
         if IS_WINDOWS:
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-O0', '-g']
             extra_link_args += ['-O0', '-g']
 
-    if REL_WITH_DEB_INFO:
+    if build_type.is_rel_with_deb_info():
         if IS_WINDOWS:
             extra_link_args.append('/DEBUG:FULL')
         else:

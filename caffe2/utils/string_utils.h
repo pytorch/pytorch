@@ -10,7 +10,8 @@
 
 namespace caffe2 {
 
-CAFFE2_API std::vector<std::string> split(char separator, const std::string& string);
+CAFFE2_API std::vector<std::string>
+split(char separator, const std::string& string, bool ignore_empty = false);
 
 CAFFE2_API std::string trim(const std::string& str);
 

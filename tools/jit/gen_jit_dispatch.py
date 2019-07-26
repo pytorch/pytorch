@@ -168,7 +168,8 @@ CONSTRUCTOR = CodeTemplate("""\
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
-    ${op}
+    ${op},
+    atenOperatorOptions()
 ),
 """)
 
@@ -178,6 +179,7 @@ blacklisted_types = {
     'DimnameList?',
     'ConstQuantizerPtr',
     'Dimname',
+    'DimnameList',
 }
 
 default_only_types = {'Generator'}

@@ -109,12 +109,13 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
-        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
-        torch._C._jit_pass_prepare_division_for_onnx(graph)
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lower_all_tuples(graph)
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lint(graph)
+
+        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
+        torch._C._jit_pass_prepare_division_for_onnx(graph)
 
         torch._C._jit_pass_onnx_remove_print(graph)
 
@@ -306,6 +307,11 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
             strip_doc_string=True, dynamic_axes=None):
+    if isinstance(model, torch.nn.DataParallel):
+        raise ValueError('torch.nn.DataParallel is not supported by ONNX '
+                         'exporter, please use \'attribute\' module to '
+                         'unwrap model from torch.nn.DataParallel. Try '
+                         'torch.onnx.export(model.module, ...)')
     global __IN_ONNX_EXPORT
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True

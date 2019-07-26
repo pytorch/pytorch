@@ -1,4 +1,4 @@
-.. _inference-threading:
+.. _threading-cpu-inference:
 
 Threading and CPU inference
 ===========================
@@ -7,7 +7,7 @@ PyTorch allows using multiple CPU threads during model inference. The following
 figure shows different levels of parallelism one would find in a typical
 application:
 
-.. image:: inference_threading.png
+.. image:: threading_cpu_inference.png
    :width: 75%
 
 One or more inference threads execute model's forward pass on the given inputs.
@@ -28,7 +28,9 @@ PyTorch provides a set of parallel primitives (in ``ATen/Parallel.h``), such as
 In addition to the functions in ``ATen/Parallel.h``, parallel ops can also
 utilize external libraries, such as MKL and MKL-DNN, to execute work.
 ``ATen/Parallel.h``, MKL, MKL-DNN and other libraries typically use parallelization
-libraries (e.g. OpenMP or TBB) to implement multithreading.
+libraries (e.g. OpenMP or TBB) to implement multithreading. Intra-op thread
+management is delegated to the parallelization library and is separate from the
+inter-op thread pool.
 
 
 Build options
@@ -48,7 +50,7 @@ with the build settings:
 +------------+-----------------------+-----------------------------+----------------------------------------+
 
 Any of the ``TBB`` values above require ``USE_TBB=1`` build setting (default: off).
-A separate setting ``USE_OPENMP=1`` (default: on) is required for OMP parallelism.
+A separate setting ``USE_OPENMP=1`` (default: on) is required for OpenMP parallelism.
 
 
 Runtime API
@@ -70,14 +72,14 @@ The following API is used to control threading:
 |                        | ``set_num_threads``,                                      |                                                  |                                                         |
 |                        | ``get_num_threads`` (Python, :mod:`torch` module)         | launching intra-op async tasks:                  | Default number of threads: number of CPU cores;         |
 |                        |                                                           | ``at::intraop_launch``                           |                                                         |
-|                        | Env. variables:                                           | ``at::intraop_launch_future`` (C++)              | Number of threads settings preference:                  |
+|                        | Env. variables:                                           | ``at::intraop_launch_future`` (C++)              | Number of threads setting preference:                   |
 |                        | ``OMP_NUM_THREADS`` and ``MKL_NUM_THREADS``               |                                                  | ``at::API`` > ``MKL_NUM_THREADS`` > ``OMP_NUM_THREADS`` |
 |                        |                                                           |                                                  |                                                         |
 +------------------------+-----------------------------------------------------------+--------------------------------------------------+---------------------------------------------------------+
 
 .. note::
 
-    OpenMP does not guarantee that a single intra-op thread pool would be used.
+    OpenMP does not guarantee that a single per-process intra-op thread pool would be used.
     In fact, two different inter-op threads will likely use different OpenMP thread pools for intra-op work.
     Use TBB backend to guarantee that there's a single per-process intra-op thread pool of a given size.
 

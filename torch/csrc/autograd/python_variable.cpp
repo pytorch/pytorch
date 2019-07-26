@@ -24,6 +24,9 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/tracer.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
@@ -54,13 +57,6 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
     v->cdata.set_pyobj(obj);
-    if (auto fn = dynamic_cast<PyFunction*>(v->cdata.grad_fn_unsafe())) {
-      // Create a new reference to the THPFunction. This ensures that ref count
-      // of the THPFunction is at least the number of referring THPVariables.
-      const auto output_nr = v->cdata.output_nr();
-      auto grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
-      v->cdata.set_gradient_edge({std::move(grad_fn), output_nr});
-    }
   }
   return obj;
 }
@@ -353,6 +349,21 @@ PyObject *THPVariable_get_names(THPVariable *self)
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
+
+int THPVariable_set_names(THPVariable *self, PyObject *names) {
+  HANDLE_TH_ERRORS
+  auto& var = self->cdata;
+  if (names == Py_None) {
+    at::internal_set_names_inplace(var, at::nullopt);
+  } else {
+    THPUtils_assertRet(-1,
+        THPUtils_checkDimnameList(names),
+        "names must either be None or a tuple of dim names");
+    at::internal_set_names_inplace(var, torch::parseDimnameList(names));
+  }
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
 #endif
 
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
@@ -506,7 +517,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
 #ifdef BUILD_NAMEDTENSOR
-  {"names", (getter)THPVariable_get_names, nullptr, nullptr, nullptr},
+  {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
 #endif
   {nullptr}
 };
