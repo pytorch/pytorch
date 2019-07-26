@@ -1,5 +1,10 @@
 import os
 import yaml
+try:
+    # use faster C loader if available
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader
 from string import Template
 from copy import deepcopy
 from .plugins import ArgcountChecker, OptionalArguments, ArgumentReferences, \
@@ -88,7 +93,7 @@ class cwrap(object):
                 in_declaration = True
             elif line == ']]':
                 in_declaration = False
-                declaration = yaml.load('\n'.join(declaration_lines))
+                declaration = yaml.load('\n'.join(declaration_lines), Loader=Loader)
                 cwrap_common.set_declaration_defaults(declaration)
 
                 # Pass declaration in a list - maybe some plugins want to add

@@ -52,7 +52,7 @@ class DeQuantize(Module):
         >>> dequantized = dqm(quantized_input)
         >>> print(dequantized)
         >>> tensor([[ 1., -1.],
-            [ 1., -1.]], dtype=torch.float32)
+        >>>         [ 1., -1.]], dtype=torch.float32)
     """
 
     def __init__(self):
@@ -76,9 +76,9 @@ class Linear(NNLinear):
         module creation time and will be overwritten later
 
     Attributes:
-        weight(Tensor): the non-learnable quantized weights of the
-                module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
-        bias (Tensor):   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
+        weight (Tensor): the non-learnable quantized weights of the module of
+                         shape :math:`(\text{out\_features}, \text{in\_features})`.
+        bias (Tensor): the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
         scale: `scale` parameter of output Quantized Tensor, type: double
         zero_point: `zero_point` parameter for output Quantized Tensor, type: long
@@ -153,8 +153,9 @@ class Linear(NNLinear):
     def from_float(mod):
         r"""Create a quantized module from a float module or qparams_dict
 
-            Args: `mod` a float module, either produced by torch.quantization utilities
-            or directly from user
+        Args:
+            mod (Module): a float module, either produced by torch.quantization
+                          utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'

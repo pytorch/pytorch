@@ -10,6 +10,14 @@
 namespace torch {
 namespace jit {
 
+namespace {
+c10::OperatorOptions aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+} // namespace
+
 // helper to determine if an optional tensor argument/value passed in is
 // statically defined (neither a None constant nor a Optional[Tensor] type)
 // return yes, no, or no value if we can't tell
@@ -57,7 +65,8 @@ RegisterOperators reg_bn_unsqueeze({Operator(
         push(stack, self.reshape(sizes));
         return 0;
       };
-    })});
+    },
+    aliasAnalysisFromSchema())});
 
 RegisterOperators reg_ln_view({Operator(
     "aten::_ncf_view(Tensor self, int[] input_shape, int normalized_ndim) -> Tensor",
@@ -74,8 +83,8 @@ RegisterOperators reg_ln_view({Operator(
         push(stack, self.reshape(sizes));
         return 0;
       };
-    })});
-
+    },
+    aliasAnalysisFromSchema())});
 
 bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
   bool decomposed = false;
