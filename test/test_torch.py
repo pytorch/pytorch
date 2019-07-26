@@ -2606,7 +2606,7 @@ class _TestTorchMixin(object):
 
             a = torch.tensor([[True, False, True],
                               [False, False, False],
-                              [True, True, True]],dtype=torch.bool, device=d)
+                              [True, True, True]], dtype=torch.bool, device=d)
             b = a.byte()
             aRes = torch.cumprod(a, 0)
             bRes = torch.cumprod(b, 0)

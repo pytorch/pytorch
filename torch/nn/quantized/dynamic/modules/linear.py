@@ -1,8 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from ....modules.linear import Linear as NNLinear
+import torch.nn.quantized as nnq
 
-class Linear(NNLinear):
+class Linear(nnq.Linear):
     r"""
     A dynamic quantized linear module with quantized tensor as inputs
     and outputs.
@@ -22,7 +23,7 @@ class Linear(NNLinear):
 
     Examples::
 
-        >>> m = nn.quantized.Linear(20, 30)
+        >>> m = nn.quantized.dynamic.Linear(20, 30)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
@@ -30,16 +31,14 @@ class Linear(NNLinear):
     """
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__(in_features, out_features, bias)
-        del self.weight
-        del self.bias
-        bias_fp32 = torch.Tensor(out_features)
-        self.register_buffer('bias', bias_fp32)
-
-        qweight = torch._empty_affine_quantized(
-            [out_features, in_features], scale=1, zero_point=0,
-            dtype=torch.qint8)
-        self.register_buffer('_packed_weight',
-                             torch.ops.quantized.fbgemm_linear_prepack(qweight))
+        if bias:
+            del self.bias
+            bias = torch.Tensor(out_features)
+            self.register_buffer('bias', bias)
+        else:
+            self.register_buffer('bias', None)
+        del self.scale
+        del self.zero_point
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
