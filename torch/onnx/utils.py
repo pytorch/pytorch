@@ -307,11 +307,14 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
             strip_doc_string=True, dynamic_axes=None):
+    if isinstance(model, torch.nn.DataParallel):
+        raise ValueError('torch.nn.DataParallel is not supported by ONNX '
+                         'exporter, please use \'attribute\' module to '
+                         'unwrap model from torch.nn.DataParallel. Try '
+                         'torch.onnx.export(model.module, ...)')
     global __IN_ONNX_EXPORT
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True
-    if isinstance(model, torch.nn.DataParallel):
-        model = model.module
     try:
         from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
         from torch.onnx.symbolic_helper import _set_operator_export_type

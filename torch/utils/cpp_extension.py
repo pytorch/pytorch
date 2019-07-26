@@ -110,7 +110,8 @@ def _is_binary_build():
 
 
 def _accepted_compilers_for_platform():
-    return ['clang++', 'clang'] if sys.platform.startswith('darwin') else ['g++', 'gcc']
+    # gnu-c++ and gnu-cc are the conda gcc compilers
+    return ['clang++', 'clang'] if sys.platform.startswith('darwin') else ['g++', 'gcc', 'gnu-c++', 'gnu-cc']
 
 
 def get_default_build_root():

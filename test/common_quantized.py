@@ -56,4 +56,4 @@ def _calculate_dynamic_qparams(X, dtype):
         zero_point = qmin - round(min_val / scale)
         zero_point = max(qmin, zero_point)
         zero_point = min(qmax, zero_point)
-    return [scale, zero_point]
+    return [float(scale), int(zero_point)]

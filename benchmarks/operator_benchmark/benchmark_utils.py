@@ -174,8 +174,8 @@ def is_pytorch_enabled(framework_arg):
     return 'PyTorch' in framework_arg
 
 
-def get_requested_frameworks(framework_arg):
-    return [fr.strip() for fr in framework_arg.split(',') if len(fr.strip()) > 0]
+def process_arg_list(arg_list):
+    return [fr.strip() for fr in arg_list.split(',') if len(fr.strip()) > 0]
 
 
 class SkipInputShape(Exception):
