@@ -43,7 +43,6 @@ def _nary_gen(out_dtype=None):
 # support for NestedTensor to torch.
 
 def monkey_patch(module):
-    print("SETUP MONKEY")
     module.nested_tensor = nested.nested_tensor
     module.NestedTensor = nested.NestedTensor
     module.as_nested_tensor = nested.as_nested_tensor

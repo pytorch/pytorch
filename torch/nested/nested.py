@@ -13,7 +13,6 @@ DEBUG = False
 orig_interpolate = F.interpolate
 
 def interpolate(*args, **kwargs):
-    print("CALLING INTO MONKEY")
     if is_nested_tensor(args[0]):
         # feat_shape = inner_lateral.shape[-2:]
         # inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
@@ -32,7 +31,6 @@ def interpolate(*args, **kwargs):
 orig_max_pool2d = torch.max_pool2d
 
 def max_pool2d(*args, **kwargs):
-    print("CALLING INTO MONKEY")
     if is_nested_tensor(args[0]):
         ret = []
         for tensor_ in args[0]._tensors:
@@ -47,7 +45,6 @@ def max_pool2d(*args, **kwargs):
 orig_conv2d = F.conv2d
 
 def conv2d(input, weight, bias, stride, padding, dilation, groups):
-    print("CALLING INTO MONKEY")
     if is_nested_tensor(input):
         ret = []
         for tensor_ in input._tensors:
@@ -62,7 +59,6 @@ def conv2d(input, weight, bias, stride, padding, dilation, groups):
 orig_relu = F.relu
 
 def relu(input, inplace=False):
-    print("CALLING INTO MONKEY")
     if is_nested_tensor(input):
         ret = []
         for tensor_ in input._tensors:
