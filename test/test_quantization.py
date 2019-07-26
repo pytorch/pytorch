@@ -1,16 +1,17 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
     default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
-    quantize, prepare, convert, prepare_qat, quantize_qat
+    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
+
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
-    ManualQATModel, test_only_eval_fn, test_only_train_fn
+    ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
 
 class PostTrainingQuantTest(QuantizationTestCase):
-
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
@@ -262,7 +263,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
-        model = ManualQATModel()
+        model = ManualLinearQATModel()
         model.qconfig = default_qat_qconfig
 
         model = prepare_qat(model)
@@ -276,7 +277,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
             self.assertEqual(type(model.fc2), nnq.Linear)
             test_only_eval_fn(model, self.calib_data)
 
-        model = ManualQATModel()
+        model = ManualLinearQATModel()
         model.qconfig = default_qat_qconfig
         model = quantize_qat(model, test_only_train_fn, self.train_data)
         checkQuantized(model)
@@ -286,7 +287,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         this is useful for estimating accuracy loss when we quantize the
         network
         """
-        model = ManualQATModel()
+        model = ManualLinearQATModel()
         model.qconfig = default_qat_qconfig
 
         model = prepare_qat(model)
@@ -294,6 +295,80 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
         model.eval()
         test_only_eval_fn(model, self.calib_data)
+
+    def test_conv_linear(self):
+        model = ManualConvLinearQATModel()
+        model.qconfig = default_qat_qconfig
+
+        model = prepare_qat(model)
+        self.checkObservers(model)
+
+        test_only_train_fn(model, self.img_data)
+        convert(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.conv), nnq.Conv2d)
+            self.assertEqual(type(model.fc1), nnq.Linear)
+            self.assertEqual(type(model.fc2), nnq.Linear)
+            test_only_eval_fn(model, self.img_data)
+
+        checkQuantized(model)
+
+        model = ManualConvLinearQATModel()
+        model.qconfig = default_qat_qconfig
+        model = quantize_qat(model, test_only_train_fn, self.img_data)
+        checkQuantized(model)
+
+
+class FusionTest(QuantizationTestCase):
+    def test_fuse_module_train(self):
+        import torch.nn._intrinsic.modules.fused as torch_fused
+        testMod = ModForFusion()
+        testMod.train()
+        fuse_modules(testMod, [['conv1', 'bn1', 'relu1'],
+                               ['sub1.conv', 'sub1.bn']])
+        self.assertEqual(type(testMod.conv1), torch_fused.ConvBnReLU2d,
+                         "Fused Conv + BN + Relu first layer")
+        self.assertEqual(type(testMod.bn1), torch.nn.Identity,
+                         "Fused Conv + BN + Relu (skipped BN)")
+        self.assertEqual(type(testMod.relu1), torch.nn.Identity,
+                         "Fused Conv + BN + Relu (skipped Relu)")
+
+        self.assertEqual(type(testMod.sub1.conv), torch_fused.ConvBn2d,
+                         "Fused submodule Conv + BN")
+        self.assertEqual(type(testMod.sub1.bn), torch.nn.Identity,
+                         "Fused submodule Conv + BN (skipped BN)")
+        self.assertEqual(type(testMod.sub2.conv), torch.nn.Conv2d,
+                         "Non-fused submodule Conv")
+        self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d,
+                         "Non-fused submodule BN")
+
+    def test_fuse_module_eval(self):
+        import torch.nn._intrinsic.modules.fused as torch_fused
+        testMod = ModForFusion()
+        testMod.eval()
+        fuse_modules(testMod, [['conv1', 'bn1', 'relu1'] ,
+                               ['sub1.conv', 'sub1.bn']])
+        self.assertEqual(type(testMod.conv1), torch_fused.ConvReLU2d,
+                         "Fused Conv + BN + Relu first layer (BN is folded)")
+        self.assertEqual(type(testMod.conv1[0]), torch.nn.Conv2d,
+                         "Fused Conv + BN + Relu (Conv + folded BN only)")
+        self.assertEqual(type(testMod.conv1[1]), torch.nn.ReLU,
+                         "Fused Conv + BN + Relu second layer (Relu only)")
+        self.assertEqual(type(testMod.bn1), torch.nn.Identity,
+                         "Fused Conv + BN + Relu second layer (Skipped BN)")
+        self.assertEqual(type(testMod.relu1), torch.nn.Identity,
+                         "Fused Conv + BN + Relu second layer (Skipped Relu)")
+
+        self.assertEqual(type(testMod.sub1.conv), torch.nn.Conv2d,
+                         "Fused submodule Conv + folded BN")
+        self.assertEqual(type(testMod.sub1.bn), torch.nn.Identity,
+                         "Fused submodule (skipped BN)")
+        self.assertEqual(type(testMod.sub2.conv), torch.nn.Conv2d,
+                         "Non-fused submodule Conv")
+        self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d,
+                         "Non-fused submodule BN")
+
 
 if __name__ == '__main__':
     run_tests()
