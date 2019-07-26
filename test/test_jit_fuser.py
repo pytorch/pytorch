@@ -543,6 +543,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
     @enable_cpu_fuser
+    @unittest.skip("temporarily disabled because fusion was restricted in fixing #22833")
     def test_fuser_iou(self):
         # This checks if most of Intersection over Union is fused.
         # In particular, the backward contains many _grad_sum_to_size.

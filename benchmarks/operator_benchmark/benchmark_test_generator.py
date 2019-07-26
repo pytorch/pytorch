@@ -8,6 +8,7 @@ import copy
 from benchmark_core import TestConfig
 from benchmark_caffe2 import register_caffe2_op_test_case
 from benchmark_pytorch import register_pytorch_op_test_case
+from benchmark_utils import SkipInputShape
 
 
 def _generate_test(configs, bench_op, OperatorTestCase, run_backward, op_name_function=None):
@@ -35,6 +36,7 @@ def _generate_test(configs, bench_op, OperatorTestCase, run_backward, op_name_fu
             test_attrs.update(attr)
         if tags is None:
             raise ValueError("Missing tags in configs")
+        input_config = str(test_attrs)[1:-1].replace('\'', '')
         op = bench_op()
         tensor_error_info = None
         # op_name_function is a dictionary which has op_name and op_function.
@@ -47,7 +49,11 @@ def _generate_test(configs, bench_op, OperatorTestCase, run_backward, op_name_fu
             op_name = op_name_function['op_name']
             init_dict.update({'op_func' : op_name_function['op_func']})
             op.set_module_name(op_name)
-        op.init(**init_dict)
+        try:
+            op.init(**init_dict)
+        except SkipInputShape:
+            print("Skipping: Config<{}> is not valid for op<{}>".format(input_config, op.module_name()))
+            continue
         test_name = op.test_name(**test_attrs)
         input_config = str(test_attrs)[1:-1].replace('\'', '')
         test_config = TestConfig(test_name, input_config, tags, run_backward)
