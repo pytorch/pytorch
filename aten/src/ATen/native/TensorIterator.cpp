@@ -3,7 +3,6 @@
 #include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/MemoryOverlap.h>
 
 namespace at {
 
@@ -504,11 +503,14 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
     const Tensor& b, bool check_internal_overlap) {
   auto iter = TensorIterator();
-  iter.add_output(out);
+  if (check_internal_overlap) {
+    iter.add_output(out);
+  } else {
+    iter.add_unchecked_output(out);
+  }
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
-  iter.check_internal_overlap(check_internal_overlap);
   iter.build();
   return iter;
 }
@@ -516,10 +518,13 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
     bool check_internal_overlap) {
   auto iter = TensorIterator();
-  iter.add_output(out);
+  if (check_internal_overlap) {
+    iter.add_output(out);
+  } else {
+    iter.add_unchecked_output(out);
+  }
   iter.add_input(a);
   iter.num_outputs_ = 1;
-  iter.check_internal_overlap(check_internal_overlap);
   iter.build();
   return iter;
 }
@@ -566,12 +571,6 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   iter.is_reduction_ = true;
   iter.build();
   return iter;
-}
-
-void TensorIterator::check_internal_overlap() {
-  for (int i = 0; i < num_outputs_; i++) {
-    at::assert_no_internal_overlap(operands_[i].tensor);
-  }
 }
 
 void TensorIterator::mark_outputs() {
@@ -699,9 +698,6 @@ int TensorIterator::get_dim_to_split() const {
 }
 
 void TensorIterator::build() {
-  if (check_internal_overlap_) {
-    check_internal_overlap();
-  }
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
   // compute the broadcasted shape

@@ -29,7 +29,7 @@ void assert_no_internal_overlap(const Tensor& t) {
 
 void assert_no_internal_overlap(TensorImpl* t) {
   if (has_internal_overlap(t) == MemOverlap::YES) {
-    AT_ERROR("unsupported operation: more than one element of the written-to "
+    TORCH_CHECK("unsupported operation: more than one element of the written-to "
         "tensor refers to a single memory location. Please clone() the tensor "
         "before performing the operation.");
   }

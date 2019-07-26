@@ -6,6 +6,7 @@
 #include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
 #include <c10/util/Optional.h>
+#include <ATen/MemoryOverlap.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisions, and trigonometric functions. It handles
@@ -256,6 +257,12 @@ struct CAFFE2_API TensorIterator {
 
   /// Construction
   void add_output(const Tensor& output) {
+    assert_no_internal_overlap(output);
+    operands_.emplace_back(output);
+    num_outputs_++;
+  }
+
+  void add_unchecked_output(const Tensor& output) {
     operands_.emplace_back(output);
     num_outputs_++;
   }
@@ -281,14 +288,9 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
-  void check_internal_overlap(bool check_internal_overlap) {
-    check_internal_overlap_ = check_internal_overlap;
-  }
-
   void build();
 
 protected:
-  void check_internal_overlap();
   void mark_outputs();
   void compute_shape();
   void compute_strides();
@@ -312,7 +314,6 @@ protected:
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
-  bool check_internal_overlap_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
