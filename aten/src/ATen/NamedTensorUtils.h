@@ -13,8 +13,8 @@ inline bool has_names(TensorList tensors) {
 }
 
 // Sets the names of `tensor` to be `names`.
-CAFFE2_API void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
-CAFFE2_API void internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
+CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
+CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
 
 // Converts dim to an positional index. Errors if `dim` cannot be used to
 // refer to any dimension of tensor.
