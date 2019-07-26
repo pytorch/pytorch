@@ -6540,7 +6540,7 @@ a")
             for out, ref in zip(final_hiddens_fp16, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            def compare_quantized_unquantized(ScriptWrapper, cell): 
+            def compare_quantized_unquantized(ScriptWrapper, cell):
                 wrapper = ScriptWrapper(cell)
 
                 # Compare quantize scripted module to unquantized
@@ -13229,6 +13229,30 @@ class TestRecursiveScript(JitTestCase):
 
         m = torch.jit.script(MyModule())
         FileCheck().check("ClassType<MyModule>").run(m.graph)
+
+    def test_repeated_error_stack(self):
+        def d(x):
+            import pdb
+
+        def c(x):
+            return d(x)
+
+        def b(x):
+            return c(x)
+
+        def a(x):
+            return b(x)
+
+        try:
+            torch.jit.script(a)
+        except Exception as e:
+            FileCheck().check_count("is being compiled", 2).run(str(e))
+
+        try:
+            torch.jit.script(a)
+        except Exception as e:
+            # Make sure that no entries are left over from the previous failure
+            FileCheck().check_count("is being compiled", 2).run(str(e))
 
     @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
