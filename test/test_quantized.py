@@ -415,7 +415,8 @@ class TestQuantizedConv(unittest.TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 1),
-           use_bias=st.booleans())
+           use_bias=st.booleans(),
+           use_relu=st.booleans())
     def test_qconv(
             self,
             batch_size,
@@ -431,10 +432,13 @@ class TestQuantizedConv(unittest.TestCase):
             pad_h,
             pad_w,
             dilation,
-            use_bias
+            use_bias,
+            use_relu
     ):
 
         qconv = torch.ops.quantized.fbgemm_conv2d
+        if use_relu:
+            qconv = torch.ops.quantized.fbgemm_conv2d_relu
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
 
         # C
@@ -531,6 +535,8 @@ class TestQuantizedConv(unittest.TestCase):
         result_q = _requantize(
             result_NHWK.numpy(), X_scale * W_scale / Y_scale, Y_zero_point
         )
+        if use_relu:
+            result_q[result_q < Y_zero_point] = Y_zero_point
 
         # Make sure the results match
         np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
