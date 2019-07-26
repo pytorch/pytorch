@@ -2847,6 +2847,25 @@ graph(%Ra, %Rb):
         s = str(torch.ops)
         self.assertRegex(s, r'ops')
 
+    def test_serialize_qtensor(self):
+        class SimpleQTensor(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SimpleQTensor, self).__init__()
+                x = torch.rand(5, 5).float()
+                x_q = torch.quantize_linear(x, 0.2, 10, torch.quint8)
+
+                self.register_buffer('x', x_q)
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.x
+
+        model = SimpleQTensor()
+        buffer = io.BytesIO()
+        torch.jit.save(model, buffer)
+        buffer.seek(0)
+        model_loaded = torch.jit.load(buffer)
+        self.assertEqual(model_loaded(), model())
 
 class TestScript(JitTestCase):
     def test_sequence_parsing(self):
