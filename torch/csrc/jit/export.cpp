@@ -813,21 +813,16 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   for (auto s : tensor.strides()) {
     tensor_proto->add_strides(s);
   }
+  tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
+      at::scalarTypeToTypeMeta(tensor.scalar_type())));
   tensor_proto->set_offset(tensor.storage_offset());
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
   tensor_proto->set_is_quantized(tensor.is_quantized());
-
   if (tensor.is_quantized()) {
-    tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
-        at::scalarTypeToTypeMeta(toUnderlying(tensor.scalar_type()))));
     tensor_proto->set_scale(tensor.q_scale());
     tensor_proto->set_zero_point(tensor.q_zero_point());
-  }
-  else {
-    tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
-        at::scalarTypeToTypeMeta(tensor.scalar_type())));
   }
 
   auto* key = tensor.storage().unsafeGetStorageImpl();
