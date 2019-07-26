@@ -6540,7 +6540,7 @@ a")
             for out, ref in zip(final_hiddens_fp16, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            def compare_quantized_unquantized(ScriptWrapper, cell): 
+            def compare_quantized_unquantized(ScriptWrapper, cell):
                 wrapper = ScriptWrapper(cell)
 
                 # Compare quantize scripted module to unquantized
@@ -13185,6 +13185,18 @@ a")
                 return t
 
         self.assertTrue('forward' in dir(M()))
+
+    def test_spread_kwargs_error(self):
+        @torch.jit.ignore
+        def something_else(h, i):
+            pass
+
+        def fn(x):
+            something_else(**x)
+
+        # print(fn({'h': 2, 'i': 4}))
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "unpacking is not supported"):
+            torch.jit.script(fn)
 
     def test_inferred_error_msg(self):
         """

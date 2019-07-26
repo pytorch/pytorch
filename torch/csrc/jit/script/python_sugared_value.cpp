@@ -504,7 +504,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
     auto pyCu = get_python_cu();
-    if (auto classType = pyCu->get_class(c10::QualifiedName(qualifiedName))) {
+    auto qualname = c10::QualifiedName(qualifiedName);
+    if (auto classType = pyCu->get_class(qualname)) {
       return std::make_shared<ClassValue>(classType);
     } else {
       // If we can't get the source code for the type, it's implemented in C and
@@ -520,7 +521,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
         // We're starting a new compilation, so update the error call stack in
         // case it fails
-        ErrorReport::CallStack::push_function(qualifiedName);
+        ErrorReport::CallStack::push_function(qualname.name());
         ErrorReport::CallStack::update_pending_range(loc);
 
         py::module::import("torch.jit")
@@ -530,7 +531,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         ErrorReport::CallStack::pop_function();
 
         // Return class
-        auto newClassType = pyCu->get_class(c10::QualifiedName(qualifiedName));
+        auto newClassType = pyCu->get_class(qualname);
         AT_ASSERT(
             newClassType,
             "Class '",

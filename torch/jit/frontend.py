@@ -101,20 +101,13 @@ class NotSupportedError(FrontendError):
     pass
 
 
-class NodeError(NotSupportedError):
-    def __init__(self, ctx, offending_node, msg):
-        # If we don't have a specific token, we default to length of 1
+class UnsupportedNodeError(NotSupportedError):
+    def __init__(self, ctx, offending_node):
         node_type = type(offending_node)
         range_len = len(node_start_tokens.get(node_type, ' '))
         source_range = ctx.make_range(offending_node.lineno,
                                       offending_node.col_offset,
                                       offending_node.col_offset + range_len)
-        super(NodeError, self).__init__(source_range, msg)
-
-
-class UnsupportedNodeError(NodeError):
-    def __init__(self, ctx, offending_node):
-        node_type = type(offending_node)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
         msg = "{} aren't supported".format(feature_name)
         super(UnsupportedNodeError, self).__init__(ctx, offending_node, msg)
@@ -443,7 +436,7 @@ class ExprBuilder(Builder):
             # XXX: we could do a better job at figuring out the range for the name here
             name = kw.arg
             if not name:
-                raise NodeError(ctx, expr, 'Could not find name for kwarg in call')
+                raise NotSupportedError(kw_expr.range(), 'Argument list unpacking is not supported')
             kwargs.append(Attribute(Ident(kw_expr.range(), name), kw_expr))
         return Apply(func, args, kwargs)
 
