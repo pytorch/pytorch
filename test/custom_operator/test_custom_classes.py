@@ -44,6 +44,7 @@ class TestCustomOperators(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             jit.script(f)()
 
+    @unittest.skip("We currently don't support passing custom classes to custom methods.")
     def test_input_class_type(self):
         def f():
             val = torch.classes.Foo(1, 2)
@@ -51,8 +52,21 @@ class TestCustomOperators(unittest.TestCase):
             val.combine(val2)
             return val
 
-        print(jit.script(f)())
-        # self.assertEqual(*test_equality(f, lambda x: x))
+        self.assertEqual(*test_equality(f, lambda x: x.info()))
+
+    def test_stack_string(self):
+        def f():
+            val = torch.classes.StackString(["asdf", "bruh"])
+            return val.pop()
+        self.assertEqual(*test_equality(f, lambda x: x))
+
+    def test_stack_push_pop(self):
+        def f():
+            val = torch.classes.StackString(["asdf", "bruh"])
+            val2 = torch.classes.StackString(["111", "222"])
+            val.push(val2.pop())
+            return val.pop() + val2.pop()
+        self.assertEqual(*test_equality(f, lambda x: x))
 
 
 if __name__ == "__main__":

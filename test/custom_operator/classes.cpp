@@ -15,7 +15,7 @@ namespace py = pybind11;
 
 struct Foo : torch::jit::torchbind_class {
   int x, y;
-  Foo(): x(2), y(5){}
+  Foo(): x(0), y(0){}
   Foo(int x_, int y_) : x(x_), y(y_) {}
   int64_t info() {
     return this->x * this->y;
@@ -35,6 +35,20 @@ struct Foo : torch::jit::torchbind_class {
   }
 };
 
+template <class T> struct Stack : torch::jit::torchbind_class {
+  std::vector<T> stack_;
+  Stack(std::vector<T> init): stack_(init.begin(), init.end()) {}
+
+  void push(T x) {
+    stack_.push_back(x);
+  }
+  T pop() {
+    auto val = stack_.back();
+    stack_.pop_back();
+    return val;
+  }
+};
+
 static auto test = torch::jit::class_<Foo>("Foo")
                     .def(torch::jit::init<int64_t, int64_t>())
                     // .def(torch::jit::init<>())
@@ -43,3 +57,9 @@ static auto test = torch::jit::class_<Foo>("Foo")
                     // .def("add", &Foo::add);
                     .def("combine", &Foo::combine)
                     ;
+
+static auto testStack = torch::jit::class_<Stack<std::string>>("StackString")
+                         .def(torch::jit::init<std::vector<std::string>>())
+                         .def("push", &Stack<std::string>::push)
+                         .def("pop", &Stack<std::string>::pop)
+                         ;

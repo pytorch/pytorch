@@ -18,7 +18,7 @@
 #include <iostream>
 #include <sstream>
 
-PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
+// PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 
 namespace py = pybind11;
 namespace torch {
@@ -50,7 +50,7 @@ template <class CurClass>
 class class_ {
   std::string className;
   std::string qualClassName;
-  std::shared_ptr<py::class_<CurClass, c10::intrusive_ptr<CurClass>>> pyClass = nullptr;
+  std::shared_ptr<py::class_<CurClass>> pyClass = nullptr;
   std::shared_ptr<script::CompilationUnit> classCu = nullptr;
   ClassTypePtr classTypePtr;
 
@@ -66,7 +66,7 @@ class class_ {
     qualClassName = topModule + "." + parentModule + "." + className;
 
     auto obj = py::module::import("torch").attr(parentModule.c_str());
-    pyClass = std::make_shared<py::class_<CurClass, c10::intrusive_ptr<CurClass>>>(obj, className.c_str());
+    pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
     pyClass->attr("qualified_name") = py::str(qualClassName);
     auto newClass =
         py::module::import("torch.jit")
