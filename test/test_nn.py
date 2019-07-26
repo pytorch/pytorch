@@ -3956,6 +3956,25 @@ class TestNN(NNTestCase):
         indices.add_(1)
         self.assertRaises(RuntimeError, lambda: output.backward(grad_output))
 
+        # Make sure -Infinity is handled correctly
+        t = torch.tensor([[[float("-inf")]]])
+        m = nn.MaxPool1d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0], 0)
+
+        t = torch.tensor([[[float("-inf")]]])
+        m = nn.MaxPool2d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0], 0)
+
+        t = torch.tensor([[[[float("-inf")]]]])
+        m = nn.MaxPool3d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0, 0], 0)
+
     def test_adaptive_pooling_input_size(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):

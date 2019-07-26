@@ -170,8 +170,8 @@ class ModuleAPITest(TestCase):
         result_reference = qF.conv2d(qX, qw, bias=qb,
                                      scale=scale, zero_point=zero_point,
                                      stride=1, padding=0,
-                                     dilation=1, groups=g,
-                                     prepacked=False, dtype=torch.quint8).permute([0, 3, 1, 2])
+                                     dilation=1, groups=g, dtype=torch.quint8
+                                     )
 
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
