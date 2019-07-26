@@ -30,9 +30,8 @@ def main():
 
     # This option is used to filter test cases to run.
     parser.add_argument(
-        '--operator',
-        help='Run the test cases that contain the provided operator'
-        ' as a substring of their names',
+        '--operators',
+        help='Filter tests based on comma-delimited list of operators to test',
         default=None)
 
     parser.add_argument(
