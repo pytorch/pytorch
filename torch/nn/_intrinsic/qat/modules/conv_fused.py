@@ -107,12 +107,17 @@ class ConvBn2d(Conv2d):
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
+
+        # we use running statistics from the previous batch, so this is an
+        # approximation of the approach mentioned in the whitepaper, but we only
+        # need to do one convolution in this case instead of two
         running_std = torch.sqrt(self.running_var + self.eps)
         scale_factor = self.gamma / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
         conv = self.conv2d_forward(input, self.weight_fake_quant(scaled_weight))
 
         if self.training and not self.freeze_bn:
+            # recovering original conv to get original batch_mean and batch_var
             conv_orig = conv
             if self.bias is not None:
                 conv_orig = conv_orig - self.bias.reshape([1, -1, 1, 1])
@@ -122,18 +127,22 @@ class ConvBn2d(Conv2d):
                 batch_mean = batch_mean + self.bias
             batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
             batch_rstd = torch.ones_like(batch_var) / torch.sqrt(batch_var + self.eps)
+
             rescale_factor = running_std * batch_rstd
             conv = conv * rescale_factor.reshape([1, -1, 1, 1])
             conv = conv + (self.beta - self.gamma * batch_mean * batch_rstd).reshape([1, -1, 1, 1])
             if self.bias is not None:
                 conv = conv + ((self.gamma * batch_rstd - rescale_factor) * self.bias).reshape([1, -1, 1, 1])
+
             self.running_mean = exponential_average_factor * batch_mean + (1 - exponential_average_factor) * self.running_mean
             self.running_var = exponential_average_factor * batch_var + (1 - exponential_average_factor) * self.running_var
         else:
             adjustment = self.running_mean
+            # adjust according to bias
             if self.bias is not None:
                 adjustment = self.running_mean - self.bias
                 conv = conv - self.bias.reshape([1, -1, 1, 1])
+
             conv = conv + (self.beta - self.gamma * adjustment /
                            running_std).reshape([1, -1, 1, 1])
         return conv
