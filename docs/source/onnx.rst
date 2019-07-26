@@ -664,6 +664,28 @@ Q: How to export models with loops in it?
 
   Please checkout `Tracing vs Scripting`_.
 
+Q: Does ONNX support implicit scalar datatype casting?
+
+  No, but the exporter will try to handle that part.  Scalars are converted to constant tensors in ONNX.
+  The exporter will try to figure out the right datatype for scalars.  However for cases that it failed
+  to do so, you will need to manually provide the datatype information.  We are trying to improve the datatype
+  propagation in the exporter such that manual changes are not required in the future. ::
+
+    class ImplicitCastType(torch.jit.ScriptModule):
+        @torch.jit.script_method
+        def forward(self, x):
+            # Exporter knows x is float32, will export '2' as float32 as well.
+            y = x + 2
+            # Without type propagation, exporter doesn't know the datatype of y.
+            # Thus '3' is exported as int64 by default.
+            return y + 3
+            # The following will export correctly.
+            # return y + torch.tensor([3], dtype=torch.float32)
+
+    x = torch.tensor([1.0], dtype=torch.float32)
+    torch.onnx.export(ImplicitCastType(), x, 'models/implicit_cast.onnx',
+                      example_outputs=ImplicitCastType()(x))
+
 Functions
 --------------------------
 .. autofunction:: export
