@@ -44,7 +44,7 @@ namespace native {
   inline Tensor tensor(T value) {                                             \
     return native::tensor(ArrayRef<T>(value));                                \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 
 ${native_function_declarations}
