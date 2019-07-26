@@ -1810,6 +1810,8 @@
 [[
   name: _th_cumsum
   cname: cumsum
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:
@@ -1822,6 +1824,8 @@
 [[
   name: _th_cumprod
   cname: cumprod
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:
@@ -2454,25 +2458,6 @@
       if_true: T
       if_false: N
       default: N
-]]
-[[
-  name: _th_btrisolve
-  cname: btrisolve
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  scalar_check: false
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THTensor* LU_data
-    - THIntegerTensor* LU_pivots
 ]]
 [[
   name: _th_random_

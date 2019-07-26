@@ -2370,6 +2370,12 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
 
+    .. note::
+        With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
+        negative values or values greater than 255 for images.
+        Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
+        when displaying the image.
+
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
         (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
@@ -2416,6 +2422,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             This only has effect when :attr:`mode` is ``'linear'``,
             ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
             Default: ``False``
+
+    .. note::
+        With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
+        negative values or values greater than 255 for images.
+        Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
+        when displaying the image.
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes

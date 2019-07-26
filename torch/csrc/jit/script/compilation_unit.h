@@ -69,11 +69,16 @@ struct TORCH_API CompilationUnit {
   }
 
   void set_optimized(bool o) {
-    optimized_ = o;
+    AT_WARN(
+        "CompilationUnit::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
   }
 
-  bool is_optimized() const {
-    return optimized_;
+   bool is_optimized() const {
+    AT_WARN(
+        "CompilationUnit::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   // for historic reasons, these are defined in compiler.cpp
@@ -106,7 +111,7 @@ struct TORCH_API CompilationUnit {
       name = c10::QualifiedName(name.prefix(), mangle(name.name()));
     }
     auto fn = torch::make_unique<Function>(
-        std::move(name), is_optimized(), std::move(graph), nullptr);
+        std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));
     return ret;
@@ -228,8 +233,6 @@ struct TORCH_API CompilationUnit {
   // for fast lookup
   std::unordered_map<c10::QualifiedName, size_t> dict_;
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
-  bool optimized_ = true;
-
 
   // [class ownership] Right now there aree two relationships between classes
   // and compilation units:
