@@ -11,7 +11,8 @@ import torch
 import torch.nn.quantized as nnq
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, QConfig, default_observer, default_weight_observer
+    default_qconfig, QConfig, default_observer, default_weight_observer, \
+    default_qat_qconfig
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -299,7 +300,7 @@ class ManualLinearQATModel(torch.nn.Module):
     """
     def __init__(self):
         super(ManualLinearQATModel, self).__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = default_qat_qconfig
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)

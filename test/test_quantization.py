@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 import torch.nn.quantized as nnq
-from torch.quantization import default_qconfig, default_qat_qconfig, \
+from torch.quantization import default_qat_qconfig, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
 
 from common_utils import run_tests
@@ -232,11 +232,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
-        model.qconfig = default_qat_qconfig
-
         model = prepare_qat(model)
         self.checkObservers(model)
-
         test_only_train_fn(model, self.train_data)
         convert(model)
 
@@ -244,10 +241,9 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
             self.assertEqual(type(model.fc1), nnq.Linear)
             self.assertEqual(type(model.fc2), nnq.Linear)
             test_only_eval_fn(model, self.calib_data)
+        checkQuantized(model)
 
-        model = ManualLinearQATModel()
-        model.qconfig = default_qat_qconfig
-        model = quantize_qat(model, test_only_train_fn, self.train_data)
+        model = quantize_qat(ManualLinearQATModel(), test_only_train_fn, self.train_data)
         checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
