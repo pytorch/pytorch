@@ -44,6 +44,14 @@ Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   }
 }
 
+Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
+  if (mask.dtype() == at::ScalarType::Bool) {
+    return legacy::cpu::_th_masked_select_bool_out(result, self, mask);
+  } else {
+    return legacy::cpu::_th_masked_select_out(result, self, mask);
+  }
+}
+
 Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }

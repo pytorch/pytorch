@@ -34,6 +34,17 @@ struct QualifiedName {
 
     cacheAccessors();
   }
+
+  /* implicit */ QualifiedName(const std::vector<std::string>& atoms) {
+    for (const auto& atom : atoms) {
+      TORCH_CHECK(!atom.empty(), "Atom cannot be empty");
+      TORCH_CHECK(
+          atom.find(delimiter_) == std::string::npos,
+          "Delimiter not allowed in atom");
+    }
+    atoms_ = atoms;
+    cacheAccessors();
+  }
   // Unnecessary copy. Ideally we'd use somoething like std::string_view.
   /* implicit */ QualifiedName(const char* name)
       : QualifiedName(std::string(name)) {}
@@ -79,6 +90,10 @@ struct QualifiedName {
   // The base name, like "baz"
   const std::string& name() const {
     return name_;
+  }
+
+  const std::vector<std::string>& atoms() const {
+    return atoms_;
   }
 
   bool operator==(const QualifiedName& other) const {
