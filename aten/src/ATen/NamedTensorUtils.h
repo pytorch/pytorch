@@ -35,14 +35,6 @@ CAFFE2_API std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, Dimn
 CAFFE2_API optional<std::vector<Dimname>>
 unify_from_right(optional<DimnameList> names, optional<DimnameList> other);
 
-// [Alignment rules]
-// Aligns the names in first and second according to the following rules:
-// 1) Check that the shorter of (tensor.names, other.names) is a subsequence
-//    (not necessarily contiguous) of the other.
-// 2) Aligning the shorter name to the longer name must NOT change the absolute
-//    position from the right of any unnamed dimension.
-CAFFE2_API DimnameList infer_alignment(DimnameList first, DimnameList second);
-
 namespace namedinference {
 
 // Propagates all names from src to result.
