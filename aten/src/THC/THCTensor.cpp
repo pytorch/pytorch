@@ -170,6 +170,10 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
 
   /* size and stride */
   THCTensor_resizeNd(state, self, nDimension, size, stride);
+
+#ifdef BUILD_NAMEDTENSOR
+  at::impl::internal_set_names_inplace(self, at::nullopt);
+#endif
 }
 
 void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int dimension)

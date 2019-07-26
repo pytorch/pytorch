@@ -136,6 +136,12 @@ class TestNamedTensor(TestCase):
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
 
+    def test_view_drops_names(self):
+        for device in torch.testing.get_all_device_types():
+            orig_tensor = torch.empty(2, 2, names=('N', 'D'), device=device)
+            new_tensor = orig_tensor.view(-1)
+            self.assertEqual(new_tensor.names, [None])
+
     def test_size(self):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
         self.assertEqual(t.size('N'), 2)

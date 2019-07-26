@@ -67,6 +67,10 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
 
   /* size and stride */
   THTensor_resizeNd(self, nDimension, size, stride);
+
+#ifdef BUILD_NAMEDTENSOR
+  at::impl::internal_set_names_inplace(self, at::nullopt);
+#endif
 }
 
 void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
