@@ -44,7 +44,7 @@ namespace torch {
   inline at::Tensor tensor(T value) {                                      \
     return torch::tensor(at::ArrayRef<T>(value));                          \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 
 /// A generic deleter function.

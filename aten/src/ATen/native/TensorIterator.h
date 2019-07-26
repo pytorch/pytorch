@@ -18,10 +18,10 @@
 //
 // Example:
 //
-//   auto iter = TensorIterator::Builder()
-//      .add_output(output)
-//      .add_input(input)
-//      .build()
+//   auto iter = TensorIterator();
+//   iter.add_output(output);
+//   iter.add_input(input);
+//   iter.build()
 //
 // [MyKernel.cpp / MyKernel.cu]
 //   cpu_kernel(iter, [](float a, float b) {
@@ -117,9 +117,6 @@ struct CAFFE2_API OperandInfo {
 struct SplitUntil32Bit;
 
 struct CAFFE2_API TensorIterator {
-  struct Builder;
-  friend struct Builder;
-
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
 
@@ -255,6 +252,35 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
+  /// Construction
+  void add_output(const Tensor& output) {
+    operands_.emplace_back(output);
+    num_outputs_++;
+  }
+
+  void add_output(const Tensor& input, Device device, ScalarType dtype) {
+    operands_.emplace_back(input, device, dtype);
+    num_outputs_++;
+  }
+
+  void add_input(const Tensor& input) {
+    operands_.emplace_back(input);
+  }
+
+  void add_input(const Tensor& input, Device device, ScalarType dtype) {
+    operands_.emplace_back(input, device, dtype);
+  }
+
+  void dont_compute_common_dtype() {
+    compute_common_dtype_ = false;
+  }
+
+  void dont_resize_outputs() {
+    resize_outputs_ = false;
+  }
+
+  void build();
+
 protected:
   void mark_outputs();
   void compute_shape();
@@ -279,41 +305,6 @@ protected:
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
-};
-
-struct TensorIterator::Builder {
-  friend struct TensorIterator;
-
-  void add_output(const Tensor& output) {
-    iter_.operands_.emplace_back(output);
-    iter_.num_outputs_++;
-  }
-
-  void add_output(const Tensor& input, Device device, ScalarType dtype) {
-    iter_.operands_.emplace_back(input, device, dtype);
-    iter_.num_outputs_++;
-  }
-
-  void add_input(const Tensor& input) {
-    iter_.operands_.emplace_back(input);
-  }
-
-  void add_input(const Tensor& input, Device device, ScalarType dtype) {
-    iter_.operands_.emplace_back(input, device, dtype);
-  }
-
-  void dont_compute_common_dtype() {
-    iter_.compute_common_dtype_ = false;
-  }
-
-  void dont_resize_outputs() {
-    iter_.resize_outputs_ = false;
-  }
-
-  TensorIterator build();
-
-protected:
-  TensorIterator iter_;
 };
 
 /// A container-like struct that acts as if it contains splits of a
