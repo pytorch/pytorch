@@ -5,11 +5,12 @@ import torch.nn.quantized as nnq
 from torch.quantization import QConfig, \
     default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    prepare_dynamic, quantize_dynamic, convert_dynamic
+    quantize_dynamic
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     TwoLayerLinearModel, NestedModel, WrappedModel, ManualQuantModel, \
-    ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
+    ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn, \
+    prepare_dynamic, convert_dynamic
 
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
