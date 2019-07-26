@@ -296,9 +296,9 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  auto elems = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto elems = c10::impl::GenericList(elem_type);
   for (auto elem : obj) {
-    elems.push_back(toIValue(elem, elem_type));
+    elems.push_back(toIValue(std::move(elem), elem_type));
   }
   return IValue(std::move(elems));
 }
@@ -437,6 +437,11 @@ inline IValue toIValue(
       return userObj;
     }
     case TypeKind::NumberType:
+      if (py::isinstance<py::int_>(obj)) {
+        return py::cast<int64_t>(obj);
+      } else if (py::isinstance<py::float_>(obj)) {
+        return py::cast<double>(obj);
+      }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:

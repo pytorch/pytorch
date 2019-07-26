@@ -247,7 +247,7 @@ void conv_transpose2d_out_cpu_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
       input.scalar_type(), "conv_transpose2d_out_cpu", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {

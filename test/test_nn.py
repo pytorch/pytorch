@@ -40,6 +40,9 @@ from common_utils import TEST_WITH_UBSAN
 
 from torch.nn import MultiheadAttention
 
+from hypothesis import given
+import hypothesis_utils as hu
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -495,6 +498,80 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     @property
     def extra_args(self):
         return self._get_arg('extra_args', False)
+
+class TestAvgPool(TestCase):
+    def _sum_pool2d(self, x, kernel_size):
+        windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
+        return torch.sum(windows, dim=1)
+
+    def _sum_pool3d(self, x, kernel_size):
+        # Because unfold does not support 3D sliding window we will split tensor to multiple tensors and calculate sum
+        h = kernel_size[0]
+        splited_x = [t.sum(0) for t in x.split(h) if t.size(0) == h]
+        # sum_pool2d assumes tensor in (1, 1, n, m) view, so unsqueeze two times
+        splited_x = [self._sum_pool2d(t.unsqueeze(0).unsqueeze(0), kernel_size[1:]) for t in splited_x]
+        joined_x = torch.cat(splited_x)
+        return joined_x.view(1, joined_x.numel())
+
+    def _avg_pool2d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool2d(x, kernel_size) / size
+
+    def _avg_pool3d(self, x, kernel_size):
+        size = reduce((lambda x, y: x * y), kernel_size)
+        return self._sum_pool3d(x, kernel_size) / size
+
+    def test_doubletensor_avg_pool2d(self):
+        n, m = 5, 8
+        input = torch.rand(1, 1, n, m)
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                actual = torch.nn.functional.avg_pool2d(input[0], (i, j))
+                actual = actual.view(1, actual.numel())
+                expected = self._avg_pool2d(input, (i, j))
+                self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool2d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+                               lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
+
+    def test_doubletensor_avg_pool2d_with_divisor(self):
+        n, m = 3, 3
+        input = torch.rand(1, 1, n, m)
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                for divisor in [1, 7, i * j]:
+                    actual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
+                    actual = actual.view(1, actual.numel())
+                    expected = self._sum_pool2d(input, (i, j)) / divisor
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_doubletensor_avg_pool3d(self):
+        h, w, d = 5, 6, 7
+        input = torch.rand(h, w, d)
+        for i in range(1, h + 1):
+            for j in range(1, w + 1):
+                for k in range(1, d + 1):
+                    actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k))
+                    actual = actual.view(1, actual.numel())
+                    expected = self._avg_pool3d(input, (i, j, k))
+                    self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_doubletensor_avg_pool3d_with_divisor(self):
+        h, w, d = 6, 5, 7
+        input = torch.rand(h, w, d)
+        for i in range(1, h + 1):
+            for j in range(1, w + 1):
+                for k in range(1, d + 1):
+                    for divisor in [1, 7, i * j]:
+                        actual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
+                        actual = actual.view(1, actual.numel())
+                        expected = self._sum_pool3d(input, (i, j, k)) / divisor
+                        self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool3d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
+                               lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -3879,6 +3956,25 @@ class TestNN(NNTestCase):
         indices.add_(1)
         self.assertRaises(RuntimeError, lambda: output.backward(grad_output))
 
+        # Make sure -Infinity is handled correctly
+        t = torch.tensor([[[float("-inf")]]])
+        m = nn.MaxPool1d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0], 0)
+
+        t = torch.tensor([[[float("-inf")]]])
+        m = nn.MaxPool2d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0], 0)
+
+        t = torch.tensor([[[[float("-inf")]]]])
+        m = nn.MaxPool3d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0, 0], 0)
+
     def test_adaptive_pooling_input_size(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -4027,6 +4123,31 @@ class TestNN(NNTestCase):
 
     def test_pool_large_size(self, dtype=torch.float):
         self._test_pool_large_size(self, device="cpu")
+
+    @staticmethod
+    def _test_pool_invalid_size(self, device, dtype=torch.float):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                # use a configuration that gives zero outputs only
+                # when doing a correct floor division by the stride
+                x = torch.ones([1, 1] + num_dim * [4],
+                               device=device, dtype=dtype)
+                with self.assertRaisesRegex(RuntimeError, r"too small|smaller than"):
+                    try:
+                        res = fn(x, 3, stride=2, padding=0, dilation=2)
+                    except TypeError:
+                        # some implementations do not support dilation
+                        res = fn(x, 6, stride=2, padding=0)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_pool_invalid_size_cuda(self, dtype=torch.float):
+        self._test_pool_invalid_size(self, device="cuda", dtype=dtype)
+
+    def test_pool_invalid_size(self, dtype=torch.float):
+        self._test_pool_invalid_size(self, device="cpu")
 
     def _test_scatter(self, tensor):
         x = tensor.detach().requires_grad_()
@@ -4244,6 +4365,23 @@ class TestNN(NNTestCase):
             outputs = dp.parallel_apply(modules, inputs, None)
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out.data, expected)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_parallel_apply_passes_exception(self):
+        # we define and instantiate a module that will throw a KeyError
+        class TestModule(nn.Module):
+
+            def forward(self, *args):
+                return {}['wonderful']
+
+        l1 = TestModule().to("cuda", torch.float)
+        # and check that parallel_apply passes on the exception
+        # (we can use a single device twice for this test)
+        with self.assertRaisesRegex(KeyError,
+                                    'Caught KeyError in replica \\d '
+                                    'on device 0.\nOriginal Traceback'
+                                    '[\\s\\S]+wonderful'):
+            dp.parallel_apply(modules=(l1, l1), inputs=(None, None))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
@@ -4634,6 +4772,32 @@ class TestNN(NNTestCase):
         i = torch.randn(20, 10, dtype=torch.float, device=cuda0, requires_grad=True)
         out = dp.data_parallel(l, i, device_ids=(cuda0, cuda1), output_device=cuda0)
         self.assertEqual(out, l(i))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_function_deletion(self):
+        # this test case is originated from #16532
+        def gradient_penalty(net, x):
+            output = net(x)
+            loss = torch.autograd.grad(
+                outputs=output, inputs=x,
+                grad_outputs=x.new_ones(output.size()),
+                create_graph=True, retain_graph=True)[0].mean()
+            return loss
+
+        net = nn.Linear(4, 1).cuda()
+        dpn = nn.DataParallel(net, [0, 1])
+        x = torch.ones(2, 4, requires_grad=True).cuda()
+
+        dpn.zero_grad()
+        loss = gradient_penalty(dpn, x)
+        loss.backward()
+        grads = [p.grad for p in net.parameters()]
+        self.assertEqual(2, len(grads))
+        self.assertEqual(
+            torch.tensor([[0.25, 0.25, 0.25, 0.25]], device='cuda:0'),
+            grads[0])
+        self.assertEqual(torch.tensor([0.0], device='cuda:0'), grads[1])
 
     def test_state_dict(self):
         l = nn.Linear(5, 5)
@@ -5393,7 +5557,7 @@ class TestNN(NNTestCase):
 
         self.assertEqual(l, expected)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 7000), "needs cudnn >= 7.0")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 7000), "needs cudnn >= 7.0")
     def test_CTCLoss_cudnn(self):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
@@ -6712,13 +6876,13 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
@@ -6761,7 +6925,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         import sys
         if sys.version_info[0] == 2:
@@ -6804,7 +6968,7 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
@@ -9116,6 +9280,32 @@ class TestNNInit(TestCase):
         def fn():
             init.normal(x)
         self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
+
+class TestFusionEval(TestCase):
+    @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
+           running_mean=hu.tensor(shapes=(6,)),
+           running_var=hu.tensor(shapes=(6,)))
+    def test_fuse_module_eval_numerics(self, X, running_mean, running_var):
+        inputs, _ = X
+
+        iC, oC = inputs.shape[1], len(running_mean[0])
+        inputs = torch.from_numpy(inputs).to(torch.double)
+        kernel_size = (3, 3)
+
+        conv_ref = torch.nn.Conv2d(iC, oC, bias=True, kernel_size=kernel_size)
+        bn_ref = torch.nn.BatchNorm2d(oC)
+        bn_ref.running_mean = torch.from_numpy(running_mean[0]).to(torch.double)
+        bn_ref.running_var = torch.from_numpy(running_var[0]).to(torch.double)
+
+        conv_ref.eval()
+        bn_ref.eval()
+
+        Y_ref = bn_ref(conv_ref(inputs))
+        conv_bn_fused = torch.nn.utils.fusion.fuse_conv_bn_eval(conv_ref,
+                                                                bn_ref)
+        Y_hat = conv_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, message="Conv+BN fusion results are off")
 
 
 def add_test(test, decorator=None):
