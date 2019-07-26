@@ -61,6 +61,7 @@ SmallVector<int64_t, 4> convOutputShape(
  * is 32767.
  *
  */
+template <bool ReluFused>
 class QConv2dInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
@@ -153,7 +154,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     float output_multiplier_float =
         (act_scale * weight_scale_float) / static_cast<float>(output_scale);
 
-    fbgemm::ReQuantizeOutput<false> outputProcObj(
+    fbgemm::ReQuantizeOutput<ReluFused> outputProcObj(
         NoOpObj,
         &output_multiplier_float,
         output_zero_point,
@@ -207,10 +208,14 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 #endif // USE_FBGEMM
 };
 
-static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_conv2d",
-    c10::RegisterOperators::options().kernel<QConv2dInt8>(
-        QuantizedCPUTensorId()));
+static auto registry =
+    c10::RegisterOperators()
+        .op("quantized::fbgemm_conv2d",
+            c10::RegisterOperators::options().kernel<QConv2dInt8<false>>(
+                QuantizedCPUTensorId()))
+        .op("quantized::fbgemm_conv2d_relu",
+            c10::RegisterOperators::options().kernel<QConv2dInt8<true>>(
+                QuantizedCPUTensorId()));
 
 } // namespace
 } // namespace native
