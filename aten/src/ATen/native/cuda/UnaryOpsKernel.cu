@@ -29,7 +29,7 @@ void sign_kernel_cuda(TensorIterator& iter){
       gpu_kernel(iter, []GPU_LAMBDA(bool a){ 
         return a; 
       });
-    }else{
+    } else {
       AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "sign_cuda", [&]() {
           gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
               scalar_t zero = scalar_t(0);

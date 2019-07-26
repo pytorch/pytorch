@@ -99,10 +99,10 @@ static void neg_kernel(TensorIterator& iter) {
 }
 
 static void sign_kernel(TensorIterator& iter){
-  if(iter.dtype() == at::ScalarType::Bool){
+  if(iter.dtype() == ScalarType::Bool){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
-  }else{
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
         auto zero_vec = Vec256<scalar_t>((scalar_t)(0));
         auto one_vec = Vec256<scalar_t>((scalar_t)(1));
 
