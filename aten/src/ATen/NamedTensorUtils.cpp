@@ -143,6 +143,88 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
   return result;
 }
 
+bool are_none_names_matched(DimnameList first, DimnameList second) {
+  auto it_first = first.rbegin();
+  auto it_second = second.rbegin();
+  while (it_first != first.rend() && it_second != second.rend()) {
+    if (it_first->is_wildcard() ^ it_second->is_wildcard()) {
+      return false;
+    }
+    ++it_first;
+    ++it_second;
+  }
+  return true;
+}
+
+bool is_subsequence(DimnameList shorter, DimnameList longer) {
+  if (shorter.size() == 0) {
+    return true;
+  }
+  auto it_longer = longer.begin();
+  auto it_shorter = shorter.begin();
+  for(; it_longer != longer.end() && it_shorter != shorter.end(); ++it_longer) {
+    TORCH_INTERNAL_ASSERT(
+        !it_longer->is_tagged() && !it_shorter->is_tagged(),
+        "Tagged names NYI");
+    if (it_longer->full_name() == it_shorter->full_name()) {
+      ++it_shorter;
+    }
+  }
+  // If everything in `shorter` was found in `longer`
+  return it_shorter == shorter.end();
+}
+
+DimnameList infer_alignment(DimnameList first, DimnameList second) {
+  size_t dims_first = first.size();
+  size_t dims_second = second.size();
+
+  DimnameList longer = dims_first > dims_second ? first : second;
+  DimnameList shorter = dims_first > dims_second ? second : first;
+  if (shorter.size() == 0) {
+    return longer;
+  }
+
+  auto it_longer = longer.rbegin();
+  auto it_shorter = shorter.rbegin();
+  for(; it_longer != longer.rend() && it_shorter != shorter.rend(); ++it_longer) {
+    TORCH_INTERNAL_ASSERT(
+        !it_longer->is_tagged() && !it_shorter->is_tagged(), "Tagged names NYI");
+    if (*it_longer != *it_shorter) {
+      continue;
+    }
+
+    // We've found a None name in shorter and longer. If their absolute positions
+    // from the right are not equal, then aligning the two names would require
+    // changing the absolute position from right of one of the None names,
+    // violating condition 2 of our [Alignment rules] (see NamedTensorUtils.h).
+    //
+    // For example:
+    // *, c, a, b
+    //       *, a
+    // [*, a] is a subsequence of [*, c, a, b], but in order to align them,
+    // we'd have to move the *.
+    if (it_shorter->is_wildcard()) {
+      TORCH_CHECK(
+          std::distance(shorter.rbegin(), it_shorter) ==
+          std::distance(longer.rbegin(), it_longer),
+          "Could not infer the alignment of Tensor", shorter, " and Tensor", longer,
+          ", please name the unnamed dimensions to resolve ambiguity.");
+    }
+
+    // Carry on and search for the next name.
+    ++it_shorter;
+  }
+
+  // TODO(rzou): suggest alternative when we have an alignment API.
+  // If everything in `shorter` was found in `longer`
+  TORCH_CHECK(
+      it_shorter == shorter.rend(),
+      "Could not align tensor `a` with dims ", shorter, " and tensor `b` with dims ", longer,
+      " because `a.names` is not a subsequence of `b.names`. ");
+
+  return longer;
+}
+
 // Assumption: A DimnameList can have no duplicate full names with
 // the exception of wildcards
 CAFFE2_API optional<std::vector<Dimname>>
