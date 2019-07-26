@@ -1007,6 +1007,9 @@ struct PythonPrintPass {
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
+      case aten::sorted: {
+        printValueList(stmt, node->inputs(), "sorted(", ")");
+      } break;
       case prim::TupleConstruct: {
         if (auto qualname = node->output()
                                 ->type()

@@ -30,38 +30,6 @@ std::shared_ptr<SugaredValue> PrintValue::call(
   return std::make_shared<NoneValue>();
 }
 
-std::shared_ptr<SugaredValue> SortedValue::call(
-    const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-  const auto schema = parseSchema("aten::sorted([]t input) -> ([]t)");
-  auto match_schema = matchSchema(schema, loc, *m.graph(), inputs, attributes);
-  TORCH_INTERNAL_ASSERT(match_schema.inputs.size() == 1 && inputs.size() == 1);
-  auto inp = NamedValue(inputs[0].name(), match_schema.inputs[0]);
-
-  // aten::sort is inplace, so we copy the list here then modify it
-  auto input = emitBuiltinCall(
-      loc,
-      *m.graph(),
-      aten::copy,
-      /*self*/ c10::nullopt,
-      {inp},
-      attributes,
-      true);
-
-  emitBuiltinCall(
-      loc,
-      *m.graph(),
-      aten::sort,
-      /*self*/ c10::nullopt,
-      {input},
-      attributes,
-      true);
-  return std::make_shared<SimpleValue>(input);
-}
-
 static const std::unordered_map<std::string, std::string>&
 builtin_cast_methods() {
   static std::unordered_map<std::string, std::string> builtin_cast_methods = {

@@ -94,6 +94,7 @@ namespace c10 {
   _(aten, _size_if_not_equal)        \
   _(aten, _ncf_unsqueeze)            \
   _(aten, warn)                      \
+  _(aten, sorted)                    \
   _(aten, floordiv)                  \
   _(aten, __range_length)            \
   _(aten, __derive_index)            \

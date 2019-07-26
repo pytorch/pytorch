@@ -349,7 +349,6 @@ struct Environment {
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
-          {"sorted", std::make_shared<SortedValue>()},
           {"float",
            makeMagic(
                "__float__",
@@ -404,6 +403,8 @@ struct Environment {
           {"enumerate", std::make_shared<IterableValue>(prim::enumerate)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
+          {"sorted",
+           std::make_shared<BuiltinFunction>(aten::sorted, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
