@@ -35,7 +35,7 @@ enum class Transform { Returns, LoopContinuations };
 // if hasExited() == true_val_ then we have exited, if == false_val_ we have
 // not. Otherwise, we might have exited.
 // exitValues() are the values that we are propagating to a destination block.
-// this is used for block outputs of loops and outputs of graphs & closures
+// this is used for block outputs of loops and outputs of functions & closures
 struct ExitPair : public std::pair<Value*, std::vector<Value*>> {
   using pair::pair;
 
@@ -78,22 +78,22 @@ struct ExitTransformer {
     false_val_ = graph_->insertConstant(false);
   };
 
-  void run(Transform transform_kind) {
-    if (transform_kind == Transform::Returns) {
-      current_exit_kind_ = prim::ReturnStmt;
-      convertReturnOutputsToReturnStmts(graph_->block());
-    } else {
-      current_exit_kind_ = prim::LoopContinuation;
-      convertLoopOutputsToContinuations(graph_->block());
-    }
+  void transformReturnStmts() {
+    current_exit_kind_ = prim::ReturnStmt;
+    convertReturnOutputsToReturnStmts(graph_->block());
+    transformExits(graph_->block());
+  }
+
+  void transformLoopContinuations() {
+    current_exit_kind_ = prim::LoopContinuation;
+    convertLoopOutputsToContinuations(graph_->block());
     transformExits(graph_->block());
   }
 
  private:
-  // The Logic for the exiy transform simplifies if the block outputs
-  // are converted to Exits before running, because you do not
-  // have to handle an exit that could have maybe exited, could have not exited,
-  // or must have exited. Now, it must have to have exited.
+  // The Logic for the exit transform simplifies if the block outputs
+  // are converted to Exits before running. Now the exit status for all
+  // targeted blocks must be will exit.
   static void convertBlockOutputsToNode(Block* block, Symbol kind) {
     auto ret_node = block->return_node();
     auto node = block->owningGraph()->create(kind, 0)->insertBefore(ret_node);
@@ -115,8 +115,8 @@ struct ExitTransformer {
   }
 
   static bool isGraphOrClosureBlock(Block* block) {
-    return owningNodeKind(block) == prim::Function ||
-        block->owningNode() == nullptr;
+    return block->owningNode() == nullptr ||
+        owningNodeKind(block) == prim::Function;
   }
 
   static void convertReturnOutputsToReturnStmts(Block* block) {
@@ -172,6 +172,32 @@ struct ExitTransformer {
 
     // if we are, we need to update the loop continue condition so that
     // we exit the loop if we've hit an exit
+    // and we need to propagate hasExited() and exitValues() outside the loop
+
+    // example:
+    // while i < 5:
+    //    i += 1
+    //    if j == 4:
+    //      return 5
+    // -> becomes
+    //
+    // loop_continue = i < 5
+    // has_exited = false
+    // ret_val = uninitialized(int)
+    // while loop_continue:
+    //    i += 1
+    //    if j == 4:
+    //      ret_val = 5
+    //      has_exited = True
+    //    else:
+    //      ret_val = uninitialized(int)
+    //      has_exited = False
+    //    if has_exited:
+    //      loop_continue = False
+    //    else:
+    //      loop_continue = i < 5
+
+    // update loop continuation condition so that we exit if we hit an exit
     WithInsertPoint insert(body);
     auto new_if = graph_->insertNode(graph_->create(prim::If, 0));
     new_if->addInput(exit_pair.hasExited());
@@ -181,14 +207,14 @@ struct ExitTransformer {
     loop.bodyBlock()->eraseOutput(0);
     loop.bodyBlock()->insertOutput(0, new_condition);
 
-    // we also need to propagate hasExited() and exitValues() outside the loop
-
-    // we didn't exit if we didn't enter the loop
+    // add hasExited() to loop outputs, we didn't exit if we didn't enter the
+    // loop
     node->addInput(false_val_);
     body->addInput()->setType(BoolType::get());
     body->registerOutput(exit_pair.hasExited());
     Value* new_has_exited = node->addOutput()->setType(BoolType::get());
 
+    // add exit values
     for (Value* exit_value : exit_pair.exitValues()) {
       auto typ = exit_value->type();
       node->addInput(getUnitValue(typ));
@@ -332,24 +358,24 @@ struct ExitTransformer {
     destroyNodeAfterExit(*iter);
   }
 
-  // if we are transforming LoopContinuations, then when we enter a loop
-  // the exits target that loop. if transforming ReturnStmts, exit target
-  // the most recent Closure/Graph
-  void setTargetBlock(Block* block) {
-    if (current_exit_kind_ == prim::LoopContinuation) {
-      if (owningNodeKind(block) == prim::Loop) {
-        target_block_ = block;
-      }
-    } else if (current_exit_kind_ == prim::ReturnStmt) {
-      if (isGraphOrClosureBlock(block)) {
-        target_block_ = block;
-      }
+  // if we're entering a Loop block & transforming LoopContinuations, or if
+  // we're entering a Closure/Graph block and we're transforming ReturnStmts,
+  // then we update target_block_ to be the new block.
+  // otherwise, target_block_ remains the same.
+  void updateTargetBlock(Block* block) {
+    if (owningNodeKind(block) == prim::Loop &&
+        current_exit_kind_ == prim::LoopContinuation) {
+      target_block_ = block;
+    } else if (
+        isGraphOrClosureBlock(block) &&
+        current_exit_kind_ == prim::ReturnStmt) {
+      target_block_ = block;
     }
   }
 
   ExitPair transformExits(Block* block) {
     Block* prev_target_block = target_block_;
-    setTargetBlock(block);
+    updateTargetBlock(block);
     ExitPair exit_pair = ExitPair(false_val_, std::vector<Value*>({}));
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       Node* node = *it;
@@ -393,6 +419,8 @@ struct ExitTransformer {
     // exit values. since the exit does not extend outside this block,
     // update returned exit to false. then, reset the target_block to whatever
     // it was previously
+    // this will occur with a Loop block when transforming LoopContinuations
+    // and a Graph/Closure block when transforming ReturnStmts.
     if (target_block_ == block) {
       TORCH_INTERNAL_ASSERT(getExitStatus(exit_pair) == ExitStatus::WILL);
       registerBlockOutputs(block, exit_pair.exitValues());
@@ -422,8 +450,16 @@ struct ExitTransformer {
   Value* true_val_;
   Value* false_val_;
 
-  // the block that we are currently targeting in the transform.
-  // e.g. when we see a ReturnStmt
+  // when we see current_exit_kind_, this is the block that the values are
+  // exiting to. For example when we are transforming LoopContinuations
+  // for i in range(5):
+  //   while i < 3:
+  //     continue
+  //   break
+  // when we transform the for loop block, target_block_ will be set the for
+  // block. then, when we enter the while loop, target_block_ will be the while
+  // loop block. when we are done transforming the while it will be set back to
+  // the for block.
   Block* target_block_ = nullptr;
   std::shared_ptr<Graph> graph_;
 };
@@ -509,9 +545,9 @@ struct ExitTransformer {
 
 void TransformExits(std::shared_ptr<Graph>& graph) {
   ExitTransformer e_loop(graph);
-  e_loop.run(Transform::LoopContinuations);
+  e_loop.transformLoopContinuations();
   ExitTransformer e_ret(graph);
-  e_ret.run(Transform::Returns);
+  e_ret.transformReturnStmts();
 }
 } // namespace jit
 } // namespace torch

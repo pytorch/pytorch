@@ -12313,6 +12313,22 @@ a")
                    .run(g)
 
         code = dedent('''
+            def loop_in_closure(self):
+                output = torch.tanh(self)
+                def backward(grad_output):
+                    for i in range(3):
+                        return 1
+                    return 4
+                return output, backward
+        ''')
+        cu = torch.jit.CompilationUnit(code)
+        fc = FileCheck()
+        fc.check("prim::Function").check("(Tensor, None) = prim::TupleConstruct")
+        # Loop then two if's added in exit transform
+        fc.check("prim::Function").check("prim::Loop").check_count("prim::If", 2)
+        fc.run(cu.loop_in_closure.graph)
+
+        code = dedent('''
             def tanh(self):
                 output = torch.tanh(self)
                 def backward(grad_output):
@@ -12493,10 +12509,11 @@ a")
         FileCheck().check(": None").run(none_ret.graph)
 
     def test_early_returns_loops(self):
-        def nest_while_ret(x: int):
+        def nest_while_ret(x):
+            # type: (int) -> int
             y = 4
-            while bool(x < 4):
-                if bool(x < 3):
+            while x < 4:
+                if x < 3:
                     return y
                 else:
                     y = y + 1
@@ -12531,6 +12548,18 @@ a")
 
         self.checkScript(test_will_ret, (0,))
         self.checkScript(test_will_ret, (1,))
+
+        def test_loop_nest_ret(y):
+            # type: (int) -> int
+            for i in range(y):
+                for i in range(y - 2):
+                    return 10
+                return 5
+            return 0
+
+        self.checkScript(test_loop_nest_ret, (0,))
+        self.checkScript(test_loop_nest_ret, (1,))
+        self.checkScript(test_loop_nest_ret, (2,))
 
     def test_nn_init(self):
         tests = (

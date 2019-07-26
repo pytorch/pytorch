@@ -545,7 +545,7 @@ struct to_ir {
     return old_frame;
   }
 
-  // If the graph might not return, at an implicit None return at the end
+  // If the graph might not return, add an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
     if (exit_blocks.count(graph->block()) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
