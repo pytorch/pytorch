@@ -3635,7 +3635,7 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
     printDebug = False
     if "test_cdist" in test_name:
         printDebug = True
-        eps = 1e-5
+        eps = 1e-4
         atol = 1e-4
 
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=eps, atol=atol, printDebug=printDebug))
