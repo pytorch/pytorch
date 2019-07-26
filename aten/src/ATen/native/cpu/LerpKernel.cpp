@@ -14,11 +14,11 @@ static void lerp_kernel_scalar(
     const Tensor& self,
     const Tensor& end,
     Scalar weight) {
-  auto builder = at::TensorIterator::Builder();
-  builder.add_output(ret);
-  builder.add_input(self);
-  builder.add_input(end);
-  auto iter = builder.build();
+  auto iter = TensorIterator();
+  iter.add_output(ret);
+  iter.add_input(self);
+  iter.add_input(end);
+  iter.build();
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "lerp_kernel_scalar", [&] {
     scalar_t weight_val = weight.to<scalar_t>();
     at::native::cpu_kernel(
@@ -36,12 +36,12 @@ static void lerp_kernel_tensor(
     const Tensor& self,
     const Tensor& end,
     const Tensor& weights) {
-  auto builder = at::TensorIterator::Builder();
-  builder.add_output(ret);
-  builder.add_input(self);
-  builder.add_input(end);
-  builder.add_input(weights);
-  auto iter = builder.build();
+  auto iter = TensorIterator();
+  iter.add_output(ret);
+  iter.add_input(self);
+  iter.add_input(end);
+  iter.add_input(weights);
+  iter.build();
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "lerp_kernel_tensor", [&] {
     at::native::cpu_kernel(
         iter,
