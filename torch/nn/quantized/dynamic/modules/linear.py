@@ -49,14 +49,16 @@ class Linear(nnq.Linear):
 
     # TODO: support initializing from quantization parameters when Quantizer is
     # exposed in python
-    @staticmethod
-    def from_float(mod):
+    @classmethod
+    def from_float(cls, mod):
         r"""Create a dynamic quantized module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
         assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
+        # assert type(mod) == cls.__FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+        #                     cls.__FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
         weight_observer = mod.qconfig.weight()
