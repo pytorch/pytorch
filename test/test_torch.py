@@ -1628,6 +1628,13 @@ class _TestTorchMixin(object):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
+    def test_sum_for_bool(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([True, False], device=device)
+            self.assertRaises(RuntimeError, lambda: a - a)
+            self.assertRaises(RuntimeError, lambda: a - 1)
+            self.assertRaises(RuntimeError, lambda: 1 - a)
+
     def test_add(self):
         for device in torch.testing.get_all_device_types():
             # [res] torch.add([res,] tensor1, tensor2)

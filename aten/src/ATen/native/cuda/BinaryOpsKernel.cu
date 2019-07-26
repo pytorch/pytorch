@@ -22,6 +22,7 @@ void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
+  TORCH_CHECK(iter.dtype() != kBool, "torch boolean subtraction, the `-` operator, is not supported, use the `^` operator instead.");
   return add_kernel_cuda(iter, -alpha_scalar);
 }
 
