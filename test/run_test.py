@@ -50,6 +50,7 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'nested_tensor',
 ]
 
 WINDOWS_BLACKLIST = [
