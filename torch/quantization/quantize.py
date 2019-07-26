@@ -2,8 +2,8 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch.nn as nn
 import torch
 
-from ._mappings import _DEFAULT_MODULE_MAPPING
-from ._mappings import _DEFAULT_QAT_MODULE_MAPPING
+from ._mappings import DEFAULT_MODULE_MAPPING
+from ._mappings import DEFAULT_QAT_MODULE_MAPPING
 from ._wrappers import QuantWrapper
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
@@ -126,7 +126,7 @@ def prepare(model, qconfig_dict=None):
 
 def prepare_qat(model, qconfig_dict=None):
     model = prepare(model, qconfig_dict)
-    model = convert(model, _DEFAULT_QAT_MODULE_MAPPING)
+    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
     return model
 
 
@@ -172,7 +172,7 @@ def quantize_qat(model, run_fn, run_args, qconfig_dict=None):
     convert(model)
     return model
 
-def convert(module, mapping=_DEFAULT_MODULE_MAPPING):
+def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
     parameters) to a quantized module.
     Args:

@@ -12,7 +12,7 @@ from ._wrappers import QuantStub
 from ._wrappers import DeQuantStub
 
 # Map for swapping float module to quantized ones.
-_DEFAULT_MODULE_MAPPING = {
+DEFAULT_MODULE_MAPPING = {
     nn.Linear: nnq.Linear,
     nn.ReLU: nnq.ReLU,
     nn.Conv2d: nnq.Conv2d,
@@ -24,7 +24,7 @@ _DEFAULT_MODULE_MAPPING = {
 }
 
 # Map for swapping float module to qat modules.
-_DEFAULT_QAT_MODULE_MAPPING = {
+DEFAULT_QAT_MODULE_MAPPING = {
     nn.Linear: nn.qat.Linear,
     nn.Conv2d: nn.qat.Conv2d,
 }
