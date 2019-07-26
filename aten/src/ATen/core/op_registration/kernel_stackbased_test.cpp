@@ -188,4 +188,14 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernelWithCache_whenCalled_
   EXPECT_EQ(6, stack[0].toInt());
 }
 
+TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCannotBeCalledUnboxed) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), &incrementKernel, &noCache));
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
+  ASSERT_TRUE(op.has_value());
+  expectThrows<c10::Error>(
+    [&] {callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, TensorType1(), dummyTensor(TensorType1()), 4);},
+    "Tried to call OpKernel::callUnboxed() for a kernel that doesn't have an unboxed version."
+  );
+}
+
 }
