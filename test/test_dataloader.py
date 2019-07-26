@@ -111,7 +111,7 @@ class TestDatasetRandomSplit(TestCase):
         dataset = CustomDataset(self, x)
         dataset = random_split(dataset, [5])[0]
         data_loader = DataLoader(dataset)
-        for batch in data_loader:
+        for _ in data_loader:
             pass
 
 

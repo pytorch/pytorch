@@ -46,7 +46,7 @@ class EventList(list):
         #
         # Algorithm has O(N * log(N)) complexity where N is number of
         # intervals
-        for thread_id, thread_events in threads:
+        for _, thread_events in threads:
             thread_events = sorted(
                 thread_events,
                 key=lambda event: [event.cpu_interval.start, -event.cpu_interval.end],

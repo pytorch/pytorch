@@ -158,7 +158,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
 
     # TODO: Use a real parser here; this will get bamboozled
     # by signatures that contain things like std::array<bool, 2> (note the space)
-    for arg_idx, arg in enumerate(args.split(', ')):
+    for arg in args.split(', '):
         type_and_name = [a.strip() for a in arg.rsplit(' ', 1)]
         if type_and_name == ['*']:
             assert not kwarg_only
@@ -263,7 +263,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
         number_of_arguments = len(supported_topt_arguments[0])
         if is_tensor_option(argument) and len(arguments) - idx >= number_of_arguments:
             topt_representation = []
-            for i in range(number_of_arguments):
+            for _ in range(number_of_arguments):
                 argument = arguments[idx]
                 if not is_tensor_option(argument):
                     break

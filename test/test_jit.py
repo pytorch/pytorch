@@ -3001,7 +3001,7 @@ def foo(x):
                 else:
                     return 'v{}'.format(idx - len(exprs))
 
-            for i in range(50):
+            for _ in range(50):
                 n = None
                 while n is None or n > len(exprs) + n_variables:
                     template = random.choice(templates)
@@ -3016,7 +3016,7 @@ def foo(x):
             src_lines.append('  return ({})\n'.format(''.join('v{},'.format(i) for i in range(n_variables))))
             return '\n'.join(src_lines)
 
-        for i in range(100):
+        for _ in range(100):
             g = {'torch': torch}
             code = gen_code()
             torch._six.exec_(code, g, None)
@@ -3046,7 +3046,7 @@ def foo(x):
         module = torch.jit.trace_module(n, inputs)
 
         check_inputs = []
-        for i in range(2):
+        for _ in range(2):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
@@ -4631,7 +4631,7 @@ a")
             # type: (int) -> int
             prev = 1
             v = 1
-            for i in range(0, x):
+            for _ in range(0, x):
                 save = v
                 v = v + prev
                 prev = save
@@ -6011,7 +6011,7 @@ a")
             while int(tensor.add_(1)) < 4:
                 if y == 1:
                     continue
-                for i in range(y):
+                for _ in range(y):
                     continue
                     ret += 1
                 ret += 1
@@ -6122,7 +6122,7 @@ a")
         def assign_after_break_nested(y):
             # type: (int)
             x = 0
-            for i in range(y):
+            for _ in range(y):
                 if y == 1:
                     x = 5
                     break
@@ -6142,7 +6142,7 @@ a")
         def may_break(y):
             # type: (int)
             x = 0
-            for i in range(y):
+            for _ in range(y):
                 if y == 1:
                     x = 5
                 else:
@@ -6214,7 +6214,7 @@ a")
         def test_varexit(cond):
             # type: (int)
             m = 0
-            for i in range(3):
+            for _ in range(3):
                 if cond == 2:
                     if cond == 2:
                         m = 2
@@ -6671,7 +6671,7 @@ a")
                 # find the last output, then all subsequent uses
                 fc.check(out_name[-1] + " : ")
                 # skip past node body
-                for i in range(contained_blocks(node)):
+                for _ in range(contained_blocks(node)):
                     fc.check("->")
                 if (node.kind() == "prim::If"):
                     fc.check("->").check("->").check("\n")
@@ -6724,7 +6724,7 @@ a")
             a = 1
             b = 2
             c = 3
-            for i in range(iter):
+            for _ in range(iter):
                 a = 4
                 b = 5
                 c = 6
@@ -6740,7 +6740,7 @@ a")
             a = 1
             b = 2
             c = 3
-            for i in range(iter):
+            for _ in range(iter):
                 c = c + 1
                 b = b + 1
                 a = a + 1
@@ -9719,7 +9719,7 @@ a")
     def test_for_in_tensors(self):
         def test_sizes(x):
             sumz = 0
-            for s in x:
+            for _ in x:
                 sumz += 1
             return sumz
         self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
@@ -9731,7 +9731,7 @@ a")
             @torch.jit.script
             def test_sizes(x):
                 sumz = 0
-                for s in x:
+                for _ in x:
                     sumz += 1
                 return sumz
 
@@ -9753,7 +9753,7 @@ a")
         def test_sizes(x):
             sumz = 0
             for n in x:
-                for t in n:
+                for _ in n:
                     sumz += 1
             return sumz
 
@@ -17418,7 +17418,7 @@ class TestLogging(JitTestCase):
         class ModuleThatLogs(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                for i in range(x.size(0)):
+                for _ in range(x.size(0)):
                     x += 1.0
                     torch.jit._logging.add_stat_value('foo', 1)
 
@@ -17433,7 +17433,7 @@ class TestLogging(JitTestCase):
         try:
 
             mtl = ModuleThatLogs()
-            for i in range(5):
+            for _ in range(5):
                 mtl(torch.rand(3, 4, 5))
 
             self.assertEqual(logger.get_counter_val('foo'), 15)
@@ -17460,7 +17460,7 @@ class TestLogging(JitTestCase):
         class ModuleThatTimes(torch.jit.ScriptModule):
             def forward(self, x):
                 tp_start = torch.jit._logging.time_point()
-                for i in range(30):
+                for _ in range(30):
                     x += 1.0
                 tp_end = torch.jit._logging.time_point()
                 torch.jit._logging.add_stat_value('mytimer', tp_end - tp_start)
@@ -17480,7 +17480,7 @@ class TestLogging(JitTestCase):
             @torch.jit.script_method
             def forward(self, x):
                 tp_start = torch.jit._logging.time_point()
-                for i in range(30):
+                for _ in range(30):
                     x += 1.0
                 tp_end = torch.jit._logging.time_point()
                 torch.jit._logging.add_stat_value('mytimer', tp_end - tp_start)
@@ -17497,7 +17497,7 @@ class TestLogging(JitTestCase):
 
     def test_counter_aggregation(self):
         def foo(x):
-            for i in range(3):
+            for _ in range(3):
                 torch.jit._logging.add_stat_value('foo', 1)
             return x + 1.0
 

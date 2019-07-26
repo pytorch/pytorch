@@ -63,7 +63,7 @@ TYPE_TRANSFORMS = {
         'accreal': 'double',
     },
 }
-for t, transforms in TYPE_TRANSFORMS.items():
+for _, transforms in TYPE_TRANSFORMS.items():
     transforms.update(COMMON_TRANSFORMS)
 
 for t in ['Float', 'Double']:

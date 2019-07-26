@@ -33,7 +33,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
-    for i in range(10):
+    for _ in range(10):
         model.train()
         for data, target in train_data:
             optimizer.zero_grad()

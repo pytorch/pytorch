@@ -62,7 +62,7 @@ def get_whitelisted_files():
     """
     matches = []
     for dir in CLANG_FORMAT_WHITELIST:
-        for root, dirnames, filenames in os.walk(dir):
+        for root, _, filenames in os.walk(dir):
             for filename in filenames:
                 if CPP_FILE_REGEX.match(filename):
                     matches.append(os.path.join(root, filename))

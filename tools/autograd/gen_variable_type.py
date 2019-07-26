@@ -586,11 +586,9 @@ def emit_body(declaration):
             # Figure out the offset of the edge that uses this variable
             for edge_off, arg in enumerate(func['args_with_derivatives']):
                 if arg['name'] == derivative_var_name:
-                    break
+                    return 'grad_fn->should_compute_output({})'.format(edge_off)
             else:
                 raise AssertionError()
-
-            return 'grad_fn->should_compute_output({})'.format(edge_off)
 
         setup.extend(save_variables(func['saved_inputs'], False, guard_for))
         for arg in func['args_with_derivatives']:

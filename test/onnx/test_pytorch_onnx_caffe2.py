@@ -2022,7 +2022,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         class NestedLoopsModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                for i in range(5):
+                for _ in range(5):
                     a = 0
                     while a < 4:
                         a += 1

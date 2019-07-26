@@ -260,7 +260,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     output = _differentiable_outputs(func_out)
 
     if not output:
-        for i, o in enumerate(func_out):
+        for i, _ in enumerate(func_out):
             def fn(input):
                 return _as_tuple(func(*input))[i]
             numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)

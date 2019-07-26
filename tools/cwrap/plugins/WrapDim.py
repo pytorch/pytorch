@@ -20,7 +20,7 @@ class WrapDim(CWrapPlugin):
 
     def process_option_code_template(self, template, option):
         new_code = []
-        for i, arg in enumerate(option['arguments']):
+        for arg in option['arguments']:
             if 'wrap_dim' not in arg:
                 continue
 

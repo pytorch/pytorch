@@ -107,7 +107,7 @@ class SpectralNorm(object):
 
     @staticmethod
     def apply(module, name, n_power_iterations, dim, eps):
-        for k, hook in module._forward_pre_hooks.items():
+        for _, hook in module._forward_pre_hooks.items():
             if isinstance(hook, SpectralNorm) and hook.name == name:
                 raise RuntimeError("Cannot register two spectral_norm hooks on "
                                    "the same parameter {}".format(name))

@@ -298,7 +298,7 @@ def backward_declaration(base, thnn_functions, backend_types):
         # Note that input_size is 4-dim for upsample_xxx2d
         size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
         input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': size}
-        for output_size_idx, arg in enumerate(arguments):
+        for arg in arguments:
             if arg['name'] == 'output_size':
                 break
         arguments.insert(output_size_idx + 1, input_size_arg)

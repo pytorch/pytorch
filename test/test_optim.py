@@ -550,7 +550,7 @@ class TestLRScheduler(TestCase):
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 scheduler.step()
                 self.opt.step()
 
@@ -572,7 +572,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group['initial_lr'] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -581,7 +581,7 @@ class TestLRScheduler(TestCase):
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 scheduler.step()
                 self.opt.step()
 
@@ -589,7 +589,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming_with_arg(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group['initial_lr'] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -606,7 +606,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_with_overriden_optim_step(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group['initial_lr'] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -641,7 +641,7 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            for e in range(epochs):                
+            for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
             self.assertTrue(len(ws) == 0, "No warning should be raised")
@@ -679,7 +679,7 @@ class TestLRScheduler(TestCase):
         self.opt.step = types.MethodType(new_step, self.opt)
 
         def new_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
 

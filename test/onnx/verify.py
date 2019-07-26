@@ -461,7 +461,7 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
         run_helper(torch_out, args)
 
         if isinstance(test_args, int):
-            for i in range(test_args):
+            for _ in range(test_args):
                 run(randomize_args(args))
         else:
             for test_arg in test_args:

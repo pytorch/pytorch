@@ -19,7 +19,7 @@ class WeightNorm(object):
 
     @staticmethod
     def apply(module, name, dim):
-        for k, hook in module._forward_pre_hooks.items():
+        for _, hook in module._forward_pre_hooks.items():
             if isinstance(hook, WeightNorm) and hook.name == name:
                 raise RuntimeError("Cannot register two weight_norm hooks on "
                                    "the same parameter {}".format(name))

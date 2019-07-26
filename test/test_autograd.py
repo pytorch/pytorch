@@ -2779,7 +2779,7 @@ class TestAutograd(TestCase):
         rnn = torch.nn.LSTM(10, 20, 2)
         total_time_s = 0
         with profile(record_shapes=True) as prof:
-            for i in range(20):
+            for _ in range(20):
                 input = torch.randn(5, 3, 10)
                 h = torch.randn(2, 3, 20)
                 c = torch.randn(2, 3, 20)
@@ -3494,7 +3494,7 @@ for shape in [(1,), ()]:
         )
 
         feat_combined = []
-        for r in range(num_inp):
+        for _ in range(num_inp):
             data_r = torch.Tensor(1, nz_inp)
             data_r.uniform_()
             data_r.requires_grad = True

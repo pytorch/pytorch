@@ -834,7 +834,7 @@ def sort_declarations(grouped_decls):
     # Use a topological sort to sort decls according to the partial order.
     sorted_deps = [(i, decl) for i, decl in enumerate(grouped_decls)
                    if i not in larger_than]
-    for i, decl in sorted_deps:
+    for i, _ in sorted_deps:
         for i2 in sorted(larger_than.keys()):
             larger = larger_than[i2]
             larger.discard(i)

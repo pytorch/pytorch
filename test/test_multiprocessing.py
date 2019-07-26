@@ -66,7 +66,7 @@ def send_and_delete_tensors(queue, event, tp, count, size=5):
 
 def receive_and_send_sum(queue, out_queue, event, tp, count, size=5):
     s = torch.full([size], 0).type(tp)
-    for i in range(count):
+    for _ in range(count):
         t = queue.get()
         s += t
     out_queue.put(s)
@@ -74,7 +74,7 @@ def receive_and_send_sum(queue, out_queue, event, tp, count, size=5):
 
 
 def receive_and_send(queue, out_queue, event, count):
-    for i in range(count):
+    for _ in range(count):
         t = queue.get()
         out_queue.put(t.clone())
     event.wait()

@@ -472,7 +472,7 @@ def gen_pyi(declarations_path, out):
         unsorted_function_hints[name].append("def {}({}) -> Tensor: ...".format(name, ', '.join(sig)))
 
     function_hints = []
-    for name, hints in sorted(unsorted_function_hints.items()):
+    for _, hints in sorted(unsorted_function_hints.items()):
         if len(hints) > 1:
             hints = ['@overload\n' + h for h in hints]
         function_hints += hints
@@ -528,7 +528,7 @@ def gen_pyi(declarations_path, out):
                ],
         'item': ["def item(self) -> Number: ..."],
     })
-    for binop in ['add', 'sub', 'mul', 'div']:
+    for name in ['add', 'sub', 'mul', 'div']:
         for inplace in [True, False]:
             out_suffix = ', *, out: Optional[Tensor]=None'
             if inplace:
@@ -555,7 +555,7 @@ def gen_pyi(declarations_path, out):
         unsorted_tensor_method_hints[name] += sig_for_ops(name)
 
     tensor_method_hints = []
-    for name, hints in sorted(unsorted_tensor_method_hints.items()):
+    for _, hints in sorted(unsorted_tensor_method_hints.items()):
         if len(hints) > 1:
             hints = ['@overload\n' + h for h in hints]
         tensor_method_hints += hints

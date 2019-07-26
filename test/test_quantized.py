@@ -231,7 +231,7 @@ class TestQuantizedOps(TestCase):
         X = torch.from_numpy(X)
         new_shape = np.array(X.shape)
         new_shape[axis] = 0
-        for idx in range(num):
+        for _ in range(num):
             tensors_q.append(torch.quantize_linear(X, scale, zero_point,
                                                    torch_type))
             tensors_ref.append(X)

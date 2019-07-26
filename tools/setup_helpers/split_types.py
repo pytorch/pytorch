@@ -53,7 +53,7 @@ def split_types(file_name, ninja_global):
         lines = f.read().split('\n')
 
     # Find //generic_include
-    for i, l in enumerate(lines):
+    for l in lines:
         if l.startswith(line_start):
             args = l[len(line_start):]
             lib_prefix, generic_file = filter(bool, args.split())

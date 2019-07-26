@@ -522,7 +522,7 @@ class DistributedDataParallel(Module):
                             buffer.set_(tensor)
 
     def _passing_sync_batchnorm_handle(self, module_copies):
-        for dev_idx, module in enumerate(module_copies):
+        for module in module_copies:
             for layer in module.modules():
                 if isinstance(layer, torch.nn.modules.SyncBatchNorm):
                     assert self.is_cuda, "SyncBatchNorm layers only work with CUDA modules"

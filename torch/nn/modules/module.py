@@ -871,7 +871,7 @@ class Module(object):
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, param in self.named_parameters(recurse=recurse):
+        for _, param in self.named_parameters(recurse=recurse):
             yield param
 
     def named_parameters(self, prefix='', recurse=True):
@@ -919,7 +919,7 @@ class Module(object):
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, buf in self.named_buffers(recurse=recurse):
+        for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
     def named_buffers(self, prefix='', recurse=True):
@@ -954,7 +954,7 @@ class Module(object):
         Yields:
             Module: a child module
         """
-        for name, module in self.named_children():
+        for _, module in self.named_children():
             yield module
 
     def named_children(self):
@@ -1001,7 +1001,7 @@ class Module(object):
             1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
-        for name, module in self.named_modules():
+        for _, module in self.named_modules():
             yield module
 
     def named_modules(self, memo=None, prefix=''):
