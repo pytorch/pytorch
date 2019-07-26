@@ -242,6 +242,9 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
   } else {
     prod_stub(iter.device_type(), iter);
   }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
+#endif
   return result;
 }
 
@@ -259,6 +262,17 @@ Tensor prod(const Tensor &self, c10::optional<ScalarType> dtype) {
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
   return at::native::prod_out_impl(result, self, dim, keepdim, dtype);
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor prod(const Tensor& self, Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  return at::prod(self, dimname_to_position(self, dim), keepdim, dtype);
+}
+
+Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
+                 bool keepdim, optional<ScalarType> opt_dtype) {
+  return at::prod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
+}
+#endif
 
 Tensor &mean_out(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
@@ -316,7 +330,7 @@ static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
   return result;
 }
 
-Tensor& logsumexp_out(Tensor& result, const Tensor &self, IntArrayRef dims, bool keepdim) {
+Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::max_values(self, dims, true);
@@ -331,7 +345,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor &self, IntArrayRef dims, bool
   return result;
 }
 
-Tensor logsumexp(const Tensor &self, IntArrayRef dims, bool keepdim) {
+Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dims, keepdim);
 }
