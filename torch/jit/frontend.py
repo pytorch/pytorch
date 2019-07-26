@@ -103,6 +103,7 @@ class NotSupportedError(FrontendError):
 
 class UnsupportedNodeError(NotSupportedError):
     def __init__(self, ctx, offending_node):
+        # If we don't have a specific token, we default to length of 1
         node_type = type(offending_node)
         range_len = len(node_start_tokens.get(node_type, ' '))
         source_range = ctx.make_range(offending_node.lineno,
@@ -434,10 +435,9 @@ class ExprBuilder(Builder):
         for kw in expr.keywords:
             kw_expr = build_expr(ctx, kw.value)
             # XXX: we could do a better job at figuring out the range for the name here
-            name = kw.arg
-            if not name:
+            if not kw.arg:
                 raise NotSupportedError(kw_expr.range(), 'Argument list unpacking is not supported')
-            kwargs.append(Attribute(Ident(kw_expr.range(), name), kw_expr))
+            kwargs.append(Attribute(Ident(kw_expr.range(), kw.arg), kw_expr))
         return Apply(func, args, kwargs)
 
     @staticmethod

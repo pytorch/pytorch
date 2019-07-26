@@ -13194,7 +13194,6 @@ a")
         def fn(x):
             something_else(**x)
 
-        # print(fn({'h': 2, 'i': 4}))
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "unpacking is not supported"):
             torch.jit.script(fn)
 
