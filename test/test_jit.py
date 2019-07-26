@@ -5417,7 +5417,7 @@ a")
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "but is actually of type None"):
+        with self.assertRaisesRegex(RuntimeError, "does not return along all paths"):  # noqa
             torch.jit.CompilationUnit('''
             def no_return_bad_annotation(a):
                 # type: (Tensor) -> Tensor
@@ -6559,7 +6559,7 @@ a")
             for out, ref in zip(final_hiddens_fp16, ref_hid):
                 torch.testing.assert_allclose(out, ref)
 
-            def compare_quantized_unquantized(ScriptWrapper, cell): 
+            def compare_quantized_unquantized(ScriptWrapper, cell):
                 wrapper = ScriptWrapper(cell)
 
                 # Compare quantize scripted module to unquantized
@@ -12315,8 +12315,97 @@ a")
         self.checkScript(fn3, ("abcdefghi",))
         self.checkScript(fn4, ("abcdefghi",))
 
-    def test_non_final_return(self):
+    def test_early_return_closure(self):
+        code = dedent('''
+            def tanh(self):
+                output = torch.tanh(self)
+                def backward(grad_output):
+                    pass
+                return output, backward
+        ''')
+        cu = torch.jit.CompilationUnit(code)
+        g = cu.tanh.graph
+        FileCheck().check_count("prim::Function_0", 2).check("None = prim::Constant") \
+                   .check_next("return").run(g)
 
+        code = dedent('''
+            def tanh(self):
+                output = torch.tanh(self)
+                def backward(grad_output):
+                    a = 1
+                    if True:
+                        return 1
+                    else:
+                        a = 2
+                    return a
+                return output, backward
+        ''')
+        cu = torch.jit.CompilationUnit(code)
+        g = cu.tanh.graph
+        FileCheck().check_count("prim::Function_0", 2).check("int = prim::If") \
+                   .run(g)
+
+        code = dedent('''
+            def loop_in_closure(self):
+                output = torch.tanh(self)
+                def backward(grad_output):
+                    for i in range(3):
+                        return 1
+                    return 4
+                return output, backward
+        ''')
+        cu = torch.jit.CompilationUnit(code)
+        fc = FileCheck()
+        fc.check("prim::Function").check("(Tensor, None) = prim::TupleConstruct")
+        # Loop then two if's added in exit transform
+        fc.check("prim::Function").check("prim::Loop").check_count("prim::If", 2)
+        fc.run(cu.loop_in_closure.graph)
+
+        code = dedent('''
+            def tanh(self):
+                output = torch.tanh(self)
+                def backward(grad_output):
+                    if True:
+                        return 1
+                    else:
+                        return 1.
+                return output, backward
+        ''')
+        with self.assertRaisesRegex(RuntimeError, "returned a value of type int but"):
+            cu = torch.jit.CompilationUnit(code)
+
+    def test_early_return_fork_join(self):
+        @torch.jit.script
+        def foo(x):
+            if x.dim() == 2:
+                return torch.neg(x), x
+            else:
+                return torch.neg(x), x + 1
+
+        x = torch.rand(3, 4)
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            y_hat = foo(x)
+            y = torch.jit._wait(fut)
+            return y, y_hat
+
+        FileCheck().check("with prim::fork").check("prim::If").check("return")\
+                   .run(wait_script.graph)
+
+    def test_early_return_type_refinement(self):
+        @torch.jit.script
+        def test(x):
+            # type: (Optional[int]) -> int
+            if x is None:
+                return 1
+            else:
+                return x
+        self.assertEqual(test(None), 1)
+        self.assertEqual(test(2), 2)
+
+    def test_non_final_return(self):
         def simple(x):
             if bool(x > 3):
                 return x + 1
@@ -12349,49 +12438,161 @@ a")
             x = x + 1
             return x + 2
 
-        self.checkScript(simple, torch.rand(1))
-        self.checkScript(nest, torch.rand(1))
-        self.checkScript(early_ret, torch.rand(1))
-        self.checkScript(nest_early_ret, torch.rand(1))
+        def not_early_ret(x):
+            s = ""
+            if bool(x > 3):
+                if bool(x > 4):
+                    return 1, s
+                s += "foo"
+            else:
+                s += "5"
+            s += "hi"
+            return 7, s
 
-        with self.assertRaisesRegex(RuntimeError, "early"):
-            @torch.jit.script
-            def not_early_ret(x):
-                if bool(x > 3):
-                    if bool(x > 4):
-                        return 1
-                    print("foo")
+        def not_total_ret(x):
+            s = ""
+            if bool(x > 3):
+                if bool(x > 4):
+                    return 1, s
                 else:
-                    print("5")
-                return 7
+                    return 2, s
+            else:
+                s += "5"
+            return 7, s
 
-        with self.assertRaisesRegex(RuntimeError, "some paths"):
-            @torch.jit.script
-            def not_total_ret(x):
-                if bool(x > 3):
-                    if bool(x > 4):
-                        return 1
-                    else:
+        for i in range(3):
+            for func in [simple, nest, early_ret, nest_early_ret, not_early_ret,
+                         not_total_ret]:
+                self.checkScript(func, (torch.tensor(2.5 + i),))
+
+        def vars_used_after_ret(x):
+            # type: (int) -> int
+            if x == 0:
+                return x
+            else:
+                y = 2
+                z = 3
+            return x + y * z
+
+        self.checkScript(vars_used_after_ret, (1,))
+        self.checkScript(vars_used_after_ret, (0,))
+
+        def complicated(x):
+            # type: (int) -> int
+            if x:
+                if x == 2:
+                    return 1
+                    assert 1 == 2
+                else:
+                    if x == 3:
                         return 2
+                        assert 1 == 2
+                    else:
+                        a = 2
+                        b = 3
+            else:
+                a = 4
+                b = 1
+            return a + b
+            assert 1 == 2
+
+        for i in range(4):
+            self.checkScript(complicated, (i,))
+
+    def test_partial_returns_shape_prop(self):
+        @torch.jit.script
+        def test_shape_prop(x):
+            # type: (int) -> int
+            if not bool(x):
+                return x
+            else:
+                z = torch.zeros([2, 2], dtype=torch.int64)
+            return int(z[0])
+
+        test_shape_prop(torch.tensor(0.5))
+        graph = test_shape_prop.graph_for(torch.tensor(0.5))
+        # Shape analysis of z should propagate through if statement
+        FileCheck().check("Long(*, *)").check("prim::If").run(graph)
+
+    def test_partial_returns(self):
+        with self.assertRaisesRegex(RuntimeError, "does not return along all"):
+            @torch.jit.script
+            def no_ret():
+                # type: () -> int
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "does not return along all"):
+            @torch.jit.script
+            def partial(x):  # noqa 484
+                # type: (Tensor) -> int
+                if x:
+                    return 1
+
+        with self.assertRaisesRegex(RuntimeError, "does not return along all"):
+            @torch.jit.script
+            def typed_none():  # noqa 484
+                # type: () -> Optional[int]
+                pass
+
+        @torch.jit.script
+        def none_ret():
+            pass
+
+        self.assertIs(none_ret(), None)
+        FileCheck().check(": None").run(none_ret.graph)
+
+    def test_early_returns_loops(self):
+        def nest_while_ret(x):
+            # type: (int) -> int
+            y = 4
+            while x < 4:
+                if x < 3:
+                    return y
                 else:
-                    print("5")
-                return 7
+                    y = y + 1
+                    break
+                y = y + 2
+            y = y + 1
+            return y
 
-        with self.assertRaisesRegex(RuntimeError, "from a loop"):
-            @torch.jit.script
-            def nest_while_ret(x):
-                while bool(x > 4):
-                    if bool(x < 3):
-                        return 4
-                return 5
+        self.checkScript(nest_while_ret, (2,))
+        self.checkScript(nest_while_ret, (3,))
+        self.checkScript(nest_while_ret, (4,))
 
-        with self.assertRaisesRegex(RuntimeError, "from a loop"):
-            @torch.jit.script
-            def nest_for_ret(x):
-                for _ in range(3):
-                    if bool(x < 3):
-                        return 4
+        def loop_ret(x, y):
+            # type: (int, int) -> (int)
+            i = 0
+            for i in range(x):
+                if x == y:
+                    return x + y
+                i = i + y
+            i = i - 1
+            return i
+
+        self.checkScript(loop_ret, (3, 3))
+        self.checkScript(loop_ret, (2, 3))
+        self.checkScript(loop_ret, (3, 1))
+
+        def test_will_ret(y):
+            # type: (int) -> int
+            for i in range(y):
+                return 2
+            return 1
+
+        self.checkScript(test_will_ret, (0,))
+        self.checkScript(test_will_ret, (1,))
+
+        def test_loop_nest_ret(y):
+            # type: (int) -> int
+            for i in range(y):
+                for i in range(y - 2):
+                    return 10
                 return 5
+            return 0
+
+        self.checkScript(test_loop_nest_ret, (0,))
+        self.checkScript(test_loop_nest_ret, (1,))
+        self.checkScript(test_loop_nest_ret, (2,))
 
     def test_nn_init(self):
         tests = (

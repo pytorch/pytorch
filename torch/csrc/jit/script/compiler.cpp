@@ -14,7 +14,6 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/script/convert_to_ssa.h>
-#include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
@@ -522,6 +521,7 @@ struct to_ir {
   ResolverPtr resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
+  std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
 
   // Singly-linked list of environments. This top element contains a member
@@ -545,6 +545,21 @@ struct to_ir {
     return old_frame;
   }
 
+  // If the graph might not return, add an implicit None return at the end
+  void handleMaybeNoReturn(const Def& def, Block* block) {
+    if (exit_blocks.count(graph->block()) == 0) {
+      auto decl_ret = def_stack_.back().declared_return_type_;
+      if (decl_ret && decl_ret != NoneType::get()) {
+        throw ErrorReport(def.range())
+            << "Function was not annotated as having type None, but does not "
+            << "return along all paths";
+      }
+      WithInsertPoint b(*block->nodes().end());
+      emitReturn(Return::create(
+          def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
+    }
+  }
+
   FunctionSchema emitDef(const Def& def, const Self* self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
@@ -555,8 +570,9 @@ struct to_ir {
         emitFormalArguments(def, self, schema, block);
 
     // body
-    auto stmts_list = moveAllReturnsToEnd(def.statements());
+    auto stmts_list = def.statements();
     emitStatements(stmts_list.begin(), stmts_list.end());
+    handleMaybeNoReturn(def, block);
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
     return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
@@ -745,10 +761,16 @@ struct to_ir {
       const FunctionSchema& schema,
       Block* block) {
     // rewrites ensure there is always a return statement in program
-    AT_ASSERT(def_stack_.back().merged_return_type_);
-    // outputs
-    Value* result = environment_stack->getVar("$return", range);
-    block->registerOutput(result);
+    auto ret_type = def_stack_.back().merged_return_type_;
+    AT_ASSERT(ret_type);
+
+    // in the ConvertToSSA pass, prim::ReturnStmts are lowered so that the
+    // correct return value is set. Until then, we have a correctly-typed
+    // placeholder return value. This is needed so that closures & graphs
+    // are correctly typed.
+    auto placeholder_return =
+        graph->insertNode(graph->createUninitialized(ret_type))->output();
+    block->registerOutput(placeholder_return);
     return Argument("", def_stack_.back().merged_return_type_);
   }
 
@@ -847,7 +869,8 @@ struct to_ir {
     }
     AT_ASSERT(result_type);
     def_stack_.back().merged_return_type_ = result_type;
-    environment_stack->setVar(stmt.range(), "$return", result);
+    graph->insertNode(graph->create(prim::ReturnStmt, {result}, 0));
+    exit_blocks.insert(environment_stack->block());
   }
 
   void emitStatements(
@@ -1118,6 +1141,12 @@ struct to_ir {
     auto save_false = emitSingleIfBranch(
         false_block, stmt.falseBranch(), bool_info.false_refinements_);
 
+    bool true_exits = exit_blocks.count(true_block);
+    bool false_exits = exit_blocks.count(false_block);
+    if (true_exits && false_exits) {
+      exit_blocks.insert(n->owningBlock());
+    }
+
     // In python, every variable assigned in an if statement escapes
     // the scope of the if statement (all variables are scoped to the function).
     // Script is a subset of python: we consider variables to be in scope
@@ -1140,6 +1169,11 @@ struct to_ir {
     // if ...:
     //   a =
     // ... = a # OK, a is defined along all paths
+    // if ...:
+    //   a =
+    // else:
+    //   return
+    // ... = a # OK, a is always defined
 
     // ordered set, because we want deterministic graph output
     std::set<std::string> mutated_variables;
@@ -1151,7 +1185,7 @@ struct to_ir {
     for (auto& v : save_true->definedVariables()) {
       {
         WithInsertPoint insert(false_block);
-        if (save_false->findInAnyFrame(v)) {
+        if (save_false->findInAnyFrame(v) || false_exits) {
           mutated_variables.insert(v);
         } else {
           ErrorReport error(stmt);
@@ -1165,7 +1199,7 @@ struct to_ir {
     for (auto& v : save_false->definedVariables()) {
       {
         WithInsertPoint insert(true_block);
-        if (save_true->findInAnyFrame(v)) {
+        if (save_true->findInAnyFrame(v) || true_exits) {
           mutated_variables.insert(v);
         } else {
           ErrorReport error(stmt);
@@ -1181,14 +1215,37 @@ struct to_ir {
     for (const auto& x : mutated_variables) {
       Value* tv;
       Value* fv;
+
       {
         WithInsertPoint insert(true_block);
-        tv = save_true->getVar(x, stmt.range());
+        if (!true_exits) {
+          tv = save_true->getVar(x, stmt.range());
+        }
       }
       {
         WithInsertPoint insert(false_block);
-        fv = save_false->getVar(x, stmt.range());
+        if (!false_exits) {
+          fv = save_false->getVar(x, stmt.range());
+        }
       }
+
+      // if both branches exit don't emit any variables
+      // if one branch exits then we allow the all variables in the other branch
+      // to escape scope since they are well-defined
+      if (true_exits && false_exits) {
+        continue;
+      } else if (true_exits) {
+        tv = graph->createUninitialized(fv->type())
+                 ->insertBefore(true_block->return_node())
+                 ->output();
+        graph->createStore(x, tv)->insertBefore(true_block->return_node());
+      } else if (false_exits) {
+        fv = graph->createUninitialized(tv->type())
+                 ->insertBefore(false_block->return_node())
+                 ->output();
+        graph->createStore(x, fv)->insertBefore(false_block->return_node());
+      }
+
       auto unified = unifyTypes(tv->type(), fv->type());
 
       // attempt to unify the types. we allow variables to be set to different
