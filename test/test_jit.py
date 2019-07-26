@@ -13370,6 +13370,22 @@ class TestRecursiveScript(JitTestCase):
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
+    def test_error_stack_class(self):
+        class X(object):
+            def bad_fn(self):
+                import pdb
+
+        def fn(x):
+            return X(10)
+
+        try:
+            torch.jit.script(fn)
+        except Exception as e:
+            checker = FileCheck()
+            checker.check("import statements")
+            checker.check("is being compiled since it was called from \'fn\'")
+            checker.run(str(e))
+
     def test_module_basic(self):
         class Other(torch.nn.Module):
             __constants__ = ['x']
