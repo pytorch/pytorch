@@ -1,6 +1,8 @@
+# Torchscript serialization
+
 This document explains the Torchscript serialization format, and the anatomy of a call to `torch::jit::save()` or `torch::jit::load()`.
 
-## Serialization format basics
+## Overview
 
 A serialized model (call it `model.pt`) is a ZIP archive containing many files. It can be directly inspected by calling `unzip` on it. The archive's file structure looks like:
 
