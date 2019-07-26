@@ -112,6 +112,7 @@ class IntrinsicQATModuleTest(TestCase):
         ref_op = compose(func_list)
 
         result_ref = ref_op(input)
+        print('conv_ref:', conv_op(input))
         result_actual = qat_op(input)
         self.assertEqual(result_ref, result_actual)
 

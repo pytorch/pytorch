@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import math
 import torch
 from torch.nn import Conv2d
-from torch.nn.modules.utils import _pair
 from torch.nn import init
 from torch.nn._intrinsic import ConvBn2d as NNConvBn2d
 from torch.nn._intrinsic import ConvBnReLU2d as NNConvBnReLU2d
@@ -21,7 +20,7 @@ class ConvBn2d(Conv2d):
     We combined the interface of :class:`torch.nn.Conv2d` and
     :class:`torch.nn.BatchNorm2d`.
 
-    Implementation details: https://arxiv.org/pdf/1806.08342.pdf
+    Implementation details: https://arxiv.org/pdf/1806.08342.pdf section 3.2.2
 
     Similar to :class:`torch.nn.Conv2d`, with FakeQuantize modules initialized
     to default.
@@ -117,13 +116,24 @@ class ConvBn2d(Conv2d):
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
         conv = self.conv2d_forward(input, self.weight_fake_quant(scaled_weight))
 
-        conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+        print('bias:', self.bias)
+        if self.bias is not None:
+            conv_orig = (conv - self.bias.reshape([1, -1, 1, 1])) / scale_factor.reshape([1, -1, 1, 1])
+        else:
+            conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+        print('conv_orig:', conv_orig)
         batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
+        if self.bias is not None:
+            batch_mean = batch_mean + self.bias
         batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
 
         if not self.freeze_bn:
-            conv = conv * (torch.sqrt((self.running_var + self.eps) / (batch_var + self.eps))).reshape([1, -1, 1, 1])
-            conv = conv + (self.beta - self.gamma * (batch_mean / torch.sqrt(batch_var + self.eps))).reshape([1, -1, 1, 1])
+            rescale_factor = torch.sqrt((self.running_var + self.eps) / (batch_var + self.eps))
+            batch_rstd = 1.0 / torch.sqrt(batch_var + self.eps)
+            conv = conv * rescale_factor.reshape([1, -1, 1, 1])
+            conv = conv + (self.beta - self.gamma * batch_mean * batch_rstd).reshape([1, -1, 1, 1])
+            if self.bias is not None:
+                conv = conv + ((self.gamma * batch_rstd - rescale_factor) * self.bias).reshape([1, -1, 1, 1])
         else:
             conv = conv + (self.beta - self.gamma * self.running_mean /
                            torch.sqrt(self.running_var + self.eps)).reshape([1, -1, 1, 1])
