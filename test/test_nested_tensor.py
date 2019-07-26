@@ -46,7 +46,7 @@ def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 3
     return torch.floor(random_float_tensor(seed, size, a, c, m) * (high - low)) + low
 
 
-class Testnested_tensor(TestCase):
+class TestNestedTensor(TestCase):
 
     def gen_float_tensor(self, seed, shape, requires_grad=False):
         return random_float_tensor(seed, shape, requires_grad=requires_grad)
