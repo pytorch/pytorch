@@ -2,9 +2,17 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 import torch.nn.quantized as nnq
-from torch.quantization import QConfig, \
-    default_qconfig, default_qat_qconfig, default_observer, default_weight_observer, \
-    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
+from torch.quantization import QConfig
+from torch.quantization import convert
+from torch.quantization import default_qconfig
+from torch.quantization import default_qat_qconfig
+from torch.quantization import default_observer
+from torch.quantization import default_weight_observer
+from torch.quantization import fuse_modules
+from torch.quantization import prepare
+from torch.quantization import prepare_qat
+from torch.quantization import quantize
+from torch.quantization import quantize_qat
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \

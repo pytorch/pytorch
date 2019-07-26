@@ -6,7 +6,7 @@ from .QConfig import *  # noqa: F401
 from .fake_quantize import *  # noqa: F401
 from .fuse_modules import fuse_modules  # noqa: F401
 
-from ._mappings import _DEFAULT_MODULE_MAPPING as DEFAULT_MODULE_MAPPING
+from ._wrappers import QuantWrapper, QuantStub, DeQuantStub
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -17,7 +17,7 @@ def default_eval_fn(model, calib_data):
         model(data)
 
 _all__ = [
-    'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
+    'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for quantizing a float model
     'quantize',
     # Sub functions called by quantize
