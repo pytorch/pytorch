@@ -9,6 +9,7 @@ import torch
 import torch.multiprocessing as multiprocessing
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler
 from . import _utils
+from torch._utils import ExceptionWrapper
 import threading
 import itertools
 from torch._six import queue
@@ -801,13 +802,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     def _process_data(self, data):
         self.rcvd_idx += 1
         self._try_put_index()
-        if isinstance(data, _utils.ExceptionWrapper):
-            # make multiline KeyError msg readable by working around
-            # a python bug https://bugs.python.org/issue2651
-            if data.exc_type == KeyError and "\n" in data.exc_msg:
-                raise Exception("KeyError:" + data.exc_msg)
-            else:
-                raise data.exc_type(data.exc_msg)
+        if isinstance(data, ExceptionWrapper):
+            data.reraise()
         return data
 
     def _shutdown_worker(self, worker_id):
