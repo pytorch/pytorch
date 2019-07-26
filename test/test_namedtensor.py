@@ -273,14 +273,28 @@ class TestNamedTensor(TestCase):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             op = getattr(torch.Tensor, op_name)
             self.assertEqual(op(t, 'C', keepdim=True).names, ['N', 'C', 'L'])
-            self.assertEqual(op(t, ['C', 'L'], keepdim=True).names, ['N', 'C', 'L'])
 
-        for device in torch.testing.get_all_device_types():
-            test_simple_reduce('sum', device)
-            test_complete_reduce('sum', device)
-            test_multidim_reduce('sum', device)
-            test_keepdim('sum', device)
-            test_out_variant('sum', device)
+        Case = namedtuple('Case', [
+            'op_name',
+            'supports_complete_reduce',
+            'supports_multidim_reduce',
+        ])
+
+        tests = [
+            Case(op_name='sum', supports_complete_reduce=True, supports_multidim_reduce=True),
+            Case(op_name='prod', supports_complete_reduce=True, supports_multidim_reduce=False),
+        ]
+
+        for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
+            op_name = testcase.op_name
+            test_simple_reduce(op_name, device)
+            test_keepdim(op_name, device)
+            test_out_variant(op_name, device)
+
+            if testcase.supports_complete_reduce:
+                test_complete_reduce(op_name, device)
+            if testcase.supports_multidim_reduce:
+                test_multidim_reduce(op_name, device)
 
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():

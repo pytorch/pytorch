@@ -547,6 +547,9 @@ class CAFFE2_API Tensor {
   Tensor std(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
   Tensor prod(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor prod(int64_t dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor prod(Dimname dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor t() const;
   Tensor & t_();
   Tensor tan() const;
