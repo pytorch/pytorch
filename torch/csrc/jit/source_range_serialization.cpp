@@ -31,7 +31,12 @@ class SourceRangeDeserializer {
     std::shared_ptr<Source> source_ = deserialize_source(tup_elems[0]);
     int64_t start_ = tup_elems[1].toInt();
     int64_t end_ = tup_elems[2].toInt();
-    return SourceRange(source_, start_, end_);
+
+    if (source_) {
+      return SourceRange(source_, start_, end_);
+    } else {
+      return SourceRange();
+    }
   }
 
  private:
@@ -43,6 +48,9 @@ class SourceRangeDeserializer {
 
     auto tup_elems = tup->elements();
     TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
+    if (tup_elems[0].toString()->string() == "") {
+      return nullptr;
+    }
     std::string text_ = tup_elems[0].toString()->string();
     c10::optional<std::string> filename_ =
         tup_elems[1].toOptional<std::string>();

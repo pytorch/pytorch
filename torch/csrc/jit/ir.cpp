@@ -1248,7 +1248,7 @@ void Node::removeFromList() {
 }
 
 inline const SourceRange& fakeRange() {
-  static SourceRange range(std::make_shared<Source>(""), 0, 1);
+  static SourceRange range;
   return range;
 }
 
