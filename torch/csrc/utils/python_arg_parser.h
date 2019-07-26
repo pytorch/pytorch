@@ -393,7 +393,7 @@ inline at::Dimname PythonArgs::dimname(int i) {
   return THPDimname_parse(args[i]);
 }
 
-static inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
+inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Dimname> res;

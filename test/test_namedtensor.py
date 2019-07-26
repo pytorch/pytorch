@@ -67,6 +67,29 @@ class TestNamedTensor(TestCase):
     def test_empty(self):
         self._test_factory(torch.empty, 'cpu')
 
+    def test_set_names_(self):
+        tensor = torch.empty(1, 1, names=('N', 'C'))
+        self.assertEqual(tensor.set_names_(None).names, (None, None))
+        self.assertEqual(tensor.set_names_(['H', 'W']).names, ('H', 'W'))
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            tensor.set_names_(['N', 'C', 'W'])
+        with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
+            tensor.set_names_(['N', 'N'])
+
+    def test_set_names_property(self):
+        tensor = torch.empty(1, 1, names=('N', 'C'))
+
+        tensor.names = None
+        self.assertEqual(tensor.names, (None, None))
+
+        tensor.names = ('N', 'W')
+        self.assertEqual(tensor.names, ('N', 'W'))
+
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            tensor.names = ['N', 'C', 'W']
+        with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
+            tensor.names = ['N', 'N']
+
     @unittest.skipIf(not TEST_CUDA, 'no CUDA')
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
