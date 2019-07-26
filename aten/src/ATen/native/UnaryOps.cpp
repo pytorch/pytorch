@@ -47,7 +47,8 @@ Tensor& bitwise_not_(Tensor& self) {
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
-  auto iter = TensorIterator::unary_op(result, self, /*check_internal_overlap=*/true);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_internal_overlap=*/true);
   bitwise_not_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);

@@ -257,14 +257,13 @@ struct CAFFE2_API TensorIterator {
 
   /// Construction
   void add_output(const Tensor& output) {
-    assert_no_internal_overlap(output);
     operands_.emplace_back(output);
     num_outputs_++;
   }
 
-  void add_unchecked_output(const Tensor& output) {
-    operands_.emplace_back(output);
-    num_outputs_++;
+  void add_checked_output(const Tensor& output) {
+    assert_no_internal_overlap(output);
+    add_output(output);
   }
 
   void add_output(const Tensor& input, Device device, ScalarType dtype) {

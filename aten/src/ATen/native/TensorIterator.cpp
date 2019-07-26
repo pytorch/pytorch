@@ -504,9 +504,9 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
     const Tensor& b, bool check_internal_overlap) {
   auto iter = TensorIterator();
   if (check_internal_overlap) {
-    iter.add_output(out);
+    iter.add_checked_output(out);
   } else {
-    iter.add_unchecked_output(out);
+    iter.add_output(out);
   }
   iter.add_input(a);
   iter.add_input(b);
@@ -519,9 +519,9 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
     bool check_internal_overlap) {
   auto iter = TensorIterator();
   if (check_internal_overlap) {
-    iter.add_output(out);
+    iter.add_checked_output(out);
   } else {
-    iter.add_unchecked_output(out);
+    iter.add_output(out);
   }
   iter.add_input(a);
   iter.num_outputs_ = 1;
