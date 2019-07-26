@@ -24,9 +24,11 @@ be useful in many cases, including element-wise ops on large tensors,
 convolutions, GEMMs, embedding lookups and others.
 
 PyTorch provides a set of parallel primitives (in ``ATen/Parallel.h``), such as
-``at::parallel_for`` and others, that can be used to implement parallel ops.
+``at::parallel_for``, that can be used to implement parallel ops.
 In addition to the functions in ``ATen/Parallel.h``, parallel ops can also
-utilize external libraries, such as ``MKL`` and ``MKL-DNN``, to execute work.
+utilize external libraries, such as MKL and MKL-DNN, to execute work.
+``ATen/Parallel.h``, MKL, MKL-DNN and other libraries typically use parallelization
+libraries (e.g. OpenMP or TBB) to implement multithreading.
 
 
 Build options
@@ -64,9 +66,9 @@ The following API is used to control threading:
 |                        | ``get_num_interop_threads`` (Python, :mod:`torch` module) |                                                  | Default number of threads: number of CPU cores;         |
 +------------------------+-----------------------------------------------------------+--------------------------------------------------+---------------------------------------------------------+
 | Intra-op parallelism   | ``at::set_num_threads``,                                  | ``at::parallel_for``                             | ``set`` functions can only be called once and only      |
-|                        | ``at::get_num_threads`` (C++)                             | ``at::parallel_reduce`` (C++)                    | during the startup, before actual operators running;    |
-|                        | ``torch.set_num_threads``,                                |                                                  |                                                         |
-|                        | ``torch.get_num_threads`` (Python)                        | launching intra-op async tasks:                  | Default number of threads: number of CPU cores;         |
+|                        | ``at::get_num_threads`` (C++)                             | ``at::parallel_reduce`` (C++)                    | during the startup, before the actual operators running;|
+|                        | ``set_num_threads``,                                      |                                                  |                                                         |
+|                        | ``get_num_threads`` (Python, :mod:`torch` module)         | launching intra-op async tasks:                  | Default number of threads: number of CPU cores;         |
 |                        |                                                           | ``at::intraop_launch``                           |                                                         |
 |                        | Env. variables:                                           | ``at::intraop_launch_future`` (C++)              | Number of threads settings preference:                  |
 |                        | ``OMP_NUM_THREADS`` and ``MKL_NUM_THREADS``               |                                                  | ``at::API`` > ``MKL_NUM_THREADS`` > ``OMP_NUM_THREADS`` |
@@ -80,5 +82,5 @@ The following API is used to control threading:
     Use TBB backend to guarantee that there's a single per-process intra-op thread pool of a given size.
 
 .. note::
-    ``parallel_info`` utility prints information about build thread settings and can be useful for debugging;
+    ``parallel_info`` utility prints information about thread settings and can be used for debugging.
     Similar output can be also obtained in Python with ``torch.__config__.parallel_info()`` call.
