@@ -48,6 +48,20 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
   }
 }
 
+at::Tensor castTensorTo(at::Tensor self,
+                        const IValue& dtype,
+                        const IValue& device,
+                        at::ScalarType initial_scalar_type) {
+  at::ScalarType scalar_type =                                     
+      dtype.isNone() ? self.scalar_type() : dtype.toScalarType();  
+  c10::Device dev =                                                  
+      device.isNone() ? self.device() : device.toDevice();         
+  if (scalar_type != initial_scalar_type || dev != self.device()) {
+    self = self.to(dev, scalar_type);                            
+  }          
+  return self;
+}
+
 int64_t list_size(const IValue& list) {
   if (list.isGenericList()) {
     return list.toGenericListRef().size();
@@ -191,14 +205,7 @@ Operation createTensorFromList(const Node* node) {
         tensor.element_size(),
         data);
 
-    at::ScalarType scalar_type =
-        dtype.isNone() ? tensor.scalar_type() : dtype.toScalarType();
-    c10::Device dev =
-        device.isNone() ? tensor.device() : device.toDevice();
-    if (scalar_type != initial_scalar_type || dev != tensor.device()) {
-      tensor = tensor.to(dev, scalar_type);
-    }
-
+    tensor = castTensorTo(tensor, dtype, device, initial_scalar_type);
     auto default_type =
         at::typeMetaToScalarType(at::get_default_dtype());
 
@@ -351,13 +358,7 @@ RegisterOperators reg({
           bool requires_grad;                                                 \
           pop(stack, scalar_val, dtype, device, requires_grad);               \
           auto tensor = autograd::make_variable(tensor_creation_op);          \
-          at::ScalarType scalar_type =                                        \
-              dtype.isNone() ? tensor.scalar_type() : dtype.toScalarType();   \
-          c10::Device dev =                                                   \
-              device.isNone() ? tensor.device() : device.toDevice();          \
-          if (scalar_type != initial_scalar_type || dev != tensor.device()) { \
-            tensor = tensor.to(dev, scalar_type);                             \
-          }                                                                   \
+          tensor = castTensorTo(tensor, dtype, device, initial_scalar_type);  \
           tensor.set_requires_grad(requires_grad);                            \
           push(stack, std::move(tensor));                                     \
           return 0;                                                           \
@@ -376,13 +377,7 @@ RegisterOperators reg({
           IValue device;                                                      \
           pop(stack, scalar_val, dtype, device);                              \
           auto tensor = autograd::make_variable(tensor_creation_op);          \
-          at::ScalarType scalar_type =                                        \
-              dtype.isNone() ? tensor.scalar_type() : dtype.toScalarType();   \
-          c10::Device dev =                                                   \
-              device.isNone() ? tensor.device() : device.toDevice();          \
-          if (scalar_type != initial_scalar_type || dev != tensor.device()) { \
-            tensor = tensor.to(dev, scalar_type);                             \
-          }                                                                   \
+          tensor = castTensorTo(tensor, dtype, device, initial_scalar_type);  \
           push(stack, std::move(tensor));                                     \
           return 0;                                                           \
         };                                                                    \
@@ -456,7 +451,8 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::as_tensor(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
-        createTensorFromList<false>),
+        createTensorFromList<false>,
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
         [](const Node* node) {
