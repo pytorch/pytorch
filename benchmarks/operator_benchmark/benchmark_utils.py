@@ -176,3 +176,8 @@ def is_pytorch_enabled(framework_arg):
 
 def get_requested_frameworks(framework_arg):
     return [fr.strip() for fr in framework_arg.split(',') if len(fr.strip()) > 0]
+
+
+class SkipInputShape(Exception):
+    """Used when a test case should be skipped"""
+    pass
