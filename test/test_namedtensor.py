@@ -238,6 +238,49 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
 
+    def test_reduction_fns(self):
+        def test_simple_reduce(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
+            self.assertEqual(op(t, 1).names, ['N', 'L'])
+            self.assertEqual(op(t, 'C').names, ['N', 'L'])
+            with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
+                op(t, None)
+            with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
+                op(t, 'H')
+
+        def test_complete_reduce(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
+            self.assertEqual(op(t).names, [])
+
+        def test_multidim_reduce(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
+
+            self.assertEqual(op(t, [1, 2]).names, ['N'])
+            self.assertEqual(op(t, ['C', 'L']).names, ['N'])
+            with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
+                op(t, [None, 'C'])
+
+        def test_out_variant(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            out = t.new_empty([0])
+            getattr(torch, op_name)(t, 'C', out=out)
+            self.assertEqual(out.names, ['N', 'L'])
+
+        def test_keepdim(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
+            self.assertEqual(op(t, 'C', keepdim=True).names, ['N', 'C', 'L'])
+            self.assertEqual(op(t, ['C', 'L'], keepdim=True).names, ['N', 'C', 'L'])
+
+        for device in torch.testing.get_all_device_types():
+            test_simple_reduce('sum', device)
+            test_complete_reduce('sum', device)
+            test_multidim_reduce('sum', device)
+            test_keepdim('sum', device)
+            test_out_variant('sum', device)
 
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():

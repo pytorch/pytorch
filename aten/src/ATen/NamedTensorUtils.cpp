@@ -60,6 +60,15 @@ int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
   return std::distance(names.begin(), it);
 }
 
+std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dims) {
+  std::vector<int64_t> result;
+  result.reserve(dims.size());
+  for (const auto& name : dims) {
+    result.push_back(dimname_to_position(tensor, name));
+  }
+  return result;
+}
+
 static void report_positional_error(
     const Dimname& name,
     const Dimname& other_name,
@@ -190,6 +199,18 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
     }
   }
   internal_set_names_inplace(result, std::move(outnames), /*validate_names=*/false);
+}
+
+void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
+  if (keepdim) {
+    propagate_names(result, src);
+    return;
+  }
+  // This actually means "full reduction"
+  if (reduced_dims.size() == 0) {
+    return;
+  }
+  propagate_names_except(result, src, reduced_dims);
 }
 
 void propagate_names(Tensor& result, const Tensor& src) {

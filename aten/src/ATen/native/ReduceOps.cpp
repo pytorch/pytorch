@@ -8,6 +8,9 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <algorithm>
 #include <functional>
@@ -206,16 +209,29 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
   } else {
     sum_stub(iter.device_type(), iter);
   }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
+#endif
   return result;
 }
 
 Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
-  return at::native::sum(self, {}, false, dtype);
+  return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
 }
 Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
   Tensor result;
   return at::native::sum_out(result, self, dim, keepdim, dtype);
 }
+#ifdef BUILD_NAMEDTENSOR
+Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
+}
+
+Tensor& sum_out(Tensor& result, const Tensor& self, DimnameList dim,
+                bool keepdim, optional<ScalarType> opt_dtype) {
+  return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+}
+#endif
 
 static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
                         bool keepdim, c10::optional<ScalarType> opt_dtype) {
