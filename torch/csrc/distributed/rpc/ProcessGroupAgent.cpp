@@ -32,6 +32,7 @@ Message deserialize(std::istream& is) {
 
   torch::load(tensors, is);
 
+  TORCH_CHECK(tensors.size() >= 2, "Failed to deserialize a message.");
   auto miscTensor = std::move(tensors.back());
   tensors.pop_back();
   auto metaTensor = std::move(tensors.back());
@@ -178,10 +179,10 @@ void ProcessGroupAgent::listenLoop() {
     // rank, tensor size
     std::vector<torch::Tensor> preamble = {torch::empty({2}, {torch::kInt64})};
     pg_->recvAnysource(preamble, pg_->getRank())->wait();
-    int64_t* header_items = preamble.front().storage().data<int64_t>();
+    int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
-    auto srcRank = header_items[0];
-    auto size = header_items[1];
+    auto srcRank = preamble_items[0];
+    auto size = preamble_items[1];
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();

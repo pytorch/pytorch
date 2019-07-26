@@ -21,7 +21,7 @@ Message::Message(
 
 Message::Message(const Message& other) = default;
 
-Message::Message(Message&& other) = default;
+Message::Message(Message&& other) noexcept = default;
 
 Message& Message::operator=(Message const& rhs) & {
   auto meta = rhs.meta_;

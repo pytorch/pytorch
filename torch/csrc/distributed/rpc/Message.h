@@ -51,7 +51,7 @@ class TORCH_API Message final {
           int64_t id);
 
   Message(const Message& other);
-  Message(Message&& other);
+  Message(Message&& other) noexcept;
   Message& operator=(Message const& rhs) &;
   Message& operator=(Message&& rhs) &;
   void swap(Message& rhs) noexcept;
