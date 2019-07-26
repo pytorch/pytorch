@@ -10533,27 +10533,6 @@ a")
         # are NOT inlined
         FileCheck().check("aten::mm").check("forward").run(str(sm.graph))
 
-    def test_elias(self):
-        class TracedModule1(torch.nn.Module):
-            def __init__(self):
-                super(TracedModule1, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(5, 5))
-
-            def forward(self, x):
-                return torch.mm(x, self.param)
-
-        class ScriptMod(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ScriptMod, self).__init__()
-                self.mod = torch.jit.trace(TracedModule1(), torch.ones(5, 5))
-
-            @torch.jit.script_method
-            def forward(self, x):
-                return self.mod(x)
-
-        sm = ScriptMod()
-        print(sm.forward.graph)
-
     def test_call_tracing_fn_from_script_module(self):
         @_trace(torch.rand(3, 3))
         def traced_fn(x):
