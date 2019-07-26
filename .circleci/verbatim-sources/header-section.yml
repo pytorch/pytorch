@@ -15,6 +15,28 @@ docker_config_defaults: &docker_config_defaults
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
 
+merge_pull_request_onto_master: &merge_pull_request_onto_master
+  name: Merge Onto Master
+  command: |
+    set -ex
+    if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
+      git config --global user.email "circleci.ossci@gmail.com"
+      git config --global user.name "CircleCI"
+       git config remote.origin.url https://github.com/pytorch/pytorch.git
+      git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+      git fetch --tags https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --quiet
+      if [[ "${CIRCLE_BRANCH}" == pull/* ]]; then  # if this is a forked PR
+        git fetch --tags https://github.com/pytorch/pytorch.git +refs/${CIRCLE_BRANCH}/head:refs/remotes/origin/${CIRCLE_BRANCH}
+      else
+        git fetch --tags https://github.com/pytorch/pytorch.git +refs/heads/${CIRCLE_BRANCH}:refs/remotes/origin/${CIRCLE_BRANCH}
+      fi
+       export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
+      echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+      export GIT_COMMIT=${CIRCLE_SHA1}
+      echo "GIT_COMMIT: " ${GIT_COMMIT}
+       git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
+    fi
+
 # This system setup script is meant to run before the CI-related scripts, e.g.,
 # installing Git client, checking out code, setting up CI env, and
 # building/testing.
