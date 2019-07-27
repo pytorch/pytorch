@@ -1,7 +1,6 @@
 #include <tuple>
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
-#include <ATen/native/ScatterGather.h>
 #include <c10/core/WrapDimMinimal.h>
 
 namespace {
