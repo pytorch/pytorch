@@ -485,6 +485,7 @@ class CAFFE2_API Tensor {
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntArrayRef dims) const;
   Tensor numpy_T() const;
+  bool is_pinned() const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
   Tensor reciprocal() const;

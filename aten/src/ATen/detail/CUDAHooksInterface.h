@@ -71,6 +71,10 @@ struct CAFFE2_API CUDAHooksInterface {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual bool isPinnedPtr(void* data) const {
+    return false;
+  }
+
   virtual bool hasCUDA() const {
     return false;
   }

@@ -591,6 +591,10 @@ inline Tensor Tensor::numpy_T() const {
     static auto table = globalATenDispatch().getOpTable("aten::numpy_T(Tensor(a) self) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
+inline bool Tensor::is_pinned() const {
+    static auto table = globalATenDispatch().getOpTable("aten::is_pinned(Tensor self) -> bool");
+    return table->getOp<bool (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+}
 inline Tensor Tensor::pin_memory() const {
     static auto table = globalATenDispatch().getOpTable("aten::pin_memory(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);

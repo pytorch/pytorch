@@ -64,6 +64,29 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
 
+bool CUDAHooks::isPinnedPtr(void* data) const {
+  cudaPointerAttributes attr;
+  cudaError_t err = cudaPointerGetAttributes(&attr, data);
+#ifndef __HIP_PLATFORM_HCC__
+  if (err == cudaErrorInvalidValue) {
+    cudaGetLastError();
+    return false;
+  }
+  AT_CUDA_CHECK(err);
+#else
+  // HIP throws hipErrorUnknown here
+  if (err != cudaSuccess) {
+    cudaGetLastError();
+    return false;
+  }
+#endif
+  #if CUDA_VERSION >= 10000
+    return attr.type == cudaMemoryTypeHost;
+  #else
+    return attr.memoryType == cudaMemoryTypeHost;
+  #endif
+}
+
 bool CUDAHooks::hasCUDA() const {
   return at::cuda::is_available();
 }

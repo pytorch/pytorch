@@ -1344,7 +1344,7 @@ class TestCuda(TestCase):
 
         # Bool test case
         t = torch.tensor([[False, True], [True, True]], device='cuda')
-        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')), 
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')),
                          torch.tensor([[False, False], [True, True]], device='cuda'))
 
     def test_gather(self):

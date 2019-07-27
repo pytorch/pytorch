@@ -12,6 +12,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
   std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const override;
   Device getDeviceFromPtr(void* data) const override;
+  bool isPinnedPtr(void* data) const override;
   Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
