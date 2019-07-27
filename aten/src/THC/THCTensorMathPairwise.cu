@@ -183,6 +183,21 @@ struct TensorFmodOp {
 };
 
 template <>
+struct TensorFmodOp<long> {
+  TensorFmodOp(long v) : val(v) {}
+  __device__ __forceinline__ void operator()(long* out, long* in) {
+    *out = *in % val;
+  }
+
+  __device__ __forceinline__ void operator()(long* v) {
+    *v = *v % val;
+  }
+
+  const long val;
+};
+
+
+template <>
 struct TensorFmodOp<double> {
   TensorFmodOp(double v) : val(v) {}
   __device__ __forceinline__ void operator()(double* out, double* in) {
