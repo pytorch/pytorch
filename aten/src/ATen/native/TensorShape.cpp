@@ -922,13 +922,13 @@ Tensor alias(const Tensor& self) {
                     get_qtensorimpl(self)->quantizer());
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(self.sizes(), self.strides());
-    self_ = Tensor(impl);
+    self_ = Tensor(std::move(impl));
   } else {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()),
                                                 self.type_id());
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(self.sizes(), self.strides());
-    self_ = Tensor(impl);
+    self_ = Tensor(std::move(impl));
   }
   return self_;
 }
