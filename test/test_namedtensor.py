@@ -67,6 +67,29 @@ class TestNamedTensor(TestCase):
     def test_empty(self):
         self._test_factory(torch.empty, 'cpu')
 
+    def test_set_names_(self):
+        tensor = torch.empty(1, 1, names=('N', 'C'))
+        self.assertEqual(tensor.set_names_(None).names, (None, None))
+        self.assertEqual(tensor.set_names_(['H', 'W']).names, ('H', 'W'))
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            tensor.set_names_(['N', 'C', 'W'])
+        with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
+            tensor.set_names_(['N', 'N'])
+
+    def test_set_names_property(self):
+        tensor = torch.empty(1, 1, names=('N', 'C'))
+
+        tensor.names = None
+        self.assertEqual(tensor.names, (None, None))
+
+        tensor.names = ('N', 'W')
+        self.assertEqual(tensor.names, ('N', 'W'))
+
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            tensor.names = ['N', 'C', 'W']
+        with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
+            tensor.names = ['N', 'N']
+
     @unittest.skipIf(not TEST_CUDA, 'no CUDA')
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
@@ -238,6 +261,63 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
 
+    def test_reduction_fns(self):
+        def test_simple_reduce(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
+            self.assertEqual(op(t, 1).names, ['N', 'L'])
+            self.assertEqual(op(t, 'C').names, ['N', 'L'])
+            with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
+                op(t, None)
+            with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
+                op(t, 'H')
+
+        def test_complete_reduce(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
+            self.assertEqual(op(t).names, [])
+
+        def test_multidim_reduce(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
+
+            self.assertEqual(op(t, [1, 2]).names, ['N'])
+            self.assertEqual(op(t, ['C', 'L']).names, ['N'])
+            with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
+                op(t, [None, 'C'])
+
+        def test_out_variant(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            out = t.new_empty([0])
+            getattr(torch, op_name)(t, 'C', out=out)
+            self.assertEqual(out.names, ['N', 'L'])
+
+        def test_keepdim(op_name, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            op = getattr(torch.Tensor, op_name)
+            self.assertEqual(op(t, 'C', keepdim=True).names, ['N', 'C', 'L'])
+
+        Case = namedtuple('Case', [
+            'op_name',
+            'supports_complete_reduce',
+            'supports_multidim_reduce',
+        ])
+
+        tests = [
+            Case(op_name='sum', supports_complete_reduce=True, supports_multidim_reduce=True),
+            Case(op_name='prod', supports_complete_reduce=True, supports_multidim_reduce=False),
+        ]
+
+        for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
+            op_name = testcase.op_name
+            test_simple_reduce(op_name, device)
+            test_keepdim(op_name, device)
+            test_out_variant(op_name, device)
+
+            if testcase.supports_complete_reduce:
+                test_complete_reduce(op_name, device)
+            if testcase.supports_multidim_reduce:
+                test_multidim_reduce(op_name, device)
 
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():

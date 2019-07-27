@@ -43,7 +43,7 @@
 #     disables use of MKLDNN
 #
 #   MKLDNN_THREADING
-#     MKL-DNN threading mode (https://github.com/intel/mkl-dnn/)
+#     MKL-DNN threading mode: TBB or OMP (default)
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -103,7 +103,7 @@
 #     the BLAS will be chosen based on what is found on your system.
 #
 #   MKL_THREADING
-#     MKL flavor: SEQ, TBB or OMP (default)
+#     MKL threading mode: SEQ, TBB or OMP (default)
 #
 #   USE_FBGEMM
 #     Enables use of FBGEMM
@@ -150,15 +150,15 @@
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
 #
-#   PARALLEL_BACKEND
-#     parallel backend to use for intra- and inter-op parallelism
+#   ATEN_THREADING
+#     ATen parallel backend to use for intra- and inter-op parallelism
 #     possible values:
-#       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
+#       OMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
-#       NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
+#       TBB - using TBB for intra- and native thread pool for inter-op parallelism
 #
 #   USE_TBB
-#      use TBB for parallelization
+#      enable TBB support
 #
 
 from __future__ import print_function
@@ -182,8 +182,7 @@ import importlib
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
-                                     check_env_flag,
-                                     DEBUG, REL_WITH_DEB_INFO)
+                                     check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
@@ -277,7 +276,7 @@ elif sha != 'Unknown':
     version += '+' + sha[:7]
 report("Building wheel {}-{}".format(package_name, version))
 
-cmake = CMake('build')
+cmake = CMake()
 
 # all the work we need to do _before_ setup runs
 def build_deps():
@@ -288,7 +287,7 @@ def build_deps():
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(DEBUG)))
+        f.write("debug = {}\n".format(repr(build_type.is_debug())))
         f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
         f.write("git_version = {}\n".format(repr(sha)))
 
@@ -631,14 +630,14 @@ def configure_extension_build():
                     break
         library_dirs.append(cuda_lib_path)
 
-    if DEBUG:
+    if build_type.is_debug():
         if IS_WINDOWS:
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-O0', '-g']
             extra_link_args += ['-O0', '-g']
 
-    if REL_WITH_DEB_INFO:
+    if build_type.is_rel_with_deb_info():
         if IS_WINDOWS:
             extra_link_args.append('/DEBUG:FULL')
         else:
