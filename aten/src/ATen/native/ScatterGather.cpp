@@ -1,6 +1,5 @@
 #include <tuple>
 #include <ATen/ATen.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <c10/core/WrapDimMinimal.h>
 
 namespace {
@@ -13,7 +12,7 @@ inline expand_scatter(const at::Tensor &self, int64_t dim, const at::Tensor &ind
 }
 
 std::tuple<at::Tensor, at::Tensor, std::vector<int64_t>>
-inline expand_gather(at::Tensor self, int64_t dim, at::Tensor index) {
+inline expand_gather(const at::Tensor &self, int64_t dim, at::Tensor index) {
   std::vector<int64_t> self_sizes = self.sizes().vec();
   std::vector<int64_t> index_sizes = index.sizes().vec();
   AT_CHECK(self_sizes.size() >= index_sizes.size(), "torch.gather requires input to have more dimensions than index");
@@ -43,11 +42,17 @@ inline expand_gather(at::Tensor self, int64_t dim, at::Tensor index) {
 namespace at { namespace native {
 
 Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return at::_gather_out(result, self, dim, index);
+  Tensor expanded_self, expanded_index;
+  c10::IntArrayRef result_sizes;
+  std::tie(expanded_self, expanded_index, result_sizes) = expand_gather(self, dim, index);
+  AT_CHECK(result_sizes == result.sizes(), "broadcasting change the shape of out");
+  return at::_gather_out(result, expanded_self, dim, expanded_index);
 }
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return at::_gather(self, dim, index);
+  Tensor expanded_self, expanded_index;
+  std::tie(expanded_self, expanded_index, std::ignore) = expand_gather(self, dim, index);
+  return at::_gather(expanded_self, dim, expanded_index);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
