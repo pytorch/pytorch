@@ -161,8 +161,9 @@ class TestCppExtension(common.TestCase):
                 build_directory=temp_dir,
             )
 
+            lib_ext = '.pyd' if IS_WINDOWS else '.so'
             command = ['cuobjdump', '--list-elf',
-                       os.path.join(temp_dir, 'cudaext_archflags.so')]
+                       os.path.join(temp_dir, 'cudaext_archflags' + lib_ext)]
             p = subprocess.Popen(command,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
@@ -179,7 +180,11 @@ class TestCppExtension(common.TestCase):
             self.assertEqual(sorted(re.findall(r'sm_\d\d', output)),
                              ['sm_52', 'sm_61'])
         finally:
-            shutil.rmtree(temp_dir)
+            if IS_WINDOWS:
+                print("Not wiping extensions build folder because Windows")
+            else:
+                shutil.rmtree(temp_dir)
+
             if old_envvar is None:
                 os.environ.pop('TORCH_CUDA_ARCH_LIST')
             else:
