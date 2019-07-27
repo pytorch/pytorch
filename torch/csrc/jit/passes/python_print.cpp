@@ -168,7 +168,7 @@ const static std::unordered_set<std::string> reserved_names = {
 
 struct PythonPrintPass {
   using SourceRangeStack = std::vector<SourceRange>;
-  SourceRangeStack source_range_stack_ = {SourceRange("")};
+  SourceRangeStack source_range_stack_ = {SourceRange()};
 
   struct WithSourceRange {
     explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
