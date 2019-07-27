@@ -16222,9 +16222,13 @@ class TestList(JitTestCase):
     def test_list_sort(self):
         template = dedent('''
         def func():
-            li = {list_create}
-            li.sort()
-            return li
+            li_1 = {list_create}
+            li_2 = {list_create}
+            li_3 = {list_create}
+            li_1.sort()
+            li_2.sort(reverse=True)
+            li_4 = sorted(li_3)
+            return li_1, li_2, li_3, li_4
         ''')
 
         lists = ["[]", "[1, 3, 2]", "[True, False, True]", "[1.2, .2, 3.2]",
@@ -17310,19 +17314,23 @@ class TestClassType(JitTestCase):
             def getVal(self):
                 return self.x
 
-        @torch.jit.script
         def test(li, reverse=False):
-            # type: (List[Foo], bool) -> List[int]
-            li.sort(reverse=reverse)
-            ret_list = torch.jit.annotate(List[int], [])
-            for foo in li:
-                ret_list.append(foo.getVal())
-            return ret_list
+            # type: (List[Foo], bool)
+            li_sorted = sorted(li)
+            ret_sorted = torch.jit.annotate(List[int], [])
+            for foo in li_sorted:
+                ret_sorted.append(foo.getVal())
 
-        self.assertEqual(test([Foo(2), Foo(1), Foo(3)]), [1, 2, 3])
-        self.assertEqual(test([Foo(2), Foo(1), Foo(3)], True), [3, 2, 1])
-        self.assertEqual(test([Foo(2)]), [2])
-        self.assertEqual(test([]), [])
+            li.sort(reverse=reverse)
+            ret_sort = torch.jit.annotate(List[int], [])
+            for foo in li:
+                ret_sort.append(foo.getVal())
+            return ret_sorted, ret_sort
+
+        self.checkScript(test, ([Foo(2), Foo(1), Foo(3)],))
+        self.checkScript(test, ([Foo(2), Foo(1), Foo(3)], True))
+        self.checkScript(test, ([Foo(2)],))
+        self.checkScript(test, ([],))
 
         @torch.jit.script
         def test_list_no_reverse():
@@ -17331,6 +17339,14 @@ class TestClassType(JitTestCase):
             return li[0].getVal()
 
         self.assertEqual(test_list_no_reverse(), 1)
+
+        @torch.jit.script
+        def test_sorted_copies():
+            li = [Foo(3), Foo(1)]
+            li_sorted = sorted(li)
+            return li[0].getVal(), li_sorted[0].getVal()
+
+        self.assertEqual(test_sorted_copies(), (3, 1))
 
         with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
