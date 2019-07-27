@@ -33,6 +33,7 @@ class Conf:
     parent_build: Optional['Conf'] = None
     is_namedtensor: bool = False
     is_important: bool = False
+    is_backcompat: bool = False
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -47,6 +48,8 @@ class Conf:
             leading.append("xla")
         if self.is_namedtensor and not for_docker:
             leading.append("namedtensor")
+        if self.is_backcompat and not for_docker:
+            leading.append("backcompat")
 
         cuda_parms = []
         if self.cuda_version:
@@ -229,6 +232,7 @@ def instantiate_configs():
         is_xla = fc.find_prop("is_xla") or False
         is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_important = fc.find_prop("is_important") or False
+        is_backcompat = fc.find_prop("is_backcompat") or False
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -244,6 +248,7 @@ def instantiate_configs():
             gpu_resource,
             is_namedtensor=is_namedtensor,
             is_important=is_important,
+            is_backcompat=is_backcompat,
         )
 
         if cuda_version == "9" and python_version == "3.6":

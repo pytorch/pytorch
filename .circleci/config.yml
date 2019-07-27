@@ -16,13 +16,14 @@ docker_config_defaults: &docker_config_defaults
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
 
 merge_pull_request_onto_master: &merge_pull_request_onto_master
-  name: Merge Onto Master
+  name: Merge Onto Master If We Check Function Schema Backward Compatibility
   command: |
     set -ex
-    if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
+    if [[ "${CIRCLE_BRANCH}" != "master" && "BUILD_ENVIRONMENT" == *"backcompat"* ]]; then
+      echo "Merge to master before build"
       git config --global user.email "circleci.ossci@gmail.com"
       git config --global user.name "CircleCI"
-       git config remote.origin.url https://github.com/pytorch/pytorch.git
+      git config remote.origin.url https://github.com/pytorch/pytorch.git
       git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
       git fetch --tags https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --quiet
       if [[ "${CIRCLE_BRANCH}" == pull/* ]]; then  # if this is a forked PR
@@ -30,11 +31,13 @@ merge_pull_request_onto_master: &merge_pull_request_onto_master
       else
         git fetch --tags https://github.com/pytorch/pytorch.git +refs/heads/${CIRCLE_BRANCH}:refs/remotes/origin/${CIRCLE_BRANCH}
       fi
-       export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
+      export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
       echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
       export GIT_COMMIT=${CIRCLE_SHA1}
       echo "GIT_COMMIT: " ${GIT_COMMIT}
-       git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
+      git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
+    else
+      echo "Build the PR without merging master directly"
     fi
 
 # This system setup script is meant to run before the CI-related scripts, e.g.,
@@ -97,6 +100,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   - run:
       <<: *setup_linux_system_environment
   - checkout
+  - run:
+      <<: *merge_pull_request_onto_master
   - run:
       <<: *setup_ci_environment
   - run:
@@ -812,6 +817,19 @@ jobs:
   pytorch_namedtensor_linux_trusty_py3_6_gcc5_4_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-namedtensor-linux-trusty-py3.6-gcc5.4-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:300"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_backcompat_linux_trusty_py3_6_gcc5_4_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-backcompat-linux-trusty-py3.6-gcc5.4-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:300"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_backcompat_linux_trusty_py3_6_gcc5_4_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-backcompat-linux-trusty-py3.6-gcc5.4-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:300"
     resource_class: large
     <<: *pytorch_linux_test_defaults
@@ -2602,6 +2620,13 @@ workflows:
           requires:
             - setup
             - pytorch_namedtensor_linux_trusty_py3_6_gcc5_4_build
+      - pytorch_backcompat_linux_trusty_py3_6_gcc5_4_build:
+          requires:
+            - setup
+      - pytorch_backcompat_linux_trusty_py3_6_gcc5_4_test:
+          requires:
+            - setup
+            - pytorch_backcompat_linux_trusty_py3_6_gcc5_4_build
       - pytorch_linux_trusty_py3_6_gcc7_build:
           requires:
             - setup

@@ -18,6 +18,7 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
                     ("namedtensor", [XImportant(True)]),
+                    ("backcompat", [XImportant(True)]),
                 ]),
             ]),
             ("7", [X("3.6")]),
@@ -144,6 +145,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "xla": XlaConfigNode,
             "namedtensor": NamedTensorConfigNode,
             "important": ImportantConfigNode,
+            "backcompat": BackCompatConfigNode,
         }
         return next_nodes[experimental_feature]
 
@@ -165,6 +167,17 @@ class NamedTensorConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_namedtensor"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class BackCompatConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "BACKCOMPAT=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_backcompat"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
