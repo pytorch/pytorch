@@ -3065,38 +3065,41 @@
 - func: index_fill(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
 
+- func: _scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: legacy::cpu::_th_scatter_
+    CUDA: legacy::cuda::_th_scatter_
+
+- func: _scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: legacy::cpu::_th_scatter_
+    CUDA: legacy::cuda::_th_scatter_
+
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: scatter__cpu
-    CUDA: scatter__cuda
+
+- func: scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+  variants: method
 
 - func: scatter(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: scatter__cpu
-    CUDA: scatter__cuda
-
 - func: scatter(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
 
-- func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
-  variants: method
+- func: _scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
+  variants: function
   dispatch:
-    CPU: scatter_add__cpu
-    CUDA: scatter_add__cuda
-
-- func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
-  variants: function, method
+    CPU: legacy::cpu::_th_scatter_add_
+    CUDA: legacy::cuda::_th_scatter_add_
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: scatter_add__cpu
-    CUDA: scatter_add__cuda
+
+- func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
+  variants: function, method
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
@@ -3721,16 +3724,23 @@
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
 
-- func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+- func: _gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   dispatch:
-    CPU: gather_out_cpu
-    CUDA: gather_out_cuda
+    CPU: _gather_out_cpu
+    CUDA: _gather_out_cuda
+
+- func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+
+- func: _gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _gather_cpu
+    CUDA: _gather_cuda
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   variants: method, function
-  dispatch:
-    CPU: gather_cpu
-    CUDA: gather_cuda
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
 

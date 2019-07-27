@@ -1,30 +1,62 @@
+#include <tuple>
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
+#include <ATen/native/ScatterGather.h>
+#include <c10/core/WrapDimMinimal.h>
+
+namespace {
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
+inline expand_scatter(const at::Tensor &self, int64_t dim, const at::Tensor &index, const at::Tensor &src, bool inplace) {
+  auto self_sizes = self.sizes();
+  auto index_sizes = index.sizes();
+  auto src_sizes = src.sizes();
+}
+
+std::tuple<at::Tensor, at::Tensor, std::vector<int64_t>>
+inline expand_gather(at::Tensor self, int64_t dim, at::Tensor index) {
+  std::vector<int64_t> self_sizes = self.sizes().vec();
+  std::vector<int64_t> index_sizes = index.sizes().vec();
+  AT_CHECK(self_sizes.size() >= index_sizes.size(), "torch.gather requires input to have more dimensions than index");
+  dim = c10::maybe_wrap_dim(dim, index_sizes.size());
+  std::vector<int64_t> result_sizes(self_sizes.size());
+  for(int64_t i = 0; i < self_sizes.size(); i++) {
+    if (i == dim) {
+      result_sizes[i] = index_sizes[i];
+    } else if (i < index_sizes.size()) {
+      if (self_sizes[i] == index_sizes[i]) {
+        result_sizes[i] = index_sizes[i];
+      } else {
+        AT_CHECK(index_sizes[i] == 1 || self_sizes[i] == 1, "Size mismatch at dim=", i, ", get: ", self_sizes[i], " and ", self_sizes[i]);
+        result_sizes[i] = index_sizes[i] + self_sizes[i] - 1;
+        self_sizes[i] = index_sizes[i] = result_sizes[i];
+      }
+    } else {
+      result_sizes[i] = self_sizes[i];
+      index.unsqueeze_(-1);
+    }
+  }
+  return std::make_tuple(self.expand(self_sizes), index.expand(index_sizes), result_sizes);
+}
+
+}  // namespace
 
 namespace at { namespace native {
 
-Tensor & scatter__cpu(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  return legacy::cpu::_th_scatter_(self, dim, index, src);
+Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  return at::_gather_out(result, self, dim, index);
 }
 
-Tensor & scatter__cpu(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return legacy::cpu::_th_scatter_(self, dim, index, value);
+Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  return at::_gather(self, dim, index);
 }
 
-Tensor & scatter_add__cpu(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  return legacy::cpu::_th_scatter_add_(self, dim, index, src);
+Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return at::_scatter_(self, dim, index, source);
 }
 
-Tensor & scatter_add__cpu(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return scatter_add__cpu(self, dim, index, at::full({}, value, self.options()));
-}
-
-Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return legacy::cpu::_th_gather_out(result, self, dim, index);
-}
-
-Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return legacy::cpu::_th_gather(self, dim, index);
+Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
+  return at::_scatter_(self, dim, index, value);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
@@ -33,6 +65,14 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Ten
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
   return self.clone().scatter_(dim, index, value);
+}
+
+Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return at::_scatter_add_(self, dim, index, source);
+}
+
+Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
+  return at::_scatter_add_(self, dim, index, at::full({}, value, self.options()));
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {

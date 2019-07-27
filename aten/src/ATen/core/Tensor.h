@@ -639,12 +639,11 @@ class CAFFE2_API Tensor {
   Tensor & index_fill_(int64_t dim, const Tensor & index, const Tensor & value);
   Tensor index_fill(int64_t dim, const Tensor & index, const Tensor & value) const;
   Tensor & scatter_(int64_t dim, const Tensor & index, const Tensor & src);
-  Tensor scatter(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor & scatter_(int64_t dim, const Tensor & index, Scalar value);
+  Tensor scatter(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter(int64_t dim, const Tensor & index, Scalar value) const;
-  Tensor & scatter_add_(int64_t dim, const Tensor & index, const Tensor & src);
-  Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor & scatter_add_(int64_t dim, const Tensor & index, Scalar value);
+  Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter_add(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor & lt_(Scalar other);
   Tensor & lt_(const Tensor & other);
