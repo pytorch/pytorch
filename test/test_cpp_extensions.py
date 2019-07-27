@@ -3,6 +3,9 @@ import shutil
 import sys
 import unittest
 import warnings
+import re
+import tempfile
+import subprocess
 
 import common_utils as common
 import torch
@@ -140,6 +143,47 @@ class TestCppExtension(common.TestCase):
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_jit_cuda_archflags(self):
+        temp_dir = tempfile.mkdtemp()
+        old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
+        try:
+            os.environ['TORCH_CUDA_ARCH_LIST'] = "Maxwell Kepler 6.1"
+            torch.utils.cpp_extension.load(
+                name="cudaext_archflags",
+                sources=[
+                    "cpp_extensions/cuda_extension.cpp",
+                    "cpp_extensions/cuda_extension.cu",
+                ],
+                extra_cuda_cflags=["-O2"],
+                verbose=True,
+                build_directory=temp_dir,
+            )
+
+            command = ['cuobjdump', '--list-elf',
+                       os.path.join(temp_dir, 'cudaext_archflags.so')]
+            p = subprocess.Popen(command,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output, err = p.communicate()
+            if common.PY3:
+                output = output.decode("ascii")
+                err = err.decode("ascii")
+
+            self.assertEqual(p.returncode, 0)
+            self.assertEqual(err, '')
+            # Expected output:
+            #   ELF file    1: cudaext_archflags.1.sm_61.cubin
+            #   ELF file    2: cudaext_archflags.2.sm_52.cubin
+            self.assertEqual(sorted(re.findall(r'sm_\d\d', output)),
+                             ['sm_52', 'sm_61'])
+        finally:
+            shutil.rmtree(temp_dir)
+            if old_envvar is None:
+                os.environ.pop('TORCH_CUDA_ARCH_LIST')
+            else:
+                os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
