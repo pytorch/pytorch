@@ -4,17 +4,48 @@
 
 namespace {
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor>
-inline expand_scatter(const at::Tensor &self, int64_t dim, const at::Tensor &index, const at::Tensor &src, bool inplace) {
-  auto self_sizes = self.sizes().vec();
-  auto index_sizes = index.sizes().vec();
-  auto src_sizes = src.sizes().vec();
+inline void expand_size(int64_t dim, int64_t &size1, int64_t &size2) {
+  AT_CHECK(size1 == 1 || size2 == 1, "Size mismatch at dim=", dim, ", get: ", size1, " and ", size2);
+  size1 = size2 = size1 + size2 - 1;
+}
+
+std::tuple<std::vector<int64_t>, at::Tensor, at::Tensor>
+inline expand3(const at::Tensor &self, int64_t dim, at::Tensor index, const at::Tensor &src) {
+  std::vector<int64_t> self_sizes = self.sizes().vec();
+  std::vector<int64_t> index_sizes = index.sizes().vec();
+  std::vector<int64_t> src_sizes = src.sizes().vec();
   AT_CHECK(self_sizes.size() == src_sizes.size(), "torch.scatter requires src and dest to have the same number of dimensions");
   AT_CHECK(index_sizes.size() <= src_sizes.size(), "torch.scatter requires src to have more dimensions than index");
+  dim = c10::maybe_wrap_dim(dim, index_sizes.size());
+  for(int64_t i = 0; i < self_sizes.size(); i++) {
+    if (i == dim) {
+      if (src_sizes[i] != index_sizes[i]) {
+        expand_size(i, index_sizes[i], src_sizes[i]);
+      }
+    } else if (i < index_sizes.size()) {
+      if (self_sizes[i] == index_sizes[i] && self_sizes[i] == src_sizes[i]) {
+        continue;
+      } else if (self_sizes[i] == index_sizes[i] && src_sizes[i] == 1) {
+        src_sizes[i] = self_sizes[i];
+      } else if (self_sizes[i] == src_sizes[i] && index_sizes[i] == 1) {
+        index_sizes[i] = self_sizes[i];
+      } else if (index_sizes[i] == src_sizes[i] && self_sizes[i] == 1) {
+        self_sizes[i] = index_sizes[i];
+      } else {
+        AT_ERROR("Size mismatch at dim=", dim, ", get: ", self_sizes[i], ", ", index_sizes[i], " and ", src_sizes[i]);
+      }
+    } else {
+      if (src_sizes[i] != self_sizes[i]) {
+        expand_size(i, src_sizes[i], self_sizes[i]);
+      }
+      index.unsqueeze_(-1);
+    }
+  }
+  return std::make_tuple(self_sizes, index.expand(index_sizes), src.expand(src_sizes));
 }
 
 std::tuple<at::Tensor, at::Tensor, std::vector<int64_t>>
-inline expand_gather(const at::Tensor &self, int64_t dim, at::Tensor index) {
+inline expand2(const at::Tensor &self, int64_t dim, at::Tensor index) {
   std::vector<int64_t> self_sizes = self.sizes().vec();
   std::vector<int64_t> index_sizes = index.sizes().vec();
   AT_CHECK(self_sizes.size() >= index_sizes.size(), "torch.gather requires input to have more dimensions than index");
@@ -27,9 +58,8 @@ inline expand_gather(const at::Tensor &self, int64_t dim, at::Tensor index) {
       if (self_sizes[i] == index_sizes[i]) {
         result_sizes[i] = index_sizes[i];
       } else {
-        AT_CHECK(index_sizes[i] == 1 || self_sizes[i] == 1, "Size mismatch at dim=", i, ", get: ", self_sizes[i], " and ", self_sizes[i]);
-        result_sizes[i] = index_sizes[i] + self_sizes[i] - 1;
-        self_sizes[i] = index_sizes[i] = result_sizes[i];
+        expand_size(i, index_sizes[i], self_sizes[i]);
+        result_sizes[i] = self_sizes[i];
       }
     } else {
       result_sizes[i] = self_sizes[i];
@@ -46,47 +76,71 @@ namespace at { namespace native {
 Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   Tensor expanded_self, expanded_index;
   c10::IntArrayRef result_sizes;
-  std::tie(expanded_self, expanded_index, result_sizes) = expand_gather(self, dim, index);
+  std::tie(expanded_self, expanded_index, result_sizes) = expand2(self, dim, index);
   AT_CHECK(result_sizes == result.sizes(), "broadcasting change the shape of out");
   return at::_gather_out(result, expanded_self, dim, expanded_index);
 }
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   Tensor expanded_self, expanded_index;
-  std::tie(expanded_self, expanded_index, std::ignore) = expand_gather(self, dim, index);
+  std::tie(expanded_self, expanded_index, std::ignore) = expand2(self, dim, index);
   return at::_gather(expanded_self, dim, expanded_index);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return at::_scatter_(self, dim, index, source);
+  Tensor expanded_source, expanded_index;
+  c10::IntArrayRef self_sizes;
+  std::tie(self_sizes, expanded_index, expanded_source) = expand3(self, dim, index, source);
+  AT_CHECK(self_sizes == self.sizes(), "broadcasting change the shape of self");
+  return at::_scatter_(self, dim, expanded_index, expanded_source);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return at::_scatter_(self, dim, index, value);
+  Tensor expanded_index;
+  c10::IntArrayRef result_sizes;
+  std::tie(std::ignore, expanded_index, result_sizes) = expand2(self, dim, index);
+  AT_CHECK(result_sizes == self.sizes(), "broadcasting change the shape of self");
+  return at::_scatter_(self, dim, expanded_index, value);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().scatter_(dim, index, source);
+  Tensor expanded_source, expanded_index;
+  c10::IntArrayRef self_sizes;
+  std::tie(self_sizes, expanded_index, expanded_source) = expand3(self, dim, index, source);
+  Tensor ret = self.clone().expand(self_sizes);
+  return at::_scatter_(ret, dim, expanded_index, expanded_source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return self.clone().scatter_(dim, index, value);
+  Tensor expanded_index;
+  c10::IntArrayRef result_sizes;
+  std::tie(std::ignore, expanded_index, result_sizes) = expand2(self, dim, index);
+  Tensor ret = self.clone().expand(result_sizes);
+  return at::_scatter_(ret, dim, expanded_index, value);
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return at::_scatter_add_(self, dim, index, source);
+  Tensor expanded_source, expanded_index;
+  c10::IntArrayRef self_sizes;
+  std::tie(self_sizes, expanded_index, expanded_source) = expand3(self, dim, index, source);
+  AT_CHECK(self_sizes == self.sizes(), "broadcasting change the shape of self");
+  return at::_scatter_add_(self, dim, expanded_index, expanded_source);
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return at::_scatter_add_(self, dim, index, at::full({}, value, self.options()));
+  return self.scatter_add_(dim, index, at::full({}, value, self.options()));
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().scatter_add_(dim, index, source);
+  Tensor expanded_source, expanded_index;
+  c10::IntArrayRef self_sizes;
+  std::tie(self_sizes, expanded_index, expanded_source) = expand3(self, dim, index, source);
+  Tensor ret = self.clone().expand(self_sizes);
+  return at::_scatter_add_(ret, dim, expanded_index, expanded_source);
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return self.clone().scatter_add_(dim, index, value);
+  return at::scatter_add(self, dim, index, at::full({}, value, self.options()));
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
