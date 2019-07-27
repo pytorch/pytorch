@@ -262,6 +262,96 @@ class TestLayers(LayersTestCase):
 
         train_init_net, train_net = self.get_training_nets()
 
+    def testSparseFC3D(self):
+        input_dim = 10
+        output_dim = 30
+        last_dim = 20
+        num_nonzeros = 5
+        input_record = self.new_record(
+            schema.Struct(
+                ('embeddings', schema.Scalar((np.float32, (input_dim, last_dim)))),
+                ('sparse_idx', schema.Scalar((np.float32, (num_nonzeros,)))),
+            )
+        )
+
+        fc_out = self.model.SparseFC(
+            input_record.embeddings, output_dim,
+            sparse_idx=input_record.sparse_idx, axis=1)
+        self.model.output_schema = fc_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (output_dim, last_dim))),
+            fc_out
+        )
+        train_init_net, train_net = self.get_training_nets()
+
+    def testSparseFC2D(self):
+        input_dim = 10
+        output_dim = 30
+        # last_dim = 1
+        num_nonzeros = 5
+        input_record = self.new_record(
+            schema.Struct(
+                ('embeddings', schema.Scalar((np.float32, (input_dim,)))),
+                ('sparse_idx', schema.Scalar((np.float32, (num_nonzeros,)))),
+            )
+        )
+
+        fc_out = self.model.SparseFC(
+            input_record.embeddings, output_dim,
+            sparse_idx=input_record.sparse_idx, axis=1)
+        self.model.output_schema = fc_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (output_dim,))),
+            fc_out
+        )
+        train_init_net, train_net = self.get_training_nets()
+
+    def testSparseFC4DAxis2(self):
+        outer_dim = 5
+        input_dim = 10
+        output_dim = 30
+        last_dim = 20
+        num_nonzeros = 5
+        input_record = self.new_record(
+            schema.Struct(
+                ('embeddings', schema.Scalar((np.float32, (outer_dim, input_dim, last_dim)))),
+                ('sparse_idx', schema.Scalar((np.float32, (outer_dim, num_nonzeros,)))),
+            )
+        )
+
+        fc_out = self.model.SparseFC(
+            input_record.embeddings, output_dim,
+            sparse_idx=input_record.sparse_idx, axis=2)
+        self.model.output_schema = fc_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (outer_dim, output_dim, last_dim))),
+            fc_out
+        )
+        train_init_net, train_net = self.get_training_nets()
+
+    def testSparseFC3DAxis2(self):
+        outer_dim = 5
+        input_dim = 10
+        output_dim = 30
+        # last_dim = 1
+        num_nonzeros = 5
+        input_record = self.new_record(
+            schema.Struct(
+                ('embeddings', schema.Scalar((np.float32, (outer_dim, input_dim,)))),
+                ('sparse_idx', schema.Scalar((np.float32, (outer_dim, num_nonzeros,)))),
+            )
+        )
+
+        fc_out = self.model.SparseFC(
+            input_record.embeddings, output_dim,
+            sparse_idx=input_record.sparse_idx, axis=2)
+        self.model.output_schema = fc_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (outer_dim, output_dim))),
+            fc_out
+        )
+        train_init_net, train_net = self.get_training_nets()
+
     def testSparseLookupSumPoolingWithEviction(self):
         # Create test embedding table of 1 row
         record = schema.NewRecord(self.model.net, schema.Struct(
