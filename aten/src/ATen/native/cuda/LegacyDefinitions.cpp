@@ -52,12 +52,4 @@ Tensor & masked_select_out_cuda(Tensor & result, const Tensor & self, const Tens
   }
 }
 
-Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return legacy::cuda::_th_gather_out(result, self, dim, index);
-}
-
-Tensor gather_cuda(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return legacy::cuda::_th_gather(self, dim, index);
-}
-
 }} // namespace at::native

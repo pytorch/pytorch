@@ -1197,6 +1197,14 @@ inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tenso
     static auto table = globalATenDispatch().getOpTable("aten::scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, index, src);
 }
+inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, Scalar value) {
+    static auto table = globalATenDispatch().getOpTable("aten::scatter_add_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, int64_t, const Tensor &, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, index, value);
+}
+inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, Scalar value) const {
+    static auto table = globalATenDispatch().getOpTable("aten::scatter_add(Tensor self, int dim, Tensor index, Scalar value) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, const Tensor &, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, index, value);
+}
 inline Tensor & Tensor::lt_(Scalar other) {
     static auto table = globalATenDispatch().getOpTable("aten::lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, other);

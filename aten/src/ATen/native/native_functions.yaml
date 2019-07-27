@@ -3068,8 +3068,8 @@
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_
-    CUDA: legacy::cuda::_th_scatter_
+    CPU: scatter__cpu
+    CUDA: scatter__cuda
 
 - func: scatter(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
@@ -3077,8 +3077,8 @@
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_
-    CUDA: legacy::cuda::_th_scatter_
+    CPU: scatter__cpu
+    CUDA: scatter__cuda
 
 - func: scatter(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
@@ -3086,10 +3086,19 @@
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_add_
-    CUDA: legacy::cuda::_th_scatter_add_
+    CPU: scatter_add__cpu
+    CUDA: scatter_add__cuda
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
+  variants: function, method
+
+- func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: scatter_add__cpu
+    CUDA: scatter_add__cuda
+
+- func: scatter_add(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
 
 - func: lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
