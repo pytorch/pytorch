@@ -10,7 +10,7 @@ bool is_cuda(const Tensor& self) {
 }
 
 bool is_distributed(const Tensor& self) {
-  return self.dispatch_type().is_distributed();
+  return false;
 }
 
 bool is_complex(const Tensor& self) {
@@ -36,6 +36,13 @@ bool is_sparse(const Tensor& self) {
 
 bool is_quantized(const Tensor& self) {
   return self.is_quantized();
+}
+
+// True if `self` and `from` have compatible tensor type so that `from`'s
+// TensorImpl can be copied to `self`.
+bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
+  return self.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
+      from.type_id());
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {

@@ -32,8 +32,8 @@ default_set = [
     'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
 
     # Binaries
-    'manywheel 2.7mu cpu devtoolset3',
-    'libtorch 2.7m cpu devtoolset3',
+    'manywheel 2.7mu cpu devtoolset7',
+    'libtorch 2.7m cpu devtoolset7',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
@@ -44,9 +44,13 @@ default_set = [
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
+    # XLA
+    'pytorch-xla-linux-trusty-py3.6-gcc5.4',
+
     # Other checks
     'pytorch-short-perf-test-gpu',
-    'pytorch-doc-push',
+    'pytorch-python-doc-push',
+    'pytorch-cpp-doc-push',
 ]
 
 # Takes in commit message to analyze via stdin

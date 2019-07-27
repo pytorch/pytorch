@@ -46,7 +46,7 @@ echo "CMake version:"
 cmake --version
 
 # TODO: Don't run this...
-pip install -q -r requirements.txt || true
+pip_install -r requirements.txt || true
 
 # TODO: Don't install this here
 if ! which conda; then
@@ -54,7 +54,7 @@ if ! which conda; then
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda9-cudnn7-py3-* ]]; then
-    pip install -q mkl mkl-devel
+    pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
@@ -108,6 +108,15 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+
+  ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
+  if [ -e $ORIG_COMP ]; then
+    # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+    # note that the wrapping always names the compiler "clang-7.0_original"
+    WRAPPED=/opt/rocm/hcc/bin/clang-[0-99]
+    sudo mv $ORIG_COMP $WRAPPED
+
+  fi
   exit 0
 fi
 
@@ -158,7 +167,7 @@ assert_git_not_dirty
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
-  pip install -q -r requirements.txt || true
+  pip_install -r requirements.txt || true
   LC_ALL=C make html
   popd
   assert_git_not_dirty
@@ -201,7 +210,7 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
 
-  pip install -q lark-parser
+  pip_install lark-parser
 
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
   sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"

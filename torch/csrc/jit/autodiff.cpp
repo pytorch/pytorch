@@ -89,7 +89,7 @@ bool isDifferentiable(Node* n) {
 
   if (n->matches(
           "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
-    return n->get<std::vector<int64_t>>(attr::size) &&
+    return n->get<c10::List<int64_t>>(attr::size) &&
         n->is_constant(attr::implicit);
   }
 
@@ -394,7 +394,7 @@ class GradientHelper {
            node->namedInput(attr::padding),
            outputs.at(1).value(),
            outputs.at(2).value(),
-           graph->insertConstant(c10::make_list<bool>({true, true, true}))});
+           graph->insertConstant(c10::List<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.
       Node* tuple_unpack_node =
@@ -423,7 +423,7 @@ class GradientHelper {
            outputs.at(2).value(),
            inputs.at(5).value(),
            inputs.at(7).value(),
-           graph->insertConstant(c10::make_list<bool>({true, true, true}))});
+           graph->insertConstant(c10::List<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.
       Node* tuple_unpack_node =

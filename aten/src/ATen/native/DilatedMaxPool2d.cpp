@@ -54,15 +54,13 @@ static void max_pool2d_with_indices_single_out_frame(
           int64_t *indp = ind_p   + k*owidth*oheight + i*owidth + j;
 
           /* compute local max: */
-          int64_t maxindex = -1;
-          scalar_t maxval = -std::numeric_limits<scalar_t>::max();
-          int64_t tcntr = 0;
-          int64_t x,y;
-          for(y = hstart; y < hend; y += dilationH)
+          int64_t maxindex = hstart*iwidth + wstart;
+          scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
+          for(int64_t y = hstart; y < hend; y += dilationH)
           {
-            for(x = wstart; x < wend; x += dilationW)
+            for(int64_t x = wstart; x < wend; x += dilationW)
             {
-              tcntr = y*iwidth + x;
+              int64_t tcntr = y*iwidth + x;
               scalar_t val = *(ip + tcntr);
               if ((val > maxval) || std::isnan(val))
               {
@@ -129,9 +127,8 @@ void max_pool2d_with_indices_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX JIT: Pooling.cpp allows stride.empty().
-  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 2 &&
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
               (stride.empty() || stride.size() == 2) &&
               (padding.size() == 1 || padding.size() == 2) &&
               (dilation.size() == 1 || dilation.size() == 2),
@@ -141,7 +138,7 @@ void max_pool2d_with_indices_out_cpu_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
@@ -303,9 +300,8 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX JIT: Pooling.cpp allows stride.empty().
-  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 2 &&
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
               (stride.empty() || stride.size() == 2) &&
               (padding.size() == 1 || padding.size() == 2) &&
               (dilation.size() == 1 || dilation.size() == 2),
@@ -315,7 +311,7 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);

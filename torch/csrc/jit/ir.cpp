@@ -34,7 +34,7 @@ static constexpr topo_position_t kMidPoint = 0;
 static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
 static void printValueRef(std::ostream& out, const Value* n) {
-  out << "%" << n->uniqueName();
+  out << "%" << n->debugName();
 }
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
@@ -204,8 +204,7 @@ SourceRange Node::sourceRange() const {
   if (source_range_) {
     return *source_range_;
   }
-  std::stringstream ss;
-  return SourceRange(ss.str());
+  return SourceRange();
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
@@ -251,14 +250,13 @@ std::ostream& Node::print(
   }
 
   // In debug print, append file:line:col as a comment after each node
-  if (print_source_locations && source_range_ &&
-      source_range_->source()->filename()) {
-    const auto& range = sourceRange();
-    const auto& source = range.source();
-    auto lineno = source->lineno_for_offset(range.start());
-    auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);
-    out << " # " << source->filename().value() << ":"
-        << source->lineno_to_source_lineno(lineno) << ":" << col_offset;
+  if (print_source_locations) {
+    if (auto file_line_col = sourceRange().file_line_col()) {
+      std::string filename;
+      size_t line, col;
+      std::tie(filename, line, col) = *file_line_col;
+      out << " # " << filename << ":" << line << ":" << col;
+    }
   }
 
   out << "\n";
@@ -636,7 +634,8 @@ std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
-        "Graph::copy() encountered a use of a value not in scope. Run lint!");
+        "Graph::copy() encountered a use of a value " + v->debugName() +
+        " not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -687,8 +686,8 @@ bool Value::mustNotBeNone() const {
       !type()->cast<OptionalType>();
 }
 
-std::string Value::uniqueNameBase() const {
-  std::string name = uniqueName();
+std::string Value::debugNameBase() const {
+  std::string name = debugName();
   std::string name_base = name;
   auto last_dot_pos = name.find_last_of('.');
   if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
@@ -714,7 +713,7 @@ bool Value::isValidName(const std::string& name) {
   return true;
 }
 
-Value* Value::setUniqueName(const std::string& name) {
+Value* Value::setDebugName(const std::string& name) {
   if (!isValidName(name)) {
     throw std::runtime_error("Invalid name: '" + name + "'");
   }
@@ -722,7 +721,7 @@ Value* Value::setUniqueName(const std::string& name) {
   auto& names = node()->owningGraph()->unique_names_;
 
   // clear any old name from the map
-  if (hasUniqueName()) {
+  if (hasDebugName()) {
     names.erase(unique_name_);
     unique_name_ = "";
   }
@@ -751,7 +750,7 @@ Value* Value::setUniqueName(const std::string& name) {
       ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
-    old_owner_of_name->second->setUniqueName(replacement_name);
+    old_owner_of_name->second->setDebugName(replacement_name);
   }
 
   names[name] = this;
@@ -761,8 +760,8 @@ Value* Value::setUniqueName(const std::string& name) {
 
 Value* Value::copyMetadata(Value* from) {
   setType(from->type());
-  if (from->hasUniqueName()) {
-    setUniqueName(from->uniqueName());
+  if (from->hasDebugName()) {
+    setDebugName(from->debugName());
   }
   return this;
 }
@@ -892,16 +891,43 @@ bool Node::hasSideEffects() const {
     case prim::TimePoint:
     case prim::CallFunction:
     case prim::CallMethod:
+    case prim::BailoutTemplate:
       return true;
   }
-  // All other builtin ops are known to be safe.
-  // see [custom operator aliasing]
-  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+
+  auto op = findOperatorFor(this);
+  if (!op) {
+    TORCH_INTERNAL_ASSERT(
+        kind_.is_prim(),
+        "Only prim ops are allowed to not have a registered operator but ",
+        kind_.toDisplayString(),
+        " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
-
-  // Custom ops may have arbitrary side effects
-  return true;
+  if (kind_.is_prim() || kind_.is_aten()) {
+    // TODO This assert is only introduced to check that we don't break the
+    // current code base. Remove this later to allow other ops to use
+    // AliasAnalysisKind::FROM_SCHEMA
+    TORCH_INTERNAL_ASSERT(
+        op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+        kind_.toDisplayString(),
+        " has ",
+        toString(op->aliasAnalysisKind()));
+  }
+  switch (op->aliasAnalysisKind()) {
+    case AliasAnalysisKind::PURE:
+      return false;
+    case AliasAnalysisKind::FROM_SCHEMA:
+      return false;
+    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
+      return false;
+    case AliasAnalysisKind::CONSERVATIVE:
+      return true;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
+  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1311,11 +1337,11 @@ Node* Graph::createWithSubgraph(Symbol kind) {
 
 Node* Graph::createTuple(
     at::ArrayRef<Value*> values,
-    c10::OptNameList field_names,
-    c10::optional<std::string> unqualName) {
+    c10::optional<c10::QualifiedName> qualname,
+    std::shared_ptr<FunctionSchema> schema) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
   auto tt = TupleType::create(
-      std::move(types), std::move(field_names), std::move(unqualName));
+      std::move(types), std::move(qualname), std::move(schema));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;
@@ -1356,7 +1382,13 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
-    AT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    TORCH_CHECK(
+        v->type()->isSubtypeOf(elem_type),
+        "Expected a list element that subtypes '",
+        elem_type->python_str(),
+        "' but got an element of type '",
+        v->type()->python_str(),
+        "'");
   }
   n->output()->setType(ListType::create(elem_type));
   return n;
@@ -1386,15 +1418,6 @@ Node* Graph::createDict(
     n->addInput(values[i]);
   }
   n->output()->setType(DictType::create(key_type, value_type));
-  return n;
-}
-
-Node* Graph::createDictIndex(Value* dict, Value* index) {
-  auto dict_type = dict->type()->expect<DictType>();
-  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
-
-  auto n = create(prim::DictIndex, {dict, index});
-  n->output()->setType(dict_type->getValueType());
   return n;
 }
 
@@ -1451,7 +1474,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 }
 
 Value* Graph::insertFunctionCall(
-    std::shared_ptr<Function> callee,
+    Function* callee,
     script::MatchedSchema& matched) {
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->output()
@@ -1529,7 +1552,7 @@ void Graph::freeNode(Node* n) {
   all_nodes.erase(it);
 }
 void Graph::freeValue(Value* v) {
-  v->setUniqueName("");
+  v->setDebugName("");
   auto it = all_values.find(v);
   AT_ASSERT(it != all_values.end());
   delete *it;

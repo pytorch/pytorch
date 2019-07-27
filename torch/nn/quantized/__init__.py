@@ -1,12 +1,6 @@
-r"""
-The quantized module contains the data structures and ops for implementation of
-the quantized models.
-"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
 
-from torch.nn.quantized.functional import add_relu
-from torch.nn.quantized.functional import relu
-
-__all__ = [
-    'add_relu',
-    'relu'
-]
+from .modules import *  # noqa: F401

@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/div_rtn.h>
 #include <tuple>
 
 #pragma once
@@ -21,17 +22,28 @@ safe_downcast(src_t v)
 }
 
 template<typename T>
-static inline T pooling_output_shape(
-        T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
-    T outputSize = ((inputSize + 2 * pad - dilation * (kernelSize - 1) - 1 + (ceil_mode ? stride - 1 : 0)) / stride + 1);
-    if (pad) {
+static inline T pooling_output_shape_pad_lr(
+        T inputSize, T kernelSize, T pad_l, T pad_r, T stride, T dilation,
+        bool ceil_mode) {
+    T outputSize = div_rtn<T>(
+        inputSize + pad_l + pad_r - dilation * (kernelSize - 1) - 1 +
+        (ceil_mode ? stride - 1 : 0), stride) + 1;
+    if (pad_l) {
         // ensure that the last pooling starts inside the image
         // needed to avoid problems in ceil mode
-        if ((outputSize - 1) * stride >= inputSize + pad)
+        if ((outputSize - 1) * stride >= inputSize + pad_l)
           --outputSize;
     }
     return outputSize;
 }
+
+template<typename T>
+static inline T pooling_output_shape(
+      T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
+    return pooling_output_shape_pad_lr(
+        inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
+}
+
 
 // AveragePool2d/DilatedMaxPool2d (forward)
 static inline void
@@ -132,8 +144,9 @@ avg_pool2d_backward_shape_check(
   check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
 }
 
+// AveragePool3d/DilatedMaxPool3d (forward)
 static inline void
-max_pool3d_with_indices_shape_check(
+pool3d_shape_check(
   const Tensor& input,
   int64_t nslices,
   int kT, int kH, int kW,
@@ -141,7 +154,8 @@ max_pool3d_with_indices_shape_check(
   int pT, int pH, int pW,
   int dilationT, int dilationH, int dilationW,
   int64_t itime, int64_t iheight, int64_t iwidth,
-  int64_t otime, int64_t oheight, int64_t owidth)
+  int64_t otime, int64_t oheight, int64_t owidth,
+  bool check_input_size=false)
 {
   const int64_t ndim = input.ndimension();
 
@@ -158,6 +172,12 @@ max_pool3d_with_indices_shape_check(
   TORCH_CHECK(input.numel() > 0 && (ndim == 4 || ndim == 5),
               "non-empty 4D or 5D (batch mode) tensor expected for input, but got ndim: ", ndim);
 
+  if (check_input_size) { // AveragePool3d
+    TORCH_CHECK(itime >= kT && iheight >= kH && iwidth >= kW,
+                "input image ", "(T: ", itime, " H: ", iheight, " W: ", iwidth, ") smaller than ",
+                "kernel size ", "(kT: ", kT, " kH: ", kH, " kW: ", kW, ")");
+  }
+
   TORCH_CHECK(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH,
               "pad should be smaller than half of kernel size, but got "
               "kT: ", kT, " kW: ", kW, " kH: ", kH, " padT: ", pT, " padW: ", pW, " padH: ", pH);
@@ -171,7 +191,7 @@ max_pool3d_with_indices_shape_check(
 }
 
 static inline void
-max_pool3d_with_indices_shape_check(
+max_pool3d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
   const Tensor& indices,
@@ -185,7 +205,7 @@ max_pool3d_with_indices_shape_check(
 {
   const int64_t ndim = input.ndimension();
 
-  max_pool3d_with_indices_shape_check(
+  pool3d_shape_check(
     input,
     nslices,
     kT, kH, kW,
@@ -204,6 +224,36 @@ max_pool3d_with_indices_shape_check(
   check_dim_size(indices, ndim, ndim-3, otime);
   check_dim_size(indices, ndim, ndim-2, oheight);
   check_dim_size(indices, ndim, ndim-1, owidth);
+}
+
+static inline void
+avg_pool3d_backward_shape_check(
+  const Tensor& input,
+  const Tensor& gradOutput,
+  int64_t nslices,
+  int kT, int kH, int kW,
+  int dT, int dH, int dW,
+  int pT, int pH, int pW,
+  int64_t itime, int64_t iheight, int64_t iwidth,
+  int64_t otime, int64_t oheight, int64_t owidth)
+{
+  const int64_t ndim = input.ndimension();
+
+  pool3d_shape_check(
+    input,
+    nslices,
+    kT, kH, kW,
+    dT, dH, dW,
+    pT, pH, pW,
+    1, 1, 1,
+    itime, iheight, iwidth,
+    otime, oheight, owidth,
+    true);
+
+  check_dim_size(gradOutput, ndim, ndim-4, nslices);
+  check_dim_size(gradOutput, ndim, ndim-3, otime);
+  check_dim_size(gradOutput, ndim, ndim-2, oheight);
+  check_dim_size(gradOutput, ndim, ndim-1, owidth);
 }
 
 } // namespace
