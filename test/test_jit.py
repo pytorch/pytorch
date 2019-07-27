@@ -3395,6 +3395,47 @@ def foo(xyz):
         self.assertEqual(records1, records2)
         self.assertEqual(records2, records3)
 
+    def test_serialized_source_ranges_no_dups(self):
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, lim):
+                first = 1
+                second = 1
+                i = 1
+                somenum = 5
+                dontmutateme = 3
+                third = 0
+                while bool(i < lim):
+                    third = first + second
+                    first = second
+                    second = third
+                    j = 0
+                    while j < 10:
+                        somenum = somenum * 2
+                        j = j + 1
+                    i = i + j
+                    i = i + dontmutateme
+
+                st = second + third
+                fs = first + second
+                return third, st, fs
+
+        ft3 = FooTest3()
+
+        def debug_records_from_mod(mod):
+            buffer = io.BytesIO()
+            torch.jit.save(ft3, buffer)
+            buffer.seek(0)
+            archive = zipfile.ZipFile(buffer)
+            debug_file = archive.open('archive/debug/archive.pkl')
+            return pickle.load(debug_file), buffer
+
+        records, _ = debug_records_from_mod(ft3)
+        for i in range(len(records) - 1):
+            offset, source_range = records[i]
+            offset2, source_range2 = records[i + 1]
+            self.assertNotEqual(source_range, source_range2)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
