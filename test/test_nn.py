@@ -5538,20 +5538,18 @@ class TestNN(NNTestCase):
         target_lengths = [0, 0, 0]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (0,), dtype=torch.long, device=device)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
-        # note that the losses are expected to be ~1.5e2, so the relative precision required is about 1.5e-6
-        self.assertAlmostEqual(-log_probs.sum(0)[:, 0], loss, delta=1e-4)
+        self.assertAlmostEqual(-log_probs.sum(0)[:, 0], loss)
 
         target_lengths = [0, 9, 0]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (9,), dtype=torch.long, device=device)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
-        # note that the losses are expected to be ~1.5e2, so the relative precision required is about 1.5e-6
-        self.assertAlmostEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]], delta=1e-4)
+        self.assertAlmostEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
 
     def test_CTCLoss_empty_target_cpu(self):
         self._test_CTCLoss_empty_target('cpu')
