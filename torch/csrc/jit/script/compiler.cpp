@@ -402,6 +402,8 @@ struct Environment {
           {"enumerate", std::make_shared<IterableValue>(prim::enumerate)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
+          {"sorted",
+           std::make_shared<BuiltinFunction>(aten::sorted, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
