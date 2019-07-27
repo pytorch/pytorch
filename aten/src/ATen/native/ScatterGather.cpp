@@ -16,7 +16,7 @@ Tensor & scatter_add__cpu(Tensor & self, int64_t dim, const Tensor & index, cons
 }
 
 Tensor & scatter_add__cpu(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return scatter_add__cpu(self, dim, index, at::tensor(value, self.options()));
+  return scatter_add__cpu(self, dim, index, at::full({}, value, self.options()));
 }
 
 Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {

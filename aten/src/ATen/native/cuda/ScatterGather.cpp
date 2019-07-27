@@ -16,7 +16,7 @@ Tensor & scatter_add__cuda(Tensor & self, int64_t dim, const Tensor & index, con
 }
 
 Tensor & scatter_add__cuda(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return scatter_add__cuda(self, dim, index, at::tensor(value, self.options()));
+  return scatter_add__cuda(self, dim, index, at::full({}, value, self.options()));
 }
 
 Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
