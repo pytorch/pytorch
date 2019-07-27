@@ -2,7 +2,22 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
+from ...modules.linear import Identity as NNIdentity
 # from ...qat.modules.linear import Linear as QATLinear
+
+class Identity(NNIdentity):
+    r"""A placeholder identity operator that is argument-insensitive.
+    """
+    __FLOAT_MODULE__ = NNIdentity
+
+    def __init__(self, *args, **kwargs):
+        super(Identity, self).__init__()
+
+    @classmethod
+    def from_float(cls, mod):
+        assert type(mod) == cls.__FLOAT_MODULE__, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+            super(Identity, cls).__name__
+        return Identity()
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor

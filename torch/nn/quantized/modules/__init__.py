@@ -7,6 +7,7 @@ from .conv import Conv2d
 from .linear import Linear
 from .linear import Quantize
 from .linear import DeQuantize
+from .linear import Identity
 
 __all__ = [
     'Conv2d',
@@ -15,4 +16,5 @@ __all__ = [
     'MaxPool2d',
     'Quantize',
     'ReLU',
+    'Identity',
 ]
