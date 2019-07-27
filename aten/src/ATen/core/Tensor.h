@@ -642,6 +642,7 @@ class CAFFE2_API Tensor {
   Tensor & scatter_(int64_t dim, const Tensor & index, Scalar value);
   Tensor scatter(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter(int64_t dim, const Tensor & index, Scalar value) const;
+  Tensor & scatter_add_(int64_t dim, const Tensor & index, const Tensor & src);
   Tensor & scatter_add_(int64_t dim, const Tensor & index, Scalar value);
   Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter_add(int64_t dim, const Tensor & index, Scalar value) const;

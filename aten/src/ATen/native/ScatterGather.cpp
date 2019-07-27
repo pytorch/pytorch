@@ -6,9 +6,11 @@ namespace {
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
 inline expand_scatter(const at::Tensor &self, int64_t dim, const at::Tensor &index, const at::Tensor &src, bool inplace) {
-  auto self_sizes = self.sizes();
-  auto index_sizes = index.sizes();
-  auto src_sizes = src.sizes();
+  auto self_sizes = self.sizes().vec();
+  auto index_sizes = index.sizes().vec();
+  auto src_sizes = src.sizes().vec();
+  AT_CHECK(self_sizes.size() == src_sizes.size(), "torch.scatter requires src and dest to have the same number of dimensions");
+  AT_CHECK(index_sizes.size() <= src_sizes.size(), "torch.scatter requires src to have more dimensions than index");
 }
 
 std::tuple<at::Tensor, at::Tensor, std::vector<int64_t>>
