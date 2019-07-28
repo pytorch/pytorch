@@ -20,7 +20,7 @@ inline expand3(const at::Tensor &self, int64_t &dim, at::Tensor index, const at:
     std::fill(src_sizes.begin(), src_sizes.end(), 1);
   }
   TORCH_CHECK(self_sizes.size() == src_sizes.size(), "torch.scatter requires src and dest to have the same number of dimensions");
-  TORCH_CHECK(index_sizes.size() <= src_sizes.size(), "torch.scatter requires src to have more dimensions than index");
+  TORCH_CHECK(index_sizes.size() <= src_sizes.size(), "torch.scatter requires src to have more or equal dimensions than index");
   dim = c10::maybe_wrap_dim(dim, index_sizes.size());
   for (int64_t i = 0; i < self_sizes.size(); i++) {
     if (i == dim) {
@@ -54,7 +54,7 @@ std::tuple<std::vector<int64_t>, at::Tensor>
 inline expand2(const at::Tensor &self, int64_t &dim, at::Tensor index) {
   std::vector<int64_t> self_sizes = self.sizes().vec();
   std::vector<int64_t> index_sizes = index.sizes().vec();
-  TORCH_CHECK(self_sizes.size() >= index_sizes.size(), "requires input to have more dimensions than index");
+  TORCH_CHECK(self_sizes.size() >= index_sizes.size(), "requires input to have more or equal dimensions than index");
   dim = c10::maybe_wrap_dim(dim, index_sizes.size());
   for(int64_t i = 0; i < self_sizes.size(); i++) {
     if (i == dim) {
