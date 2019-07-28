@@ -133,7 +133,7 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Ten
   Tensor expanded_source, expanded_index;
   std::vector<int64_t> self_sizes;
   std::tie(self_sizes, expanded_index, expanded_source) = expand3(self, dim, index, source);
-  Tensor ret = self.clone().expand(self_sizes);
+  Tensor ret = self.clone().expand(self_sizes).contiguous();
   return at::_scatter_(ret, dim, expanded_index, expanded_source);
 }
 
@@ -147,7 +147,7 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar va
   Tensor expanded_index;
   std::vector<int64_t> result_sizes;
   std::tie(result_sizes, expanded_index) = expand2(self, dim, index);
-  Tensor ret = self.clone().expand(result_sizes);
+  Tensor ret = self.clone().expand(result_sizes).contiguous();
   return at::_scatter_(ret, dim, expanded_index, value);
 }
 
@@ -179,7 +179,7 @@ Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const
   Tensor expanded_source, expanded_index;
   std::vector<int64_t> self_sizes;
   std::tie(self_sizes, expanded_index, expanded_source) = expand3(self, dim, index, source);
-  Tensor ret = self.clone().expand(self_sizes);
+  Tensor ret = self.clone().expand(self_sizes).contiguous();
   return at::_scatter_add_(ret, dim, expanded_index, expanded_source);
 }
 

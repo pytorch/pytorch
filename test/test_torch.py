@@ -8195,6 +8195,42 @@ class _TestTorchMixin(object):
                                                 [False, True, False, True, False],
                                                 [True, False, True, False, True]], device=device))
 
+    def test_scatter_broadcasting(self):
+        # valid case
+        x = torch.randn(1, 5, 8, 5, 3)
+        full_x = x.expand(2, 5, 8, 5, 3).contiguous().clone()
+
+        index1 = torch.randint(high=8, size=(2, 1, 3))
+        src1 = torch.randn(1, 1, 1, 5, 1)
+        index2 = torch.randint(high=8, size=(2, 1, 1))
+        src2 = torch.randn(1, 1, 3, 5, 1)
+        for index, src in [(index1, src1), (index2, src2)]:
+            result1 = full_x.clone().scatter_(2, index, src)
+            result2 = x.scatter(2, index, src)
+            self.assertEqual(result1, result2)
+            result3 = x.scatter(-1, index, src)
+            result4 = x.scatter(2, index.unsqueeze(-1), src)
+            result5 = x.scatter(2, index.unsqueeze(-1).unsqueeze(-1), src)
+            result6 = full_x.clone().scatter_(2, index.unsqueeze(-1).unsqueeze(-1).expand(2, 5, 3, 5, 3), src.expand(2, 5, 3, 5, 3))
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+            self.assertEqual(result1, result4)
+            self.assertEqual(result1, result5)
+            self.assertEqual(result1, result6)
+            result1 = full_x.clone().scatter_add_(2, index, src)
+            result2 = x.scatter_add(2, index, src)
+            result3 = x.scatter_add(-1, index, src)
+            result4 = x.scatter_add(2, index.unsqueeze(-1), src)
+            result5 = x.scatter_add(2, index.unsqueeze(-1).unsqueeze(-1), src)
+            result6 = full_x.clone().scatter_add_(2, index.unsqueeze(-1).unsqueeze(-1).expand(2, 5, 3, 5, 3), src.expand(2, 5, 3, 5, 3))
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+            self.assertEqual(result1, result4)
+            self.assertEqual(result1, result5)
+            self.assertEqual(result1, result6)
+
+        # valid case scalar
+
     def test_masked_scatter(self):
         for dtype in [torch.uint8, torch.bool]:
             num_copy, num_dest = 3, 10
