@@ -144,12 +144,29 @@ class TestCppExtension(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_jit_cuda_archflags(self):
+    def _run_jit_cuda_archflags(self, flags, expected):
+        # Compile an extension with given `flags`
+        def _check_cuobjdump_output(expected_values, is_ptx=False):
+            elf_or_ptx = '--list-ptx' if is_ptx else '--list-elf'
+            command = ['cuobjdump', elf_or_ptx,
+                       os.path.join(temp_dir, 'cudaext_archflags' + lib_ext)]
+            p = subprocess.Popen(command,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output, err = p.communicate()
+            if common.PY3:
+                output = output.decode("ascii")
+                err = err.decode("ascii")
+
+            self.assertEqual(p.returncode, 0)
+            self.assertEqual(err, '')
+            self.assertEqual(sorted(re.findall(r'sm_\d\d', output)),
+                             ['sm_' + xx for xx in expected_values])
+
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
         try:
-            os.environ['TORCH_CUDA_ARCH_LIST'] = "Maxwell Kepler 6.1"
+            os.environ['TORCH_CUDA_ARCH_LIST'] = flags
             torch.utils.cpp_extension.load(
                 name="cudaext_archflags",
                 sources=[
@@ -162,23 +179,14 @@ class TestCppExtension(common.TestCase):
             )
 
             lib_ext = '.pyd' if IS_WINDOWS else '.so'
-            command = ['cuobjdump', '--list-elf',
-                       os.path.join(temp_dir, 'cudaext_archflags' + lib_ext)]
-            p = subprocess.Popen(command,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
-            output, err = p.communicate()
-            if common.PY3:
-                output = output.decode("ascii")
-                err = err.decode("ascii")
-
-            self.assertEqual(p.returncode, 0)
-            self.assertEqual(err, '')
-            # Expected output:
+            # Expected output for --list-elf:
             #   ELF file    1: cudaext_archflags.1.sm_61.cubin
             #   ELF file    2: cudaext_archflags.2.sm_52.cubin
-            self.assertEqual(sorted(re.findall(r'sm_\d\d', output)),
-                             ['sm_52', 'sm_61'])
+            _check_cuobjdump_output(expected[0])
+            if expected[1] is not None:
+                # Expected output for --list-ptx:
+                #   PTX file    1: cudaext_archflags.1.sm_61.ptx
+                _check_cuobjdump_output(expected[1], is_ptx=True)
         finally:
             if IS_WINDOWS:
                 print("Not wiping extensions build folder because Windows")
@@ -189,6 +197,29 @@ class TestCppExtension(common.TestCase):
                 os.environ.pop('TORCH_CUDA_ARCH_LIST')
             else:
                 os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_jit_cuda_archflags(self):
+        # Test a number of combinations:
+        #   - the default for the machine we're testing on
+        #   - Separators, can be ';' (most common) or ' '
+        #   - Architecture names
+        #   - With/without '+PTX'
+
+        capability = torch.cuda.get_device_capability()
+        # expected values is length-2 tuple: (list of ELF, list of PTX)
+        # note: there should not be more than one PTX value
+        archflags = {
+            '': ['{}{}'.format(capability[0], capability[1])],
+            "Maxwell+Tegra;6.1": (['53', '61'], None),
+            "Pascal 3.5": (['35', '60', '61'], None),
+            "7.5+PTX": (['75'], ['75']),
+            "5.0;6.0+PTX;7.0;7.5": (['50', '60', '70', '75'], ['60']),
+            "Volta": (['70'], ['70']),
+        }
+
+        for flags, expected in archflags.items():
+            self._run_jit_cuda_archflags(flags, expected)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
@@ -672,14 +703,14 @@ class TestCppExtension(common.TestCase):
             torch.set_default_dtype(initial_default)
 
     def test_compilation_error_formatting(self):
-        # Test that the missing-semicolon error message has linebreaks in it. 
+        # Test that the missing-semicolon error message has linebreaks in it.
         # This'll fail if the message has been munged into a single line.
         # It's hard to write anything more specific as every compiler has it's own
         # error formatting.
         with self.assertRaises(RuntimeError) as e:
             torch.utils.cpp_extension.load_inline(
                 name="test_compilation_error_formatting",
-                cpp_sources="int main() { return 0 }") 
+                cpp_sources="int main() { return 0 }")
         pattern = r'.*(\\n|\\r).*'
         self.assertNotRegex(str(e), pattern)
 

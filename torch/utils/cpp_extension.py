@@ -931,6 +931,17 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
 
 
 def _get_cuda_arch_flags(cflags=None):
+    '''
+    Determine CUDA arch flags to use.
+
+    For an arch, say "6.1", the added compile flag will be
+    ``-gencode=arch=compute_61,code=sm_61``.
+    For an added "+PTX", an additional
+    ``-gencode=arch=compute_xx,code=compute_xx`` is added.
+
+    See select_compute_arch.cmake for corresponding named and supported arches
+    when building with CMake.
+    '''
     # If cflags is given, there may already be user-provided arch flags in it
     # (from `extra_compile_args`)
     if cflags is not None:
@@ -938,31 +949,49 @@ def _get_cuda_arch_flags(cflags=None):
             if 'arch' in flag:
                 return []
 
+    named_arches = {'Fermi': '2.0;2.1',
+                    'Kepler+Tegra': '3.2',
+                    'Kepler+Tesla': '3.7',
+                    'Kepler': '3.0;3.5+PTX',
+                    'Maxwell+Tegra': '5.3',
+                    'Maxwell': '5.0;5.2+PTX',
+                    'Pascal': '6.0;6.1+PTX',
+                    'Volta': '7.0+PTX',
+                    'Turing': '7.5+PTX'}
+
+    supported_arches = ['2.0', '2.1', '3.0', '3.2', '3.5', '3.7', '5.0', '5.2',
+                        '5.3', '6.0', '6.1', '6.2', '7.0', '7.2', '7.5']
+    valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
+
     # The default is sm_30 for CUDA 9.x and 10.x
     # First check for an env var (same as used by the main setup.py)
-    # Can be one or more architectures, e.g. '6.1' or "3.5 5.2 6.0 6.1 7.0+PTX"
+    # Can be one or more architectures, e.g. "6.1" or "3.5;5.2;6.0;6.1;7.0+PTX"
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
-
-    all_arches = {'3.5': '35', '5.2': '52', '6.0': '60', '6.1': '61',
-                  '7.0': '70', '7.0+PTX': '70', '7.2': '72', '7.2+PTX': '72',
-                  '7.5': '75', '7.5+PTX': '75',
-                  'Kepler': '52', 'Tegra': '52', 'Maxwell': '52',
-                  'Pascal': '60', 'Volta': '70', 'Turing': '75'}
 
     # If not given, determine what's needed for the GPU that can be found
     if not arch_list:
         capability = torch.cuda.get_device_capability()
         arch_list = ['{}.{}'.format(capability[0], capability[1])]
     else:
-        arch_list = arch_list.split(' ')
+        # Deal with lists that are ' ' separated (only deal with ';' after)
+        arch_list = arch_list.replace(' ', ';')
+        # Expand named arches
+        for named_arch, archval in named_arches.items():
+            arch_list = arch_list.replace(named_arch, archval)
 
+        arch_list = arch_list.split(';')
+
+    flags = []
     for arch in arch_list:
-        if arch not in all_arches.keys():
+        if arch not in valid_arch_strings:
             raise ValueError("Unknown CUDA arch ({}) or GPU not supported".format(arch))
+        else:
+            num = arch[0] + arch[2]
+            flags.append('-gencode=arch=compute_{},code=sm_{}'.format(num, num))
+            if arch.endswith('+PTX'):
+                flags.append('-gencode=arch=compute_{},code=compute_{}'.format(num, num))
 
-    arch_list = [all_arches[s] for s in arch_list]
-    flags = ['-gencode=arch=compute_{},code=sm_{}'.format(s, s) for s in arch_list]
     return list(set(flags))
 
 
