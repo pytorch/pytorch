@@ -8113,12 +8113,12 @@ class _TestTorchMixin(object):
         self.assertEqual(result1, result6)
 
         # size mismatch
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, 'Size mismatch at dim=0, get: 2 and 3'):
             y = torch.randn(3, 5, 8, 5, 3)
             y.gather(2, index)
 
         # input should have >= dim than index
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, 'requires input to have more or equal dimensions than index'):
             y = torch.randn(1, 1)
             y.gather(2, index)
 
@@ -8266,14 +8266,24 @@ class _TestTorchMixin(object):
             torch.zeros(5, 5, 1).scatter_add(2, torch.zeros(1, 5, dtype=torch.long), torch.zeros(5, 5, 5))
 
         # index has more dims than input and output
-        with self.assertRaisesRegexp(RuntimeError, 'torch.scatter requires src to have more or equal dimensions than index'):
+        with self.assertRaisesRegexp(RuntimeError, 'requires src to have more or equal dimensions than index'):
             torch.zeros(5, 5, 5).scatter(1, torch.zeros(1, 5, 5, 1, dtype=torch.long), torch.zeros(5, 5, 5))
-        with self.assertRaisesRegexp(RuntimeError, 'torch.scatter requires src to have more or equal dimensions than index'):
+        with self.assertRaisesRegexp(RuntimeError, 'requires src to have more or equal dimensions than index'):
             torch.zeros(5, 5, 5).scatter_add(1, torch.zeros(1, 5, 5, 1, dtype=torch.long), torch.zeros(5, 5, 5))
-        with self.assertRaisesRegexp(RuntimeError, 'torch.scatter requires src to have more or equal dimensions than index'):
+        with self.assertRaisesRegexp(RuntimeError, 'requires src to have more or equal dimensions than index'):
             torch.zeros(5, 5, 5).scatter_(1, torch.zeros(1, 5, 5, 1, dtype=torch.long), torch.zeros(5, 5, 5))
-        with self.assertRaisesRegexp(RuntimeError, 'torch.scatter requires src to have more or equal dimensions than index'):
+        with self.assertRaisesRegexp(RuntimeError, 'requires src to have more or equal dimensions than index'):
             torch.zeros(5, 5, 5).scatter_add(1, torch.zeros(1, 5, 5, 1, dtype=torch.long), torch.zeros(5, 5, 5))
+
+        # self and src must have the same number of dims
+        with self.assertRaisesRegexp(RuntimeError, 'requires src and dest to have the same number of dimensions'):
+            torch.zeros(5, 5, 5, 5).scatter(1, torch.zeros(5, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
+        with self.assertRaisesRegexp(RuntimeError, 'requires src and dest to have the same number of dimensions'):
+            torch.zeros(5, 5, 5, 5).scatter_(1, torch.zeros(5, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
+        with self.assertRaisesRegexp(RuntimeError, 'requires src and dest to have the same number of dimensions'):
+            torch.zeros(5, 5, 5, 5).scatter_add(1, torch.zeros(5, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
+        with self.assertRaisesRegexp(RuntimeError, 'requires src and dest to have the same number of dimensions'):
+            torch.zeros(5, 5, 5, 5).scatter_add_(1, torch.zeros(5, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
 
     def test_masked_scatter(self):
         for dtype in [torch.uint8, torch.bool]:
