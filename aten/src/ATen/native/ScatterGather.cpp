@@ -28,17 +28,17 @@ inline expand_scatter(const at::Tensor &self, int64_t dim, at::Tensor index, con
         expand_size(i, index_sizes[i], src_sizes[i]);
       }
     } else if (i < index_sizes.size()) {
-      if (self_sizes[i] == index_sizes[i] && self_sizes[i] == src_sizes[i]) {
-        continue;
-      } else if (self_sizes[i] == index_sizes[i] && src_sizes[i] == 1) {
-        src_sizes[i] = self_sizes[i];
-      } else if (self_sizes[i] == src_sizes[i] && index_sizes[i] == 1) {
-        index_sizes[i] = self_sizes[i];
-      } else if (index_sizes[i] == src_sizes[i] && self_sizes[i] == 1) {
-        self_sizes[i] = index_sizes[i];
-      } else {
-        AT_ERROR("Size mismatch at dim=", dim, ", get: ", self_sizes[i], ", ", index_sizes[i], " and ", src_sizes[i]);
+      int64_t expanded_size = 1;
+      for (int64_t s : {self_sizes[i], index_sizes[i], src_sizes[i]}) {
+        if (s != 1) {
+          if (expanded_size == 1) {
+            expanded_size = s;
+          } else {
+            AT_CHECK(expanded_size == s, "Size mismatch at dim=", dim, ", get: ", self_sizes[i], ", ", index_sizes[i], " and ", src_sizes[i]);
+          }
+        }
       }
+      self_sizes[i] = index_sizes[i] = src_sizes[i] = expanded_size;
     } else {
       if (src_sizes[i] != self_sizes[i]) {
         expand_size(i, src_sizes[i], self_sizes[i]);
@@ -100,7 +100,7 @@ namespace at { namespace native {
 
 Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   if (self.dim() == 0 || index.dim() == 0) {
-    return at::_gather_out(result, self, dim, index);
+    return at::_gather_out(result, self, dim, index, sparse_grad);
   }
   Tensor expanded_self, expanded_index;
   std::vector<int64_t> result_sizes;
@@ -111,7 +111,7 @@ Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Ten
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   if (self.dim() == 0 || index.dim() == 0) {
-    return at::_gather(self, dim, index);
+    return at::_gather(self, dim, index, sparse_grad);
   }
   Tensor expanded_self, expanded_index;
   std::tie(expanded_self, expanded_index, std::ignore) = expand_gather(self, dim, index);
