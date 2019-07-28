@@ -8117,7 +8117,7 @@ class _TestTorchMixin(object):
             y = torch.randn(3, 5, 8, 5, 3)
             y.gather(2, index)
 
-        # smaller input
+        # input should have >= dim than index
         with self.assertRaises(RuntimeError):
             y = torch.randn(1, 1)
             y.gather(2, index)
@@ -8204,14 +8204,15 @@ class _TestTorchMixin(object):
         src1 = torch.randn(1, 1, 1, 5, 1)
         index2 = torch.randint(high=8, size=(2, 1, 1))
         src2 = torch.randn(1, 1, 3, 5, 1)
-        for index, src in [(index1, src1), (index2, src2)]:
+        for index, src in [(index1, src1), (index2, src2), (index1, torch.tensor(1.0)), (index1, 1.0)]:
+            expanded_src = torch.tensor(src).expand(2, 5, 3, 5, 3)
             result1 = full_x.clone().scatter_(2, index, src)
             result2 = x.scatter(2, index, src)
             self.assertEqual(result1, result2)
             result3 = x.scatter(-1, index, src)
             result4 = x.scatter(2, index.unsqueeze(-1), src)
             result5 = x.scatter(2, index.unsqueeze(-1).unsqueeze(-1), src)
-            result6 = full_x.clone().scatter_(2, index.unsqueeze(-1).unsqueeze(-1).expand(2, 5, 3, 5, 3), src.expand(2, 5, 3, 5, 3))
+            result6 = full_x.clone().scatter_(2, index.unsqueeze(-1).unsqueeze(-1).expand(2, 5, 3, 5, 3), expanded_src)
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
             self.assertEqual(result1, result4)
@@ -8222,7 +8223,7 @@ class _TestTorchMixin(object):
             result3 = x.scatter_add(-1, index, src)
             result4 = x.scatter_add(2, index.unsqueeze(-1), src)
             result5 = x.scatter_add(2, index.unsqueeze(-1).unsqueeze(-1), src)
-            result6 = full_x.clone().scatter_add_(2, index.unsqueeze(-1).unsqueeze(-1).expand(2, 5, 3, 5, 3), src.expand(2, 5, 3, 5, 3))
+            result6 = full_x.clone().scatter_add_(2, index.unsqueeze(-1).unsqueeze(-1).expand(2, 5, 3, 5, 3), expanded_src)
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
             self.assertEqual(result1, result4)
