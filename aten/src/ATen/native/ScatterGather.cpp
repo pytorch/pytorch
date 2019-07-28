@@ -106,7 +106,7 @@ Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Ten
   std::vector<int64_t> result_sizes;
   std::tie(expanded_self, expanded_index, result_sizes) = expand_gather(self, dim, index);
   TORCH_CHECK(result_sizes == result.sizes(), "broadcasting change the shape of out");
-  return at::_gather_out(result, expanded_self, dim, expanded_index);
+  return at::_gather_out(result, expanded_self, dim, expanded_index, sparse_grad);
 }
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
@@ -115,7 +115,7 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
   }
   Tensor expanded_self, expanded_index;
   std::tie(expanded_self, expanded_index, std::ignore) = expand_gather(self, dim, index);
-  return at::_gather(expanded_self, dim, expanded_index);
+  return at::_gather(expanded_self, dim, expanded_index, sparse_grad);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
