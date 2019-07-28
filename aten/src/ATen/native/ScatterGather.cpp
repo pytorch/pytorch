@@ -15,7 +15,7 @@ inline expand_scatter(const at::Tensor &self, int64_t dim, at::Tensor index, con
   std::vector<int64_t> self_sizes = self.sizes().vec();
   std::vector<int64_t> index_sizes = index.sizes().vec();
   std::vector<int64_t> src_sizes = src.sizes().vec();
-  if (src_sizes.size() == 0) {
+  if (src_sizes.size() == 0) {  // when src is a scalar tensor
     src_sizes = std::vector<int64_t>(self_sizes.size());
     std::fill(src_sizes.begin(), src_sizes.end(), 1);
   }
@@ -99,6 +99,9 @@ inline expand_scatter_scalar(const at::Tensor &self, int64_t dim, at::Tensor ind
 namespace at { namespace native {
 
 Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  if (self.dim() == 0 || index.dim() == 0) {
+    return at::_gather_out(result, self, dim, index);
+  }
   Tensor expanded_self, expanded_index;
   std::vector<int64_t> result_sizes;
   std::tie(expanded_self, expanded_index, result_sizes) = expand_gather(self, dim, index);
@@ -107,6 +110,9 @@ Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Ten
 }
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  if (self.dim() == 0 || index.dim() == 0) {
+    return at::_gather(self, dim, index);
+  }
   Tensor expanded_self, expanded_index;
   std::tie(expanded_self, expanded_index, std::ignore) = expand_gather(self, dim, index);
   return at::_gather(expanded_self, dim, expanded_index);
@@ -115,6 +121,9 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   if (index.numel() == 0) {
     return self;
+  }
+  if (self.dim() == 0 || index.dim() == 0) {
+    return at::_scatter_(self, dim, index, source);
   }
   Tensor expanded_source, expanded_index;
   std::vector<int64_t> self_sizes;
@@ -127,6 +136,9 @@ Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value
   if (index.numel() == 0) {
     return self;
   }
+  if (self.dim() == 0 || index.dim() == 0) {
+    return at::_scatter_(self, dim, index, value);
+  }
   Tensor expanded_index;
   std::vector<int64_t> result_sizes;
   std::tie(result_sizes, expanded_index) = expand_scatter_scalar(self, dim, index);
@@ -137,6 +149,9 @@ Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   if (index.numel() == 0) {
     return self.clone();
+  }
+  if (self.dim() == 0 || index.dim() == 0) {
+    return self.clone().scatter_(dim, index, source);
   }
   Tensor expanded_source, expanded_index;
   std::vector<int64_t> self_sizes;
@@ -149,6 +164,9 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar va
   if (index.numel() == 0) {
     return self.clone();
   }
+  if (self.dim() == 0 || index.dim() == 0) {
+    return self.clone().scatter_(dim, index, value);
+  }
   Tensor expanded_index;
   std::vector<int64_t> result_sizes;
   std::tie(result_sizes, expanded_index) = expand_scatter_scalar(self, dim, index);
@@ -160,6 +178,9 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Te
   if (index.numel() == 0) {
     return self;
   }
+  if (self.dim() == 0 || index.dim() == 0) {
+    return at::_scatter_add_(self, dim, index, source);
+  }
   Tensor expanded_source, expanded_index;
   std::vector<int64_t> self_sizes;
   std::tie(self_sizes, expanded_index, expanded_source) = expand_scatter(self, dim, index, source);
@@ -168,15 +189,15 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Te
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  if (index.numel() == 0) {
-    return self;
-  }
   return self.scatter_add_(dim, index, at::full({}, value, self.options()));
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   if (index.numel() == 0) {
     return self.clone();
+  }
+  if (self.dim() == 0 || index.dim() == 0) {
+    return self.clone().scatter_add_(dim, index, source);
   }
   Tensor expanded_source, expanded_index;
   std::vector<int64_t> self_sizes;
