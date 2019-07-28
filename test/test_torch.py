@@ -8164,6 +8164,26 @@ class _TestTorchMixin(object):
                                                 [False, True, False, True, False],
                                                 [True, False, True, False, True]], device=device))
 
+    def test_scatter_gather_broadcasting(self):
+        x = torch.randn(1, 5, 8, 5, 3)
+        index = torch.randint(high=8, size=(2, 1, 3))
+        result1 = x.gather(2, index)
+        print("before result2")
+        print(index.shape)
+        result2 = x.gather(-1, index)
+        print("after result2")
+        result3 = x.gather(2, index.unsqueeze(-1))
+        result4 = x.expand(2, 5, 8, 5, 3).gather(2, index.unsqueeze(-1).unsqueeze(-1).expand(2, 5, 3, 5, 3))
+        result5 = torch.empty(2, 5, 3, 5, 3)
+        torch.gather(x, 2, index, out=result5)
+        result6 = x.expand(2, 5, 8, 5, 3).gather(2, index.unsqueeze(-1).unsqueeze(-1))
+        self.assertEqual(result1, result2)
+        self.assertEqual(result1, result3)
+        self.assertEqual(result1, result4)
+        self.assertEqual(result1, result5)
+        self.assertEqual(result1, result6)
+
+
     def test_masked_scatter(self):
         for dtype in [torch.uint8, torch.bool]:
             num_copy, num_dest = 3, 10

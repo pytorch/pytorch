@@ -11,7 +11,7 @@ inline void expand_size(int64_t dim, int64_t &size1, int64_t &size2) {
 }
 
 std::tuple<std::vector<int64_t>, at::Tensor, at::Tensor>
-inline expand_scatter(const at::Tensor &self, int64_t dim, at::Tensor index, const at::Tensor &src) {
+inline expand_scatter(const at::Tensor &self, int64_t &dim, at::Tensor index, const at::Tensor &src) {
   std::vector<int64_t> self_sizes = self.sizes().vec();
   std::vector<int64_t> index_sizes = index.sizes().vec();
   std::vector<int64_t> src_sizes = src.sizes().vec();
@@ -43,14 +43,15 @@ inline expand_scatter(const at::Tensor &self, int64_t dim, at::Tensor index, con
       if (src_sizes[i] != self_sizes[i]) {
         expand_size(i, src_sizes[i], self_sizes[i]);
       }
-      index.unsqueeze_(-1);
+      index = index.unsqueeze(-1);
+      index_sizes.push_back(src_sizes[i]);
     }
   }
   return std::make_tuple(self_sizes, index.expand(index_sizes), src.expand(src_sizes));
 }
 
 std::tuple<at::Tensor, at::Tensor, std::vector<int64_t>>
-inline expand_gather(const at::Tensor &self, int64_t dim, at::Tensor index) {
+inline expand_gather(const at::Tensor &self, int64_t &dim, at::Tensor index) {
   std::vector<int64_t> self_sizes = self.sizes().vec();
   std::vector<int64_t> index_sizes = index.sizes().vec();
   TORCH_CHECK(self_sizes.size() >= index_sizes.size(), "torch.gather requires input to have more dimensions than index");
@@ -68,14 +69,15 @@ inline expand_gather(const at::Tensor &self, int64_t dim, at::Tensor index) {
       }
     } else {
       result_sizes[i] = self_sizes[i];
-      index.unsqueeze_(-1);
+      index = index.unsqueeze(-1);
+      index_sizes.push_back(result_sizes[i]);
     }
   }
   return std::make_tuple(self.expand(self_sizes), index.expand(index_sizes), result_sizes);
 }
 
 std::tuple<std::vector<int64_t>, at::Tensor>
-inline expand_scatter_scalar(const at::Tensor &self, int64_t dim, at::Tensor index) {
+inline expand_scatter_scalar(const at::Tensor &self, int64_t &dim, at::Tensor index) {
   std::vector<int64_t> self_sizes = self.sizes().vec();
   std::vector<int64_t> index_sizes = index.sizes().vec();
   TORCH_CHECK(self_sizes.size() >= index_sizes.size(), "scatter and scatter_add requires input to have more dimensions than index");
@@ -88,7 +90,8 @@ inline expand_scatter_scalar(const at::Tensor &self, int64_t dim, at::Tensor ind
         expand_size(i, index_sizes[i], self_sizes[i]);
       }
     } else {
-      index.unsqueeze_(-1);
+      index = index.unsqueeze(-1);
+      index_sizes.push_back(self_sizes[i]);
     }
   }
   return std::make_tuple(self_sizes, index.expand(index_sizes));
