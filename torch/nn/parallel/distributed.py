@@ -436,10 +436,13 @@ class DistributedDataParallel(Module):
         if self.require_forward_param_sync:
             self._sync_params()
 
-        if self.device_ids and len(self.device_ids) > 1:
+        if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
-            outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
-            output = self.gather(outputs, self.output_device)
+            if len(self.device_ids) == 1:
+                output = self.module(*inputs[0], **kwargs[0])
+            else:
+                outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
+                output = self.gather(outputs, self.output_device)
         else:
             output = self.module(*inputs, **kwargs)
 
