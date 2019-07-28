@@ -2394,7 +2394,7 @@
 
 - func: pow(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
     SparseCPU: pow_out_sparse_scalar
     SparseCUDA: pow_out_sparse_scalar
@@ -2402,7 +2402,7 @@
 - func: pow(Tensor self, Scalar exponent) -> Tensor
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
     SparseCPU: pow_sparse_scalar
     SparseCUDA: pow_sparse_scalar
@@ -3339,13 +3339,13 @@
 - func: pow_(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_pow_
+    CPU: pow_
     CUDA: legacy::cuda::_th_pow_
 
 - func: pow_(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_pow_
+    CPU: pow_
     CUDA: legacy::cuda::_th_pow_
 
 - func: lerp_(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
@@ -4181,23 +4181,23 @@
 
 - func: pow(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
 
 - func: pow(Tensor self, Tensor exponent) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
 
 - func: pow(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
 
 - func: pow(Scalar self, Tensor exponent) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
