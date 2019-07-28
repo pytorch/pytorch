@@ -8240,24 +8240,24 @@ class _TestTorchMixin(object):
             self.assertEqual(result1, result6)
 
         # incompatible shape
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, "Size mismatch at dim=1, get: 5, 2 and 2"):
             torch.zeros(5, 5, 5).scatter(1, torch.zeros(2, 5, 5, dtype=torch.long), torch.zeros(2, 5, 5))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, "Size mismatch at dim=1, get: 5, 2 and 2"):
             torch.zeros(5, 5, 5).scatter_(1, torch.zeros(2, 5, 5, dtype=torch.long), torch.zeros(2, 5, 5))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, "Size mismatch at dim=1, get: 5, 2 and 2"):
             torch.zeros(5, 5, 5).scatter_add(1, torch.zeros(2, 5, 5, dtype=torch.long), torch.zeros(2, 5, 5))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, "Size mismatch at dim=1, get: 5, 2 and 2"):
             torch.zeros(5, 5, 5).scatter_add_(1, torch.zeros(2, 5, 5, dtype=torch.long), torch.zeros(2, 5, 5))
 
         # broadcast change shape of self
-        result = torch.zeros(5, 5, 1).scatter(1, torch.zeros(1, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
+        result = torch.zeros(5, 5, 1).scatter(1, torch.zeros(5, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
         self.assertEqual(result, torch.zeros(5, 5, 5))
-        result = torch.zeros(5, 5, 1).scatter_add(1, torch.zeros(1, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
+        result = torch.zeros(5, 5, 1).scatter_add(1, torch.zeros(5, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
         self.assertEqual(result, torch.zeros(5, 5, 5))
-        with self.assertRaises(RuntimeError):
-            torch.zeros(5, 5, 1).scatter_(1, torch.zeros(1, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
-        with self.assertRaises(RuntimeError):
-            torch.zeros(5, 5, 1).scatter_add_(1, torch.zeros(1, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
+        with self.assertRaisesRegexp(RuntimeError, 'broadcasting change the shape of self'):
+            torch.zeros(5, 5, 1).scatter_(1, torch.zeros(5, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
+        with self.assertRaisesRegexp(RuntimeError, 'broadcasting change the shape of self'):
+            torch.zeros(5, 5, 1).scatter_add_(1, torch.zeros(5, 5, 5, dtype=torch.long), torch.zeros(5, 5, 5))
 
         # dim out of range
         with self.assertRaises(IndexError):
@@ -8266,13 +8266,13 @@ class _TestTorchMixin(object):
             torch.zeros(5, 5, 1).scatter_add(2, torch.zeros(1, 5, dtype=torch.long), torch.zeros(5, 5, 5))
 
         # index has more dims than input and output
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, 'torch.scatter requires src to have more or equal dimensions than index'):
             torch.zeros(5, 5, 5).scatter(1, torch.zeros(1, 5, 5, 1, dtype=torch.long), torch.zeros(5, 5, 5))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, 'torch.scatter requires src to have more or equal dimensions than index'):
             torch.zeros(5, 5, 5).scatter_add(1, torch.zeros(1, 5, 5, 1, dtype=torch.long), torch.zeros(5, 5, 5))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, 'torch.scatter requires src to have more or equal dimensions than index'):
             torch.zeros(5, 5, 5).scatter_(1, torch.zeros(1, 5, 5, 1, dtype=torch.long), torch.zeros(5, 5, 5))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(RuntimeError, 'torch.scatter requires src to have more or equal dimensions than index'):
             torch.zeros(5, 5, 5).scatter_add(1, torch.zeros(1, 5, 5, 1, dtype=torch.long), torch.zeros(5, 5, 5))
 
     def test_masked_scatter(self):
