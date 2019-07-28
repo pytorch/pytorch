@@ -36,7 +36,8 @@ Tensor det(const Tensor& self) {
 
   Tensor det_P, diag_U, infos;
   std::tie(det_P, diag_U, infos) = _lu_det_P_diag_U_info(self);
-  auto complete_det = at::where(infos > 0, at::zeros({}, self.options()), diag_U.prod(-1).mul_(det_P));
+  auto complete_det = diag_U.prod(-1).mul_(det_P);
+  complete_det.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
   return complete_det;
 }
 
@@ -61,11 +62,8 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 
   Tensor det_P, diag_U, infos;
   std::tie(det_P, diag_U, infos) = _lu_det_P_diag_U_info(self);
-  Tensor det_sign = at::where(infos > 0, at::zeros({}, self.options()),
-                                         diag_U.sign().prod(-1).mul_(det_P));
-  Tensor abslogdet_val = at::where(infos > 0,
-                                   at::full({}, -std::numeric_limits<double>::infinity(), self.options()),
-                                   diag_U.abs_().log_().sum(-1));
+  auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+  auto abslogdet_val = diag_U.abs_().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
 }
 
