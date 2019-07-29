@@ -66,8 +66,8 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
 }
 
 bool CUDAHooks::isPinnedPtr(void* data) const {
-  // cudaPointerGetAttributes grabs context on the current device, so we grab
-  // any context if exists.
+  // cudaPointerGetAttributes grabs context on the current device, so we set
+  // device to one that already has context, if exists.
   at::OptionalDeviceGuard device_guard;
   auto primary_ctx_device_index = CUDAHooks::getDevceIndexWithPrimaryContext();
   if (primary_ctx_device_index.has_value()) {
