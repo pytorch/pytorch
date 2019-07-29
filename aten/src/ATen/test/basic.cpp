@@ -284,6 +284,9 @@ void TestNegativeDim(DeprecatedTypeProperties& type) {
 }
 
 void TestView(DeprecatedTypeProperties& type) {
+  // Testing the tensor view path, which is different from
+  // the Variable view path, see https://github.com/pytorch/pytorch/pull/23452
+  // for details
   Tensor tensor = randn({3, 4}, type);;
   Tensor viewed = tensor.view({3, 4});
   tensor.resize_({6, 2});

@@ -914,8 +914,6 @@ Tensor view(const Tensor& self, IntArrayRef size) {
 Tensor alias(const Tensor& self) {
   Tensor self_;
   if (self.is_quantized()) {
-    TORCH_CHECK(self.qscheme() == kPerTensorAffine,
-                "Only PerTensorAffine quantization is supported right now");
     auto impl = c10::make_intrusive<QTensorImpl>(
                     Storage(self.storage()),
                     self.type_id(),
