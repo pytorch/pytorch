@@ -2450,7 +2450,7 @@ on a scalar or tensor :attr:`weight` and returns the resulting :attr:`out` tenso
 
 The shapes of :attr:`start` and :attr:`end` must be
 :ref:`broadcastable <broadcasting-semantics>`. If :attr:`weight` is a tensor, then
-the shapes of :attr:`start`, :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
+the shapes of :attr:`weight`, :attr:`start`, and :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     input (Tensor): the tensor with the starting points
