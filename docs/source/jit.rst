@@ -99,10 +99,6 @@ Example::
             return self.resnet(input - self.means)
 
     my_script_module = torch.jit.script(MyScriptModule())
-<<<<<<<
-=======
-
->>>>>>>
 
 
 TorchScript Language Reference

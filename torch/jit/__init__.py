@@ -1060,11 +1060,11 @@ def _compile_and_register_class(obj, rcb, qualified_name):
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
-    it as TorchScript code using the TorchScript compiler, and return a ``ScriptModule``.
+    it as TorchScript code using the TorchScript compiler, and return a ``ScriptModule`` or
+    ``torch._C.Function``.
 
     **Scripting a function**
-        The ``@torch.jit.script`` decorator will construct a ``ScriptModule`` with a single ``forward``
-        method that implements the function. The resulting ``ScriptModule`` has no parameters or attributes.
+        The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``.
 
         Example (scripting a function)::
 
@@ -1455,22 +1455,6 @@ if _enabled:
                 # and construct `ScriptModule` with a single `forward` method
                 module = torch.jit.trace(n.forward, example_forward_input) # produces ScriptModule with `forward`
                 module = torch.jit.trace(n, example_forward_input) # produces ScriptModule with `forward`
-
-        **Scripting:**
-
-            You can write TorchScript code directly using Python syntax. You do this
-            using the ``@torch.jit.script`` decorator for functions and modules. You can
-            also call ``torch.jit.script`` directly with the function or module you wish to
-            compile. On functions, the body of the function is compiled to TorchScript. If
-            applied to an ``nn.Module``, by default the ``forward`` method and any methods it
-            calls are compiled, and all buffer and Parameters of the original module are copied
-            to a new ``ScriptModule``. You should not need to construct a ``ScriptModule`` manually.
-            TorchScript itself is a subset of the Python language, so not all
-            features in Python work, but we provide enough functionality to compute on
-            tensors and do control-dependent operations.
-        """
-        def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule()
                 module = torch.jit.trace_module(n, inputs) # produces ScriptModule with `forward`
 
                 inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
