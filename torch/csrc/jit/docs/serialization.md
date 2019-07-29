@@ -226,4 +226,12 @@ There are some caveats:
 1. For `ScriptModule`s, since every `ScriptModule` is a singleton class in the JIT, a user that is constructing multiple `ScriptModule`s will create multiple corresponding `ClassType`s with identical names.
 2. Nesting functions will also cause qualified name clashes, due to limitations in Python. In these cases, we mangle the names of the code objects before they are placed in the global Python `CompilationUnit`.
 
-The rules for mangling are simple. Say we have a qualified name `__torch__.foo.Bar`. The first instance of this qualified name will just be `__torch__.foo.Bar`. The next time we want to create a code object with that name, it'll get the name `__torch__.foo.__torch_mangle_0.Bar`. The next one will be `__torch__.foo.__torch_mangle_1.Bar`, and so on. We mangle the namespace before `Bar` so that when we pretty-print code, the unqualified name (`Bar`) is unchanged—this is a useful property so that things like trace-checking are oblivious to the mangling.
+The rules for mangling are simple. Say we have a qualified name `__torch__.foo.Bar`:
+
+```
+__torch__.foo.Bar                    # first time, unchanged
+__torch__.foo.__torch_mangle_0.Bar   # second time, when we request a mangle
+__torch__.foo.__torch_mangle_1.Bar   # and so on
+```
+
+Notice that we mangle the namespace before `Bar`. This is so that when we pretty-print code, the unqualified name (`Bar`) is unchanged. This is a useful property so that things like trace-checking are oblivious to the mangling.
