@@ -10,5 +10,9 @@
     "ATen-cu#platform007-clang,shared": {
         "workerSize": "MEDIUM",
         "platformType": "LINUX"
+    },
+    "ATen-cpu#compile-pic-THTensorMoreMath.cpp.oc1c23613,platform007-clang": {
+        "workerSize": "MEDIUM",
+        "platformType": "LINUX"
     }
 }
