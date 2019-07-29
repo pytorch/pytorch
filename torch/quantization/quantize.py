@@ -77,7 +77,7 @@ def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
-        len(module._modules) == 0 and type(module) not in DEFAULT_SKIP_LIST:
+        len(module._modules) == 0 and type(module) not in skip_list:
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
