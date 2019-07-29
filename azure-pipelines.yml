@@ -85,6 +85,7 @@ jobs:
   - task: UsePythonVersion@0
     inputs:
       versionSpec: "3.6"
+  - script: sudo apt-get install clang-tidy
   - script: git branch master origin/master
   - script: pip install pyyaml
   - script: tools/run-clang-tidy-in-ci.sh
