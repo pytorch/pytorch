@@ -36,7 +36,7 @@ C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 // Error message to show when the user tries to change tensor metadata on
 // Tensor created from .data or .detach().
 //
-// For more detail, see comment for `allow_tensor_metadata_change_` field.
+// See NOTE [ Metadata Change for a Detached Tensor ] for details.
 extern C10_API const std::string err_msg_tensor_metadata_change_not_allowed;
 
 namespace at {
