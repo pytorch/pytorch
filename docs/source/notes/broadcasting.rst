@@ -86,42 +86,6 @@ For Example::
     >>> (x.add_(y)).size()
     RuntimeError: The expanded size of the tensor (1) must match the existing size (7) at non-singleton dimension 2.
 
-Scatter and gather
-------------------
-
-``gather``, ``scatter_``, ``scatter_add_``, ``scatter``, and ``scatter_add`` also support broadcasting. But the broadcasting
-of these operators are more complicated than most other operators.
-
-When we do ``input.gather(dim, input)``, the following rules are applied:
-
-- The number of dimensions of ``index`` must be equal to or smaller than the number of dimensions of ``input``.
-- If the number of dimensions of ``index`` is smaller than of ``input``, then ``index`` is aligned to the left,
-  that is, extra size 1 dimensions would be appended to the back to make them the same number of dimensions.
-- ``dim`` could be negative, if this is the case, then the ``dim`` is wrapped according to the original dimensions
-  if ``index``, not the broadcasted dimension. For example, if ``input`` is 8-dimensional and ``index`` is 4-dimensional,
-  then ``dim=-1`` is the same as ``dim=3``.
-- All dimensions other than the one specified by ``dim`` must either equal or one of them must be 1. If they are not equal,
-  then that dimesion would be expanded to the same size.
-
-When we do ``self.scatter(dim, index, src)``, the following rules are applied:
-
-- The number of dimensions of ``self`` must be equal to the number of dimensions of ``src``.
-- The number of dimensions of ``index`` must be equal to or smaller than the number of dimensions of ``self``.
-- If the number of dimensions of ``index`` is smaller than of ``self``, then ``index`` is aligned to the left,
-  that is, extra size 1 dimensions would be appended to the back to make them the same number of dimensions.
-- ``dim`` could be negative, if this is the case, then the ``dim`` is wrapped according to the original dimensions
-  if ``index``, not the broadcasted dimension. For example, if ``input`` is 8-dimensional and ``index`` is 4-dimensional,
-  then ``dim=-1`` is the same as ``dim=3``.
-- All dimensions other than the one specified by ``dim`` for ``self``, ``index``, and ``src`` must either equal or 1.
-  If they are not equal, then that dimesion would be expanded to the same size.
-- Besides the case described above, ``src`` could also be a scalar. If this is the case, it is automatically broadcasted
-  the correct number of dimesions and sizes.
-
-The rule for ``scatter_add`` is exactly the same as ``scatter``.
-
-The rule for ``scatter_`` and ``scatter_add_`` is almost the same as for their outplace version, except that broadcasting
-is not allowed to change the shape of ``self``.
-
 Backwards compatibility
 -----------------------
 Prior versions of PyTorch allowed certain pointwise functions to execute on tensors with different shapes,

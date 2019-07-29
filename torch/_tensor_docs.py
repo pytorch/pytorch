@@ -2116,9 +2116,9 @@ For a 3-D tensor, :attr:`self` is updated as::
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
 :attr:`self` and :attr:`src` (if it is a Tensor) should have same number of dimensions.
-:attr:`index` could have less dimensions than :attr:`self` and :attr:`src`.
-It is also required that ``index.size(d) == src.size(d) == self.size(d)`` or broadcastable
-for all dimensions ``d != dim``. See `broadcasting-semantics`_ for more information.
+:attr:`index` should also have the same number of dimensions as :attr:`self` and :attr:`src`.
+It is also required that ``index.size(d) == src.size(d) == self.size(d)``
+for all dimensions ``d != dim``.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row

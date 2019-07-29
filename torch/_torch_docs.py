@@ -1971,11 +1971,9 @@ For a 3-D tensor the output is specified by::
 
 If :attr:`input` is an n-dimensional tensor with size
 :math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
-and ``dim = i``, then :attr:`index` must be an :math:`k`-dimensional tensor, where :math:`k\leq n`,
-with size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{k})`, where :math:`y \geq 1` or
-any other size broadcasting-compatible with :attr:`input`. When no broadcasting happens, the return
-value, :attr:`out`, will have the same size as :attr:`index`, otherwise :attr:`out` will have broadcasted
-size. See `broadcasting-semantics`_ for more information.
+and ``dim = i``, then :attr:`index` must be an :math:`n`-dimensional tensor with
+size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
+and :attr:`out` will have the same size as :attr:`index`.
 
 Args:
     input (Tensor): the source tensor
