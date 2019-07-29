@@ -319,12 +319,12 @@ class record_function(object):
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         ...     y = x ** 2
-        ...     with torch.autograd.profiler.record_function("label-z"): // label the block
+        ...     with torch.autograd.profiler.record_function("label-z"): # label the block
         ...         z = y ** 3
         ...     y.backward()
         ...
         >>> # NOTE: some columns were removed for brevity
-        ... print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+        >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
         -----------------------------------  ---------------  ---------------  ---------------
         Name                                 Self CPU total %  CPU time avg     Number of Calls
         -----------------------------------  ---------------  ---------------  ---------------
