@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/passes/guard_elimination.h>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <memory>
 #include <unordered_set>
 
@@ -17,6 +19,8 @@ struct GuardElimination {
     GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
     GRAPH_DUMP("After coalesceGuards", graph_);
+    runRequiredPasses(graph_);
+    ConstantPropagation(graph_);
     eliminateRedundantGuards(graph_->block());
     GRAPH_DUMP("After eliminateRedundantGuards", graph_);
   }
@@ -90,6 +94,7 @@ struct GuardElimination {
 
     while (it != output) {
       if (it->kind() != prim::Guard && it->kind() != prim::Constant) {
+        GRAPH_DEBUG("found an unexpected node ", *it);
         return false;
       }
       it = it->prev();
@@ -122,36 +127,54 @@ struct GuardElimination {
     }
   }
 
- private:
-  bool removableGuard(Node* n) {
-    if (!simple_ops_.count(n->kind())) {
-      return false;
-    }
-
+  bool checkInputs(Node* n, const std::unordered_set<size_t>& except) {
     bool all_inputs_guarded = true;
+    size_t i = 0;
     for (auto input : n->inputs()) {
       if (input->node()->kind() == prim::Guard ||
-          input->node()->kind() == prim::Constant) {
+          input->node()->kind() == prim::Constant || except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
             input->type()->expect<ProfiledTensorType>());
       } else {
+        GRAPH_DEBUG("input ", input->debugName(), " isn't guarded");
         all_inputs_guarded = false;
         break;
       }
+      i++;
     }
     return all_inputs_guarded;
+  }
+
+ private:
+  bool removableGuard(Node* n) {
+    const static auto no_exceptions = std::unordered_set<size_t>{};
+    switch (n->kind()) {
+      case aten::add:
+      case aten::sub:
+      case aten::mul:
+      case aten::div:
+      case aten::t:
+      case aten::sigmoid:
+      case aten::tanh:
+      case aten::mm:
+      case aten::min:
+      case aten::max:
+      case prim::ConstantChunk:
+        return checkInputs(n, no_exceptions);
+      case aten::clamp:
+        // the second and third args do not affect shapes
+        return checkInputs(n, std::unordered_set<size_t>{1, 2});
+      default:
+        GRAPH_DEBUG("cannot remove ", n->kind().toQualString());
+        return false;
+    }
   }
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
   static std::unordered_set<Symbol> simple_ops_;
 };
-
-std::unordered_set<Symbol> GuardElimination::simple_ops_ = {aten::add,
-                                                            aten::sub,
-                                                            aten::mul,
-                                                            aten::div};
 
 static void removeProfilingNodes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {

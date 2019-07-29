@@ -662,6 +662,7 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
     return false;
   if (mayIntroduceGradient(graph->block()))
     return true;
+
   for (const Value* input : graph->inputs()) {
     if (input->type()->requires_grad())
       return true;
