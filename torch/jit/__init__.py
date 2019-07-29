@@ -903,7 +903,7 @@ def trace_module(mod,
                 _check_trace([inputs], func, check_trace_method,
                              check_tolerance, _force_outplace, True, _module_class)
 
-        return module
+    return module
 
 
 class CompilationUnit(object):
