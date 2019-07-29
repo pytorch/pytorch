@@ -1,13 +1,13 @@
 .. _cpu-threading-torchscript-inference:
 
-CPU threading and Torchscript inference
+CPU threading and TorchScript inference
 =================================================
 
 PyTorch allows using multiple CPU threads during TorchScript model inference.
 The following figure shows different levels of parallelism one would find in a
 typical application:
 
-.. image:: cpu_threading_torchscript_inference.png
+.. image:: cpu_threading_torchscript_inference.svg
    :width: 75%
 
 One or more inference threads execute a model's forward pass on the given inputs.
@@ -47,22 +47,20 @@ Build options
 -------------
 
 PyTorch uses an internal ATen library to implement ops. In addition to that,
-PyTorch can also be built to use external libraries, such as MKL_ and MKL-DNN_,
+PyTorch can also be built with support of external libraries, such as MKL_ and MKL-DNN_,
 to speed up computations on CPU.
 
 ATen, MKL and MKL-DNN support intra-op parallelism and depend on the
 following parallelization libraries to implement it:
- * OpenMP_ - a standard (and a library, usually shipped with a compiler), widely-used and is generally optimized for non-concurrent loop-based parallelism;
+ * OpenMP_ - a standard (and a library, usually shipped with a compiler), widely used in external libraries;
  * TBB_ - a newer parallelization library optimized for task-based parallelism and concurrent environments.
 OpenMP historically has been used by a large number of libraries. It is known
 for a relative ease of use and support for loop-based parallelism and other primitives.
 At the same time OpenMP is not known for a good interoperability with other threading
-libraries used by the application.
-
-In particular, OpenMP does not guarantee that a single per-process intra-op thread
+libraries used by the application. In particular, OpenMP does not guarantee that a single per-process intra-op thread
 pool is going to be used in the application. On the contrary, two different inter-op
 threads will likely use different OpenMP thread pools for intra-op work. This might
-result in the large number of threads used by the application.
+result in a large number of threads used by the application.
 
 TBB is used to a lesser extent in external libraries, but, at the same time,
 is optimized for the concurrent environments. PyTorch's TBB backend guarantees that
@@ -113,7 +111,7 @@ The following API is used to control thread settings:
 |                        | ``OMP_NUM_THREADS`` and ``MKL_NUM_THREADS``               |                                                         |
 +------------------------+-----------------------------------------------------------+---------------------------------------------------------+
 
-For the intra-op parallelism settings, ``at::set_num_threads``/``torch.set_num_threads`` always takes precedence
+For the intra-op parallelism settings, ``at::set_num_threads``, ``torch.set_num_threads`` always take precedence
 over environment variables, ``MKL_NUM_THREADS`` variable takes precedence over ``OMP_NUM_THREADS``.
 
 .. note::
