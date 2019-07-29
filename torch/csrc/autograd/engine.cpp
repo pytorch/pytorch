@@ -451,6 +451,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       }
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
+    TORCH_CHECK(isFloatingType(grads[i].type().scalarType()));
     if (metadata.type().scalarType() != grads[i].type().scalarType()) {
       grads[i] = grads[i].to(metadata.type().scalarType());
     }

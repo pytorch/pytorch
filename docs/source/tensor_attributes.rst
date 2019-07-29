@@ -34,15 +34,24 @@ Boolean                    ``torch.bool``                                ``torch
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
 can be used, which returns ``True`` if the data type is a floating point data type.
 
-For arithmetic operations we allow casting a tensor to an output tensor of another dtype, except:
-  * An integral output tensor cannot accept a floating point tensor.
-  * An unsigned output tensor cannot accept a signed tensor.
+When the dtypes of inputs to an arithmetic operation (`add`, `sub`, `div`, `mul`) differ, we promote
+by finding the minimum dtype that satisfies the following rules:
+  * If the type of a scalar operand is of a higher category (floating, signed) than
+  tensor operands, the result type must have sufficient size to hold all scalar operands
+  of that category.
+  * If a zero-dimension tensor operand has a higher category than dimensioned operands,
+  the result type must have sufficient size and category to hold all zero-dim tensor operands of
+  that category.
+  * The result type must be large enough to hold all dimensioned tensor operands of the highest
+  category.
 
-Unlike numpy's same_kind, we do not restrict conversion of unsigned integral types to boolean.
+A floating point scalar operand has dtype `torch.get_default_dtype()` and an integral
+non-boolean scalar operand has dtype `torch.int64`. Unlike numpy, we do not inspect
+values when determining the minimum `dtypes` of an operand.  Quantized and complex types
+are not yet supported.
 
-Examples::
+Promotion Examples::
 
-    # allowed:
     >>> float_tensor = torch.ones(1, dtype=torch.float)
     >>> double_tensor = torch.ones(1, dtype=torch.double)
     >>> int_tensor = torch.ones(1, dtype=torch.int)
@@ -50,7 +59,41 @@ Examples::
     >>> uint_tensor = torch.ones(1, dtype=torch.uint8)
     >>> double_tensor = torch.ones(1, dtype=torch.double)
     >>> bool_tensor = torch.ones(1, dtype=torch.bool)
-    >>>
+    # zero-dim tensors
+    >>> long_zerodim = torch.tensor(1, dtype=torch.long)
+    >>> int_zerodim = torch.tensor(1, dtype=torch.int)
+
+    >>> torch.add(5, 5).dtype
+    torch.int64
+    # 5 is an int64, but does not have higher category than int_tensor so is not considered.
+    >>> (int_tensor + 5).dtype
+    torch.int32
+    >>> (int_tensor + long_zerodim).dtype
+    torch.int32
+    >>> (long_tensor + int_tensor).dtype
+    torch.int64
+    >>> (bool_tensor + long_tensor).dtype
+    torch.int64
+    >>> (bool_tensor + uint_tensor).dtype
+    torch.uint8
+    >>> (float_tensor + double_tensor).dtype
+    torch.float64
+    >>> (bool_tensor + int_tensor).dtype
+    torch.int32
+    # Since long is a different kind than float, result dtype only needs to be large enough
+    # to hold the float.
+    >>> torch.add(long_tensor, float_tensor).dtype
+    torch.float32
+
+When the an output tensor of an arithmetic operation is specified, we allow casting to its dtype except that:
+  * An integral output tensor cannot accept a floating point tensor.
+  * An unsigned output tensor cannot accept a signed tensor.
+
+Unlike numpy's same_kind, we do not restrict conversion of unsigned integral types to boolean.
+
+Casting Examples::
+
+    # allowed:
     >>> float_tensor *= double_tensor
     >>> float_tensor *= int_tensor
     >>> float_tensor *= uint_tensor
@@ -58,6 +101,7 @@ Examples::
     >>> float_tensor *= double_tensor
     >>> int_tensor *= long_tensor
     >>> bool_tensor *= uint_tensor
+    >>> int_tensor *= uint_tensor
 
     # disallowed (RuntimeError: result type can't be cast to the desired output type):
     >>> int_tensor *= float_tensor
