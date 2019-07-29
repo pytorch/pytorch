@@ -24,6 +24,7 @@ namespace py = pybind11;
 namespace torch {
 namespace jit {
 
+static std::vector<c10::RegisterOperators> registeredOps;
 
 namespace detail {
 template <class R, class...>
@@ -50,7 +51,7 @@ template <class CurClass>
 class class_ {
   std::string className;
   std::string qualClassName;
-  std::shared_ptr<py::class_<CurClass>> pyClass = nullptr;
+  c10::optional<py::class_<CurClass>> pyClass = c10::nullopt;
   std::shared_ptr<script::CompilationUnit> classCu = nullptr;
   ClassTypePtr classTypePtr;
 
@@ -66,7 +67,7 @@ class class_ {
     qualClassName = topModule + "." + parentModule + "." + className;
 
     auto obj = py::module::import("torch").attr(parentModule.c_str());
-    pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
+    pyClass = py::class_<CurClass>(obj, className.c_str());
     pyClass->attr("qualified_name") = py::str(qualClassName);
     auto newClass =
         py::module::import("torch.jit")
@@ -87,7 +88,7 @@ class class_ {
 
     c10::getCustomClassTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
-    c10::getCustomClassTypeMap().insert({typeid(c10::ivalue_holder<CurClass>).name(),
+    c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
 
     classCu->register_class(classTypePtr);
@@ -98,7 +99,7 @@ class class_ {
                                                // torch::jit::init<...>()
     pyClass->def(py::init<Types...>());
 
-    auto func = [](c10::ivalue_holder<CurClass> self, Types... args) {
+    auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
       auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::torchbind_class>(classObj);
       auto capsule = IValue(genericPtr);
@@ -158,8 +159,9 @@ class class_ {
   void defineMethod(std::string name, Func func, bool hasRet) {
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
-    static auto classRegistry =
-        torch::RegisterOperators().op(qualFuncName, std::move(func));
+    registeredOps.push_back(
+        torch::RegisterOperators().op(qualFuncName, std::move(func)));
+
 
     std::vector<Value*> inputs = addInputs(func, graph);
     auto methodCall = graph->insertNode(graph->create(

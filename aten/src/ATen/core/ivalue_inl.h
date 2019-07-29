@@ -24,8 +24,18 @@ struct IValue;
 struct ClassType;
 struct TupleType;
 
-template <typename T>
-struct ivalue_holder {
+// For custom class __init__ registration, we need to pass in a function
+// that looks like this: [](IValue x, args...)
+
+// However, kernel_functor.h automatically sets the input types of the function
+// by introspecting the types of the functor (which is IValue in this case).
+// However, we need the type it binds to be Foo.
+
+// Instead, we pass in a lambda [](ivalue_holder<CurClass> x, args...) from
+// which getTypePtr can recover the original class pointer.
+
+template <typename TaggedCapsuleType>
+struct tagged_capsule {
   IValue ivalue;
 };
 
@@ -459,10 +469,10 @@ T generic_to(
 }
 
 template <typename T>
-ivalue_holder<T> generic_to(
+tagged_capsule<T> generic_to(
     IValue ivalue,
-    _fake_type<ivalue_holder<T>>) {
-    return ivalue_holder<T>{ivalue};
+    _fake_type<tagged_capsule<T>>) {
+    return tagged_capsule<T>{ivalue};
 }
 
 template <typename Elem>
