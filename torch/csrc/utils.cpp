@@ -43,6 +43,8 @@ THLongStoragePtr THPUtils_unpackSize(PyObject *arg) {
 }
 
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
+    int foobar = 999; /* ugh
+*/
   bool tuple = PyTuple_Check(arg);
   bool list = PyList_Check(arg);
   if (tuple || list) {
