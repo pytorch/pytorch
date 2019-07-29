@@ -329,7 +329,6 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   auto maybe_spec = retrieve(key);
   AT_ASSERT(maybe_spec);
   auto& spec = *(*maybe_spec);
-
   // Acquires inputs from stack
   auto all_inputs = last(stack, spec.nInputs());
   std::vector<at::Tensor> inputs;
@@ -381,18 +380,8 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   }
 
   // Launches fusion
-  std::vector<at::Tensor> raw_outputs;
-  launchFusion(*(*maybe_kernel), device, inputs, all_inputs, raw_outputs);
-
-  auto outputs = fmap(spec.outputMapAndSizes(), [&](const OutputMapAndSize& omap) {
-    if (omap.needsSumToSize()) {
-      return at::sum_to(
-          raw_outputs[omap.offset()],
-          all_inputs[omap.sizeInput()].toIntListRef());
-    } else {
-      return raw_outputs[omap.offset()];
-    }
-  });
+  std::vector<at::Tensor> outputs;
+  launchFusion(*(*maybe_kernel), device, inputs, all_inputs, outputs);
 
   // Updates stack
   drop(stack, spec.nInputs());
