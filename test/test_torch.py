@@ -1725,7 +1725,7 @@ class _TestTorchMixin(object):
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
 
-    def test_sum(self):
+    def test_python_sum(self):
         input = [1, 2, 3]
         self.assertEqual(sum(input), 6)
 
