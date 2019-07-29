@@ -326,6 +326,7 @@ void AliasDb::analyzeImpl(Node* node) {
       // for now we assume the worst
       return analyzeConservative(node);
     case prim::Print:
+    case prim::Uninitialized:
       // These ops do nothing
       return;
     default:
@@ -705,8 +706,25 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
   }
 }
 
+bool AliasDb::nonAliasingValue(const Value* elem) const {
+  // these are values which can point to aliasing types in the graph,
+  // as with a None value pointing to an optional if node output,
+  // but will never alias themselves
+  return elem->mustBeNone() || elem->node()->kind() == prim::Uninitialized;
+}
+
 // Register the fact that `from` is a pointer to `to`
 void AliasDb::makePointerTo(const Value* from, const Value* to) {
+  if (nonAliasingValue(from) || nonAliasingValue(to)) {
+    // if either value is guaranteed to be non-aliasing, we do not need to
+    // connect the two elements. however, it is invariant that aliasing types
+    // that are not wildcards have a memory dag element, so we create one if
+    // needed
+    giveFreshAlias(from);
+    giveFreshAlias(to);
+    return;
+  }
+
   if (!shouldAnnotate(from)) {
     TORCH_INTERNAL_ASSERT(!shouldAnnotate(to));
     return;
@@ -1179,6 +1197,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::FusionGroup,
       prim::DifferentiableGraph,
       prim::Constant,
+      prim::Uninitialized,
       prim::DictConstruct,
       prim::ListConstruct,
       prim::TupleConstruct,
