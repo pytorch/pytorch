@@ -106,7 +106,7 @@ inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::opt
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
-          && lhs.type() == rhs.type()
+          && *lhs.type() == *rhs.type()
           && lhs.N() == rhs.N()
           && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
           && lhs.kwarg_only() == rhs.kwarg_only()
@@ -182,15 +182,11 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    // see [custom operator aliasing]
-    const auto kind = Symbol::fromQualString(name_.name);
-    const auto is_custom_op = !kind.is_aten() && !kind.is_prim();
-    return is_custom_op ||
-        std::any_of(
-            arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-              const auto& aliasInfo = arg.alias_info();
-              return aliasInfo && aliasInfo.value().isWrite();
-            });
+    return std::any_of(
+        arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+          const auto& aliasInfo = arg.alias_info();
+          return aliasInfo && aliasInfo.value().isWrite();
+        });
   }
 
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
@@ -226,6 +222,20 @@ public:
       const std::unordered_map<std::string, IValue>& kwargs) const;
 
   void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
+
+  bool hasAnyAliasInfo() const {
+    for (const auto& arg : arguments_) {
+      if (arg.alias_info().has_value()) {
+        return true;
+      }
+    }
+    for (const auto& ret : returns_) {
+      if (ret.alias_info().has_value()) {
+        return true;
+      }
+    }
+    return false;
+  }
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
@@ -241,9 +251,51 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   return !(lhs == rhs);
 }
 
-// for debugging, make sure we can describe the call site
+// print out Argument, which is compatible with FunctionSchema parser
+// full format: Type(alias)? name=default_value
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  return out << arg.type()->str() << " " << arg.name() << (arg.default_value() ? "=<default>" : "");
+  bool optional_type = arg.type()->isSubclass(TypeKind::OptionalType);
+  // for adjusting the ? position.
+  // in schema, we have Tensor?(a!) input, and t(a!)?.
+  // however, t?(a!) doesn't work with schema parser.
+  // so we always use Type(alias)? format
+  std::stringstream oss;
+  if (arg.type()->isSubclass(TypeKind::ListType) && arg.N()) {
+    oss << arg.type()->cast<ListType>()->getElementType()->str();
+    oss << "[" << arg.N().value() << "]";
+  } else {
+    oss << arg.type()->str();
+  }
+  if (optional_type) {
+    oss.seekp(oss.str().size() - 1);
+  }
+  if (arg.alias_info()) {
+    oss << arg.alias_info().value();
+  }
+  if (optional_type) {
+    oss << "?";
+  }
+  out << oss.str();
+  if (!arg.name().empty()) {
+    out << " " << arg.name();
+  }
+  if (arg.default_value()) {
+    out << "=";
+    if (arg.type()->kind() == c10::TypeKind::StringType) {
+        // TODO prettify the result, such as using \n to represent \012
+        out << "\'";
+        std::ios_base::fmtflags flags(out.flags());
+        for (unsigned char c : arg.default_value().value().toStringRef()) {
+          out << "\\" << std::oct << std::setfill('0') << std::setw(3)
+            << static_cast<uint64_t>(c);
+        }
+        out.flags(flags);
+        out << "\'";
+    } else {
+      out << arg.default_value().value();
+    }
+  }
+  return out;
 }
 
 inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
