@@ -498,6 +498,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    def test_frobenius_norm_keepdim(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch._C._VariableFunctions.frobenius_norm(x, dim=(0, 1), keepdim=True)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
+    def test_frobenius_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch._C._VariableFunctions.frobenius_norm(x, dim=1, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
 
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),

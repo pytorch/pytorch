@@ -1842,3 +1842,9 @@ def index(g, self, index):
                     axis_i=0)
 
             return g.op("Reshape", self, final_shape)
+
+
+@parse_args('v', 'is', 'i')
+def frobenius_norm(g, self, dim, keepdim):
+    f = _reduce_op_symbolic("ReduceL2")
+    return f(g, self, dim=dim, keepdim=keepdim)
