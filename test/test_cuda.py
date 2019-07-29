@@ -1928,6 +1928,8 @@ class TestCuda(TestCase):
     def test_events_wait(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
+        torch.cuda.synchronize(d0)
+        torch.cuda.synchronize(d1)
 
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
