@@ -3069,7 +3069,9 @@ def foo(x):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
-        module = torch.jit.trace_module(n, inputs, True, check_inputs)
+        module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
+        self.assertTrue(module._c._has_method("forward"))
+        self.assertTrue(module._c._has_method("weighted_kernel_sum"))
 
         module = torch.jit.trace(n.forward, example_forward_input)
         module = torch.jit.trace(n.forward, example_forward_input, True, [example_forward_input])
