@@ -12,7 +12,6 @@ import torch.nn.quantized as nnq
 
 from torch.quantization import default_qconfig
 from torch.quantization import DeQuantStub
-from torch.quantization import make_module
 from torch.quantization import QuantStub
 from torch.quantization import QuantWrapper
 
@@ -266,19 +265,4 @@ class ModForFusion(torch.nn.Module):
         x = self.relu1(x)
         x = self.sub1(x)
         x = self.sub2(x)
-        return x
-
-
-class ModelForFunctionQuant(torch.nn.Module):
-    def __init__(self):
-        super(ModelForFunctionQuant, self).__init__()
-        self.quant = QuantStub()
-        self.add = make_module(torch.add)
-        self.dequant = DeQuantStub()
-        self.qconfig = default_qconfig
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.add(x, 42)
-        x = self.dequant(x)
         return x

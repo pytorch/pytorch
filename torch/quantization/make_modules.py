@@ -6,28 +6,27 @@ _disclaimer = r"""
 
 """
 
-_module_head = \
-r'''r"""{module_name} wraps the {op_string} function."""
+_module_head = r'''
+r"""{module_name} wraps the {op_string} function."""
 class {module_name}(torch.nn.Module):
 '''
 
-_module_init = \
-r'''    def __init__(self, **kwargs):
+_module_init = r'''    def __init__(self, **kwargs):
         super({module_name}, self).__init__()
 '''
 
-_module_init_extras = \
-r'''        self.scale = kwargs.get('scale', 1.0)
+_module_init_extras = r'''
+        self.scale = kwargs.get('scale', 1.0)
         self.zero_point = swargs.get('zero_point', 0)
 '''
 
-_module_forward = \
-r'''    def forward(self, *args):
+_module_forward = r'''
+    def forward(self, *args):
         return self.{op_string}(*args)
 '''
 
-_module_from_float = \
-r'''    def from_float(self, mod):
+_module_from_float = r'''
+    def from_float(self, mod):
         return {module_name}()
 '''
 
