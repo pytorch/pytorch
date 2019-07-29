@@ -54,9 +54,8 @@ def _observer_forward_hook(self, input, output):
     """
     return self.observer(output)
 
-DEFAULT_SKIP_LIST = [nn.Identity]
+DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
 
-# TODO(jerryzh): remove_observer?
 def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
     r"""Add observer for the leaf child of the module.
 
