@@ -514,6 +514,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    def test_nuclear_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch._C._VariableFunctions.nuclear_norm(x, dim=1, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
 
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
