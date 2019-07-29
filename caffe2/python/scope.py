@@ -7,7 +7,6 @@ from __future__ import unicode_literals
 
 import contextlib
 import threading
-from past.builtins import basestring
 
 from caffe2.proto import caffe2_pb2
 

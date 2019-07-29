@@ -7,7 +7,6 @@ from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python.compatibility import container_abcs
-from future.utils import viewitems
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
 

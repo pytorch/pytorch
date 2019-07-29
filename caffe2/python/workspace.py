@@ -12,7 +12,6 @@ import os
 from collections import defaultdict
 import logging
 import numpy as np
-from past.builtins import basestring
 import shutil
 import socket
 import tempfile
