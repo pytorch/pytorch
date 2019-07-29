@@ -36,7 +36,6 @@ def run_model_test(self, model, train, batch_size=2, state_dict=None,
         torch.onnx.export(model, input, f,
                           opset_version=self.opset_version,
                           example_outputs=output)
-
         input, _ = torch.jit._flatten(input)
         output, _ = torch.jit._flatten(output)
 
@@ -48,6 +47,7 @@ def run_model_test(self, model, train, batch_size=2, state_dict=None,
 
         inputs = list(map(to_numpy, input))
         outputs = list(map(to_numpy, output))
+
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -154,6 +154,27 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(1, 2)
         self.run_test(DynamicSliceModel(), x)
 
+    def _test_index_generic(self, fn):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, input):
+                return fn(input)
+
+        m1 = torch.randn(3, 4, 5, 6, 7)
+        self.run_test(MyModel(), m1)
+
+    def test_tensor_index_advanced_indexing(self):
+        self._test_index_generic(
+            lambda input: input[:, torch.tensor([[0, 2], [1, 1]]), :, torch.tensor([2, 1]), torch.tensor([0, 3])])
+        self._test_index_generic(lambda input: input[..., torch.tensor([2, 1]), torch.tensor([0, 3])])
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), None, 2:4, torch.tensor([[1, 3], [4, 0]])])
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([1]), 2:4, torch.tensor([[1], [4]])])
+
+    def test_tensor_index_advanced_indexing_consecutive(self):
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([[1, 3], [4, 0]]), None])
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_flip(self):
         class MyModule(torch.nn.Module):
@@ -188,6 +209,29 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
+    def test_index_select_constant_scaler_index(self):
+        class IndexSelectScalerIndexModel(torch.nn.Module):
+            def forward(self, x):
+                index = 2
+                return torch.index_select(x, 1, torch.tensor(index))
+        x = torch.randn(3, 4)
+        self.run_test(IndexSelectScalerIndexModel(), x)
+
+    def test_index_select_scaler_index(self):
+        class IndexSelectScalerIndexModel(torch.nn.Module):
+            def __init__(self, index_base):
+                super(IndexSelectScalerIndexModel, self).__init__()
+                self.index_base = torch.tensor(index_base)
+
+            def forward(self, x, index_offset):
+                index = self.index_base + index_offset
+                return torch.index_select(x, 1, index)
+        x = torch.randn(3, 4)
+        offset = 2
+        index_offset = torch.tensor(offset)
+        base = 1
+        self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
+
     # TODO: enable for opset 10 when ONNXRuntime version will be updated 
     @skipIfUnsupportedOpsetVersion([10])
     def test_topk(self):
@@ -212,7 +256,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_layer_norm(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
-        self.run_test(model, x, rtol=1e-05, atol=1e-07)
+        self.run_test(model, x)
 
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
@@ -245,6 +289,66 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 1, requires_grad=True)
         self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        self.run_test(ArangeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        self.run_test(ArangeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end_step(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        self.run_test(ArangeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test__dim_arange(self):
+        class DimArange(torch.nn.Module):
+            def forward(self, input):
+                return torch._dim_arange(input, 1)
+
+        x = torch.ones(5, 6)
+        self.run_test(DimArange(), x)
 
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
@@ -363,6 +467,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
+
+    def test_sort(self):
+        class SortModel(torch.nn.Module):
+            def __init__(self, dim):
+                super(SortModel, self).__init__()
+                self.dim = dim
+
+            def forward(self, x):
+                return torch.sort(x, dim=self.dim, descending=True)
+
+        dim = 1
+        x = torch.randn(3, 4)
+        self.run_test(SortModel(dim), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
