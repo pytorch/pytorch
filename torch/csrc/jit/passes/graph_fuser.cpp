@@ -170,13 +170,6 @@ struct GraphFuser {
     });
   }
 
-  bool containsGradSumToSize(Node* fusion_group) {
-    auto nodes = getSubgraph(fusion_group).nodes();
-    return std::any_of(nodes.begin(), nodes.end(), [](Node* n) {
-      return n->kind() == aten::_grad_sum_to_size;
-    });
-  }
-
   bool isFusable(Node* node) {
     return callback_(node);
   }
@@ -212,14 +205,6 @@ struct GraphFuser {
     // are not necessarily correct.
     if (node->owningBlock() != block_)
       return false;
-    if (node->kind() == aten::_grad_sum_to_size) {
-      // We only fuse _grad_sum_to_size if
-      // - we will fuse its input next (checked here)
-      // - we can commute the _grad_sum_to_size with everything
-      //   along the computation graph until we reach the outputs,
-      //   but this is checked later
-      return isFusable(node->inputs()[0]->node());
-    }
     return node->kind() == prim::FusionGroup || isSimpleMap(node);
   }
 
@@ -442,23 +427,6 @@ struct GraphFuser {
          producer->node()->inputs().size() +
          producer->node()->outputs().size()) > subgraph_arg_limit_) {
       return at::nullopt;
-    }
-
-    if (producer->node()->kind() == aten::_grad_sum_to_size &&
-        consumer->kind() == kind_) {
-      // check that we will be able to move the _grad_sum_to_size to be fused
-      // to the end of the fusion group in the fusion compiler
-      // the difficulty here is that the producer is not part of the fusion
-      // group yet
-      for (auto& u : producer->uses()) {
-        if (u.user == consumer) {
-          auto subgraph = &getSubgraph(consumer);
-          if (!trackSingleGradSumToSizeToOutputs(
-                  subgraph->inputs().at(u.offset), nullptr)) {
-            return at::nullopt;
-          }
-        }
-      }
     }
 
     auto group = consumer;
@@ -1039,13 +1007,11 @@ struct GraphFuser {
     }
 
     // Fusion groups can be merged with concat's group if and only if
-    // - the value they produce isn't already coming from a concat and
-    // - the fusion group does not contain GradSumToSize
+    // the value they produce isn't already coming from a concat
     if (producer->node()->kind() == prim::FusionGroup) {
       auto subgraph = producer->node()->g(attr::Subgraph);
       auto* node = subgraph->outputs().at(producer->offset())->node();
-      return node->kind() != prim::FusedConcat &&
-          !containsGradSumToSize(producer->node());
+      return node->kind() != prim::FusedConcat;
     }
     return true;
   }
@@ -1226,83 +1192,6 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 }
 
 } // anonymous namespace
-
-// This takes a _grad_sum_to_size output and tracks it to the return
-// statements that depend on it, checking that it only hits nodes
-// that commute with _grad_sum_to_size on its path.
-// If a non-nullptr vector pointer outputGradSumToSizes is passed, the sizes
-// will be recorded as target sizes for the outputs as applicable.
-// In the graph_fuser pass we only need to check that we can go to the
-// outputs while in the fuser's compiler we want to record the sizes.
-// Note: This will only record a new sum_to_size if there is not one
-// already. As we want the last grad_sum_to_size, you need to call
-// it in reverse order when recording and removing outputs.
-bool trackSingleGradSumToSizeToOutputs(
-    Value* gradSumToSizeOutput,
-    std::vector<int64_t>* outputGradSumToSizes) {
-  static OperatorSet commutes_with_SumToSize{{
-      "aten::mul(Tensor self, Tensor other) -> Tensor",
-      "aten::div(Tensor self, Tensor other) -> Tensor",
-      // for div we might check whether we're the first argument
-      "aten::mul(Tensor self, Scalar other) -> Tensor",
-      "aten::div(Tensor self, Scalar other) -> Tensor",
-      "aten::neg(Tensor self) -> Tensor",
-      "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-      "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
-      // add this used to be prim::AutogradAdd
-  }};
-
-  std::queue<Use> uses_to_process{};
-  auto add_to_uses = [&](const use_list& uses) {
-    for (auto u : uses) {
-      uses_to_process.push(u);
-    }
-  };
-  add_to_uses(gradSumToSizeOutput->uses());
-  while (!uses_to_process.empty()) {
-    auto user = uses_to_process.front().user;
-    auto offset = uses_to_process.front().offset;
-    uses_to_process.pop();
-    if (user->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
-      // sometimes, a mask or similar is cast to the same type as the gradient,
-      // i.e. we see other. Then we don't need to do anything, as the shape is
-      // not used, only the type..
-      // But we might also see it as self, when the gradient is cast, then we
-      // want to track it.
-      if (offset == 0) {
-        add_to_uses(user->output()->uses());
-      }
-    } else if (commutes_with_SumToSize.find(user)) {
-      add_to_uses(user->output()->uses());
-    } else if (user->kind() == prim::Return) {
-      // During compilation and only if we don't already have a
-      // _grad_sum_to_size for this output we record the size to sum the output
-      // to. We only do this if we didn't see anything yet because we want later
-      // (in the graph) nodes to take precedence over earlier ones and we
-      // iterate backwards. The implicit assumption is that if we have several
-      // _grad_sumtosizes "in parallel" (from auto-diff added AutogradAdd as the
-      // backward of using an input in multiple places) they are the same. This
-      // is because AutogradAdd does not broadcast.
-      if (outputGradSumToSizes && (*outputGradSumToSizes)[offset] == -1) {
-        // note: we make the assumption that the sizes are inputs to the
-        // fusion group (rather than something calculated).
-        (*outputGradSumToSizes)[offset] =
-            gradSumToSizeOutput->node()->inputs()[1]->offset();
-      }
-    } else if (user->kind() == aten::_grad_sum_to_size) {
-      // do nothing
-      // this case only happens in the graph_fuser step because in the
-      // compile step because we iterate backwards and delete
-      // all _grad_sum_to_size nodes we see
-    } else {
-      // we find something we do not support. Note that this notably includes
-      // prim::FusedConcat, which we do not know how to deal with in conjunction
-      // with _grad_sum_to_size
-      return false;
-    }
-  }
-  return true;
-}
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
   GraphFuser(graph->block(), graph).run();
