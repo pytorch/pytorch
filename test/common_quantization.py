@@ -9,13 +9,8 @@ checking quantization api and properties of resulting modules.
 
 import torch
 import torch.nn.quantized as nnq
-
-from torch.quantization import default_qconfig
-from torch.quantization import DeQuantStub
-from torch.quantization import QuantStub
-from torch.quantization import QuantWrapper
-
 from common_utils import TestCase
+from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, default_qconfig
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -117,7 +112,6 @@ class SingleLayerLinearModel(torch.nn.Module):
         x = self.fc1(x)
         return x
 
-
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super(TwoLayerLinearModel, self).__init__()
@@ -129,7 +123,6 @@ class TwoLayerLinearModel(torch.nn.Module):
         x = self.fc2(x)
         return x
 
-
 class LinearReluModel(torch.nn.Module):
     def __init__(self):
         super(LinearReluModel, self).__init__()
@@ -139,7 +132,6 @@ class LinearReluModel(torch.nn.Module):
     def forward(self, x):
         x = self.relu(self.fc(x))
         return x
-
 
 class NestedModel(torch.nn.Module):
     def __init__(self):
@@ -154,7 +146,6 @@ class NestedModel(torch.nn.Module):
         x = self.fc3(x)
         return x
 
-
 class InnerModule(torch.nn.Module):
     def __init__(self):
         super(InnerModule, self).__init__()
@@ -164,7 +155,6 @@ class InnerModule(torch.nn.Module):
 
     def forward(self, x):
         return self.relu(self.fc2(self.relu(self.fc1(x))))
-
 
 class WrappedModel(torch.nn.Module):
     def __init__(self):
@@ -177,7 +167,6 @@ class WrappedModel(torch.nn.Module):
 
     def forward(self, x):
         return self.fc(self.sub(x))
-
 
 class ManualQuantModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
@@ -193,7 +182,6 @@ class ManualQuantModel(torch.nn.Module):
         x = self.quant(x)
         x = self.fc(x)
         return self.dequant(x)
-
 
 class ManualLinearQATModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
@@ -211,7 +199,6 @@ class ManualLinearQATModel(torch.nn.Module):
         x = self.fc1(x)
         x = self.fc2(x)
         return self.dequant(x)
-
 
 class ManualConvLinearQATModel(torch.nn.Module):
     r"""A module with manually inserted `QuantStub` and `DeQuantStub`
@@ -248,7 +235,6 @@ class SubModForFusion(torch.nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         return x
-
 
 class ModForFusion(torch.nn.Module):
     def __init__(self):
