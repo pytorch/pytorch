@@ -181,13 +181,13 @@ class RNNBase(Module):
         return apply_permutation(hx, permutation)
 
     def run_impl(self, input, hx, batch_sizes):
-        impl = _rnn_impls(self.mode)
+        impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
-                           self.dropout, self.training, self.bidirectional, self.batch_first)
+            result = impl(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
+                          self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
-                           self.num_layers, self.dropout, self.training, self.bidirectional)
+            result = impl(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
+                          self.num_layers, self.dropout, self.training, self.bidirectional)
         return result
 
     def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
