@@ -367,7 +367,32 @@ def load(github, model, *args, **kwargs):
     return model
 
 
-def _download_url_to_file(url, dst, hash_prefix, progress):
+def download_url_to_file(url, dst, hash_prefix, progress):
+    r"""
+    Download a file from the given url and store it to the specified destination.
+
+    Optionally check content's SHA-256 hash with expected SHA-256 hash.
+    Shows progress bar if progress=True.
+
+    Args:
+        url (string): Required, an url to download content from.
+        dst (string): Required, a file or directory to write content to
+            (possibly overwriting). If dst is a directory then the content
+            is stored in a file with randomly generated name in dst directory.
+        hash_prefix (string): Optional, expected SHA-256 hash string
+            of downloaded content.
+        progress (bool): Optional, show progress bar if True.
+
+    Raises:
+        URLError: if url is malformed or the resource if unreachable.
+        IOError: if any IO error occurred.
+        RuntimeError: if hash_prefix specified and SHA-256 of downloaded
+            content does not equal hash_prefix.
+
+    Example:
+        >>> torch.hub.download_url_to_file('https://someserver.com/resnet18.pth', '/home/user/file.pth', '5c106cde', True)
+
+    """
     file_size = None
     u = urlopen(url)
     meta = u.info()
@@ -454,5 +479,5 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
     if not os.path.exists(cached_file):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = HASH_REGEX.search(filename).group(1)
-        _download_url_to_file(url, cached_file, hash_prefix, progress=progress)
+        download_url_to_file(url, cached_file, hash_prefix, progress=progress)
     return torch.load(cached_file, map_location=map_location)
