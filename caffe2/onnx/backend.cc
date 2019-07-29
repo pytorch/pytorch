@@ -365,7 +365,8 @@ Caffe2Backend::get_special_operators() const {
               {"DynamicSlice", &Caffe2Backend::CreateDynamicSlice},
               {"RandomNormal", &Caffe2Backend::CreateRandomNormal},
               {"RandomNormalLike", &Caffe2Backend::CreateRandomNormal},
-              {"Where", &Caffe2Backend::CreateWhereOp}};
+              {"Where", &Caffe2Backend::CreateWhereOp},
+              {"NonZero", &Caffe2Backend::CreateNonZeroOp}};
   return kSpecialOperators;
 }
 
@@ -596,6 +597,28 @@ Caffe2Ops Caffe2Backend::CreateWhereOp(
   attr->set_s("where");
   OnnxNode new_node(converted);
   return CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
+}
+
+Caffe2Ops Caffe2Backend::CreateNonZeroOp(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  // Native Caffe2 doesn't support NonZero, fallback to ATen.
+  // ATen nonzero is equivalent to Transpose(ONNX::NonZero).
+  onnx::NodeProto converted;
+  converted.CopyFrom(onnx_node->node);
+
+  auto nonzero_output = dummy_->NewDummyName();
+  converted.set_output(0, nonzero_output);
+  converted.set_op_type("ATen");
+  onnx::AttributeProto* attr = converted.add_attribute();
+  attr->set_name("operator");
+  attr->set_s("nonzero");
+  OnnxNode new_node(converted);
+  auto ret = CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
+
+  auto* c2_transpose = ret.ops.Add();
+  BuildOperator(c2_transpose, "Transpose", {nonzero_output}, {onnx_node->node.output(0)});
+  return ret;
 }
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(

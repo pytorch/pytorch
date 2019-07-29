@@ -77,9 +77,7 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_module;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_module("name.with.dot", torch::nn::Linear(3, 4)),
       "Submodule name must not contain a dot (got 'name.with.dot')");
@@ -89,9 +87,7 @@ TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_module;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_module("linear", torch::nn::Linear(3, 4));
   ASSERT_THROWS_WITH(
@@ -99,10 +95,28 @@ TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
       "Submodule 'linear' already defined");
 }
 
-TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
+TEST_F(ModuleTest, ReplaceModuleThrowsForUnknownModuleName) {
+  torch::nn::Module model;
+  ASSERT_THROWS_WITH(
+      model.replace_module("linear", torch::nn::Linear(3, 4)),
+      "Submodule 'linear' is not defined");
+}
+
+TEST_F(ModuleTest, ReplaceModule) {
   struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_parameter;
+    torch::nn::Linear l1{nullptr};
+    TestModel() {
+      l1 = register_module("l1", torch::nn::Linear(3, 4));
+    }
   };
+  auto model = std::make_shared<TestModel>();
+  model->l1 = model->replace_module("l1", torch::nn::Linear(5, 6));
+  ASSERT_EQ(model->named_parameters()["l1.weight"].size(0), 6);
+  ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
+}
+
+TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_parameter("name.with.dot", torch::ones(5)),
       "Parameter name must not contain a dot (got 'name.with.dot')");
@@ -112,9 +126,7 @@ TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_parameter;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_parameter("p", torch::ones(5));
   ASSERT_THROWS_WITH(
@@ -123,9 +135,7 @@ TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
 }
 
 TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_buffer;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_buffer("name.with.dot", torch::ones(5)),
       "Buffer name must not contain a dot (got 'name.with.dot')");
@@ -135,9 +145,7 @@ TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterBufferThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_buffer;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_buffer("p", torch::ones(5));
   ASSERT_THROWS_WITH(
@@ -249,29 +257,25 @@ TEST_F(ModuleTest, CallingCloneOnModuleThatDoesOverrideCloneDoesNotThrow) {
   ASSERT_NO_THROW({ module.clone(); });
 }
 
-TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
-  struct TestModule : public Cloneable<TestModule> {
-    TestModule() {
-      reset();
-    }
-    void reset() override {
-      l1 = register_module("l1", Linear(10, 3));
-      l2 = register_module("l2", Linear(3, 5));
-      l3 = register_module("l3", Linear(5, 100));
-      buffer = register_buffer("buf", torch::ones({2, 2}));
-    }
+struct TestDistinctParametersModule
+    : public Cloneable<TestDistinctParametersModule> {
+  TestDistinctParametersModule() {
+    reset();
+  }
+  void reset() override {
+    l1 = register_module("l1", Linear(10, 3));
+    l2 = register_module("l2", Linear(3, 5));
+    l3 = register_module("l3", Linear(5, 100));
+    buffer = register_buffer("buf", torch::ones({2, 2}));
+  }
 
-    Linear l1{nullptr}, l2{nullptr}, l3{nullptr};
-    torch::Tensor buffer;
-  };
+  Linear l1{nullptr}, l2{nullptr}, l3{nullptr};
+  torch::Tensor buffer;
+};
 
-  auto module = std::make_shared<TestModule>();
-
-  torch::NoGradGuard no_grad;
-
-  auto module2 = module->clone();
-  auto params1 = module->named_parameters();
-  auto params2 = module2->named_parameters();
+void testDistinctParameters(std::shared_ptr<Module> m1, std::shared_ptr<Module> m2) {
+  auto params1 = m1->named_parameters();
+  auto params2 = m2->named_parameters();
   ASSERT_EQ(params1.size(), 6);
   ASSERT_EQ(params2.size(), 6);
   for (auto& param : params1) {
@@ -283,8 +287,8 @@ TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
     ASSERT_FALSE(param->allclose(params2[param.key()]));
   }
 
-  auto buffers1 = module->named_buffers();
-  auto buffers2 = module2->named_buffers();
+  auto buffers1 = m1->named_buffers();
+  auto buffers2 = m2->named_buffers();
   ASSERT_EQ(buffers1.size(), 1);
   ASSERT_EQ(buffers2.size(), 1);
   for (auto& buffer : buffers1) {
@@ -295,6 +299,44 @@ TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
   for (auto& buffer : buffers1) {
     ASSERT_FALSE(buffer->allclose(buffers2[buffer.key()]));
   }
+}
+
+TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
+  auto module = std::make_shared<TestDistinctParametersModule>();
+  torch::NoGradGuard no_grad;
+  auto module2 = module->clone();
+  testDistinctParameters(module, module2);
+}
+
+TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_CUDA) {
+  auto module = std::make_shared<TestDistinctParametersModule>();
+  torch::NoGradGuard no_grad;
+  torch::Device device(torch::kCUDA, 0);
+  module->to(device);
+  auto module2 = module->clone(device);
+  testDistinctParameters(module, module2);
+}
+
+TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_MultiCUDA) {
+  auto module = std::make_shared<TestDistinctParametersModule>();
+  torch::NoGradGuard no_grad;
+  torch::Device d0(torch::kCUDA, 0);
+  torch::Device d1(torch::kCUDA, 1);
+  module->to(d0);
+  auto module2 = module->clone(d1);
+
+  for (auto& param : module->parameters()) {
+    ASSERT_EQ(param.device(), d0);
+  }
+
+  for (auto& param : module2->parameters()) {
+    ASSERT_EQ(param.device(), d1);
+  }
+
+  // need to move the module back to d0 as allclose expects two tensors on
+  // the same device.
+  module2->to(d0);
+  testDistinctParameters(module, module2);
 }
 
 TEST_F(ModuleTest, ClonePreservesExternalReferences) {
