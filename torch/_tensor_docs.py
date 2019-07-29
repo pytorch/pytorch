@@ -2194,7 +2194,7 @@ Args:
     index (LongTensor): the indices of elements to scatter and add,
       can be either empty or the same size of src.
       When empty, the operation returns identity.
-    src (Tensor or scalar): the source element(s) to scatter and add,
+    other (Tensor or scalar): the source element(s) to scatter and add,
       could be a tensor, or a scalar of the same dtype as ``self``.
 
 Example::
