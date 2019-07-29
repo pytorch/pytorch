@@ -264,7 +264,7 @@ struct CAFFE2_API TensorIterator {
     num_outputs_++;
   }
 
-  void add_checked_output(const Tensor& output) {
+  void check_and_add_output(const Tensor& output) {
     assert_no_internal_overlap(output);
     add_output(output);
   }
