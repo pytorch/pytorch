@@ -5770,7 +5770,8 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_lstsq(self, device):
-        cast_fn = lambda x: x.to(device=device)
+        def cast_fn(tensor):
+            return tensor.to(device=device)
 
         def _test_underdetermined(a, b, expectedNorm):
             # underdetermined systems are not supported on the GPU
