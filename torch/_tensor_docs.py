@@ -2127,7 +2127,7 @@ along the specified dimension :attr:`dim` must be unique.
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter,
-      can be either empty or the broadcasting-compatible size of src.
+      can be either empty or the same size of src.
       When empty, the operation returns identity
     src (Tensor): the source element(s) to scatter,
       incase `value` is not specified
@@ -2182,7 +2182,7 @@ the specified dimension :attr:`dim` must be unique.
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter and add,
-      can be either empty or the broadcasting-compatible size of src.
+      can be either empty or the same size of src.
       When empty, the operation returns identity.
     other (Tensor): the source elements to scatter and add
 
