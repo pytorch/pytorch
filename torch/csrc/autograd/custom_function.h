@@ -35,7 +35,7 @@ TORCH_API variable_list _wrap_outputs(
 // Variable x;
 // MyFunction::apply(6, x);
 template <class T>
-struct Function {
+struct TORCH_API Function {
   template<typename... Args>
   static variable_list apply(Args&&... args);
 };
@@ -66,34 +66,27 @@ struct CppNode : public Node {
   AutogradContext ctx;
   std::vector<bool> is_variable_input;
   std::vector<VariableInfo> input_info;
+  std::vector<VariableInfo> output_info;
 
   void release_variables() override;
 };
 
+template <typename T>
+using enable_if_var_t = typename std::enable_if<std::is_constructible<Variable, T>::value>::type;
+
+template <typename T>
+using enable_if_not_var_t = typename std::enable_if<!std::is_constructible<Variable, T>::value>::type;
+
 template <typename T, typename... Args>
-void extract_vars(std::vector<bool> &is_var, variable_list& list, T&& cur, Args&& ... args) {
+enable_if_not_var_t<T> extract_vars(std::vector<bool> &is_var, variable_list& list, T&& cur, Args&& ... args) {
   is_var.push_back(false);
   extract_vars(is_var, list, std::forward<Args>(args)...);
 }
 
-template <typename... Args>
-void extract_vars(std::vector<bool> &is_var, variable_list& list, Variable&& cur, Args&& ... args) {
-  list.push_back(cur);
+template <typename T, typename... Args>
+enable_if_var_t<T> extract_vars(std::vector<bool> &is_var, variable_list& list, T&& cur, Args&& ... args) {
   is_var.push_back(true);
-  extract_vars(is_var, list, std::forward<Args>(args)...);
-}
-
-template <typename... Args>
-void extract_vars(std::vector<bool> &is_var, variable_list& list, Variable& cur, Args&& ... args) {
-  list.push_back(cur);
-  is_var.push_back(true);
-  extract_vars(is_var, list, std::forward<Args>(args)...);
-}
-
-template <typename... Args>
-void extract_vars(std::vector<bool> &is_var, variable_list& list, const Variable& cur, Args&& ... args) {
-  list.push_back(cur);
-  is_var.push_back(true);
+  list.emplace_back(cur);
   extract_vars(is_var, list, std::forward<Args>(args)...);
 }
 
@@ -130,13 +123,34 @@ variable_list Function<T>::apply(Args&&... args) {
     outputs = T::forward(&node->ctx, std::forward<Args>(args)...);
   }
 
-  return _wrap_outputs(input_vars, node->ctx.get_non_differentiable(), node->ctx.get_dirty(), outputs, is_executable ? node : nullptr);
+  auto wrapped_outputs = _wrap_outputs(input_vars, node->ctx.get_non_differentiable(), node->ctx.get_dirty(), outputs, is_executable ? node : nullptr);
+
+  node->output_info.reserve(wrapped_outputs.size());
+  for (auto& output : wrapped_outputs) {
+    if (is_executable) {
+      node->output_info.emplace_back(output);
+    }
+  }
+
+  return wrapped_outputs;
 }
 
 template<class T>
 variable_list CppNode<T>::apply(variable_list&& inputs) {
-  auto outputs = T::backward(&ctx, inputs);
   at::OptionalDeviceGuard _device_guard;
+
+  int num_inputs = inputs.size();
+  variable_list backward_inputs;
+  backward_inputs.reserve(num_inputs);
+  for (int i = 0 ; i < num_inputs; ++i) {
+    if (inputs[i].defined()) {
+      backward_inputs.emplace_back(inputs[i]);
+    } else {
+      backward_inputs.emplace_back(output_info[i].zeros(_device_guard));
+    }
+  }
+
+  auto outputs = T::backward(&ctx, backward_inputs);
 
   int num_forward_inputs = is_variable_input.size();
   int num_outputs = outputs.size();
@@ -148,7 +162,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
       all_undef &= (!outputs[i].defined());
     }
     if (all_undef) {
-      std::cout << "all undef...\n";
       outputs.resize(num_forward_inputs);
       num_outputs = num_forward_inputs;
     }
