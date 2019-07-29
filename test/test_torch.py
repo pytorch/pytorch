@@ -1735,8 +1735,8 @@ class _TestTorchMixin(object):
         input = torch.tensor([])
         self.assertEqual(sum(input), 0)
 
-        input = torch.tensor([1, 0, 1, 0, 1], dtype=torch.uint8)
-        self.assertEqual(sum(input), 3)
+        input = torch.full((1, 300), 1, dtype=torch.uint8)
+        self.assertEqual(sum(input), 300)
 
         input = torch.tensor([1.1, 0, 1.1, 0, 1.1])
         self.assertEqual(sum(input), 3.3)

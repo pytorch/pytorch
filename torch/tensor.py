@@ -364,7 +364,7 @@ class Tensor(torch._C._TensorBase):
 
     def __radd__(self, other):
         if isinstance(self, torch.Tensor):
-            if (self.dtype == torch.bool):
+            if (self.dtype == torch.bool or self.dtype == torch.uint8):
                 return torch.sum(self) + other
         return self.__add__(other)
 
