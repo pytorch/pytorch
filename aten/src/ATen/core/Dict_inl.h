@@ -20,6 +20,8 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
     return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
   } else if (lhs.isBool()) {
     return rhs.isBool() && lhs.toBool() == rhs.toBool();
+  } else if (lhs.isIntList()) {
+    return rhs.isIntList() && lhs.toIntListRef() == rhs.toIntListRef();
   } else {
     AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
   }
