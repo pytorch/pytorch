@@ -58,47 +58,51 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-if(NOT BUILD_ATEN_ONLY)
-  add_subdirectory(proto)
-  add_subdirectory(contrib)
+if (NOT BUILD_ATEN_ONLY)
   add_subdirectory(core)
-  add_subdirectory(utils)
-  add_subdirectory(predictor)
-  add_subdirectory(predictor/emulator)
-  add_subdirectory(core/nomnigraph)
+  add_subdirectory(proto)
   add_subdirectory(serialize)
-  if (USE_NVRTC)
-    add_subdirectory(cuda_rtc)
-  endif()
-  add_subdirectory(db)
-  add_subdirectory(distributed)
-  # add_subdirectory(experiments) # note, we may remove this folder at some point
-  add_subdirectory(ideep)
-  add_subdirectory(image)
-  add_subdirectory(video)
-  add_subdirectory(mobile)
-  add_subdirectory(mpi)
-  add_subdirectory(observers)
-  add_subdirectory(onnx)
-  if (BUILD_CAFFE2_OPS)
-    add_subdirectory(operators)
-    add_subdirectory(operators/rnn)
-    if (USE_FBGEMM)
-      add_subdirectory(quantization)
-      add_subdirectory(quantization/server)
-    endif()
-    if (USE_QNNPACK)
-      add_subdirectory(operators/quantized)
-    endif()
-  endif()
-  add_subdirectory(opt)
+  add_subdirectory(utils)
   add_subdirectory(perfkernels)
-  add_subdirectory(python)
-  add_subdirectory(queue)
-  add_subdirectory(sgd)
-  add_subdirectory(share)
-  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-  add_subdirectory(transforms)
+
+  # Skip modules that are not used by libtorch mobile yet.
+  if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+    add_subdirectory(contrib)
+    add_subdirectory(predictor)
+    add_subdirectory(predictor/emulator)
+    add_subdirectory(core/nomnigraph)
+    if (USE_NVRTC)
+      add_subdirectory(cuda_rtc)
+    endif()
+    add_subdirectory(db)
+    add_subdirectory(distributed)
+    # add_subdirectory(experiments) # note, we may remove this folder at some point
+    add_subdirectory(ideep)
+    add_subdirectory(image)
+    add_subdirectory(video)
+    add_subdirectory(mobile)
+    add_subdirectory(mpi)
+    add_subdirectory(observers)
+    add_subdirectory(onnx)
+    if (BUILD_CAFFE2_OPS)
+      add_subdirectory(operators)
+      add_subdirectory(operators/rnn)
+      if (USE_FBGEMM)
+        add_subdirectory(quantization)
+        add_subdirectory(quantization/server)
+      endif()
+      if (USE_QNNPACK)
+        add_subdirectory(operators/quantized)
+      endif()
+    endif()
+    add_subdirectory(opt)
+    add_subdirectory(python)
+    add_subdirectory(queue)
+    add_subdirectory(sgd)
+    add_subdirectory(share)
+    # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
+    add_subdirectory(transforms)
+  endif()
 endif()
 
 # Advanced: if we have white list specified, we will do intersections for all
@@ -428,7 +432,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/inline_loop_condition.cpp
@@ -457,7 +460,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
-  if (NOT WIN32)
+  if (NOT WIN32 AND NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
     )
@@ -862,23 +865,23 @@ target_compile_options(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 
 
-# Parallelism settings
-#  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+# ATen parallelism settings
+#  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
-set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
-message(STATUS "Using parallel backend: ${PARALLEL_BACKEND}")
-if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
+#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
+set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
+if ("${ATEN_THREADING}" STREQUAL "OMP")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_OPENMP=1")
-elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
+elseif ("${ATEN_THREADING}" STREQUAL "NATIVE")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE=1")
-elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE_TBB")
+elseif ("${ATEN_THREADING}" STREQUAL "TBB")
   if (NOT USE_TBB)
-    message(FATAL_ERROR "Using NATIVE_TBB backend but USE_TBB is off")
+    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
   endif()
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
 else()
-  message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
+  message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")

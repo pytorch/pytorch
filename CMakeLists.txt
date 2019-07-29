@@ -19,6 +19,7 @@ endif()
 if (DEFINED GLIBCXX_USE_CXX11_ABI)
   if (${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
   endif()
 endif()
 
@@ -100,7 +101,7 @@ option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
-option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
+option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -109,8 +110,15 @@ option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
 option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
-option(USE_NCCL "Use NCCL" ON)
-option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
+cmake_dependent_option(
+    USE_NCCL "Use NCCL" ON
+    "USE_CUDA;UNIX;NOT APPLE" OFF)
+cmake_dependent_option(
+    USE_STATIC_NCCL "Use static NCCL" OFF
+    "USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_SYSTEM_NCCL "Use system-wide NCCL" OFF
+    "USE_NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 option(USE_NUMA "Use NUMA (only available on Linux)" ON)
@@ -158,7 +166,9 @@ option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside t
 # When generating debug symbols, CMake default to use the flag /Zi.
 # However, it is not compatible with sccache. So we rewrite it off.
 # But some users don't use sccache; this override is for them.
-option(MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON)
+cmake_dependent_option(
+  MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON
+  "MSVC" OFF)
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
@@ -166,6 +176,8 @@ set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to bu
 # 1. Replace /Zi and /ZI with /Z7
 # 2. Switch off incremental linking in debug builds
 if (MSVC)
+  string(APPEND CMAKE_C_FLAGS " /EHa")
+  string(APPEND CMAKE_CXX_FLAGS " /EHa")
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE

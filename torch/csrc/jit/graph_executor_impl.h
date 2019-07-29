@@ -55,11 +55,8 @@ struct GraphExecutorImplBase {
     return copy;
   }
 
-  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph, bool optimize)
+  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph)
       : graph(prepareGraph(graph)),
-        // until we have correct alias analysis any use of mutable operators
-        // disables all optimization
-        optimize(optimize),
         num_inputs(this->graph->inputs().size()),
         num_outputs(this->graph->outputs().size()) {}
 
@@ -125,7 +122,6 @@ struct GraphExecutorImplBase {
 
   // If false, we'll run the graph as we get it, without any optimizations.
   // Useful for debugging.
-  const bool optimize;
   const size_t num_inputs;
   const size_t num_outputs;
 

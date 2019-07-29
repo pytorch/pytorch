@@ -3,11 +3,26 @@
 
 namespace torch { namespace autograd {
 
+VariableInfo::VariableInfo(const Variable& var)
+  : backend(tensorTypeIdToBackend(var.type_id()))
+  , device(var.device())
+  , scalar_type(var.scalar_type())
+  , size(var.sizes().vec())
+  , requires_grad(var.requires_grad()) {
+}
+
+Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
+  // NB: This will NOT work if we ever get mixed device gradients
+  device_guard.reset_device(device);
+  return at::zeros(size,
+    at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)).is_variable(true));
+}
+
 variable_list _wrap_outputs(const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const at::ArrayRef<Variable> raw_outputs,
-  const std::shared_ptr<Function> &cdata) {
+  const std::shared_ptr<Node> &cdata) {
 
   std::unordered_set<at::TensorImpl*> inputs;
   inputs.reserve(input_vars.size());
@@ -85,85 +100,4 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   return outputs;
 }
 
-
-template <typename T, typename... Args>
-void extract_vars(variable_list& list, T&& cur, Args&& ... args) {
-  extract_vars(list, std::forward<Args>(args)...);
-}
-
-template <typename... Args>
-void extract_vars(variable_list& list, Variable&& cur, Args&& ... args) {
-  list.push_back(cur);
-  extract_vars(list, std::forward<Args>(args)...);
-}
-
-template <typename... Args>
-void extract_vars(variable_list& list, Variable& cur, Args&& ... args) {
-  list.push_back(cur);
-  extract_vars(list, std::forward<Args>(args)...);
-}
-
-template <typename... Args>
-void extract_vars(variable_list& list, Args&& ... args) {
-}
-
-
-template<class T>
-template<typename... Args>
-variable_list CFunction<T>::apply(Args&&... args) {
-  variable_list input_vars;
-  extract_vars(input_vars, std::forward<Args>(args)...);
-
-  bool is_executable =  GradMode::is_enabled() && any_variable_requires_grad(input_vars);
-  auto next_edges = collect_next_edges(input_vars);
-
-  std::shared_ptr<CustomFunc<T>> grad_fn(new CustomFunc<T>, deleteFunction);
-  grad_fn->set_next_edges(std::move(next_edges));
-  grad_fn->clear_input_metadata();
-
-
-  variable_list outputs;
-  {
-    AutoGradMode grad_mode(false);
-    outputs = T::forward(&grad_fn->ctx, std::forward<Args>(args)...);
-  }
-
-  return _wrap_outputs(input_vars, grad_fn->ctx.non_differentiable, grad_fn->ctx.dirty_inputs, outputs, is_executable ? grad_fn : nullptr);
-}
-
-template<class T>
-variable_list CustomFunc<T>::apply(variable_list&& inputs) {
-  auto outputs = T::backward(&ctx, inputs);
-
-  auto num_forward_inputs = inputs.size();
-  auto num_outputs = outputs.size();
-
-  // Returning too many results is ok, but only as long as they're all undefined.
-  // Truncate the result vector in that case.
-  if (num_outputs > num_forward_inputs) {
-    bool all_undef = true;
-    for (int i = num_forward_inputs; i < num_outputs; ++i) {
-      all_undef &= (outputs[i].defined());
-    }
-    if (all_undef) {
-      outputs.resize(num_forward_inputs);
-      num_outputs = num_forward_inputs;
-    }
-  }
-
-  if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got " ;
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
-  }
-
-  return outputs;
-}
-
-template<class T>
-void CustomFunc<T>::release_variables() {
-  ctx.saved_variables.clear();
-}
 }} // namespace torch::autograd

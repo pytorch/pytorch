@@ -155,7 +155,8 @@ inline bool is_quantized(Tensor self) {
     return static_cast<T*>(this->data_ptr());    \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_CAST)
+AT_FORALL_QINTS(DEFINE_CAST)
 #undef DEFINE_CAST
 
 #define DEFINE_ITEM(T, name, _)   \

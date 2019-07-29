@@ -92,10 +92,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export PYTORCH_TEST_WITH_ROCM=1
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
