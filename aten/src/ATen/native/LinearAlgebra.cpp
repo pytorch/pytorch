@@ -19,25 +19,25 @@ namespace native {
 // det(P) = \pm 1, this method returns a 3-tuple:
 //   (det(P), diag(U), info),
 // where info helps us identify singular matrices.
-static inline std::tuple<Tensor, Tensor, Tensor> _lu_det_P_diag_U_info(const Tensor& self) {
+static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   Tensor pivs, lu, infos;
   std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod(2);
-  return std::tuple<Tensor, Tensor, Tensor>(num_exchanges.mul_(-2).add_(1),
-                                            lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1),
-                                            infos);
+  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1),
+                                    lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1));
 }
 
 Tensor det(const Tensor& self) {
   squareCheckInputs(self);
   TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
 
-  Tensor det_P, diag_U, infos;
-  std::tie(det_P, diag_U, infos) = _lu_det_P_diag_U_info(self);
+  Tensor det_P, diag_U;
+  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
+  // complete_det is 0 when U is singular (U(i, i) = 0 for some i in [1, self.size(-1)]).
+  // The product accumulation takes care of this case, and hence no special case handling is required.
   auto complete_det = diag_U.prod(-1).mul_(det_P);
-  complete_det.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
   return complete_det;
 }
 
@@ -45,14 +45,21 @@ Tensor logdet(const Tensor& self) {
   squareCheckInputs(self);
   TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
 
-  Tensor det_P, diag_U, infos;
-  std::tie(det_P, diag_U, infos) = _lu_det_P_diag_U_info(self);
+  Tensor det_P, diag_U;
+  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
   Tensor det_sign = diag_U.sign().prod(-1).mul_(det_P);
 
-  // If det_sign > 0 and infos > 0, diag_U.abs_().log_().sum(-1) gives logdet
-  // If infos > 0, then U is singular => log(0) = -inf
-  // If det_sign <= 0, then we get proper nan (when det < 0) or -inf (when det = 0)
-  Tensor logdet_vals = at::where((det_sign > 0).__iand__(infos == 0), diag_U.abs_().log_().sum(-1), det_sign.log());
+  // If det_sign > 0, diag_U.abs_().log_().sum(-1) gives logdet (this means U is not singular).
+  // If det_sign <= 0, then we get proper nan (when det < 0, i.e., det_sign) or -inf (when det = 0, i.e., U is singular).
+  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
+  Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
+  if (self.dim() > 2) {
+    logdet_vals.index_put_((det_sign < 0).nonzero_numpy(), at::full({}, NAN, self.options()));
+  } else {
+    if ((det_sign < 0).item<uint8_t>()) {
+      logdet_vals.fill_(NAN);
+    }
+  }
   return logdet_vals;
 }
 
@@ -60,9 +67,12 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   squareCheckInputs(self);
   TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
 
-  Tensor det_P, diag_U, infos;
-  std::tie(det_P, diag_U, infos) = _lu_det_P_diag_U_info(self);
+  Tensor det_P, diag_U;
+  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
   auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+  // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
+  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
+  // Since abslogdet_val cannot take nan, no special case handling is required.
   auto abslogdet_val = diag_U.abs_().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
 }
