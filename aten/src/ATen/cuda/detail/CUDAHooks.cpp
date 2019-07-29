@@ -2,6 +2,7 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
+#include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
@@ -65,6 +66,13 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
 }
 
 bool CUDAHooks::isPinnedPtr(void* data) const {
+  // cudaPointerGetAttributes grabs context on the current device, so we grab
+  // any context if exists.
+  at::OptionalDeviceGuard device_guard;
+  auto primary_ctx_device_index = CUDAHooks::getDevceIndexWithPrimaryContext();
+  if (primary_ctx_device_index.has_value()) {
+    device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+  }
   cudaPointerAttributes attr;
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
 #ifndef __HIP_PLATFORM_HCC__
@@ -80,11 +88,11 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
     return false;
   }
 #endif
-  #if CUDA_VERSION >= 10000
-    return attr.type == cudaMemoryTypeHost;
-  #else
-    return attr.memoryType == cudaMemoryTypeHost;
-  #endif
+#if CUDA_VERSION >= 10000
+  return attr.type == cudaMemoryTypeHost;
+#else
+  return attr.memoryType == cudaMemoryTypeHost;
+#endif
 }
 
 bool CUDAHooks::hasCUDA() const {
@@ -145,6 +153,23 @@ bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
   int ctx_is_active;
   AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
   return ctx_is_active == 1;
+}
+
+c10::optional<int64_t> CUDAHooks::getDevceIndexWithPrimaryContext() const {
+  // check current device first
+  int64_t current_device_index = CUDAHooks::current_device();
+  if (current_device_index >= 0) {
+    if (CUDAHooks::hasPrimaryContext(current_device_index)) {
+      return current_device_index;
+    }
+  }
+  for (int64_t device_index = 0; device_index < CUDAHooks::getNumGPUs(); device_index++) {
+    if (device_index == current_device_index) continue;
+    if (CUDAHooks::hasPrimaryContext(device_index)) {
+      return device_index;
+    }
+  }
+  return c10::nullopt;
 }
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {

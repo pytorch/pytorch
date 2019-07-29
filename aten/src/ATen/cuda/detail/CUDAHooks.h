@@ -1,6 +1,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/Generator.h>
+#include <c10/util/Optional.h>
 
 // TODO: No need to have this whole header, we can just put it all in
 // the cpp file
@@ -20,6 +21,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   const at::cuda::NVRTC& nvrtc() const override;
   int64_t current_device() const override;
   bool hasPrimaryContext(int64_t device_index) const override;
+  c10::optional<int64_t> getDevceIndexWithPrimaryContext() const override;
   Allocator* getPinnedMemoryAllocator() const override;
   bool compiledWithCuDNN() const override;
   bool compiledWithMIOpen() const override;
