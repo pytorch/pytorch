@@ -191,6 +191,8 @@ class _TestTorchMixin(object):
                 else:
                     self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
 
+        # FIXME: All of the following should be marked as expected failures
+        # so that it is easier to tell when missing has been added.
         # FIXME: fix all the skipped ones below!
         test_namespace(torch.randn(1),
                        'as_strided_',
@@ -223,6 +225,7 @@ class _TestTorchMixin(object):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
+                       'set_names_',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
@@ -2606,7 +2609,7 @@ class _TestTorchMixin(object):
 
             a = torch.tensor([[True, False, True],
                               [False, False, False],
-                              [True, True, True]],dtype=torch.bool, device=d)
+                              [True, True, True]], dtype=torch.bool, device=d)
             b = a.byte()
             aRes = torch.cumprod(a, 0)
             bRes = torch.cumprod(b, 0)
