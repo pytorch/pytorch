@@ -65,6 +65,12 @@ inline void Tensor::set_data(const Tensor & new_data) const {
     static auto table = globalATenDispatch().getOpTable("aten::set_data(Tensor(a!) self, Tensor new_data) -> void");
     return table->getOp<void (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, new_data);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::set_names_(c10::optional<DimnameList> names) {
+    static auto table = globalATenDispatch().getOpTable("aten::set_names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, names);
+}
+#endif
 inline Tensor Tensor::abs() const {
     static auto table = globalATenDispatch().getOpTable("aten::abs(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
@@ -185,6 +191,14 @@ inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const 
     static auto table = globalATenDispatch().getOpTable("aten::bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, weights, minlength);
 }
+inline Tensor Tensor::bitwise_not() const {
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_not(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+}
+inline Tensor & Tensor::bitwise_not_() {
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_not_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+}
 inline Tensor Tensor::bmm(const Tensor & mat2) const {
     static auto table = globalATenDispatch().getOpTable("aten::bmm(Tensor self, Tensor mat2) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, mat2);
@@ -272,6 +286,10 @@ inline Tensor Tensor::diagflat(int64_t offset) const {
 inline Tensor Tensor::diagonal(int64_t offset, int64_t dim1, int64_t dim2) const {
     static auto table = globalATenDispatch().getOpTable("aten::diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, offset, dim1, dim2);
+}
+inline Tensor & Tensor::fill_diagonal_(Scalar fill_value, bool wrap) {
+    static auto table = globalATenDispatch().getOpTable("aten::fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Scalar, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, fill_value, wrap);
 }
 inline Tensor Tensor::div(const Tensor & other) const {
     static auto table = globalATenDispatch().getOpTable("aten::div(Tensor self, Tensor other) -> Tensor");
@@ -703,6 +721,12 @@ inline int64_t Tensor::size(int64_t dim) const {
     static auto table = globalATenDispatch().getOpTable("aten::size(Tensor self, int dim) -> int");
     return table->getOp<int64_t (const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline int64_t Tensor::size(Dimname dim) const {
+    static auto table = globalATenDispatch().getOpTable("aten::size(Tensor self, Dimname dim) -> int");
+    return table->getOp<int64_t (const Tensor &, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
+}
+#endif
 inline Tensor Tensor::slice(int64_t dim, int64_t start, int64_t end, int64_t step) const {
     static auto table = globalATenDispatch().getOpTable("aten::slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, start, end, step);
@@ -755,6 +779,12 @@ inline int64_t Tensor::stride(int64_t dim) const {
     static auto table = globalATenDispatch().getOpTable("aten::stride(Tensor self, int dim) -> int");
     return table->getOp<int64_t (const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline int64_t Tensor::stride(Dimname dim) const {
+    static auto table = globalATenDispatch().getOpTable("aten::stride(Tensor self, Dimname dim) -> int");
+    return table->getOp<int64_t (const Tensor &, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
+}
+#endif
 inline Tensor Tensor::sum(c10::optional<ScalarType> dtype) const {
     static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dtype);
@@ -763,6 +793,12 @@ inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, c10::optional<ScalarTyp
     static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::sum(DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) const {
+    static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
+}
+#endif
 inline Tensor Tensor::sum_to_size(IntArrayRef size) const {
     static auto table = globalATenDispatch().getOpTable("aten::sum_to_size(Tensor self, int[] size) -> Tensor");
     return table->getOp<Tensor (const Tensor &, IntArrayRef)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, size);
@@ -791,6 +827,12 @@ inline Tensor Tensor::prod(int64_t dim, bool keepdim, c10::optional<ScalarType> 
     static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::prod(Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) const {
+    static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
+}
+#endif
 inline Tensor Tensor::t() const {
     static auto table = globalATenDispatch().getOpTable("aten::t(Tensor(a) self) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
@@ -1539,10 +1581,6 @@ inline Tensor Tensor::cholesky_inverse(bool upper) const {
     static auto table = globalATenDispatch().getOpTable("aten::cholesky_inverse(Tensor self, bool upper=False) -> Tensor");
     return table->getOp<Tensor (const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, upper);
 }
-inline std::tuple<Tensor,Tensor> Tensor::pstrf(bool upper, Scalar tol) const {
-    static auto table = globalATenDispatch().getOpTable("aten::pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)");
-    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, upper, tol);
-}
 inline std::tuple<Tensor,Tensor> Tensor::qr(bool some) const {
     static auto table = globalATenDispatch().getOpTable("aten::qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)");
     return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, some);
@@ -1780,7 +1818,8 @@ inline bool is_quantized(Tensor self) {
     return static_cast<T*>(this->data_ptr());    \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_CAST)
+AT_FORALL_QINTS(DEFINE_CAST)
 #undef DEFINE_CAST
 
 #define DEFINE_ITEM(T, name, _)   \

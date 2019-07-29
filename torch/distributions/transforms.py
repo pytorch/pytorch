@@ -555,7 +555,7 @@ class LowerCholeskyTransform(Transform):
         return torch.stack([self._call_on_event(flat_x[i]) for i in range(flat_x.size(0))]).view(x.shape)
 
     def _inverse(self, y):
-        flat_y = y.contiguous().view((-1,) + y.shape[-2:])
+        flat_y = y.reshape((-1,) + y.shape[-2:])
         return torch.stack([self._inverse_on_event(flat_y[i]) for i in range(flat_y.size(0))]).view(y.shape)
 
 

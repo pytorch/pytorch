@@ -77,6 +77,9 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   static PythonArgParser parser({
     "size(int64_t dim)",
     "size()",
+#ifdef BUILD_NAMEDTENSOR
+    "size(Dimname dim)",
+#endif
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<3> parsed_args;
@@ -92,6 +95,14 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     // torch.Size and tuple in python.
     return THPSize_New(self_);
   }
+#ifdef BUILD_NAMEDTENSOR
+  else if (r.idx == 2) {
+    if (jit::tracer::isTracing()) {
+      TORCH_INTERNAL_ASSERT("NYI: Named tensors w/ JIT");
+    }
+    return wrap(self_.size(r.dimname(0)));
+  }
+#endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -102,6 +113,9 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   static PythonArgParser parser({
     "stride(int64_t dim)",
     "stride()",
+#ifdef BUILD_NAMEDTENSOR
+    "stride(Dimname dim)",
+#endif
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<3> parsed_args;
@@ -115,6 +129,11 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // torch.Size and tuple in python
     return THPUtils_packInt64Array(strides.size(), strides.data());
   }
+#ifdef BUILD_NAMEDTENSOR
+  else if (r.idx == 2) {
+    return wrap(self_.stride(r.dimname(0)));
+  }
+#endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -413,6 +432,10 @@ static PyObject * THPVariable_short(PyObject* self, PyObject* args) {
 
 static PyObject * THPVariable_bool(PyObject* self, PyObject* args) {
   return THPVariable_to_type(self, ScalarType::Bool);
+}
+
+static PyObject * THPVariable_bfloat16(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::BFloat16);
 }
 
 static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
@@ -731,6 +754,7 @@ PyMethodDef variable_methods[] = {
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", (PyCFunction)THPVariable__is_view, METH_NOARGS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
+  {"bfloat16", (PyCFunction)THPVariable_bfloat16, METH_NOARGS, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},

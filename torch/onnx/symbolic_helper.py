@@ -122,6 +122,12 @@ def _unpack_list(list_value):
     return list(list_node.inputs())
 
 
+# Check if list_value is output from prim::ListConstruct
+# This is usually called before _unpack_list to ensure the list can be unpacked.
+def _is_packed_list(list_value):
+    return _is_value(list_value) and list_value.node().kind() == "prim::ListConstruct"
+
+
 def parse_args(*arg_descriptors):
     def decorator(fn):
         fn._arg_descriptors = arg_descriptors
@@ -146,6 +152,10 @@ def _scalar(x):
     return x.item()
 
 
+def _is_complete_or_dimensioned_tensor_type(tensor):
+    return tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType"
+
+
 def _if_scalar_type_as(g, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
@@ -156,7 +166,7 @@ def _if_scalar_type_as(g, self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    elif tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType":
+    elif _is_complete_or_dimensioned_tensor_type(tensor):
         ty = tensor.type().scalarType().lower()
         return getattr(self, ty)()
     else:
@@ -177,9 +187,9 @@ def _unimplemented(op, msg):
 
 def _black_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
-        warnings.warn("ONNX export failed on {}, which is not yet implemented for opset 10. "
-                      "Try exporting with a previous opset version."
-                      .format(name))
+        raise RuntimeError("ONNX export failed on {}, which is not implemented for opset {}. "
+                           "Try exporting with other opset versions."
+                           .format(name, _export_onnx_opset_version))
     return symbolic_fn
 
 
@@ -192,10 +202,10 @@ def _try_get_scalar_type(*args):
     return None
 
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
-    if _export_onnx_opset_version == 9:
+    if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
         return _slice(g, input, axes, starts, ends)
-    if _export_onnx_opset_version == 10:
+    else:
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
@@ -228,7 +238,7 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [9, 10]
+_onnx_stable_opsets = [7, 8, 9, 10]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 
