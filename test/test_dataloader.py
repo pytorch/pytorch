@@ -12,8 +12,9 @@ import itertools
 import warnings
 from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
-from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
+from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
+from torch._utils import ExceptionWrapper
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
                           IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
                           load_tests)
