@@ -681,7 +681,7 @@ class TestOperators(TestCase):
 
     def test_frobenius_norm(self):
         x = torch.randn(2, 3, 4).float()
-        self.assertONNX(lambda x: torch._C._VariableFunctions.frobenius_norm(x, (0, 1), keepdim=True), x)
+        self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
 
 
 if __name__ == '__main__':

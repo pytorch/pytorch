@@ -1845,6 +1845,7 @@ def index(g, self, index):
 
 
 @parse_args('v', 'is', 'i')
-def frobenius_norm(g, self, dim, keepdim):
-    f = _reduce_op_symbolic("ReduceL2")
-    return f(g, self, dim=dim, keepdim=keepdim)
+def frobenius_norm(g, self, dim=None, keepdim=False):
+    sqrt = g.op('Mul', self, self)
+    sumsqrt = g.op('ReduceSum', sqrt, axes_i=dim, keepdims_i=keepdim)
+    return g.op('Sqrt', sumsqrt)

@@ -395,10 +395,24 @@ class TestONNXOpset(TestCase):
     def test_frobenius_norm(self):
         class MyModule(Module):
             def forward(self, input):
-                return torch._C._VariableFunctions.frobenius_norm(x, dim=(0, 1), keepdim=True)
+                return torch.norm(x, p="fro", keepdim=False)
 
-        ops = [{"op_name": "ReduceL2",
-                "attributes": [{"name": "axes", "ints": [0, 1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]}]
+        ops = [{"op_name": "Mul"},
+               {"op_name": "ReduceSum", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
+               {"op_name": "Sqrt"}]
+        ops = {9: ops, 10: ops}
+        x = torch.randn(2, 3, 4)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
+    def test_frobenius_norm_keepdim(self):
+        class MyModule(Module):
+            def forward(self, input):
+                return torch.norm(x, p="fro", dim=(0, 1), keepdim=True)
+
+        ops = [{"op_name": "Mul"},
+               {"op_name": "ReduceSum",
+                "attributes": [{"name": "axes", "ints": [0, 1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
+               {"op_name": "Sqrt"}]
         ops = {9: ops, 10: ops}
         x = torch.randn(2, 3, 4)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
