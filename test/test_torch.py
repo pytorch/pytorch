@@ -1865,6 +1865,12 @@ class _TestTorchMixin(object):
             res2[i, 3] = math.fmod(res2[i, 3], q)
         self.assertEqual(res1, res2)
 
+        self.assertEqual(torch.fmod(torch.tensor(2**24 + 1), 2), torch.tensor(1))
+        self.assertEqual(torch.fmod(torch.tensor(2**24*1.0 + 1), 2), torch.tensor(0.))
+        self.assertEqual(torch.fmod(torch.tensor(2**54 + 1), 2), torch.tensor(1))
+        self.assertEqual(torch.fmod(torch.tensor(2**54*1.0 + 1), 2), torch.tensor(0.))
+
+
     def test_remainder(self):
         # Check the Floating point case, both tensor and scalar overloads
         for use_item in [True, False]:

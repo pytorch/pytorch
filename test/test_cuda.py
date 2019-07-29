@@ -1299,6 +1299,12 @@ class TestCuda(TestCase):
             self.assertEqual(r, input[tuple(index)], 0)
             chunk_start = chunk_end
 
+    def test_fmod_cuda(self):
+        self.assertEqual(torch.fmod(torch.tensor(2**24 + 1).cuda(), 2), torch.tensor(1).cuda())
+        self.assertEqual(torch.fmod(torch.tensor(2**24*1.0 + 1).cuda(), 2), torch.tensor(0.).cuda())
+        self.assertEqual(torch.fmod(torch.tensor(2**54 + 1).cuda(), 2), torch.tensor(1).cuda())
+        self.assertEqual(torch.fmod(torch.tensor(2**54*1.0 + 1).cuda(), 2), torch.tensor(0.).cuda())
+
     def test_scatter_cpu(self):
         self._test_scatter(torch.randn(4, 4), dim=0)
 
@@ -1344,7 +1350,7 @@ class TestCuda(TestCase):
 
         # Bool test case
         t = torch.tensor([[False, True], [True, True]], device='cuda')
-        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')), 
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')),
                          torch.tensor([[False, False], [True, True]], device='cuda'))
 
     def test_gather(self):
