@@ -36,7 +36,6 @@ def run_model_test(self, model, train, batch_size=2, state_dict=None,
         torch.onnx.export(model, input, f,
                           opset_version=self.opset_version,
                           example_outputs=output)
-
         input, _ = torch.jit._flatten(input)
         output, _ = torch.jit._flatten(output)
 
@@ -48,6 +47,7 @@ def run_model_test(self, model, train, batch_size=2, state_dict=None,
 
         inputs = list(map(to_numpy, input))
         outputs = list(map(to_numpy, output))
+
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -209,6 +209,29 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
+    def test_index_select_constant_scaler_index(self):
+        class IndexSelectScalerIndexModel(torch.nn.Module):
+            def forward(self, x):
+                index = 2
+                return torch.index_select(x, 1, torch.tensor(index))
+        x = torch.randn(3, 4)
+        self.run_test(IndexSelectScalerIndexModel(), x)
+
+    def test_index_select_scaler_index(self):
+        class IndexSelectScalerIndexModel(torch.nn.Module):
+            def __init__(self, index_base):
+                super(IndexSelectScalerIndexModel, self).__init__()
+                self.index_base = torch.tensor(index_base)
+
+            def forward(self, x, index_offset):
+                index = self.index_base + index_offset
+                return torch.index_select(x, 1, index)
+        x = torch.randn(3, 4)
+        offset = 2
+        index_offset = torch.tensor(offset)
+        base = 1
+        self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
+
     # TODO: enable for opset 10 when ONNXRuntime version will be updated 
     @skipIfUnsupportedOpsetVersion([10])
     def test_topk(self):
@@ -233,7 +256,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_layer_norm(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
-        self.run_test(model, x, rtol=1e-05, atol=1e-07)
+        self.run_test(model, x)
 
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
@@ -444,6 +467,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
+
+    def test_sort(self):
+        class SortModel(torch.nn.Module):
+            def __init__(self, dim):
+                super(SortModel, self).__init__()
+                self.dim = dim
+
+            def forward(self, x):
+                return torch.sort(x, dim=self.dim, descending=True)
+
+        dim = 1
+        x = torch.randn(3, 4)
+        self.run_test(SortModel(dim), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
