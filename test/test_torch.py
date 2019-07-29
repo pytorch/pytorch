@@ -1675,7 +1675,7 @@ class _TestTorchMixin(object):
             self.assertEqual(res1, res2)
 
             # inter-type
-            m1 = torch.randn(2, 2, device=device)
+            m1 = torch.randn(10, 10, device=device)
             self.assertEqual(m1 + 3, m1 + torch.tensor(3))
             self.assertEqual(3 + m1, torch.tensor(3) + m1)
             one = torch.tensor(1, dtype=torch.uint8, device=device)
