@@ -582,6 +582,9 @@ ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
 void ScriptModuleSerializer::serialize(
     const script::Module& module,
     const script::ExtraFilesMap& extra_files) {
+#ifdef FBCODE_CAFFE2
+  proto_version_ = 5;
+#endif
   C10_LOG_API_USAGE_ONCE("torch.script.save");
   TORCH_CHECK(
       !module.name().prefix().empty(),
