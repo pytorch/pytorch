@@ -3,9 +3,12 @@
 
 #include <ATen/NamedTensor.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/DimVector.h>
 #include <functional>
 
 namespace at {
+
+using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
 inline bool has_names(TensorList tensors) {
   return std::any_of(

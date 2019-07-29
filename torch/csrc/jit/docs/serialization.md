@@ -155,7 +155,7 @@ class MyModule(Module):
 
 ### Placing the source code in the archive
 
-Once all code objects have been `PythonPrint`ed into source strings, we have to figure out where to actually put this source. Explaining this necessitates an introduction to `CompilationUnit` and `QualifiedName`.
+Once all code objects have been `PythonPrint`ed into source strings, we have to figure out where to actually put this source. Explaining this necessitates an introduction to `CompilationUnit` and `QualifiedName`. See the appendix on `CompilationUnit` for more info.
 
 **`CompilationUnit`**: this is the owning container for all code objects associated with a given model. When we load, we load all the code objects to a single `CompilationUnit`.
 
@@ -187,5 +187,43 @@ UNDER CONSTRUCTION/WILL CHANGE IF WE KILL TENSORS
 
 During export a list of all the tensors in a model is created. Tensors can come from either module parameters or Tensor type attributes. Metadata about each tensor is stored in `model.json` with an index into this list. The data field refers to the file which contains the tensor storage data. Tensors are saved by directly writing the Tensor storage to a file.
 
+## Appendix: `CompilationUnit` and code object ownership
+`CompilationUnit` performs two functions:
+1. It is the owner (in a C++ sense) for all code objects.
+2. It forms a namespace in which code objects must have unique names.
 
+A `CompilationUnit` is created whenever `torch::jit::load()` is invoked, to place the deserializednewly  code objects in. In Python, there is a single global `CompilationUnit` that holds all code objects defined in Python.
 
+### `CompilationUnit` ownership semantics
+There are a few different entities that participate in the ownership model:
+**`CompilationUnit`**: A container that owns code objects and gives them name. Every code object has a unique qualified name within the CompilationUnit.
+
+There are two kinds of code objects: `Function`s and `ClassType`s.
+**`Function`**: A `Graph` with an associated executor. The `Graph` may own `ClassType`s, since some `Value`s hold a `shared_ptr` to their type (for now). The `Graph` may also weakly reference other `Function`s through function calls.
+
+**`ClassType`**: A definition of a type. This could refer to a user-defined Torchscript class, or a `ScriptModule`. Owns other its attribute types (including other ClassTypes). Weakly references the class’s methods (`Function`s).
+
+**`Object`**: An instance of a particular class. Own the `CompilationUnit` that owns its `ClassType`. This is to ensure that if the user passes the object around in C++, all its code will stay around and methods will be invokable.
+
+**`Module`**: A view over a `ClassType` and the `Object` that holds its state. Also responsible for turning unqualified names (e.g. `foward()`) into qualified ones for lookup in the owning `CompilationUnit` (e.g. `__torch__.MyModule.forward`). Owns the `Object`, which transitively owns the `CompilationUnit`.
+
+**`Method`**: A tuple of `(Module, Function)`.
+
+### Code object naming
+
+`CompilationUnit` maintains a namespace in which all code objects (`ClassType`s and `Function`s) are uniquely named. These names don't have any particular meaning, except that they uniquely identify a code object during serialization and deserialization. The basic naming scheme is:
+
+* Everything starts in the `__torch__` namespace.
+* Classes are named parallel to Python’s module namespacing: so class `Bar` in `foo.py` would become `__torch__.foo.Bar`.
+* Methods are attached to the module’s namespace. So `Bar.forward()` would be `__torch__.foo.Bar.forward`.
+
+There are some caveats:
+
+**Some `CompilationUnit`s have no prefix**: For testing and other internal purposes, occasionally it’s useful to have no prefixes on names. In this case, everything is just a bare name inside the `CompilationUnit`. Users cannot construct `CompilationUnits that look like this.
+
+**Name mangling**: In Python, we can construct code objects that have the same qualified name. There are two cases where this happens:
+
+1. For `ScriptModule`s, since every `ScriptModule` is a singleton class in the JIT, a user that is constructing multiple `ScriptModule`s will create multiple corresponding `ClassType`s with identical names.
+2. Nesting functions will also cause qualified name clashes, due to limitations in Python. In these cases, we mangle the names of the code objects before they are placed in the global Python `CompilationUnit`.
+
+The rules for mangling are simple. Say we have a qualified name `__torch__.foo.Bar`. The first instance of this qualified name will just be `__torch__.foo.Bar`. The next time we want to create a code object with that name, it'll get the name `__torch__.foo.__torch_mangle_0.Bar`. The next one will be `__torch__.foo.__torch_mangle_1.Bar`, and so on. We mangle the namespace before `Bar` so that when we pretty-print code, the unqualified name (`Bar`) is unchanged—this is a useful property so that things like trace-checking are oblivious to the mangling.
