@@ -15,6 +15,16 @@ C10_DEFINE_int64(
     "The maximum memory in bytes to keep on shrink, if the difference between "
     "tensor sizes is bigger than this then tensor will be reset.");
 
+const std::string err_msg_tensor_metadata_change_not_allowed =
+    "is not allowed on a Tensor created from .data or .detach().\n"
+    "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
+    "without autograd tracking the change, remove the .data / .detach() call and wrap the change in a `with torch.no_grad():` block.\n"
+    "For example, change:\n"
+    "    x.data.set_(y)\n"
+    "to:\n"
+    "    with torch.no_grad():\n"
+    "        x.set_(y)";
+
 namespace c10 {
 
 at::Tensor& TensorImpl::grad() {
