@@ -80,43 +80,49 @@ std::array<bool, N> as_bool_array(const c10::List<bool>& list) {
   return res;
 }
 
-RegisterOperators reg({
-  Operator(
-      "aten::get_device(Tensor self) -> int",
-      [](Stack & stack) {
-          RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
-          auto result = at::get_device(
-              (std::move(peek(stack, 0, 1))).toTensor()
-          );
-          drop(stack, 1);
-          pack(stack, std::move(result));
-          return 0;
-      }
-  ),
-  Operator(
-      "aten::storage_offset(Tensor self) -> int",
-      [](Stack & stack) {
-          RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
-          auto result = ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
-          drop(stack, 1);
-          pack(stack, std::move(result));
-          return 0;
-      }
-  ),
-  Operator(
-      "aten::is_contiguous(Tensor self) -> bool",
-      [](Stack & stack) {
-          RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
-          auto result = ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
-          drop(stack, 1);
-          pack(stack, std::move(result));
-          return 0;
-      }
-  ),
+c10::OperatorOptions atenOperatorOptions() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
 
-  // Generated operators
-  ${constructors}
-});
+RegisterOperators reg(
+    {Operator(
+         "aten::get_device(Tensor self) -> int",
+         [](Stack& stack) {
+           RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
+           auto result =
+               at::get_device((std::move(peek(stack, 0, 1))).toTensor());
+           drop(stack, 1);
+           pack(stack, std::move(result));
+           return 0;
+         },
+         atenOperatorOptions()),
+     Operator(
+         "aten::storage_offset(Tensor self) -> int",
+         [](Stack& stack) {
+           RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
+           auto result =
+               ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
+           drop(stack, 1);
+           pack(stack, std::move(result));
+           return 0;
+         },
+         atenOperatorOptions()),
+     Operator(
+         "aten::is_contiguous(Tensor self) -> bool",
+         [](Stack& stack) {
+           RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
+           auto result =
+               ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
+           drop(stack, 1);
+           pack(stack, std::move(result));
+           return 0;
+         },
+         atenOperatorOptions()),
+
+     // Generated operators
+     ${constructors}});
 
 } // anon namespace
 
