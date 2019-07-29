@@ -37,7 +37,7 @@ class ConvBn2d(Conv2d):
                  # Conv2d args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros',
+                 padding_mode='zeros',
                  # BatchNorm2d args
                  # num_features: out_channels
                  eps=1e-05, momentum=0.1,
@@ -48,7 +48,7 @@ class ConvBn2d(Conv2d):
                  activation_fake_quant=None,
                  weight_fake_quant=None):
         super(ConvBn2d, self).__init__(in_channels, out_channels, kernel_size,
-                                       stride, padding, dilation, groups, bias, padding_mode)
+                                       stride, padding, dilation, groups, False, padding_mode)
         self.eps = eps
         self.momentum = momentum
         self.freeze_bn = freeze_bn if self.training else True
@@ -118,10 +118,7 @@ class ConvBn2d(Conv2d):
 
         if self.training and not self.freeze_bn:
             # recovering original conv to get original batch_mean and batch_var
-            conv_orig = conv
-            if self.bias is not None:
-                conv_orig = conv_orig - self.bias.reshape([1, -1, 1, 1])
-            conv_orig = conv_orig / scale_factor.reshape([1, -1, 1, 1])
+            conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
             batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
             if self.bias is not None:
                 batch_mean = batch_mean + self.bias
@@ -131,19 +128,11 @@ class ConvBn2d(Conv2d):
             rescale_factor = running_std * batch_rstd
             conv = conv * rescale_factor.reshape([1, -1, 1, 1])
             conv = conv + (self.beta - self.gamma * batch_mean * batch_rstd).reshape([1, -1, 1, 1])
-            if self.bias is not None:
-                conv = conv + ((self.gamma * batch_rstd - rescale_factor) * self.bias).reshape([1, -1, 1, 1])
 
             self.running_mean = exponential_average_factor * batch_mean + (1 - exponential_average_factor) * self.running_mean
             self.running_var = exponential_average_factor * batch_var + (1 - exponential_average_factor) * self.running_var
         else:
-            adjustment = self.running_mean
-            # adjust according to bias
-            if self.bias is not None:
-                adjustment = self.running_mean - self.bias
-                conv = conv - self.bias.reshape([1, -1, 1, 1])
-
-            conv = conv + (self.beta - self.gamma * adjustment /
+            conv = conv + (self.beta - self.gamma * self.running_mean /
                            running_std).reshape([1, -1, 1, 1])
         return conv
 
@@ -170,7 +159,7 @@ class ConvBn2d(Conv2d):
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
                          conv.stride, conv.padding, conv.dilation,
-                         conv.groups, conv.bias is not None,
+                         conv.groups,
                          conv.padding_mode,
                          bn.eps, bn.momentum,
                          False,
@@ -178,7 +167,6 @@ class ConvBn2d(Conv2d):
                          qconfig.weight)
 
         qat_convbn.weight = conv.weight
-        qat_convbn.bias = conv.bias
         qat_convbn.gamma = bn.weight
         qat_convbn.beta = bn.bias
         qat_convbn.running_mean = bn.running_mean
@@ -212,7 +200,7 @@ class ConvBnReLU2d(ConvBn2d):
                  # Conv2d args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros',
+                 padding_mode='zeros',
                  # BatchNorm2d args
                  # num_features: out_channels
                  eps=1e-05, momentum=0.1,
@@ -223,7 +211,7 @@ class ConvBnReLU2d(ConvBn2d):
                  activation_fake_quant=None,
                  weight_fake_quant=None):
         super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
-                                           padding, dilation, groups, bias,
+                                           padding, dilation, groups,
                                            padding_mode, eps, momentum,
                                            freeze_bn,
                                            activation_fake_quant,

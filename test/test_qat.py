@@ -29,7 +29,6 @@ class IntrinsicQATModuleTest(TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 1),
-           use_bias=st.booleans(),
            padding_mode=st.sampled_from(['zeros', 'circular']),
            use_relu=st.booleans(),
            eps=st.sampled_from([1e-5, 1e-4, 1e-3, 0.01, 0.1]),
@@ -50,7 +49,6 @@ class IntrinsicQATModuleTest(TestCase):
             pad_h,
             pad_w,
             dilation,
-            use_bias,
             padding_mode,
             use_relu,
             eps,
@@ -69,7 +67,7 @@ class IntrinsicQATModuleTest(TestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            use_bias,
+            False,  # No bias
             padding_mode
         ).to(dtype=torch.float)
         bn_op = BatchNorm2d(output_channels, eps, momentum).to(dtype=torch.float)
@@ -84,7 +82,6 @@ class IntrinsicQATModuleTest(TestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            use_bias,
             padding_mode,
             eps,
             momentum,
@@ -97,8 +94,6 @@ class IntrinsicQATModuleTest(TestCase):
         input = torch.randn(batch_size, input_channels, height, width, dtype=torch.float)
         input.requires_grad_()
         conv_op.weight = Parameter(qat_op.weight)
-        if use_bias:
-            conv_op.bias = Parameter(qat_op.bias)
         bn_op.running_mean = qat_op.running_mean
         bn_op.running_var = qat_op.running_var
         bn_op.weight = qat_op.gamma
