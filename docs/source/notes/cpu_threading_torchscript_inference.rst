@@ -59,8 +59,8 @@ for a relative ease of use and support for loop-based parallelism and other prim
 At the same time OpenMP is not known for a good interoperability with other threading
 libraries used by the application. In particular, OpenMP does not guarantee that a single per-process intra-op thread
 pool is going to be used in the application. On the contrary, two different inter-op
-threads will likely use different OpenMP thread pools for intra-op work. This might
-result in a large number of threads used by the application.
+threads will likely use different OpenMP thread pools for intra-op work.
+This might result in a large number of threads used by the application.
 
 TBB is used to a lesser extent in external libraries, but, at the same time,
 is optimized for the concurrent environments. PyTorch's TBB backend guarantees that
