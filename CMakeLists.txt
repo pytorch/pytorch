@@ -566,7 +566,9 @@ else()
 endif()
 
 # ---[ Modules
-add_subdirectory(modules)
+if (NOT INTERN_BUILD_MOBILE)
+  add_subdirectory(modules)
+endif()
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules

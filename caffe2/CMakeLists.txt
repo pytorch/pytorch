@@ -460,6 +460,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
+  if (INTERN_BUILD_MOBILE)
+    list(REMOVE_ITEM TORCH_SRCS ${TORCH_SRC_DIR}/csrc/jit/export.cpp)
+    list(REMOVE_ITEM TORCH_SRCS ${TORCH_ROOT}/test/cpp/jit/test.cpp)
+  endif()
+
   if (NOT WIN32 AND NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
@@ -497,7 +502,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
-  if (NOT NO_API)
+  if (INTERN_BUILD_MOBILE) 
+    list(APPEND TORCH_SRCS ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp)
+  elseif (NOT NO_API) 
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
