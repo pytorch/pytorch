@@ -91,7 +91,8 @@ namespace jit {
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
   _(InsertConstant)                    \
-  _(DCE)
+  _(DCE)                               \
+  _(CustomFusionNestedBlocks)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

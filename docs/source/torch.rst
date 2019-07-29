@@ -320,6 +320,7 @@ BLAS and LAPACK Operations
 .. autofunction:: addr
 .. autofunction:: baddbmm
 .. autofunction:: bmm
+.. autofunction:: bitwise_not
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
 .. autofunction:: cholesky_inverse

@@ -105,6 +105,11 @@ module_tests = [
         input_size=(2, 3, 4, 5)
     ),
     dict(
+        module_name='Flatten',
+        input_size=(2, 3, 4, 5),
+        reference_fn=lambda i, *_: torch.flatten(i, 1)
+    ),
+    dict(
         module_name='Softmax',
         constructor_args=(1,),
         input_size=(10, 20),

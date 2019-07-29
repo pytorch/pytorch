@@ -35,6 +35,10 @@
 - func: set_data(Tensor(a!) self, Tensor new_data) -> void
   variants: method
 
+- func: set_names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -1979,11 +1983,21 @@
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: sum(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: sum(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
@@ -2022,11 +2036,22 @@
 
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: prod(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: prod(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
 
 - func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False
