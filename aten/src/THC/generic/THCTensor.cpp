@@ -73,7 +73,7 @@ THCTensor *THCTensor_(new)(THCState *state)
 /* Pointer-copy init */
 THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
-  return at::native::alias(THTensor_wrap(tensor)).unsafeGetTensorImpl();
+  return at::native::alias(THTensor_wrap(tensor)).unsafeReleaseTensorImpl();
 }
 
 /* Storage init */
@@ -199,7 +199,7 @@ THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
   for (int i = 2; i < in_dims; i++) {
     new_size[i - 1] = THCTensor_(size)(state, input, i);
   }
-  THCTensor *output = at::native::view(THTensor_wrap(input), new_size).unsafeGetTensorImpl();
+  THCTensor *output = at::native::view(THTensor_wrap(input), new_size).unsafeReleaseTensorImpl();
   return output;
 }
 
