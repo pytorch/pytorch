@@ -43,7 +43,7 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Te
   }
   if (source.dim() == 0) {
     dim = c10::maybe_wrap_dim(dim, index.dim());
-    std::vector<int64_t> source_sizes = source.sizes().vec();
+    std::vector<int64_t> source_sizes = self.sizes().vec();
     source_sizes[dim] = index.size(dim);
     return at::_scatter_add_(self, dim, index, source.expand(source_sizes));
   }

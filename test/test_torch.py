@@ -8119,12 +8119,16 @@ class _TestTorchMixin(object):
                 for k in range(idx_size[2]):
                     ii = [i, j, k]
                     ii[dim] = idx[i, j, k]
-                    if method == 'scatter_' and not is_scalar:
-                        expected[tuple(ii)] = src[i, j, k]
+                    if method == 'scatter_':
+                        if is_scalar:
+                            expected[tuple(ii)] = src
+                        else:
+                            expected[tuple(ii)] = src[i, j, k]
                     elif method == 'scatter_add_':
-                        expected[tuple(ii)] += src[i, j, k]
-                    else:
-                        expected[tuple(ii)] = src
+                        if is_scalar:
+                            expected[tuple(ii)] += src
+                        else:
+                            expected[tuple(ii)] += src[i, j, k]
         self.assertEqual(actual, expected, 0)
 
         if test_bounds:
