@@ -1818,7 +1818,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
       return nonsingular_case_backward(grad, self, det);
     }
   } else {
-    auto nonzero_det_indices = at::where(det != 0);
+    auto nonzero_det_indices = at::where(det);
     auto zero_det_indices = at::where(det == 0);
 
     if (zero_det_indices[0].size(0) == det.numel()) {  // all determinants are zero (singular)
@@ -1920,7 +1920,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    auto nonzero_signdet_indices = at::where(signdet != 0);
+    auto nonzero_signdet_indices = at::where(signdet);
     auto zero_signdet_indices = at::where(signdet == 0);
 
     if (zero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)

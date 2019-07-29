@@ -552,13 +552,17 @@ class TestCase(expecttest.TestCase):
             prec = self.precision
 
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, prec, message, allow_inf)
+            self.assertEqual(x.item(), y, prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), prec, message, allow_inf)
+            self.assertEqual(x, y.item(), prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
-            self.assertEqual(x.item(), y, prec, message, allow_inf)
+            self.assertEqual(x.item(), y, prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
-            self.assertEqual(x, y.item(), prec, message, allow_inf)
+            self.assertEqual(x, y.item(), prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
@@ -602,10 +606,15 @@ class TestCase(expecttest.TestCase):
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
             elif x.is_quantized and y.is_quantized:
-                self.assertEqual(x.qscheme(), y.qscheme())
-                self.assertEqual(x.q_scale(), y.q_scale())
-                self.assertEqual(x.q_zero_point(), y.q_zero_point())
-                self.assertEqual(x.int_repr(), y.int_repr())
+                self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(x.q_zero_point(), y.q_zero_point(),
+                                 prec=prec, message=message,
+                                 allow_inf=allow_inf)
+                self.assertEqual(x.int_repr(), y.int_repr(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -614,15 +623,21 @@ class TestCase(expecttest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
-                self.assertEqual(x.items(), y.items())
+                self.assertEqual(x.items(), y.items(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
             else:
-                self.assertEqual(set(x.keys()), set(y.keys()))
+                self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
+                                 message=message, allow_inf=allow_inf)
                 key_list = list(x.keys())
-                self.assertEqual([x[k] for k in key_list], [y[k] for k in key_list])
+                self.assertEqual([x[k] for k in key_list],
+                                 [y[k] for k in key_list],
+                                 prec=prec, message=message,
+                                 allow_inf=allow_inf)
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, prec, message)
+                self.assertEqual(x_, y_, prec=prec, message=message,
+                                 allow_inf=allow_inf)
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
