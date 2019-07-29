@@ -901,7 +901,6 @@ class ShapePropagator {
 
     static const register_formula_for broadcasting_tensor_scalar_ops_arithmetic{
         {
-
             // Tensor-Scalar operators
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
@@ -911,7 +910,15 @@ class ShapePropagator {
           [this](Node* node) -> type_vec_t {
             if (auto maybe_tensor_types =
                     gatherTensorTypes<DimensionedTensorType>(node)) {
-              return {broadcast(*maybe_tensor_types, getScalarType(node))};
+              auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
+              auto second_scalar_type = typeToScalarType(node->inputs()[1]->type());
+              if (isIntegralType(first_scalar_type) && second_scalar_type.has_value() &&
+                  isFloatingType(*second_scalar_type) )
+              {
+                auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+                return {broadcast(*maybe_tensor_types, default_dtype)};
+              }
+              return {broadcast(*maybe_tensor_types, first_scalar_type)};
             }
             return {};
           }};
