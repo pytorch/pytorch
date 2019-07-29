@@ -8214,7 +8214,7 @@ class _TestTorchMixin(object):
         index2 = torch.randint(high=8, size=(2, 1, 1))
         src2 = torch.randn(1, 1, 3, 5, 1)
         for index, src in [(index1, src1), (index2, src2), (index1, torch.tensor(1.0)), (index1, 1.0)]:
-            expanded_src = torch.tensor(src).expand(2, 5, 3, 5, 3)
+            expanded_src = torch.as_tensor(src).expand(2, 5, 3, 5, 3)
             result1 = full_x.clone().scatter_(2, index, src)
             result2 = x.scatter(2, index, src)
             self.assertEqual(result1, result2)
