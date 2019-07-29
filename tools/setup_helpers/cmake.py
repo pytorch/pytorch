@@ -189,10 +189,6 @@ class CMake:
 
         cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
         ldflags = os.getenv('LDFLAGS', "")
-        if IS_WINDOWS:
-            CMake.defines(args, MSVC_Z7_OVERRIDE=not check_negative_env_flag(
-                'MSVC_Z7_OVERRIDE'))
-            cflags += " /EHa"
 
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
@@ -227,6 +223,7 @@ class CMake:
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'MKL_THREADING',
              'MKLDNN_THREADING',
+             'MSVC_Z7_OVERRIDE',
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
