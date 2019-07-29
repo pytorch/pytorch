@@ -719,7 +719,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if not is_module and not has_self and name.endswith('_') and not name.startswith('_'):
             if name not in EXEMPTED_INPLACE_FUNCTIONS:
                 # An in-place function that is not exempted.
-                raise AssertionError('In-place operator {} must not have a function variant.'.format(name))
+                raise AssertionError('In-place operator {} should not have a function variant. '
+                                     'Please remove its function variant in '
+                                     'aten/src/ATen/native/native_functions.yaml.'.format(name))
 
         # emit dispatch
         grouped = group_declarations(declarations)
