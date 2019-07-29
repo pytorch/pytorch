@@ -33,12 +33,6 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
-// Error message to show when the user tries to change tensor metadata on
-// Tensor created from .data or .detach().
-//
-// See NOTE [ Metadata Change for a Detached Tensor ] for details.
-extern C10_API const std::string err_msg_tensor_metadata_change_not_allowed;
-
 namespace at {
 class Tensor;
 }
@@ -1537,6 +1531,12 @@ protected:
   }
 
 protected:
+  // Error message to show when the user tries to change tensor metadata on
+  // Tensor created from .data or .detach().
+  //
+  // See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  static const char * const err_msg_tensor_metadata_change_not_allowed;
+
   Storage storage_;
   // This pointer points to an AutogradMeta struct that stores autograd-specific fields
   // (such as grad_ / grad_fn_ / grad_accumulator_).
