@@ -7,6 +7,9 @@
 # and then update DOCKER_IMAGE_VERSION at the top of the following files:
 # * cimodel/data/pytorch_build_definitions.py
 # * cimodel/data/caffe2_build_definitions.py
+# And the inline copies of the variable in
+# * verbatim-sources/job-specs-custom.yml
+#   (grep for DOCKER_IMAGE)
 
 docker_config_defaults: &docker_config_defaults
   user: jenkins
