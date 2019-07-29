@@ -792,6 +792,8 @@ def method_tests():
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', (), [0]),
         ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', (), [0]),
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
+        ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalartensor_all_dim0', (), [0]),
+        ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), 2.5), 'scalar_all_dim0', (), [0]),
         ('masked_select', (M, M), (mask_not_all_zeros((M, M)),)),
         ('masked_select', (M, M), (mask_not_all_zeros((M,)),), 'broadcast_rhs'),
         ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),

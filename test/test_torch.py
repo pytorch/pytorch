@@ -8146,6 +8146,9 @@ class _TestTorchMixin(object):
     def test_scatterFill(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
+    def test_scatterAddScalar(self):
+        self._test_scatter_base(self, lambda t: t, 'scatter_add_', True)
+
     def test_scatter_bool(self):
         for device in torch.testing.get_all_device_types():
             x = torch.tensor([[True, True, True], [True, True, True]], device=device)
