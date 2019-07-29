@@ -2115,10 +2115,10 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should have same
-number of dimensions. It is also required that ``index.size(d) <= src.size(d)``
-for all dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all
-dimensions ``d != dim``.
+:attr:`self` and :attr:`src` (if it is a Tensor) should have same number of dimensions.
+:attr:`index` could have less dimensions than :attr:`self` and :attr:`src`.
+It is also required that ``index.size(d) == src.size(d) == self.size(d)`` or broadcastable
+for all dimensions ``d != dim``. See `broadcasting-semantics`_ for more information.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row
@@ -2127,7 +2127,7 @@ along the specified dimension :attr:`dim` must be unique.
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter,
-      can be either empty or the same size of src.
+      can be either empty or the broadcasting-compatible size of src.
       When empty, the operation returns identity
     src (Tensor): the source element(s) to scatter,
       incase `value` is not specified
@@ -2182,7 +2182,7 @@ the specified dimension :attr:`dim` must be unique.
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter and add,
-      can be either empty or the same size of src.
+      can be either empty or the broadcasting-compatible size of src.
       When empty, the operation returns identity.
     other (Tensor): the source elements to scatter and add
 
