@@ -15,6 +15,14 @@ from torch.nn.modules.utils import _pair
 
 
 class Conv2d(_ConvNd):
+    r"""A quantized Conv2d module.
+
+    We adopt the same interface as :class:`torch.nn.Conv2d`.
+    """
+
+    # __QAT_MODULE = QATConv2d
+    __FLOAT_MODULE = NNConv2d
+
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros'):
@@ -98,19 +106,21 @@ class Conv2d(_ConvNd):
                                              self.scale, self.zero_point)
         return output.permute([0, 3, 1, 2])
 
-    @staticmethod
-    def from_float(mod):
+    @classmethod
+    def from_float(cls, mod):
         r"""Create a quantized module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
         if hasattr(mod, 'weight_fake_quant'):
-            # assert type(mod) == QATConv2d, 'nnq.Conv2d.from_float only works for nn.Conv2d or nn.qat.Conv2d'
+            # assert type(mod) == cls.__QAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+            #     cls.__QAT_MODULE.__name__
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
             weight_observer = mod.weight_fake_quant
         else:
-            assert type(mod) == NNConv2d, 'nnq.Conv2d.from_float only works for nn.Conv2d or nn.qat.Conv2d'
+            assert type(mod) == cls.__FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+                cls.__FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
             weight_observer = mod.qconfig.weight()

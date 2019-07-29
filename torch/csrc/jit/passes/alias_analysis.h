@@ -119,6 +119,9 @@ class AliasDb {
   // or does the element contain an element for which that's true
   bool cannotCheckAliasContainment(const Value* elem) const;
 
+  // Is this a value which will not alias
+  bool nonAliasingValue(const Value* elem) const;
+
   /**
    * Special analysis methods
    */
