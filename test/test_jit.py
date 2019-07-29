@@ -13186,7 +13186,8 @@ a")
 
         self.assertTrue('forward' in dir(M()))
 
-    def test_spread_kwargs_error(self):
+    @unittest.skipIf(PY2, "kwarg expansion requires Python 3")
+    def test_kwarg_expansion_error(self):
         @torch.jit.ignore
         def something_else(h, i):
             pass
@@ -13394,7 +13395,7 @@ class TestRecursiveScript(JitTestCase):
         except Exception as e:
             checker = FileCheck()
             checker.check("import statements")
-            checker.check("is being compiled since it was called from \'fn\'")
+            checker.check("is being compiled since it was called from")
             checker.run(str(e))
 
     def test_module_basic(self):

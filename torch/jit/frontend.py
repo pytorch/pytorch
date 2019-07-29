@@ -436,7 +436,7 @@ class ExprBuilder(Builder):
             kw_expr = build_expr(ctx, kw.value)
             # XXX: we could do a better job at figuring out the range for the name here
             if not kw.arg:
-                raise NotSupportedError(kw_expr.range(), 'Argument list unpacking is not supported')
+                raise NotSupportedError(kw_expr.range(), 'keyword-arg expansion is not supported')
             kwargs.append(Attribute(Ident(kw_expr.range(), kw.arg), kw_expr))
         return Apply(func, args, kwargs)
 
