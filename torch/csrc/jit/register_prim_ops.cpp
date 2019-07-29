@@ -1759,7 +1759,13 @@ int listSort(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   std::sort(list.begin(), list.end(), [reverse](const T& a, const T& b) {
-    return (a < b) ^ reverse;
+    // FBCode errors without this check - "strict weak ordering"
+    // TODO: remove when possible, since it just slows down
+    // sorting and doesn't do anything useful
+    if (a == b) {
+      return false;
+    }
+    return (a < b) != reverse;
   });
   return 0;
 }
@@ -1783,6 +1789,10 @@ int listCopyAndSort(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   auto list_copied = list.copy();
   std::sort(list_copied.begin(), list_copied.end(), [](const T& a, const T& b) {
+    // "strict weak ordering" issue - see other sort
+    if (a == b) {
+      return false;
+    }
     return a < b;
   });
   push(stack, list_copied);
@@ -2885,16 +2895,14 @@ Operation sort_op(
         g_list.begin(),
         g_list.end(),
         [lt_func, reverse, &sort_stack](IValue a, IValue b) -> bool {
-          // FBCode errors without this check - "strict weak ordering"
-          // TODO: remove when possible, since it just slows down
-          // sorting and doesn't do anything useful
+          // "strict weak ordering" issue - see other sort
           if (a.isSameIdentity(b)) {
             return false;
           }
           sort_stack.push_back(a);
           sort_stack.push_back(b);
           lt_func->run(sort_stack);
-          return pop(sort_stack).toBool() ^ reverse;
+          return pop(sort_stack).toBool() != reverse;
         });
     if (copy_return_list) {
       push(stack, g_list);
