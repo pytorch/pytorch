@@ -200,10 +200,23 @@ class TestUtilityFuns(TestCase):
         # test strip_doc_string=False
         self.assertFalse(is_model_stripped(io.BytesIO(), False))
 
+    # NB: remove this test once DataParallel can be correctly handled
+    def test_error_on_data_parallel(self):
+        model = torch.nn.DataParallel(torch.nn.ReflectionPad2d((1, 2, 3, 4)))
+        x = torch.randn(1, 2, 3, 4)
+        f = io.BytesIO()
+        with self.assertRaisesRegex(ValueError,
+                                    'torch.nn.DataParallel is not supported by ONNX '
+                                    'exporter, please use \'attribute\' module to '
+                                    'unwrap model from torch.nn.DataParallel. Try '):
+            torch.onnx.export(model, x, f, opset_version=self.opset_version)
+
+
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=10))
+
 
 if __name__ == '__main__':
     run_tests()
