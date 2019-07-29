@@ -362,6 +362,12 @@ class Tensor(torch._C._TensorBase):
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
 
+    def __radd__(self, other):
+        if isinstance(self, torch.Tensor):
+            if (self.dtype == torch.bool):
+                return torch.sum(self) + other
+        return self.__add__(other)
+
     def __len__(self):
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")

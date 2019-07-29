@@ -1675,7 +1675,7 @@ class _TestTorchMixin(object):
             self.assertEqual(res1, res2)
 
             # inter-type
-            m1 = torch.randn(10, 10, device=device)
+            m1 = torch.randn(2, 2, device=device)
             self.assertEqual(m1 + 3, m1 + torch.tensor(3))
             self.assertEqual(3 + m1, torch.tensor(3) + m1)
             one = torch.tensor(1, dtype=torch.uint8, device=device)
@@ -1724,6 +1724,22 @@ class _TestTorchMixin(object):
         res_csub = a.clone()
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
+
+    def test_sum(self):
+        input = [1, 2, 3]
+        self.assertEqual(sum(input), 6)
+
+        input = torch.tensor([True, False, True, False, True])
+        self.assertEqual(sum(input), 3)
+
+        input = torch.tensor([])
+        self.assertEqual(sum(input), 0)
+
+        input = torch.tensor([1, 0, 1, 0, 1], dtype=torch.uint8)
+        self.assertEqual(sum(input), 3)
+
+        input = torch.tensor([1.1, 0, 1.1, 0, 1.1])
+        self.assertEqual(sum(input), 3.3)
 
     @staticmethod
     def _test_neg(self, cast):
