@@ -41,7 +41,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     return Variable();
   }
 
-  auto grad_fn = grad_fn_;
+  auto grad_fn = grad_fn_.lock();
   if (has_grad_fn_ && !grad_fn) {
     if (!saved_for) {
       // If saving the grad_fn would create a circular reference, then it must

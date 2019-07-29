@@ -43,7 +43,7 @@ class TORCH_API SavedVariable {
   // is false, then this is a leaf node. Note that the grad_fn is not saved if
   // it would create a circular reference. In that case, the grad_fn must be
   // passed in to the unpack function when reconstructing the Variable.
-  std::shared_ptr<Node> grad_fn_;
+  std::weak_ptr<Node> grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
   c10::VariableVersion version_counter_;
 
