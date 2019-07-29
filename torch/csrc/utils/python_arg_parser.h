@@ -144,6 +144,7 @@ struct PythonArgs {
   inline c10::optional<at::Device> deviceOptional(int i);
 #ifdef BUILD_NAMEDTENSOR
   inline at::Dimname dimname(int i);
+  inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
 #endif
   inline at::MemoryFormat memoryformat(int i);
@@ -392,9 +393,7 @@ inline at::Dimname PythonArgs::dimname(int i) {
   return THPDimname_parse(args[i]);
 }
 
-inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
-  if (!args[i]) return c10::nullopt;
-  PyObject* arg = args[i];
+inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Dimname> res;
@@ -404,6 +403,22 @@ inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional
     res.push_back(THPDimname_parse(obj));
   }
   return res;
+}
+
+inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return parseDimnameList(args[i]);
+}
+
+inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
+  TORCH_INTERNAL_ASSERT(args[i]);
+  PyObject* arg = args[i];
+  auto size = signature.params[i].size;
+  TORCH_INTERNAL_ASSERT(size == 0 || size == 1);
+  if (size == 1 && THPUtils_checkDimname(arg)) {
+    return { THPDimname_parse(arg) };
+  }
+  return parseDimnameList(arg);
 }
 #endif
 

@@ -274,7 +274,7 @@ class JitTestCase(TestCase):
         return defined_vars
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               optimize=True, outputs=None, capture_output=False):
+                               outputs=None, capture_output=False):
         """
         Checks that a given function will throw the correct exception,
         when executed with normal python, the string frontend, and the AST frontend
@@ -285,66 +285,66 @@ class JitTestCase(TestCase):
         # string frontend
         with self.assertRaisesRegex(exception, regex):
             source = textwrap.dedent(inspect.getsource(script))
-            cu = torch.jit.CompilationUnit(source, optimize)
+            cu = torch.jit.CompilationUnit(source)
             ge = getattr(cu, script.__name__)
             ge(*inputs)
         # python AST frontend
         with self.assertRaisesRegex(exception, regex):
-            ge = torch.jit.script(script, optimize)
+            ge = torch.jit.script(script)
             ge(*inputs)
 
     def checkScript(self,
                     script,
                     inputs,
-                    optimize=True,
                     name='func',
+                    optimize=True,
                     capture_output=False,
                     frames_up=1):
-        if isinstance(script, str):
-            # Compile the string to a Script function
-            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
+        with torch.jit.optimized_execution(optimize):
+            if isinstance(script, str):
+                # Compile the string to a Script function
+                cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
 
-            # Execute the Python function so we can run it later and get its
-            # outputs
-            frame = self.get_frame_vars(frames_up)
-            the_locals = {}
-            execWrapper(script, glob=frame, loc=the_locals)
-            frame.update(the_locals)
+                # Execute the Python function so we can run it later and get its
+                # outputs
+                frame = self.get_frame_vars(frames_up)
+                the_locals = {}
+                execWrapper(script, glob=frame, loc=the_locals)
+                frame.update(the_locals)
 
-            python_fn = frame[name]
-            scripted_fn = getattr(cu, name)
-        else:
+                python_fn = frame[name]
+                scripted_fn = getattr(cu, name)
+            else:
 
-            # Check the string frontend first
-            source = textwrap.dedent(inspect.getsource(script))
-            self.checkScript(
-                source,
-                inputs,
-                optimize,
-                script.__name__,
-                capture_output,
-                frames_up=2)
+                # Check the string frontend first
+                source = textwrap.dedent(inspect.getsource(script))
+                self.checkScript(
+                    source,
+                    inputs,
+                    script.__name__,
+                    capture_output,
+                    frames_up=2)
 
-            # Continue checking the Python frontend
-            scripted_fn = torch.jit.script(script, optimize, _frames_up=1)
-            python_fn = script
+                # Continue checking the Python frontend
+                scripted_fn = torch.jit.script(script, _frames_up=1)
+                python_fn = script
 
-        if capture_output:
-            with self.capture_stdout() as script_stdout:
+            if capture_output:
+                with self.capture_stdout() as script_stdout:
+                    script_outputs = scripted_fn(*inputs)
+                with self.capture_stdout() as _python_stdout:
+                    python_outputs = python_fn(*inputs)
+                if not IS_WINDOWS:
+                    self.assertExpected(script_stdout[0], subname='stdout')
+            else:
                 script_outputs = scripted_fn(*inputs)
-            with self.capture_stdout() as _python_stdout:
                 python_outputs = python_fn(*inputs)
-            if not IS_WINDOWS:
-                self.assertExpected(script_stdout[0], subname='stdout')
-        else:
-            script_outputs = scripted_fn(*inputs)
-            python_outputs = python_fn(*inputs)
-        self.assertEqual(python_outputs, script_outputs)
+            self.assertEqual(python_outputs, script_outputs)
 
-        return scripted_fn
+            return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
-                   optimize=True, drop=None, allow_unused=False, verbose=False,
+                   drop=None, allow_unused=False, verbose=False,
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
                    _force_outplace=False):
         # TODO: check gradients for parameters, not just inputs
@@ -380,7 +380,7 @@ class JitTestCase(TestCase):
         else:
             recording_inputs = reference_tensors
 
-        ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance,
+        ge = torch.jit.trace(func, input_tensors, check_tolerance=check_tolerance,
                              _force_outplace=_force_outplace)
 
         if export_import:
