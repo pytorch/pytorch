@@ -4196,7 +4196,7 @@ a")
 
         a = torch.rand(2, 3)
 
-        with enable_profiling_mode():
+        with enable_profiling_mode(True):
             # check prim::profile are inserted
             profiled_graph_str = str(def_in_one_branch.graph_for(a, True))
             FileCheck().check_count("prim::profile", 4).run(profiled_graph_str)
