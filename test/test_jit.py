@@ -13458,7 +13458,7 @@ a")
         def fn(x):
             something_else(**x)
 
-        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "unpacking is not supported"):
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
             torch.jit.script(fn)
 
     def test_inferred_error_msg(self):
