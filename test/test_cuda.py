@@ -2815,6 +2815,15 @@ class TestCuda(TestCase):
             torch.randperm(small_n, out=res)  # No exception expected
             self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res))
 
+        # Test non-contiguous tensors
+        for n in (4, 5, 6, 10, 20):
+            non_contiguous_tensor = torch.zeros((2, 3), dtype=torch.long, device=cuda).t()
+            self.assertFalse(non_contiguous_tensor.is_contiguous())
+            with torch.random.fork_rng(devices=[0]):
+                res = torch.randperm(n, dtype=torch.long, device=cuda)
+            torch.randperm(n, out=non_contiguous_tensor)
+            self.assertEqual(non_contiguous_tensor, res)
+
     def test_random_neg_values(self):
         _TestTorchMixin._test_random_neg_values(self, use_cuda=True)
 
