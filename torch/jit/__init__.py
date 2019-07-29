@@ -2003,6 +2003,7 @@ def _get_builtin_table():
         (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
         (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
         (torch.nn.utils.rnn.get_packed_sequence, "aten::_pack_sequence"),
+        (torch._C._get_tracing_state, "aten::_get_tracing_state"),
         (warnings.warn, "aten::warn"),
     ]
 
