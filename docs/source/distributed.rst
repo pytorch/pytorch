@@ -90,15 +90,17 @@ Common environment variables
 Choosing the network interface to use
 """""""""""""""""""""""""""""""""""""
 
-By default, both NCCL and Gloo
-backends will try to find the network interface to use for communication. However, this
-is not always guaranteed to be successful from our experiences. Therefore, if you
-encounter any problem on either backend not being able to find the correct network
-interface. You can try to set the following environment variables (each one
-applicable to its respective backend):
+By default, both the NCCL and Gloo backends will try to find the right network interface to use.
+If the automatically detected interface is not correct, you can override it using the following
+environment variables (applicable to the respective backend):
 
 * **NCCL_SOCKET_IFNAME**, for example ``export NCCL_SOCKET_IFNAME=eth0``
 * **GLOO_SOCKET_IFNAME**, for example ``export GLOO_SOCKET_IFNAME=eth0``
+
+If you're using the Gloo backend, you can specify multiple interfaces by separating
+them by a comma, like this: ``export GLOO_SOCKET_IFNAME=eth0,eth1,eth2,eth3``.
+The backend will dispatch operations in a round-robin fashion across these interfaces.
+It is imperative that all processes specify the same number of interfaces in this variable.
 
 Other NCCL environment variables
 """"""""""""""""""""""""""""""""
@@ -259,9 +261,6 @@ used to create new groups, with arbitrary subsets of all processes. It returns
 an opaque group handle that can be given as a ``group`` argument to all collectives
 (collectives are distributed functions to exchange information in certain well-known programming patterns).
 
-Currently `torch.distributed` does not support creating groups with different backends.
-In other words, each group being created will use the same backend as you specified in
-:func:`~torch.distributed.init_process_group`.
 
 .. autofunction:: new_group
 
