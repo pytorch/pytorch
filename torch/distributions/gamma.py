@@ -63,9 +63,9 @@ class Gamma(ExponentialFamily):
         return value
 
     def log_prob(self, value):
-        value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         if self._validate_args:
             self._validate_sample(value)
+        value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         return (self.concentration * torch.log(self.rate) +
                 (self.concentration - 1) * torch.log(value) -
                 self.rate * value - torch.lgamma(self.concentration))
