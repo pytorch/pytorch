@@ -56,11 +56,8 @@ class Linear(nnq.Linear):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
-        # assert type(mod) == cls.__FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-        #                     cls.__FLOAT_MODULE.__name__
+        assert type(mod) == NNLinear, 'nn.quantized.dynamic.Linear.from_float only works for nn.Linear'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
         weight_observer = mod.qconfig.weight()
         weight_observer(mod.weight)
         wt_qparams = weight_observer.calculate_qparams()
