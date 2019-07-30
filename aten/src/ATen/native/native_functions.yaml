@@ -3751,12 +3751,12 @@
     CPU: legacy::cpu::_th_addcdiv
     CUDA: legacy::cuda::_th_addcdiv
 
-- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
+- func: lstsq(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   dispatch:
     CPU: legacy::cpu::_th_gels_out
     CUDA: legacy::cuda::_th_gels_out
 
-- func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
+- func: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_gels

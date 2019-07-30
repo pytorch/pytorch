@@ -334,6 +334,7 @@ BLAS and LAPACK Operations
 .. autofunction:: det
 .. autofunction:: logdet
 .. autofunction:: slogdet
+.. autofunction:: lstsq
 .. autofunction:: lu
 .. autofunction:: lu_solve
 .. autofunction:: lu_unpack
