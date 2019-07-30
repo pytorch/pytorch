@@ -18,7 +18,6 @@
 #include <iostream>
 #include <sstream>
 
-// PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 
 namespace py = pybind11;
 namespace torch {
@@ -46,6 +45,18 @@ using args_t = typename args<Sig>::type;
 } // namespace detail
 template <class... Types>
 detail::types<void, Types...> init() {}
+
+// To bind custom classes into Torchscript, use an API very similar to Pybind's.
+// Currently exposes one class `torch::jit::class_<T>` and 2 methods.
+// - Constructing `torch::jit::class_<Foo>` registers `Foo` in Python and
+// Torchscript, and puts it under `torch.classes.Foo` in Python.
+// - torch::jit::class_<Foo>.def("method1", &Foo::method1) does some template
+// metaprogramming to introspect the function types and register the operator
+// for use in Torchscript.
+// - torch::jit::class_<Foo>.def(torch::jit::init<int64_t, int64_t>()) registers
+// the Foo(int, int) constructor.
+// see test/custom_operator/classes.cpp and
+// test/custom_operator/test_custom_classes.py for example usages
 
 template <class CurClass>
 class class_ {
@@ -101,7 +112,7 @@ class class_ {
 
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
-      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::torchbind_class>(classObj);
+      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(classObj);
       auto capsule = IValue(genericPtr);
       auto object = self.ivalue.toObject();
       object->setSlot(0, capsule);

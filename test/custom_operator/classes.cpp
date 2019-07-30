@@ -13,7 +13,7 @@ using namespace std;
 
 namespace py = pybind11;
 
-struct Foo : torch::jit::torchbind_class {
+struct Foo : torch::jit::CustomClassHolder {
   int x, y;
   Foo(): x(0), y(0){}
   Foo(int x_, int y_) : x(x_), y(y_) {}
@@ -35,7 +35,7 @@ struct Foo : torch::jit::torchbind_class {
   }
 };
 
-template <class T> struct Stack : torch::jit::torchbind_class {
+template <class T> struct Stack : torch::jit::CustomClassHolder {
   std::vector<T> stack_;
   Stack(std::vector<T> init): stack_(init.begin(), init.end()) {}
 

@@ -98,13 +98,13 @@ inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() const & {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return toIntrusivePtr<caffe2::Blob>();;
 }
-inline c10::intrusive_ptr<torch::jit::torchbind_class> IValue::toCapsule() && {
+inline c10::intrusive_ptr<torch::jit::CustomClassHolder> IValue::toCapsule() && {
   TORCH_INTERNAL_ASSERT(isCapsule());
-  return moveToIntrusivePtr<torch::jit::torchbind_class>();
+  return moveToIntrusivePtr<torch::jit::CustomClassHolder>();
 }
-inline c10::intrusive_ptr<torch::jit::torchbind_class> IValue::toCapsule() const & {
+inline c10::intrusive_ptr<torch::jit::CustomClassHolder> IValue::toCapsule() const & {
   TORCH_INTERNAL_ASSERT(isCapsule());
-  return toIntrusivePtr<torch::jit::torchbind_class>();
+  return toIntrusivePtr<torch::jit::CustomClassHolder>();
 }
 
 namespace ivalue {
@@ -685,7 +685,7 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(c10::intrusive_ptr<torch::jit::torchbind_class> v)
+inline IValue::IValue(c10::intrusive_ptr<torch::jit::CustomClassHolder> v)
 : tag(Tag::Capsule), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
@@ -763,7 +763,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
   }
   auto res = getCustomClassType<inputType>();
   auto retObject = ivalue::Object::create(res->second, 1);
-  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::torchbind_class>(x);
+  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(x);
 
   retObject->setSlot(0, IValue(objPtr));
   auto resIVal = IValue(std::move(retObject));

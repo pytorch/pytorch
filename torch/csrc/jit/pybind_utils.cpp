@@ -1,4 +1,4 @@
-#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/pybind_utils.h>
 #include <unordered_map>
 
 namespace torch {
