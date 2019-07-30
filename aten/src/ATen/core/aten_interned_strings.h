@@ -199,7 +199,6 @@ _(aten, arange) \
 _(aten, argmax) \
 _(aten, argmin) \
 _(aten, as_strided) \
-_(aten, as_tensor) \
 _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
