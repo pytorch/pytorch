@@ -16,7 +16,8 @@ from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent, emit_nvtx
+from torch.autograd.profiler import (profile, format_time, EventList,
+                                     FunctionEvent, record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
@@ -2807,6 +2808,22 @@ class TestAutograd(TestCase):
         if sys.platform != "win32":
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
+
+    def test_record_function(self):
+        x = torch.randn(10, 10)
+
+        with profile() as p:
+            with record_function("label"):
+                y = x * 2 + 4
+
+        last_end = 0
+        names = ['mul', 'add']
+        labels = ['label']
+        self.assertEqual(len(p.function_events), len(names) + len(labels))
+        for info, expected_name in zip(p.function_events, labels):
+            self.assertGreater(info.cpu_interval.start, last_end)
+            self.assertEqual(info.name, expected_name)
+            last_end = info.cpu_interval.end
 
     @skipIfRocm
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
