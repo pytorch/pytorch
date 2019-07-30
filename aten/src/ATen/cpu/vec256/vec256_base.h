@@ -183,6 +183,13 @@ public:
   Vec256<T> atan() const {
     return map(std::atan);
   }
+  Vec256<T> atan2(const Vec256<T> &exp) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::atan2(values[i], exp[i]);
+    }
+    return ret;
+  }
   Vec256<T> erf() const {
     return map(std::erf);
   }

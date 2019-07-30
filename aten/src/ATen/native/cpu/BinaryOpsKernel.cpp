@@ -30,6 +30,17 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   }
 }
 
+void atan2_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
+    cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
+    return std::atan2(a, b);
+  },
+    [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+      return a.atan2(b);
+    });
+  });
+}
+
 void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   add_kernel(iter, -alpha_scalar);
 }
@@ -77,5 +88,6 @@ REGISTER_DISPATCH(add_stub, &add_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
+REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 
 }} // namespace at::native

@@ -100,6 +100,9 @@ public:
   Vec256<double> atan() const {
     return Vec256<double>(Sleef_atand4_u10(values));
   }
+  Vec256<double> atan2(const Vec256<double> &b) const {
+    return b;
+  }
   Vec256<double> erf() const {
     return Vec256<double>(Sleef_erfd4_u10(values));
   }
