@@ -361,7 +361,8 @@ const std::vector<std::string> functions = {
         # we do [m, bn] * [bn, p] to avoid having the large
         # intermediate, thus reduces max memory usage.
         def AD_matmul_bw_special_fold(mat1, mat2):
-            mat1_fold = mat1.reshape(-1, mat1.size()[-2])
+            mat1_transpose = AD_mat_transpose(mat1)
+            mat1_fold = mat1_transpose.reshape(-1, mat1_transpose.size()[-1])
             mat2_fold = mat2.reshape(-1, mat2.size()[-1])
             return mat1_fold.t().mm(mat2_fold)
 
