@@ -262,6 +262,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 template<class T>
 void CppNode<T>::release_variables() {
   ctx_.saved_variables_.clear();
+  ctx_.has_freed_buffers = true;
 }
 
 template<class T>
@@ -272,7 +273,6 @@ void CppNode<T>::save_variables_to_ctx() {
 template<class T>
 void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node> &node) {
   ctx_.grad_fn_ = node;
-  ctx_.has_freed_buffers = true;
 }
 
 }} // namespace torch::autograd
