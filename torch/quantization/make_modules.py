@@ -3,7 +3,10 @@ import os
 _disclaimer = r"""
 # This file is generated using `torch.nn.quantization.make_module`
 # and saved as `{filename}`.
+"""
 
+_imports = r"""
+import torch
 """
 
 _module_head = r'''
@@ -49,6 +52,8 @@ def _make_module(op_string=None, qop_string=None):
     }
 
     generated_module = _disclaimer
+    generated_module += _imports
+
     generated_module += _module_head
     generated_module += _module_init
     generated_module += _module_forward

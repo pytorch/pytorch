@@ -2,6 +2,7 @@
 # This file is generated using `torch.nn.quantization.make_module`
 # and saved as `QAddGen.py`.
 
+import torch
 
 r"""AddGen wraps the torch.add function."""
 class AddGen(torch.nn.Module):
