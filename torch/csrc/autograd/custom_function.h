@@ -69,14 +69,13 @@ struct TORCH_API AutogradContext {
   // Saves the list of variables for a future call to backward(). This
   // should be called at most once from inside of forward().
   void save_for_backward(const variable_list &to_save);
-  // Marks variables in the list as modified in an in-place opertaion. This
+  // Marks variables in the list as modified in an in-place operation. This
   // should be called at most once from inside of forward() and all arguments
   // should be inputs.
   void mark_dirty(const variable_list &inputs);
   // Marks outputs in the list as not requiring gradients. This should be called
   // at most once from inside of forward() and all arguments should be outputs.
   void mark_non_differentiable(const variable_list &outputs);
-  void clear_saved();
 
   // Get the list of variables that were saved in forward using
   // save_for_backward(). Before returning them to the user, a check is made to
@@ -86,14 +85,17 @@ struct TORCH_API AutogradContext {
   const std::unordered_set<at::TensorImpl*>& get_non_differentiable() const;
 
 private:
-  std::unordered_set<at::TensorImpl*> non_differentiable;
-  std::unordered_set<at::TensorImpl*> dirty_inputs;
-  std::vector<torch::autograd::SavedVariable> saved_variables;
+  std::unordered_set<at::TensorImpl*> non_differentiable_;
+  std::unordered_set<at::TensorImpl*> dirty_inputs_;
+  std::vector<torch::autograd::SavedVariable> saved_variables_;
+  variable_list to_save_;
 
-  std::weak_ptr<Node> grad_fn;
-  friend void set_ctx_grad_fn(AutogradContext &ctx, const std::shared_ptr<Node> &node) {
-    ctx.grad_fn = node;
-  }
+  std::weak_ptr<Node> grad_fn_;
+  bool has_freed_buffers;
+
+  void save_variables();
+
+  template <class T> friend struct CppNode;
 };
 
 struct TORCH_API VariableInfo {
@@ -108,16 +110,21 @@ struct TORCH_API VariableInfo {
   bool requires_grad;
 };
 
+// Node representing the operation implemented by the user defined Function
+// Calls to 'apply' are forward to the implementation of backward by the user.
 template <class T>
 struct CppNode : public Node {
 
   variable_list apply(variable_list&& inputs) override;
-  AutogradContext ctx;
-  std::vector<bool> is_variable_input;
-  std::vector<VariableInfo> input_info;
-  std::vector<VariableInfo> output_info;
+  AutogradContext ctx_;
+  std::vector<bool> is_variable_input_;
+  std::vector<VariableInfo> input_info_;
+  std::vector<VariableInfo> output_info_;
 
   void release_variables() override;
+
+  void set_ctx_grad_fn(const std::shared_ptr<Node> &node);
+  void save_variables_to_ctx();
 };
 
 template <typename T>
@@ -146,44 +153,46 @@ void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&& ... arg
 template<class T>
 template<typename... Args>
 variable_list Function<T>::apply(Args&&... args) {
-  std::shared_ptr<CppNode<T>> node(new CppNode<T>, deleteNode);
+  std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
   variable_list input_vars;
 
   const size_t num_inputs = sizeof...(Args);
   input_vars.reserve(num_inputs);
-  node->is_variable_input.reserve(num_inputs);
-
-  extract_vars(node->is_variable_input, input_vars, args...);
+  node->is_variable_input_.reserve(num_inputs);
+  // TODO Add tracing here
+  extract_vars(node->is_variable_input_, input_vars, args...);
 
   bool is_executable =  GradMode::is_enabled() && any_variable_requires_grad(input_vars);
   auto next_edges = collect_next_edges(input_vars);
-  set_ctx_grad_fn(node->ctx, node);
+  set_ctx_grad_fn(node->ctx_, node);
   node->set_next_edges(std::move(next_edges));
   node->clear_input_metadata();
 
-  node->input_info.reserve(input_vars.size());
+  node->input_info_.reserve(input_vars.size());
   for (auto& var : input_vars) {
-      node->input_info.emplace_back(var);
+      node->input_info_.emplace_back(var);
   }
 
   variable_list outputs;
   {
     AutoGradMode grad_mode(false);
-    outputs = T::forward(&node->ctx, std::forward<Args>(args)...);
+    outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
   }
 
-  auto wrapped_outputs = _wrap_outputs(input_vars, node->ctx.get_non_differentiable(), node->ctx.get_dirty(), outputs, is_executable ? node : nullptr);
+  auto wrapped_outputs = _wrap_outputs(input_vars, node->ctx_.get_non_differentiable(), node->ctx_.get_dirty(), outputs, is_executable ? node : nullptr);
 
-  node->output_info.reserve(wrapped_outputs.size());
+  node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
     if (is_executable) {
-      node->output_info.emplace_back(output);
+      node->output_info_.emplace_back(output);
     }
   }
 
   return wrapped_outputs;
 }
 
+// The logic here is the same as PyNode::apply, so changes to it should be done
+// in both the places
 template<class T>
 variable_list CppNode<T>::apply(variable_list&& inputs) {
   at::OptionalDeviceGuard _device_guard;
@@ -195,13 +204,13 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     if (inputs[i].defined()) {
       backward_inputs.emplace_back(inputs[i]);
     } else {
-      backward_inputs.emplace_back(output_info[i].zeros(_device_guard));
+      backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
     }
   }
 
-  auto outputs = T::backward(&ctx, backward_inputs);
+  auto outputs = T::backward(&ctx_, backward_inputs);
 
-  int num_forward_inputs = is_variable_input.size();
+  int num_forward_inputs = is_variable_input_.size();
   int num_outputs = outputs.size();
   // Returning too many results is ok, but only as long as they're all undefined.
   // Truncate the result vector in that case.
@@ -227,7 +236,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   variable_list results;
   results.reserve(num_outputs);
   for (int i = 0; i < num_outputs; ++i) {
-    if (!is_variable_input[i]) {
+    if (!is_variable_input_[i]) {
       if (outputs[i].defined()) {
         std::string msg("function ");
         msg += name() + " returned a gradient different that is defined at position ";
@@ -237,7 +246,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
       continue;
     }
     if (!outputs[i].defined()) {
-      auto& info = input_info[results.size()];
+      auto& info = input_info_[results.size()];
       if (info.requires_grad) {
         results.emplace_back(info.zeros(_device_guard));
       } else {
@@ -252,6 +261,18 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
 template<class T>
 void CppNode<T>::release_variables() {
-  ctx.clear_saved();
+  ctx_.saved_variables_.clear();
 }
+
+template<class T>
+void CppNode<T>::save_variables_to_ctx() {
+  ctx_.save_variables();
+}
+
+template<class T>
+void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node> &node) {
+  ctx_.grad_fn_ = node;
+  ctx_.has_freed_buffers = true;
+}
+
 }} // namespace torch::autograd

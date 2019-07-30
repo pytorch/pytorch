@@ -3069,22 +3069,29 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
-// Mangle a qualified name so that it is globally unique.
-std::string CompilationUnit::mangle(const std::string& name) const {
+c10::QualifiedName CompilationUnit::mangle(const c10::QualifiedName& name) const {
   static const std::string manglePrefix = "___torch_mangle_";
+  std::vector<std::string> atoms = name.atoms();
 
-  std::string mangledName;
-  auto pos = name.find(manglePrefix);
-  if (pos != std::string::npos) {
-    // If the name is already mangled, avoid re-appending the prefix.
-    mangledName.reserve(name.size());
-    // Append the part of the name up to the end of the prefix
-    mangledName.append(name, 0, pos);
-    mangledName.append(std::to_string(mangleIndex_++));
-  } else {
-    mangledName = c10::str(name, manglePrefix, std::to_string(mangleIndex_++));
+  // Search for an already-existing mangle namespace.
+  // If the name is already mangled, just bump the integer.
+  for (auto& atom : atoms) {
+    auto pos = atom.find(manglePrefix);
+    if (pos != std::string::npos) {
+      std::string newAtom;
+      newAtom.reserve(atom.size());
+      // Append the part of the name up to the end of the prefix
+      newAtom.append(atom, 0, pos);
+      newAtom.append(std::to_string(mangleIndex_++));
+      atom = newAtom;
+      return QualifiedName(atoms);
+    }
   }
-  return mangledName;
+
+  // Otherwise add a mangle namespace right before the basename
+  TORCH_INTERNAL_ASSERT(!atoms.empty());
+  atoms.insert(atoms.end() - 1, manglePrefix + std::to_string(mangleIndex_++));
+  return QualifiedName(atoms);
 }
 
 std::unique_ptr<Function> CompilationUnit::define(
@@ -3122,8 +3129,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     // If `shouldMangle` is set, we should generate a unique name for this
     // function if there is already an existing one.
     if (auto fn = find_function(name)) {
-      auto newBase = mangle(name.name());
-      name = QualifiedName(name.prefix(), newBase);
+      name = mangle(name);
     }
   }
   auto fn = torch::make_unique<Function>(

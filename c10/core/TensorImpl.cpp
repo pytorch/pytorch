@@ -17,6 +17,16 @@ C10_DEFINE_int64(
 
 namespace c10 {
 
+const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
+    "is not allowed on a Tensor created from .data or .detach().\n"
+    "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
+    "without autograd tracking the change, remove the .data / .detach() call and wrap the change in a `with torch.no_grad():` block.\n"
+    "For example, change:\n"
+    "    x.data.set_(y)\n"
+    "to:\n"
+    "    with torch.no_grad():\n"
+    "        x.set_(y)";
+
 at::Tensor& TensorImpl::grad() {
   if (autograd_meta()) {
     return autograd_meta()->grad();

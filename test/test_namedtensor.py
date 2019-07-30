@@ -74,6 +74,18 @@ class TestNamedTensor(TestCase):
     def test_empty(self):
         self._test_factory(torch.empty, 'cpu')
 
+    def test_copy_transpose(self):
+        # This type of copy is special-cased and therefore needs its own test
+        def _test(self_names, other_names, expected_names):
+            x = torch.empty(2, 5, names=self_names)
+            y = torch.empty(5, 2).t().set_names_(other_names)
+            x.copy_(y)
+            self.assertEqual(x.names, expected_names)
+
+        _test(('N', 'C'), ('N', 'C'), ('N', 'C'))
+        _test(('N', None), ('N', 'C'), ('N', 'C'))
+        _test(None, ('N', 'C'), ('N', 'C'))
+
     def test_set_names_(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
         self.assertEqual(tensor.set_names_(None).names, (None, None))
@@ -223,6 +235,7 @@ class TestNamedTensor(TestCase):
 
         tests = [
             fn_method_and_inplace('mul'),
+            method('copy_'),
         ]
         tests = flatten(tests)
 

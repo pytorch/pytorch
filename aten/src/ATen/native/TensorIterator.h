@@ -6,6 +6,7 @@
 #include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
 #include <c10/util/Optional.h>
+#include <ATen/MemoryOverlap.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -142,8 +143,10 @@ struct CAFFE2_API TensorIterator {
 
   void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
 
-  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator unary_op(Tensor& out, const Tensor& a);
+  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
+    bool check_internal_overlap = false);
+  static TensorIterator unary_op(Tensor& out, const Tensor& a,
+    bool check_internal_overlap = false);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
@@ -261,6 +264,11 @@ struct CAFFE2_API TensorIterator {
     num_outputs_++;
   }
 
+  void check_and_add_output(const Tensor& output) {
+    assert_no_internal_overlap(output);
+    add_output(output);
+  }
+
   void add_output(const Tensor& input, Device device, ScalarType dtype) {
     operands_.emplace_back(input, device, dtype);
     num_outputs_++;
@@ -312,7 +320,6 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
 };
-
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
