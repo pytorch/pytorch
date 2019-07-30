@@ -27,7 +27,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   at::assert_no_internal_overlap(result, "add");
   auto iter = TensorIterator::binary_op(result, self, other);
-  add_stub(iter->device_type(), *iter, alpha);
+  add_stub(iter.device_type(), iter, alpha);
   return result;
 }
 
@@ -38,8 +38,8 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
     return native::add_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  add_stub(iter->device_type(), *iter, alpha);
-  return iter->output();
+  add_stub(iter.device_type(), iter, alpha);
+  return iter.output();
 }
 
 Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
@@ -56,7 +56,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   }
   at::assert_no_internal_overlap(result, "div");
   auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter->device_type(), *iter);
+  div_stub(iter.device_type(), iter);
   return result;
 }
 
@@ -67,8 +67,8 @@ Tensor div(const Tensor& self, const Tensor& other) {
     return native::div_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter->device_type(), *iter);
-  return iter->output();
+  div_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& div_(Tensor& self, const Tensor& other) {
@@ -81,7 +81,7 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   }
   at::assert_no_internal_overlap(result, "mul");
   auto iter = TensorIterator::binary_op(result, self, other);
-  mul_stub(iter->device_type(), *iter);
+  mul_stub(iter.device_type(), iter);
   return result;
 }
 
@@ -92,15 +92,26 @@ Tensor mul(const Tensor& self, const Tensor& other) {
     return native::mul_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  mul_stub(iter->device_type(), *iter);
-  return iter->output();
+  mul_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
 }
 
+// Basic checking for all sub functions.
+static inline void sub_check(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
+              "Subtraction, the `-` operator, with two bool tensors is not supported. "
+              "Use the `^` operator instead.")
+  TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
+              "Subtraction, the `-` operator, with a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `bitwise_not()` operator instead.");
+}
+
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
+  sub_check(self, other);
   if (other.is_sparse()) {
     if (!self.sizes().equals(other.sizes())) {
       AT_ERROR("sizes do not match");
@@ -116,19 +127,20 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   at::assert_no_internal_overlap(result, "sub");
   auto iter = TensorIterator::binary_op(result, self, other);
-  sub_stub(iter->device_type(), *iter, alpha);
+  sub_stub(iter.device_type(), iter, alpha);
   return result;
 }
 
 Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
+  sub_check(self, other);
   Tensor result;
   if (other.is_sparse()) {
     result = at::empty({0}, self.options());
     return native::sub_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  sub_stub(iter->device_type(), *iter, alpha);
-  return iter->output();
+  sub_stub(iter.device_type(), iter, alpha);
+  return iter.output();
 }
 
 Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {

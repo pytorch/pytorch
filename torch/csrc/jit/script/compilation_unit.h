@@ -69,11 +69,16 @@ struct TORCH_API CompilationUnit {
   }
 
   void set_optimized(bool o) {
-    optimized_ = o;
+    AT_WARN(
+        "CompilationUnit::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
   }
 
-  bool is_optimized() const {
-    return optimized_;
+   bool is_optimized() const {
+    AT_WARN(
+        "CompilationUnit::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   // for historic reasons, these are defined in compiler.cpp
@@ -103,10 +108,10 @@ struct TORCH_API CompilationUnit {
       std::shared_ptr<Graph> graph,
       bool shouldMangle = false) {
     if (shouldMangle) {
-      name = c10::QualifiedName(name.prefix(), mangle(name.name()));
+      name = mangle(name);
     }
     auto fn = torch::make_unique<Function>(
-        std::move(name), is_optimized(), std::move(graph), nullptr);
+        std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));
     return ret;
@@ -205,6 +210,16 @@ struct TORCH_API CompilationUnit {
     classDict_.clear();
   }
 
+  // [name mangling] All code objects must have a unique qualified name in a
+  // CompilationUnit. In Python, sometimes functions won't have unique qualified
+  // name (for example, nested functions). So we mangle Python functions to
+  // ensure that they are uniquely named.
+  //
+  // We also use mangling to distinguish different Module instances. Since each
+  // Module is a singleton class instance, different instances of the same
+  // Python Module will have different types but the same qualified name.
+  c10::QualifiedName mangle(const c10::QualifiedName& name) const;
+
  private:
   std::unique_ptr<Function> define(
       const c10::optional<c10::QualifiedName>& prefix,
@@ -228,8 +243,6 @@ struct TORCH_API CompilationUnit {
   // for fast lookup
   std::unordered_map<c10::QualifiedName, size_t> dict_;
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
-  bool optimized_ = true;
-
 
   // [class ownership] Right now there aree two relationships between classes
   // and compilation units:
@@ -238,12 +251,7 @@ struct TORCH_API CompilationUnit {
   // module's compilation unit.
   std::vector<c10::NamedTypePtr> classes_;
 
-  // [name mangling] All code objects must have a unique qualified name in a
-  // CompilationUnit. In Python, sometimes functions won't have unique qualified
-  // name (for example, nested functions). So we mangle Python functions to
-  // ensure that they are uniquely named.
   mutable size_t mangleIndex_ = 0;
-  std::string mangle(const std::string& name) const;
 };
 
 } // namespace script
