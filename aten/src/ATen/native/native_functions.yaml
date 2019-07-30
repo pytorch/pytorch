@@ -508,6 +508,7 @@
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
   device_guard: False
+  named_guard: False
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
@@ -2380,8 +2381,8 @@
 - func: clone(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_clone
-    CUDA: legacy::cuda::_th_clone
+    CPU: clone
+    CUDA: clone
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
@@ -2390,8 +2391,8 @@
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_resize_as_
-    CUDA: legacy::cuda::_th_resize_as_
+    CPU: resize_as_cpu_
+    CUDA: resize_as_cuda_
     SparseCPU: resize_as_sparse_
     SparseCUDA: resize_as_sparse_
 
@@ -3750,12 +3751,12 @@
     CPU: legacy::cpu::_th_addcdiv
     CUDA: legacy::cuda::_th_addcdiv
 
-- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
+- func: lstsq(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   dispatch:
     CPU: legacy::cpu::_th_gels_out
     CUDA: legacy::cuda::_th_gels_out
 
-- func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
+- func: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_gels
@@ -4812,6 +4813,7 @@
     CPU: adaptive_avg_pool2d_out_cpu
     CUDA: adaptive_avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_out
+    QuantizedCPU: quantized_adaptive_avg_pool2d_out
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   python_module: nn
@@ -4825,6 +4827,7 @@
   dispatch:
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
+    QuantizedCPU: quantized_adaptive_avg_pool2d
 
 - func: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
