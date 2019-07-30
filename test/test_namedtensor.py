@@ -18,6 +18,13 @@ def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
 
 
+def flatten(lst):
+    return [item for sublist in lst for item in sublist]
+
+
+Function = namedtuple('TestCase', ['name', 'lambd'])
+
+
 class TestNamedTensor(TestCase):
     def test_trivial(self):
         pass
@@ -66,6 +73,18 @@ class TestNamedTensor(TestCase):
 
     def test_empty(self):
         self._test_factory(torch.empty, 'cpu')
+
+    def test_copy_transpose(self):
+        # This type of copy is special-cased and therefore needs its own test
+        def _test(self_names, other_names, expected_names):
+            x = torch.empty(2, 5, names=self_names)
+            y = torch.empty(5, 2).t().set_names_(other_names)
+            x.copy_(y)
+            self.assertEqual(x.names, expected_names)
+
+        _test(('N', 'C'), ('N', 'C'), ('N', 'C'))
+        _test(('N', None), ('N', 'C'), ('N', 'C'))
+        _test(None, ('N', 'C'), ('N', 'C'))
 
     def test_set_names_(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
@@ -167,9 +186,64 @@ class TestNamedTensor(TestCase):
                 for split in splits:
                     self.assertEqual(split.names, orig_tensor.names)
 
-    def test_unary_propagate_names_fns(self):
-        TestCase = namedtuple('TestCase', ['name', 'lambd'])
+    def test_binary_ops(self):
+        def test_basic(op):
+            a = torch.empty(2, 3, names=('N', 'C'))
+            b = torch.empty(2, 3, names=('C', 'N'))
+            c = torch.empty(3, names=('C',))
+            d = torch.empty(3, names=('W',))
 
+            self.assertEqual(op(a, a).names, ('N', 'C'))
+            self.assertEqual(op(a, c).names, ('N', 'C'))
+
+            with self.assertRaisesRegex(RuntimeError, "do not match"):
+                op(a, d)
+            with self.assertRaisesRegex(RuntimeError, "do not match"):
+                op(a, b)
+
+        def test_wildcard(op):
+            a = torch.empty(2, 3, names=('N', 'C'))
+            c = torch.empty(2, 3, names=(None, 'C'))
+            self.assertEqual(op(a, c).names, ('N', 'C'))
+
+            b = torch.empty(2, 3)
+            self.assertEqual(op(a, b).names, ('N', 'C'))
+
+            d = torch.empty(2, 3, names=('C', None))
+            with self.assertRaisesRegex(RuntimeError, "misaligned"):
+                op(d, c)
+
+        def method(name, *args, **kwargs):
+            return [Function(name, lambda a, b: getattr(a, name)(b, *args, **kwargs))]
+
+        def out_function(name, *args, **kwargs):
+            out_fn = getattr(torch, name)
+
+            def fn(a, b):
+                result = a.new_empty([0])
+                out_fn(a, b, *args, out=result, **kwargs)
+                return result
+
+            return [Function(name, fn)]
+
+        def fn_method_and_inplace(name, *args, **kwargs):
+            return (
+                method(name, *args, **kwargs) +
+                method(name + '_', *args, **kwargs) +
+                out_function(name, *args, **kwargs)
+            )
+
+        tests = [
+            fn_method_and_inplace('mul'),
+            method('copy_'),
+        ]
+        tests = flatten(tests)
+
+        for _, op in tests:
+            test_basic(op)
+            test_wildcard(op)
+
+    def test_unary_propagate_names_fns(self):
         def _test(testcase, names=('N', 'D'), device='cpu'):
             sizes = [2] * len(names)
             tensor = torch.empty(sizes, names=names, device=device)
@@ -178,7 +252,7 @@ class TestNamedTensor(TestCase):
                              message=testcase.name)
 
         def method(name, *args, **kwargs):
-            return [TestCase(name, lambda t: getattr(t, name)(*args, **kwargs))]
+            return [Function(name, lambda t: getattr(t, name)(*args, **kwargs))]
 
         def out_function(name, *args, **kwargs):
             out_fn = getattr(torch, name)
@@ -188,7 +262,7 @@ class TestNamedTensor(TestCase):
                 out_fn(tensor, *args, out=result, **kwargs)
                 return result
 
-            return [TestCase(name + '_out', fn)]
+            return [Function(name + '_out', fn)]
 
         def fn_method_and_inplace(name, *args, **kwargs):
             return (
@@ -196,9 +270,6 @@ class TestNamedTensor(TestCase):
                 method(name + '_', *args, **kwargs) +
                 out_function(name, *args, **kwargs)
             )
-
-        def flatten(lst):
-            return [item for sublist in lst for item in sublist]
 
         # All of these operate on 2x2 tensors.
         tests = [
@@ -232,7 +303,7 @@ class TestNamedTensor(TestCase):
             method('log_normal_'),
             fn_method_and_inplace('neg'),
             method('normal_'),
-            [TestCase('polygamma', lambda t: torch.polygamma(1, t))],
+            [Function('polygamma', lambda t: torch.polygamma(1, t))],
             method('polygamma_', 1),
             fn_method_and_inplace('reciprocal'),
             method('random_', 0, 1),
