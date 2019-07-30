@@ -16,11 +16,11 @@ struct Call {
 thread_local std::unique_ptr<SourceRange> pending_range;
 thread_local std::vector<Call> calls;
 
-void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
+CAFFE2_API void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   pending_range = torch::make_unique<SourceRange>(range);
 }
 
-void ErrorReport::CallStack::push_function(const std::string& name) {
+CAFFE2_API void ErrorReport::CallStack::push_function(const std::string& name) {
   if (pending_range != nullptr) {
     calls.push_back({name, std::move(pending_range)});
     pending_range = nullptr;
@@ -29,7 +29,7 @@ void ErrorReport::CallStack::push_function(const std::string& name) {
   }
 }
 
-void ErrorReport::CallStack::pop_function() {
+CAFFE2_API void ErrorReport::CallStack::pop_function() {
   calls.pop_back();
 }
 

@@ -37,6 +37,9 @@ struct CAFFE2_API ErrorReport : public std::exception {
   mutable std::string the_message;
 };
 
+// Export the CallStack struct
+struct CAFFE2_API ErrorReport::CallStack;
+
 template <typename T>
 const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
   e.ss << t;
