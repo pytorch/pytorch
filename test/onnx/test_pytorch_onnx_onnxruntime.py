@@ -879,7 +879,8 @@ def setup_rnn_tests():
     # noticing
     # assert test_count == 192, test_count
     # TODO: Revert this once elman_rnn bidirectional issue is fixed
-    assert test_count == 144, test_count
+    if test_count != 144:
+        raise ValueError('Expected 144 tests but found {}'.format(test_count))
 
 
 setup_rnn_tests()
