@@ -1059,7 +1059,7 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     _add_script_class(obj, qualified_name)
 
 
-def script(obj, optimize=True, _frames_up=0, _rcb=None):
+def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a ``ScriptModule`` or
