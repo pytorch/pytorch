@@ -84,6 +84,7 @@ void validateBlock(
         }
       }
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
+        std::cout << "Failed AT\n" << *node << "\n";
         FAIL_EXPORT(
             "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
             getNodeStackTraceString(node));

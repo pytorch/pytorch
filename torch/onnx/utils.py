@@ -127,8 +127,11 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
         from torch.onnx.symbolic_helper import _export_onnx_opset_version
+        print("PEEPHOLE START")
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version)
+        print("PEEPHOLE LINT")
         torch._C._jit_pass_lint(graph)
+        print("PEEPHOLE GOOD")
 
     # graph is not a valid jit graph anymore because types have been replaced
     # (e.g. int with Tensor), so it now contains operators that don't actually

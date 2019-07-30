@@ -233,22 +233,28 @@ void pushPackingPastRnn(Block* b) {
     }
     if (n->outputs().at(0)->uses().size() != 1) {
       // For now, only handle the case where there is one consumer.
+      std::cout << "MORE THAN 1 CONSUMER\n";
       continue;
     }
     Node* rnn = n->outputs()[0]->uses()[0].user;
     if (!isRNN(rnn)) {
+      std::cout << "user is not rnn\n";
       continue;
     }
 
-    if (rnn->owningBlock() != n->owningBlock())
+    if (rnn->owningBlock() != n->owningBlock()) {
+      std::cout << "user not in same block\n";
       continue;
+    }
 
     // Packing only has an effect on a network when its outputs are actually
     // used, so we can remove it here.
     if (rnn->outputs().at(0)->uses().empty() &&
         n->outputs().at(1)->uses().size() == 1) {
       n->outputs().at(0)->replaceAllUsesWith(n->inputs().at(0));
-      n->outputs().at(1)->replaceFirstUseWith(n->inputs().at(1));
+      // n->outputs().at(1)->replaceFirstUseWith(n->inputs().at(1));
+      n->outputs().at(1)->replaceAllUsesWith(n->inputs().at(1));
+      std::cout << "252: destroying packing " << *it << "\n";
       it.destroyCurrent();
       continue;
     }
@@ -271,10 +277,13 @@ void pushPackingPastRnn(Block* b) {
     // note there can be multiple uses of the length blob. If we are
     // translating a multi-level RNN it will be an input to each level.
     n->outputs().at(1)->replaceFirstUseWith(n->inputs().at(1));
+    // n->outputs().at(1)->replaceAllUsesWith(n->inputs().at(1));
 
     // and insert new PackPadded after the RNN
     Node* newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
+
     newPackPadded->insertAfter(next);
+    std::cout << "Inserted new node " << *newPackPadded << " after " << *next << "\n";
 
     // make things consume from the new PackPadded
     next->outputs().at(0)->replaceAllUsesWith(newPackPadded->outputs().at(0));
@@ -299,8 +308,12 @@ void pushPackingPastRnn(Block* b) {
       CompleteTensorTypePtr newType = CompleteTensorType::create(
           oldType->scalarType(), oldType->device(), new_sizes);
       next->outputs().at(0)->setType(newType);
+      std::cout << "Complete tensor type\n";
+    } else {
+      std::cout << "incomplete tensor type\n";
     }
 
+    std::cout << "306: delete " << **it << "\n";
     it.destroyCurrent();
   }
 }
@@ -317,18 +330,23 @@ void removeNopPacking(Block* graph) {
     }
     Node* input = n->inputs()[0]->node();
     if (input->kind() != prim::PackPadded) {
+      std::cout << "input not pack\n";
+      std::cout << *input << "\n";
       continue;
     }
     if (input->outputs()[0] != n->inputs()[0]) {
+      std::cout << "output no match\n";
       continue;
     }
     if (input->outputs()[1] != n->inputs()[1]) {
+      std::cout << "input no match\n";
       continue;
     }
     n->outputs()[0]->replaceAllUsesWith(input->inputs()[0]);
     n->outputs()[1]->replaceAllUsesWith(input->inputs()[1]);
 
     n->removeAllInputs();
+    std::cout << "335: Deleting node " << **it << "\n";
     it.destroyCurrent();
   }
 }
@@ -346,7 +364,9 @@ void hackFixupPadPackedShapes(Block* graph) {
     if (n->kind() != prim::PadPacked) {
       continue;
     }
+
     Node* input = n->inputs()[0]->node();
+    std::cout << "Changing shape on " << *input << "\n";
     input->outputs()[0]->setType(n->outputs()[0]->type());
   }
 }
@@ -639,6 +659,8 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version) {
   // k is the number of distinct peephole optimizations
   hackFixupPadPackedShapes(graph->block());
   pushPackingPastRnn(graph->block());
+
+  // These should be good...
   removeNopPacking(graph->block());
   fixDefaultRnnHiddenState(graph->block(), opset_version);
   fixDefaultLstmCellState(graph->block(), opset_version);
@@ -650,6 +672,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version) {
   eraseListConstruct(graph->block());
   fuseSplitListUnpack(graph->block());
   removeMaxPoolUnusedOutput(graph->block());
+  std::cout << *graph << "\n";
 }
 
 } // namespace jit

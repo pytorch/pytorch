@@ -476,7 +476,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          AT_ASSERTM(0, input->unique(), " not in scope");
+          AT_ASSERTM(0, input->unique(), " not in scope in\n", *n);
         }
       }
       AT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));

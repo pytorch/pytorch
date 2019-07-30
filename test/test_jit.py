@@ -2745,6 +2745,71 @@ graph(%Ra, %Rb):
 
         self.assertEqual(str(warns[0]), str(script_warns[0]))
 
+    def test_trace_rnn_batch(self):
+        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+        class GRUEncoder(nn.Module):
+            def __init__(self):
+                super(GRUEncoder, self).__init__()
+                num_embeddings = 3
+                embedding_dim = 8
+                hidden_size = 8
+                num_layers = 2
+                bidirectional = True
+                embedding_padding_idx = 1
+                gru_dropout = 0.2
+                embedding_dropout = 0.2
+
+                self.gru = nn.GRU(
+                    input_size=embedding_dim,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    dropout=gru_dropout,
+                    bidirectional=True,
+                )
+
+                embedding = nn.Embedding(
+                    num_embeddings, embedding_dim, padding_idx=embedding_padding_idx
+                )
+                self.embedding = nn.Sequential(
+                    embedding, nn.Dropout(embedding_dropout)
+                )
+
+            def forward(self, batch, sequence_lengths):
+                embeddings = self.embedding(batch)
+                max_sequence_length = batch.shape[0]
+                packed_sequence = pack_padded_sequence(embeddings, sequence_lengths.squeeze(0))
+                output, hidden = self.gru(packed_sequence)
+                output, _ = pad_packed_sequence(output, total_length=max_sequence_length)
+
+                return output, hidden
+
+            @property
+            def num_embeddings(self):
+                if isinstance(self.embedding, nn.Sequential):
+                    return self.embedding[0].num_embeddings
+                else:
+                    return self.embedding.num_embeddings
+
+            def dummy_input(self, batch_size=3, sequence_length_upper_bound=5):
+                sequence_lengths = torch.tensor([batch_size - i for i in range(batch_size)]) + 10
+                batch = torch.randint(
+                    0, self.num_embeddings, (sequence_lengths.max(), batch_size)
+                )
+                return (batch, sequence_lengths)
+
+
+        encoder = GRUEncoder()
+        encoder.eval()
+        inputs = encoder.dummy_input(
+            batch_size=3,
+            sequence_length_upper_bound=5,
+        )
+        check1 = encoder.dummy_input(batch_size=5, sequence_length_upper_bound=7)
+        traced_encoder = torch.jit.trace(
+            encoder, inputs, check_inputs=[check1]
+        )
+
     def test_no_erroneous_warnings(self):
         import warnings
 
