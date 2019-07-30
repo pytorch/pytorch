@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.qat as qat
-import torch
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`

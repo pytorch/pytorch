@@ -7,10 +7,10 @@ r"""Add wraps the torch.ops.quantized.add function."""
 class Add(torch.nn.Module):
     __FLOAT_MODULE = torch.nn.modules.Add
 
-    def __init__(self, scale=1.0, zero_point=0):
+    def __init__(self):
         super(Add, self).__init__()
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
+        self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
 
     def forward(self, *args):
         return torch.ops.quantized.add(
@@ -23,5 +23,7 @@ class Add(torch.nn.Module):
         assert (type(mod) == cls.__FLOAT_MODULE),\
             "nnq.Add.from_float only works for " + cls.__FLOAT_MODULE.__name__
         qparams = mod.observer.calculate_qparams()
-        return Add(
-            scale=qparams[0].item(), zero_point=qparams[1].item())
+        mod = Add(scale=qparams[0].item(), zero_point=qparams[1].item())
+        mod.scale = torch.tensor(qparams[0], dtype=torch.double)
+        mod.zero_point = torch.tensor(qparams[1], dtype=torch.long)
+        return mod

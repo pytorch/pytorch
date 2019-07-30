@@ -23,10 +23,10 @@ r"""{module_name} wraps the {qop_string} function."""
 class {module_name}(torch.nn.Module):
     __FLOAT_MODULE = torch.nn.modules.{float_op_name}
 
-    def __init__(self, scale=1.0, zero_point=0):
+    def __init__(self):
         super({module_name}, self).__init__()
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
+        self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
 
     def forward(self, *args):
         return {qop_string}(
@@ -39,8 +39,10 @@ class {module_name}(torch.nn.Module):
         assert (type(mod) == cls.__FLOAT_MODULE),\
             "nnq.{module_name}.from_float only works for " + cls.__FLOAT_MODULE.__name__
         qparams = mod.observer.calculate_qparams()
-        return {module_name}(
-            scale=qparams[0].item(), zero_point=qparams[1].item())
+        mod = {module_name}(scale=qparams[0].item(), zero_point=qparams[1].item())
+        mod.scale = torch.tensor(qparams[0], dtype=torch.double)
+        mod.zero_point = torch.tensor(qparams[1], dtype=torch.long)
+        return mod
 '''
 
 """Factory method to generate the ops files.
@@ -76,6 +78,7 @@ def make_modules(basepath='../..'):
     filename = '_generated.py'
 
     operations = (
+        # (non-quantized op, quantized op)
         ('torch.add', 'torch.ops.quantized.add'),
     )
 
