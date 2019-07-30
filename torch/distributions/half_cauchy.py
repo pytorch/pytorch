@@ -1,4 +1,3 @@
-from numbers import Number
 import math
 
 import torch
@@ -51,8 +50,8 @@ class HalfCauchy(TransformedDistribution):
         return self.base_dist.variance
 
     def log_prob(self, value):
-        if not self._validate_args and isinstance(value, Number):
-            value = torch.tensor(value)
+        value = torch.as_tensor(value, dtype=self.base_dist.scale.dtype,
+                                device=self.base_dist.scale.device)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
         log_prob[value.expand(log_prob.shape) < 0] = -inf
         return log_prob
