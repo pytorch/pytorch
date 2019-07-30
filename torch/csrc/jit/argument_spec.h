@@ -9,6 +9,8 @@
 #include <iostream>
 #include <vector>
 
+#include <torch/csrc/utils/hash.h>
+
 namespace torch {
 namespace jit {
 
@@ -418,10 +420,41 @@ inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
   return CompleteArgumentInfo(*this, i);
 }
 
+inline c10::optional<int8_t> convertOptional(
+    c10::optional<c10::ScalarType> const& from) {
+  return (from) ? c10::optional<int8_t>(static_cast<int8_t>(*from))
+                : c10::optional<int8_t>{};
+}
+
 } // namespace jit
 } // namespace torch
 
 namespace std {
+
+template <>
+struct hash<c10::VaryingShape> {
+  size_t operator()(const c10::VaryingShape& vs) const {
+    return torch::
+        get_hash<c10::optional<size_t>, std::vector<c10::optional<int64_t>>>(
+            vs.size(), vs.sizes());
+  }
+};
+
+template <>
+struct hash<c10::ProfiledTensorType> {
+  size_t operator()(const c10::ProfiledTensorType& ptt) const {
+    return torch::get_hash<
+        c10::optional<int8_t>,
+        c10::VaryingShape,
+        c10::VaryingShape,
+        c10::optional<bool>>(
+        torch::jit::convertOptional(ptt.scalarType()),
+        ptt.sizes(),
+        ptt.strides(),
+        ptt.requiresGrad());
+  }
+};
+
 template <>
 struct hash<torch::jit::ArgumentSpec> {
   size_t operator()(const torch::jit::ArgumentSpec& spec) const {

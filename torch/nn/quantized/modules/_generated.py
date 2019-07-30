@@ -2,9 +2,10 @@
 # @generated This file is produced by `torch/quantization/tools/make_module`.
 
 import torch
+from torch.nn.modules import Module
 
 r"""Add wraps the torch.ops.quantized.add function."""
-class Add(torch.nn.Module):
+class Add(Module):
     __FLOAT_MODULE = torch.nn.modules.Add
 
     def __init__(self):

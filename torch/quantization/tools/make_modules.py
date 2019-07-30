@@ -1,16 +1,22 @@
 import os
 
+operations = (
+    # (non-quantized op, quantized op)
+    ('torch.add', 'torch.ops.quantized.add'),
+)
+
 _disclaimer = r"""
 # @generated This file is produced by `torch/quantization/tools/make_module`.
 """
 
 _imports = r"""
 import torch
+from torch.nn.modules import Module
 """
 
 _module_body = r'''
 r"""{module_name} wraps the {op_string} function."""
-class {module_name}(torch.nn.Module):
+class {module_name}(Module):
     def __init__(self):
         super({module_name}, self).__init__()
 
@@ -20,7 +26,7 @@ class {module_name}(torch.nn.Module):
 
 _qmodule_body = r'''
 r"""{module_name} wraps the {qop_string} function."""
-class {module_name}(torch.nn.Module):
+class {module_name}(Module):
     __FLOAT_MODULE = torch.nn.modules.{float_op_name}
 
     def __init__(self):
@@ -75,13 +81,6 @@ def make_modules(basepath='../..'):
     module_path = os.path.join(os.path.abspath(basepath), 'nn', 'modules')
     qmodule_path = os.path.join(os.path.abspath(basepath), 'nn', 'quantized',
                                 'modules')
-    filename = '_generated.py'
-
-    operations = (
-        # (non-quantized op, quantized op)
-        ('torch.add', 'torch.ops.quantized.add'),
-    )
-
     filename = '_generated.py'
     f_name = os.path.join(module_path, filename)
     qf_name = os.path.join(qmodule_path, filename)
