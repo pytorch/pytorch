@@ -5291,11 +5291,12 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_ConvTranspose2d_half_cublas_gemm(self):
-        inputs = torch.randn(1, 1, 16, 16, device='cuda', dtype=torch.half)
-        deconv = nn.ConvTranspose2d(
-            1, 1, 3, stride=2, padding=1, output_padding=1).cuda().half()
-        output = deconv(inputs)
-        output.mean().backward()
+        with torch.backends.cudnn.flags(enabled=False):
+            inputs = torch.randn(1, 1, 16, 16, device='cuda', dtype=torch.half)
+            deconv = nn.ConvTranspose2d(
+                1, 1, 3, stride=2, padding=1, output_padding=1).cuda().half()
+            output = deconv(inputs)
+            output.mean().backward()
 
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions
