@@ -2242,3 +2242,34 @@ class TestLayers(LayersTestCase):
             self.model.layers[0].get_accessed_features(),
             expected_accessed_features
         )
+
+    def testFCWithBatchMatMul(self):
+
+        input_dim = 10
+        output_dim = 30
+        dim1 = 20
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (dim1, input_dim)))),
+            )
+        )
+        fc_out = self.model.FcWithBatchMatMul(
+            input_record.history_sequence, output_dim)
+        self.assertEqual(
+            schema.Scalar((np.float32, (dim1, output_dim))),
+            fc_out
+        )
+
+        input_dim = 10
+        output_dim = 30
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (input_dim)))),
+            )
+        )
+        fc_out = self.model.FcWithBatchMatMul(
+            input_record.history_sequence, output_dim)
+        self.assertEqual(
+            schema.Scalar((np.float32, (output_dim, ))),
+            fc_out
+        )
