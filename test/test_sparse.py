@@ -1434,7 +1434,7 @@ class TestSparse(TestCase):
         i = self.index_tensor([[0, 1, 1], [2, 0, 2]])
         v = self.value_tensor([3, 4, 5])
         x = self.sparse_tensor(i, v, torch.Size([2, 3]))
-        y = torch.ones(3)
+        y = torch.ones(3, device=self.device)
 
         self.assertEqual(self.value_tensor([3, 9]), x.matmul(y))
 
