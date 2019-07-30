@@ -2014,73 +2014,6 @@ Example::
             [ 0,  1]], dtype=torch.uint8)
 """)
 
-add_docstr(torch.gels,
-           r"""
-gels(input, A, out=None) -> Tensor
-
-Computes the solution to the least squares and least norm problems for a full
-rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
-size :math:`(m \times k)`.
-
-If :math:`m \geq n`, :func:`gels` solves the least-squares problem:
-
-.. math::
-
-   \begin{array}{ll}
-   \min_X & \|AX-B\|_2.
-   \end{array}
-
-If :math:`m < n`, :func:`gels` solves the least-norm problem:
-
-.. math::
-
-   \begin{array}{ll}
-   \min_X & \|X\|_2 & \text{subject to} & AX = B.
-   \end{array}
-
-Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
-rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
-for the solution in each column is given by the sum of squares of elements in the
-remaining :math:`m - n` rows of that column.
-
-Args:
-    input (Tensor): the matrix :math:`B`
-    A (Tensor): the :math:`m` by :math:`n` matrix :math:`A`
-    out (tuple, optional): the optional destination tensor
-
-Returns:
-    (Tensor, Tensor): A namedtuple (solution, QR) containing:
-
-        - **solution** (*Tensor*): the least squares solution
-        - **QR** (*Tensor*): the details of the QR factorization
-
-.. note::
-
-    The returned matrices will always be transposed, irrespective of the strides
-    of the input matrices. That is, they will have stride `(1, m)` instead of
-    `(m, 1)`.
-
-Example::
-
-    >>> A = torch.tensor([[1., 1, 1],
-                          [2, 3, 4],
-                          [3, 5, 2],
-                          [4, 2, 5],
-                          [5, 4, 3]])
-    >>> B = torch.tensor([[-10., -3],
-                          [ 12, 14],
-                          [ 14, 12],
-                          [ 16, 16],
-                          [ 18, 16]])
-    >>> X, _ = torch.gels(B, A)
-    >>> X
-    tensor([[  2.0000,   1.0000],
-            [  1.0000,   1.0000],
-            [  1.0000,   2.0000],
-            [ 10.9635,   4.8501],
-            [  8.9332,   5.2418]])
-""")
-
 add_docstr(torch.geqrf,
            r"""
 geqrf(input, out=None) -> (Tensor, Tensor)
@@ -2666,6 +2599,76 @@ Example::
     >>> torch.logsumexp(a, 1)
     tensor([ 0.8442,  1.4322,  0.8711])
 """.format(**multi_dim_common))
+
+add_docstr(torch.lstsq,
+           r"""
+lstsq(input, A, out=None) -> Tensor
+
+Computes the solution to the least squares and least norm problems for a full
+rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
+size :math:`(m \times k)`.
+
+If :math:`m \geq n`, :func:`lstsq` solves the least-squares problem:
+
+.. math::
+
+   \begin{array}{ll}
+   \min_X & \|AX-B\|_2.
+   \end{array}
+
+If :math:`m < n`, :func:`lstsq` solves the least-norm problem:
+
+.. math::
+
+   \begin{array}{ll}
+   \min_X & \|X\|_2 & \text{subject to} & AX = B.
+   \end{array}
+
+Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
+rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
+for the solution in each column is given by the sum of squares of elements in the
+remaining :math:`m - n` rows of that column.
+
+.. note::
+    The case when :math:`m < n` is not supported on the GPU.
+
+Args:
+    input (Tensor): the matrix :math:`B`
+    A (Tensor): the :math:`m` by :math:`n` matrix :math:`A`
+    out (tuple, optional): the optional destination tensor
+
+Returns:
+    (Tensor, Tensor): A namedtuple (solution, QR) containing:
+
+        - **solution** (*Tensor*): the least squares solution
+        - **QR** (*Tensor*): the details of the QR factorization
+
+.. note::
+
+    The returned matrices will always be transposed, irrespective of the strides
+    of the input matrices. That is, they will have stride `(1, m)` instead of
+    `(m, 1)`.
+
+Example::
+
+    >>> A = torch.tensor([[1., 1, 1],
+                          [2, 3, 4],
+                          [3, 5, 2],
+                          [4, 2, 5],
+                          [5, 4, 3]])
+    >>> B = torch.tensor([[-10., -3],
+                          [ 12, 14],
+                          [ 14, 12],
+                          [ 16, 16],
+                          [ 18, 16]])
+    >>> X, _ = torch.lstsq(B, A)
+    >>> X
+    tensor([[  2.0000,   1.0000],
+            [  1.0000,   1.0000],
+            [  1.0000,   2.0000],
+            [ 10.9635,   4.8501],
+            [  8.9332,   5.2418]])
+""")
 
 add_docstr(torch.lt,
            r"""
