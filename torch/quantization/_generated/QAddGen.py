@@ -13,7 +13,6 @@ class AddGen(torch.nn.Module):
         return self.torch.add(*args)
 
 
-
 r"""QAddGen wraps the torch.ops.quantized.add function."""
 class QAddGen(torch.nn.Module):
     def __init__(self, **kwargs):
@@ -23,7 +22,12 @@ class QAddGen(torch.nn.Module):
         self.zero_point = swargs.get('zero_point', 0)
 
     def forward(self, *args):
-        return self.torch.ops.quantized.add(*args)
+        return self.torch.ops.quantized.add(
+            *args, scale=self.scale, zero_point=self.zero_point)
 
-    def from_float(self, mod):
-        return QAddGen()
+    @classmethod
+    def from_float(cls, mod):
+        assert hasattr(mod, 'observer')
+        qparams = mod.observer.calculate_qparams()
+        return QAddGen(
+            scale=qparams[0].item(), zero_point=qparams[1].item())

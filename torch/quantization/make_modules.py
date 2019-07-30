@@ -28,9 +28,19 @@ _module_forward = r'''
         return self.{op_string}(*args)
 '''
 
+_qmodule_forward = r'''
+    def forward(self, *args):
+        return self.{op_string}(
+            *args, scale=self.scale, zero_point=self.zero_point)
+'''
+
 _module_from_float = r'''
-    def from_float(self, mod):
-        return {module_name}()
+    @classmethod
+    def from_float(cls, mod):
+        assert hasattr(mod, 'observer')
+        qparams = mod.observer.calculate_qparams()
+        return {module_name}(
+            scale=qparams[0].item(), zero_point=qparams[1].item())
 '''
 
 """Factory method to generate the ops files.
@@ -65,10 +75,10 @@ def _make_module(op_string=None, qop_string=None):
         'op_string': qop_string,
     }
 
-    generated_qmodule = '\n\n' + _module_head
+    generated_qmodule = '\n' + _module_head
     generated_qmodule += _module_init
     generated_qmodule += _module_init_extras
-    generated_qmodule += _module_forward
+    generated_qmodule += _qmodule_forward
     generated_qmodule += _module_from_float
     generated_qmodule = generated_qmodule.format(**qparams)
 
