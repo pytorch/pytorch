@@ -4443,7 +4443,11 @@ a")
 
         x = torch.zeros(3, 4, dtype=torch.long)
         graph = _propagate_shapes(fn.graph, (x,), False)
-        FileCheck().check('Float(*, *) = aten::add').run(graph)
+        default = torch.get_default_dtype()
+        if( default == torch.float ):
+            FileCheck().check('Float(*, *) = aten::add').run(graph)
+        else:
+            FileCheck().check('Double(*, *) = aten::add').run(graph)
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''

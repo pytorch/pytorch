@@ -38,6 +38,19 @@ class TestTypePromotion(TestCase):
         # uint8 is unsigned, half is signed.
         self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: uint8_tensor.add_(half_tensor))
 
+        # We allow demotion from signed to unsigned, unlike numpy, because we
+        # don't want the performance penalty of inspecting scalar values, and
+        # because we don't want 'signed' to be considered a distinct 'category'
+        # in promotion rules.
+        # If signed were a distinct category, uint16_tensor + 5 would result in
+        # a long_tensor, which is not what we want.
+        int16_tensor = torch.tensor([1, 1, 1], dtype=torch.int16)
+        uint8_tensor *= int16_tensor
+
+    def test_unsinged(self):
+        dont_promote = torch.ones(3, dtype=torch.uint8) + 5
+        self.assertEqual(dont_promote.dtype, torch.uint8)
+
     # some basic examples
 
     def test_int_promotion(self):
@@ -149,7 +162,7 @@ class TestTypePromotion(TestCase):
         }
 
         for k, v in from_to.items():
-            a = torch.rand([3, 3], device=self.device).to(k)  # not _th_uniform for half on cpu.
+            a = torch.rand([3, 3], device=self.device).to(k)  # no _th_uniform for half on cpu.
             b = torch.rand([3, 3], device=self.device).to(v)
             c = a.add(b)
             d = a.to(v).add(b)

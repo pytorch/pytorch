@@ -217,20 +217,41 @@ class ShapePropagator {
   }
 
   c10::ScalarType getScalarType(Node *node) {
-    c10::ScalarType ret = c10::ScalarType::Undefined;
+    c10::ScalarType dimmed = c10::ScalarType::Undefined;
+    c10::ScalarType zerodim = c10::ScalarType::Undefined;
     auto& args = node->schema().arguments();
     for (size_t i = 0 ; i < args.size() ; i++ ) {
       auto arg = args[i];
-      auto inputDtype = typeToScalarType(node->inputs()[i]->type());
-      if (inputDtype) {
-        if (ret == c10::ScalarType::Undefined) {
-          ret = *inputDtype;
-        } else {
-          ret = c10::promoteTypes(ret, *inputDtype);
+      auto dtt = node->inputs()[i]->type()->cast<DimensionedTensorType>();
+      if ( dtt && dtt->dim() > 0) {
+        if (dtt->dim() > 0) {
+          if (dimmed == c10::ScalarType::Undefined) {
+            dimmed = dtt->scalarType();
+          } else {
+            dimmed = c10::promoteTypes(dimmed, dtt->scalarType());
+          }
+        }
+      } else {
+        auto inputDtype = typeToScalarType(node->inputs()[i]->type());
+       if (inputDtype) {
+          if (zerodim == c10::ScalarType::Undefined) {
+            zerodim = *inputDtype;
+          } else {
+            zerodim = c10::promoteTypes(zerodim, *inputDtype);
+          }
         }
       }
     }
-    return ret;
+    if (isFloatingType(dimmed)) {
+      return dimmed;
+    }
+    if (isIntegralType(dimmed) && isFloatingType(zerodim) ) {
+      return zerodim;
+    }
+    if (c10::ScalarType::Bool == dimmed && c10::ScalarType::Undefined != zerodim) {
+      return zerodim;
+    }
+    return dimmed;
   }
 
   bool mergeTypes(
@@ -924,6 +945,12 @@ class ShapePropagator {
               {
                 auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
                 return {broadcast(*maybe_tensor_types, default_dtype)};
+              }
+              if (c10::ScalarType::Bool == first_scalar_type && second_scalar_type.has_value() &&
+                  c10::ScalarType::Bool != second_scalar_type)
+              {
+                  auto result_type = c10::promoteTypes(first_scalar_type, *second_scalar_type);
+                  return {broadcast(*maybe_tensor_types, result_type)};
               }
               return {broadcast(*maybe_tensor_types, first_scalar_type)};
             }

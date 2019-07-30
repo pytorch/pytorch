@@ -115,6 +115,18 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
         [](const OperandInfo& op) { return !op.tensor.unsafeGetTensorImpl()->is_wrapped_number(); },
         [](const OperandInfo& op) { return true; });
 
+  if (ScalarType::Bool == std::get<1>(result_type)) {
+    auto alternate = compute_result_type(operands_,
+        [](const OperandInfo& op) {
+          return op.tensor.dim() == 0;
+        }
+    );
+    if (std::get<1>(alternate) != ScalarType::Undefined) {
+      // preserve device from original result
+      return std::make_tuple(std::get<0>(result_type), std::get<1>(alternate));
+    }
+  }
+
   // if non-zero-dim tensor result is an integral type and there's a zero-dim
   // floating point operand, we'll promote the floating point type.
   if (isIntegralType(std::get<1>(result_type))) {
@@ -135,12 +147,13 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
 
 static bool can_cast(const ScalarType from, const ScalarType to) {
   // We disallow float -> integral, e.g., int_tensor *= float is disallowed.
-  // Unlike numpy we allow casting unsigned integral types into boolean.
   if (isFloatingType(from) && isIntegralType(to)) {
     return false;
   }
 
-  if (isSignedType(from) && ! isSignedType(to) ) {
+  // treat bool as a distinct category. This resolves most issues that arrise from
+  // not distinguishing signed/unsigned.
+  if (ScalarType::Bool != from && ScalarType::Bool == to) {
     return false;
   }
   return true;

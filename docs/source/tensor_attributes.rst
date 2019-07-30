@@ -36,14 +36,14 @@ can be used, which returns ``True`` if the data type is a floating point data ty
 
 When the dtypes of inputs to an arithmetic operation (`add`, `sub`, `div`, `mul`) differ, we promote
 by finding the minimum dtype that satisfies the following rules:
-  * If the type of a scalar operand is of a higher category (floating, signed) than
-  tensor operands, the result type must have sufficient size to hold all scalar operands
-  of that category.
+  * If the type of a scalar operand is of a higher category than tensor operands
+  (where floating > integral > boolean), we promote to a type with sufficient size to hold
+  all scalar operands of that category.
   * If a zero-dimension tensor operand has a higher category than dimensioned operands,
-  the result type must have sufficient size and category to hold all zero-dim tensor operands of
+  we promote to a type with sufficient size and category to hold all zero-dim tensor operands of
   that category.
-  * The result type must be large enough to hold all dimensioned tensor operands of the highest
-  category.
+  * If there are no higher-category zero-dim operands, we promote to a type with sufficient size
+  and category to hold all dimensioned operands.
 
 A floating point scalar operand has dtype `torch.get_default_dtype()` and an integral
 non-boolean scalar operand has dtype `torch.int64`. Unlike numpy, we do not inspect
@@ -85,11 +85,9 @@ Promotion Examples::
     >>> torch.add(long_tensor, float_tensor).dtype
     torch.float32
 
-When the an output tensor of an arithmetic operation is specified, we allow casting to its dtype except that:
+When the output tensor of an arithmetic operation is specified, we allow casting to its `dtype` except that:
   * An integral output tensor cannot accept a floating point tensor.
-  * An unsigned output tensor cannot accept a signed tensor.
-
-Unlike numpy's same_kind, we do not restrict conversion of unsigned integral types to boolean.
+  * A boolean output tensor cannot accept a non-boolean tensor.
 
 Casting Examples::
 
@@ -100,13 +98,13 @@ Casting Examples::
     >>> float_tensor *= bool_tensor
     >>> float_tensor *= double_tensor
     >>> int_tensor *= long_tensor
-    >>> bool_tensor *= uint_tensor
     >>> int_tensor *= uint_tensor
+    >>> uint_tensor *= int_tensor
 
     # disallowed (RuntimeError: result type can't be cast to the desired output type):
     >>> int_tensor *= float_tensor
     >>> bool_tensor *= int_tensor
-    >>> uint_tensor *= int_tensor
+    >>> bool_tensor *= uint_tensor
 
 
 .. _device-doc:
