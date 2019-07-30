@@ -352,6 +352,9 @@ class CAFFE2_API Tensor {
   //Tensor * add(Tensor & b);
   void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
   void set_data(const Tensor & new_data) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & set_names_(c10::optional<DimnameList> names);
+  #endif
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -537,6 +540,9 @@ class CAFFE2_API Tensor {
   #endif
   Tensor sum(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor sum(IntArrayRef dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor sum(DimnameList dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor sum_to_size(IntArrayRef size) const;
   Tensor sqrt() const;
   Tensor & sqrt_();
@@ -544,6 +550,9 @@ class CAFFE2_API Tensor {
   Tensor std(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
   Tensor prod(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor prod(int64_t dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor prod(Dimname dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor t() const;
   Tensor & t_();
   Tensor tan() const;
@@ -722,7 +731,7 @@ class CAFFE2_API Tensor {
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor & addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
-  std::tuple<Tensor,Tensor> gels(const Tensor & A) const;
+  std::tuple<Tensor,Tensor> lstsq(const Tensor & A) const;
   std::tuple<Tensor,Tensor> triangular_solve(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
   std::tuple<Tensor,Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;

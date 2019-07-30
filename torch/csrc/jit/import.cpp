@@ -181,6 +181,9 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
       tensor_proto.strides().begin(), tensor_proto.strides().end());
   auto type = at::typeMetaToScalarType(
       caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
+  if (tensor_proto.is_quantized()) {
+    type = toQIntType(type);
+  }
   const std::string& record_key = tensor_proto.data().key();
   AT_ASSERT(tensor_proto.has_device() && !tensor_proto.device().empty());
   at::Device device(tensor_proto.device());
@@ -227,10 +230,21 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
   }
 
   at::Tensor result;
+
   if (device.type() == at::DeviceType::CPU) {
-    result =
-        at::empty({0}, at::CPU(type).options())
-            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    if (tensor_proto.is_quantized()) {
+      result = at::_empty_affine_quantized(
+          {0},
+          type,
+          tensor_proto.scale(),
+          tensor_proto.zero_point())
+          .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    }
+    else {
+      result =
+          at::empty({0}, at::CPU(type).options())
+              .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    }
   } else if (device.type() == at::DeviceType::CUDA) {
     result =
         at::empty(
@@ -284,7 +298,13 @@ void ScriptModuleDeserializer::moduleSetState(
 
 script::Module ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
-  moduleStack_.emplace_back(module_def.name());
+  // HACK: The current model exporter can create module_defs with invalid Python
+  // identifiers as names (they contain `.`)
+  const auto atoms = c10::QualifiedName(module_def.name()).atoms();
+  const size_t numPushed = atoms.size();
+  for (const auto& atom : atoms) {
+    moduleStack_.emplace_back(atom);
+  }
   auto module = script::Module(moduleStack_, compilation_unit_);
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
@@ -371,7 +391,9 @@ script::Module ScriptModuleDeserializer::convertModule(
     }
   }
 
-  moduleStack_.pop_back();
+  for (size_t i = 0; i < numPushed; i++) {
+    moduleStack_.pop_back();
+  }
   return module;
 }
 
