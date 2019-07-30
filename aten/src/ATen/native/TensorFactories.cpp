@@ -122,6 +122,10 @@ Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
     const TensorOptions& options) {
+  TORCH_CHECK(options.layout() == Layout::Strided,
+      "NYI: named tensors only support strided layout");
+  TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
+      "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::empty(size, options);
   internal_set_names_inplace(result, names);
   return result;
