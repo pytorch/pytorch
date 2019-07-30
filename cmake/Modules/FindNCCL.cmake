@@ -49,41 +49,16 @@ find_library(NCCL_LIBRARIES
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(NCCL DEFAULT_MSG NCCL_INCLUDE_DIRS NCCL_LIBRARIES)
 
-if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
+if(NCCL_FOUND)
   set (NCCL_HEADER_FILE "${NCCL_INCLUDE_DIRS}/nccl.h")
-  message (STATUS "Determining NCCL version from ${NCCL_HEADER_FILE}...")
-  set (OLD_CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES})
-  list (APPEND CMAKE_REQUIRED_INCLUDES ${NCCL_INCLUDE_DIRS})
-  include(CheckCXXSymbolExists)
-  check_cxx_symbol_exists(NCCL_VERSION_CODE nccl.h NCCL_VERSION_DEFINED)
-
-  if (NCCL_VERSION_DEFINED)
-    set(file "${PROJECT_BINARY_DIR}/detect_nccl_version.cc")
-    file(WRITE ${file} "
-      #include <iostream>
-      #include <nccl.h>
-      int main()
-      {
-        std::cout << NCCL_MAJOR << '.' << NCCL_MINOR << '.' << NCCL_PATCH << std::endl;
-
-        int x;
-        ncclGetVersion(&x);
-        return x == NCCL_VERSION_CODE;
-      }
-")
-    try_run(NCCL_VERSION_MATCHED compile_result ${PROJECT_BINARY_DIR} ${file}
-          RUN_OUTPUT_VARIABLE NCCL_VERSION_FROM_HEADER
-          LINK_LIBRARIES ${NCCL_LIBRARIES})
-    if (NOT NCCL_VERSION_MATCHED)
-      message(FATAL_ERROR "Found NCCL header version and library version do not match! \
-(include: ${NCCL_INCLUDE_DIRS}, library: ${NCCL_LIBRARIES}) Please set NCCL_INCLUDE_DIR and NCCL_LIB_DIR manually.")
-    endif()
-    message(STATUS "NCCL version: ${NCCL_VERSION_FROM_HEADER}")
-  else()
-    message(STATUS "NCCL version < 2.3.5-5")
+  message (STATUS "Determining NCCL version from the header file: ${NCCL_HEADER_FILE}")
+  file (STRINGS ${NCCL_HEADER_FILE} NCCL_MAJOR_VERSION_DEFINED
+        REGEX "^[ \t]*#define[ \t]+NCCL_MAJOR[ \t]+[0-9]+.*$" LIMIT_COUNT 1)
+  if (NCCL_MAJOR_VERSION_DEFINED)
+    string (REGEX REPLACE "^[ \t]*#define[ \t]+NCCL_MAJOR[ \t]+" ""
+            NCCL_MAJOR_VERSION ${NCCL_MAJOR_VERSION_DEFINED})
+    message (STATUS "NCCL_MAJOR_VERSION: ${NCCL_MAJOR_VERSION}")
   endif ()
-  set (CMAKE_REQUIRED_INCLUDES ${OLD_CMAKE_REQUIRED_INCLUDES})
-
   message(STATUS "Found NCCL (include: ${NCCL_INCLUDE_DIRS}, library: ${NCCL_LIBRARIES})")
   mark_as_advanced(NCCL_ROOT_DIR NCCL_INCLUDE_DIRS NCCL_LIBRARIES)
 endif()
