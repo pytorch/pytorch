@@ -19,7 +19,7 @@ struct CAFFE2_API ErrorReport : public std::exception {
 
   const char* what() const noexcept override;
 
-  struct CallStack {
+  struct CAFFE2_API CallStack {
     // These functions are used to report why a function was being compiled (i.e.
     // what was the call stack of user functions at compilation time that led to
     // this error)
@@ -36,9 +36,6 @@ struct CAFFE2_API ErrorReport : public std::exception {
   c10::optional<SourceRange> context;
   mutable std::string the_message;
 };
-
-// Export the CallStack struct
-struct CAFFE2_API ErrorReport::CallStack;
 
 template <typename T>
 const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
