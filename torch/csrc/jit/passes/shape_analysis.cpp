@@ -203,20 +203,14 @@ class ShapePropagator {
     return tensor_types;
   }
 
-  c10::optional<c10::ScalarType> typeToScalarType(const c10::TypePtr & type) {
+  c10::ScalarType typeToScalarType(const c10::TypePtr & type) {
     if(auto cast = type->cast<DimensionedTensorType>()) {
       return cast->scalarType();
-    } else if (auto cast = type->cast<FloatType>()) {
-      return c10::ScalarType::Float;
-    } else if (auto cast = type->cast<IntType>()) {
-      return c10::ScalarType::Long;
-    } else if (auto cast = type->cast<BoolType>()) {
-      return c10::ScalarType::Bool;
     }
-    return c10::nullopt;
+    return scalarTypeFromJitType(type);
   }
 
-  c10::ScalarType getScalarType(Node *node) {
+  c10::ScalarType getPromotedTypeForArithmeticOp(Node *node) {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
     auto& args = node->schema().arguments();
@@ -233,12 +227,10 @@ class ShapePropagator {
         }
       } else {
         auto inputDtype = typeToScalarType(node->inputs()[i]->type());
-       if (inputDtype) {
-          if (zerodim == c10::ScalarType::Undefined) {
-            zerodim = *inputDtype;
-          } else {
-            zerodim = c10::promoteTypes(zerodim, *inputDtype);
-          }
+        if (zerodim == c10::ScalarType::Undefined) {
+          zerodim = inputDtype;
+        } else {
+          zerodim = c10::promoteTypes(zerodim, inputDtype);
         }
       }
     }
@@ -251,7 +243,10 @@ class ShapePropagator {
     if (c10::ScalarType::Bool == dimmed && c10::ScalarType::Undefined != zerodim) {
       return zerodim;
     }
-    return dimmed;
+    if (c10::ScalarType::Undefined != dimmed) {
+      return dimmed;
+    }
+    return zerodim;
   }
 
   bool mergeTypes(
@@ -863,7 +858,7 @@ class ShapePropagator {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
             AT_ASSERT(maybe_tensor_types->size() >= 2);
-            return {broadcast(*maybe_tensor_types, getScalarType(node))};
+            return {broadcast(*maybe_tensor_types, getPromotedTypeForArithmeticOp(node))};
           }
           return {};
         }};
@@ -940,16 +935,15 @@ class ShapePropagator {
                     gatherTensorTypes<DimensionedTensorType>(node)) {
               auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
               auto second_scalar_type = typeToScalarType(node->inputs()[1]->type());
-              if (isIntegralType(first_scalar_type) && second_scalar_type.has_value() &&
-                  isFloatingType(*second_scalar_type) )
+              if (isIntegralType(first_scalar_type) && isFloatingType(second_scalar_type) )
               {
                 auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
                 return {broadcast(*maybe_tensor_types, default_dtype)};
               }
-              if (c10::ScalarType::Bool == first_scalar_type && second_scalar_type.has_value() &&
+              if (c10::ScalarType::Bool == first_scalar_type &&
                   c10::ScalarType::Bool != second_scalar_type)
               {
-                  auto result_type = c10::promoteTypes(first_scalar_type, *second_scalar_type);
+                  auto result_type = c10::promoteTypes(first_scalar_type, second_scalar_type);
                   return {broadcast(*maybe_tensor_types, result_type)};
               }
               return {broadcast(*maybe_tensor_types, first_scalar_type)};
