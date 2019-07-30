@@ -1,3 +1,5 @@
+set(MKLDNN_USE_NATIVE_ARCH ${USE_NATIVE_ARCH})
+
 find_package(MKLDNN QUIET)
 
 add_library(caffe2::mkldnn INTERFACE IMPORTED)
