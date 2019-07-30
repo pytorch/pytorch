@@ -14,20 +14,30 @@ namespace script {
 
 static ModulePtr create_module_object(
     c10::QualifiedName class_name,
-    std::shared_ptr<CompilationUnit> cu) {
+    std::shared_ptr<CompilationUnit> cu,
+    bool shouldMangle = false) {
+  if (shouldMangle && cu->get_class(class_name) != nullptr) {
+    class_name = cu->mangle(class_name);
+  }
   auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
+  cu->register_class(cls);
   return c10::ivalue::Object::create(
       c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
 }
 
 Module::Module(c10::QualifiedName class_name)
-    : module_value_(create_module_object( std::move(class_name), std::make_shared<CompilationUnit>())) {}
+    : module_value_(create_module_object(
+          std::move(class_name),
+          std::make_shared<CompilationUnit>())) {}
 
 Module::Module(
     c10::QualifiedName class_name,
-    std::shared_ptr<CompilationUnit> cu)
-    : module_value_(
-          create_module_object(std::move(class_name), std::move(cu))) {}
+    std::shared_ptr<CompilationUnit> cu,
+    bool shouldMangle)
+    : module_value_(create_module_object(
+          std::move(class_name),
+          std::move(cu),
+          shouldMangle)) {}
 
 ModulePtr Module::module_object() const {
   if (!module_value_) {
@@ -257,14 +267,14 @@ void Module::copy_into(
     }
   }
 
-  for (auto& fn : class_compilation_unit()->get_functions()) {
-    curr.clone_method(*this, fn->qualname(), type_remap);
+  for (auto& fn : type()->methods()) {
+    curr.clone_method(*this, *fn, type_remap);
   }
 }
 
 void Module::clone_method(
     const Module& orig,
-    const QualifiedName& orig_method_name,
+    const Function& method,
     const std::unordered_map<TypePtr, TypePtr>& type_remap) {
   // type remapping - when we copy method implementations from one module
   // singleton to another, we need to update the types of the self arguments
@@ -282,14 +292,13 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  const Function& fn =
-      orig.class_compilation_unit()->get_function(orig_method_name);
-  auto graph = fn.graph()->copy();
+  auto graph = method.graph()->copy();
   graph->remapTypes(type_remap_fn);
-  auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
-  const auto this_method_name = getNameForMethod(orig_method_name.name());
+  auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
+  const auto this_method_name = getNameForMethod(method.name());
   auto copied =
       class_compilation_unit()->create_function(this_method_name, graph);
+  type()->addMethod(copied);
   copied->setSchema(std::move(schema));
 }
 
@@ -305,8 +314,7 @@ void Module::clone_method(const Module& orig, const std::string& name) {
       to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
     }
   }
-  const auto orig_method_name = QualifiedName(orig.name(), name);
-  return clone_method(orig, orig_method_name, type_remap);
+  return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
 void Module::train(bool on) {
