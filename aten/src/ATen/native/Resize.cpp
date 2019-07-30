@@ -10,4 +10,8 @@ Tensor& resize_cpu_(Tensor& self, IntArrayRef size) {
   return self;
 }
 
+Tensor& resize_as_cpu_(Tensor& self, const Tensor& the_template) {
+  return resize_cpu_(self, the_template.sizes());
+}
+
 }}
