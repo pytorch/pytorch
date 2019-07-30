@@ -154,16 +154,20 @@ Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 
 Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto device_res = result.type().device_type();
+  auto device1 = self.type().device_type();
+  TORCH_CHECK(device_res == device1, "out and input1 must have the same device. out: ", device_res, " input1: ", device1);
+  auto device2 = other.type().device_type();
+  TORCH_CHECK(device1 == device2, "input1 and input2 must have the same device. input1: ", device1, " input2: ", device2);
+  TORCH_CHECK(result.numel() == self.numel() && self.numel() == other.numel() , "sizes do not match");
   auto iter = TensorIterator::binary_op(result, self, other);
   atan2_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor atan2(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  auto iter = TensorIterator::binary_op(result, self, other);
-  atan2_stub(iter.device_type(), iter);
-  return iter.output();
+  Tensor result = at::empty_like(self);
+  return native::atan2_out(result, self, other);
 }
 
 Tensor& atan2_(Tensor& self, const Tensor& other) {
