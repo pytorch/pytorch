@@ -3,6 +3,9 @@
 #else
 
 #include <ATen/MemoryOverlap.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 void THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
@@ -100,6 +103,9 @@ void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 void THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
@@ -172,6 +178,12 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
 
 #if !defined(THC_REAL_IS_BOOL)
 
+static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor* src) {
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, src);
+#endif
+}
+
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \
   struct Tensor_##NAME##_##REAL##_Op {                                  \
     __device__ __forceinline__ void operator()(scalar_t* out, scalar_t* in) const { \
@@ -184,8 +196,8 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
   };                                                                    \
                                                                         \
   void THCTensor_(NAME)(THCState* state, THCTensor* self_, THCTensor* src) { \
-    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));               \
-    at::assert_no_internal_overlap(self_, #NAME);                       \
+    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));       \
+    at::assert_no_internal_overlap(self_);                              \
     if (self_ == src) {                                                 \
       if (!THC_pointwiseApply1<scalar_t>(state, self_, Tensor_##NAME##_##REAL##_Op())) { \
         THArgCheck(false, 2, CUTORCH_DIM_WARNING);                      \
@@ -199,6 +211,7 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
     }                                                                   \
                                                                         \
     THCudaCheck(cudaGetLastError());                                    \
+    propagate_names_if_named_tensor_enabled(self_, src);                \
   }
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(NAME, CFUNC, REAL) \
@@ -311,6 +324,9 @@ void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 void THCTensor_(digamma)(THCState* state, THCTensor* self_, THCTensor* src) {
@@ -323,6 +339,9 @@ void THCTensor_(digamma)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTensor* src) {
@@ -346,6 +365,9 @@ void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTens
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 #endif

@@ -55,15 +55,20 @@ class Transformer(Module):
         self.d_model = d_model
         self.nhead = nhead
 
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None, memory_mask=None):
+    def forward(self, src, tgt, src_mask=None, tgt_mask=None,
+                memory_mask=None, src_key_padding_mask=None,
+                tgt_key_padding_mask=None, memory_key_padding_mask=None):
         r"""Take in and process masked source/target sequences.
 
         Args:
             src: the sequence to the encoder (required).
             tgt: the sequence to the decoder (required).
-            src_mask: the mask for the src sequence (optional).
-            tgt_mask: the mask for the tgt sequence (optional).
-            memory_mask: the mask for the encoder output (optional).
+            src_mask: the additive mask for the src sequence (optional).
+            tgt_mask: the additive mask for the tgt sequence (optional).
+            memory_mask: the additive mask for the encoder output (optional).
+            src_key_padding_mask: the ByteTensor mask for src keys per batch (optional).
+            tgt_key_padding_mask: the ByteTensor mask for tgt keys per batch (optional).
+            memory_key_padding_mask: the ByteTensor mask for memory keys per batch (optional).
 
         Shape:
             - src: :math:`(S, N, E)`.
@@ -71,10 +76,18 @@ class Transformer(Module):
             - src_mask: :math:`(S, S)`.
             - tgt_mask: :math:`(T, T)`.
             - memory_mask: :math:`(T, S)`.
+            - src_key_padding_mask: :math:`(N, S)`.
+            - tgt_key_padding_mask: :math:`(N, T)`.
+            - memory_key_padding_mask: :math:`(N, S)`.
 
-            Note: The maksed positions are filled with float('-inf'). Unmasked positions
-            are filled with float(0.0). Masks ensure that the predictions 
-            for position i depend only on the information before position i.
+            Note: [src/tgt/memory]_mask should be filled with
+            float('-inf') for the masked positions and float(0.0) else. These masks
+            ensure that predictions for position i depend only on the unmasked positions
+            j and are applied identically for each sequence in a batch.
+            [src/tgt/memory]_key_padding_mask should be a ByteTensor where True values are positions
+            that should be masked with float('-inf') and False values will be unchanged.
+            This mask ensures that no information will be taken from position i if
+            it is masked, and has a separate mask for each sequence in a batch.
 
             - output: :math:`(T, N, E)`.
 
@@ -95,8 +108,10 @@ class Transformer(Module):
         if src.size(2) != self.d_model or tgt.size(2) != self.d_model:
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
-        memory = self.encoder(src, src_mask)
-        output = self.decoder(tgt, memory, tgt_mask, memory_mask)
+        memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
+        output = self.decoder(tgt, memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
+                              tgt_key_padding_mask=tgt_key_padding_mask,
+                              memory_key_padding_mask=memory_key_padding_mask)
         return output
 
     def generate_square_subsequent_mask(self, sz):
@@ -134,12 +149,13 @@ class TransformerEncoder(Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, src, mask=None):
+    def forward(self, src, mask=None, src_key_padding_mask=None):
         r"""Pass the input through the endocder layers in turn.
 
         Args:
             src: the sequnce to the encoder (required).
-            src_mask: the mask for the src sequence (optional).
+            mask: the mask for the src sequence (optional).
+            src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
             see the docs in Transformer class.
@@ -147,7 +163,8 @@ class TransformerEncoder(Module):
         output = src
 
         for i in range(self.num_layers):
-            output = self.layers[i](output, mask)
+            output = self.layers[i](output, src_mask=mask,
+                                    src_key_padding_mask=src_key_padding_mask)
 
         if self.norm:
             output = self.norm(output)
@@ -174,7 +191,9 @@ class TransformerDecoder(Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, tgt, memory, tgt_mask=None, memory_mask=None):
+    def forward(self, tgt, memory, tgt_mask=None,
+                memory_mask=None, tgt_key_padding_mask=None,
+                memory_key_padding_mask=None):
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:
@@ -182,6 +201,8 @@ class TransformerDecoder(Module):
             memory: the sequnce from the last layer of the encoder (required).
             tgt_mask: the mask for the tgt sequence (optional).
             memory_mask: the mask for the memory sequence (optional).
+            tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
+            memory_key_padding_mask: the mask for the memory keys per batch (optional).
 
         Shape:
             see the docs in Transformer class.
@@ -189,7 +210,10 @@ class TransformerDecoder(Module):
         output = tgt
 
         for i in range(self.num_layers):
-            output = self.layers[i](output, memory, tgt_mask, memory_mask)
+            output = self.layers[i](output, memory, tgt_mask=tgt_mask,
+                                    memory_mask=memory_mask,
+                                    tgt_key_padding_mask=tgt_key_padding_mask,
+                                    memory_key_padding_mask=memory_key_padding_mask)
 
         if self.norm:
             output = self.norm(output)
@@ -199,9 +223,9 @@ class TransformerDecoder(Module):
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
     This standard encoder layer is based on the paper "Attention Is All You Need".
-    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
-    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
-    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement 
+    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
+    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
+    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
     in a different way during application.
 
     Args:
@@ -227,17 +251,19 @@ class TransformerEncoderLayer(Module):
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
 
-    def forward(self, src, src_mask=None):
+    def forward(self, src, src_mask=None, src_key_padding_mask=None):
         r"""Pass the input through the endocder layer.
 
         Args:
             src: the sequnce to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
+            src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
             see the docs in Transformer class.
         """
-        src2 = self.self_attn(src, src, src, attn_mask=src_mask)[0]
+        src2 = self.self_attn(src, src, src, attn_mask=src_mask,
+                              key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
         src = self.norm1(src)
         src2 = self.linear2(self.dropout(F.relu(self.linear1(src))))
@@ -249,9 +275,9 @@ class TransformerEncoderLayer(Module):
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
     This standard decoder layer is based on the paper "Attention Is All You Need".
-    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
-    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
-    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement 
+    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
+    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
+    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
     in a different way during application.
 
     Args:
@@ -280,7 +306,8 @@ class TransformerDecoderLayer(Module):
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
 
-    def forward(self, tgt, memory, tgt_mask=None, memory_mask=None):
+    def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
+                tgt_key_padding_mask=None, memory_key_padding_mask=None):
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
@@ -288,14 +315,18 @@ class TransformerDecoderLayer(Module):
             memory: the sequnce from the last layer of the encoder (required).
             tgt_mask: the mask for the tgt sequence (optional).
             memory_mask: the mask for the memory sequence (optional).
+            tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
+            memory_key_padding_mask: the mask for the memory keys per batch (optional).
 
         Shape:
             see the docs in Transformer class.
         """
-        tgt2 = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask)[0]
+        tgt2 = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask,
+                              key_padding_mask=tgt_key_padding_mask)[0]
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
-        tgt2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask)[0]
+        tgt2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
+                                   key_padding_mask=memory_key_padding_mask)[0]
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
         tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))

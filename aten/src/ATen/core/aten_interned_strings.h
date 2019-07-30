@@ -199,6 +199,7 @@ _(aten, arange) \
 _(aten, argmax) \
 _(aten, argmin) \
 _(aten, as_strided) \
+_(aten, as_tensor) \
 _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
@@ -248,7 +249,6 @@ _(aten, conv3d) \
 _(aten, conv_tbc) \
 _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
-_(aten, conv_transpose3d) \
 _(aten, convolution) \
 _(aten, copy_sparse_to_sparse) \
 _(aten, cos) \
@@ -285,6 +285,7 @@ _(aten, diag) \
 _(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
+_(aten, fill_diagonal_) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
@@ -462,6 +463,8 @@ _(aten, miopen_depthwise_convolution) \
 _(aten, miopen_depthwise_convolution_backward) \
 _(aten, miopen_depthwise_convolution_backward_input) \
 _(aten, miopen_depthwise_convolution_backward_weight) \
+_(aten, miopen_rnn) \
+_(aten, miopen_rnn_backward) \
 _(aten, mkldnn_convolution) \
 _(aten, mkldnn_convolution_backward) \
 _(aten, mkldnn_convolution_backward_input) \
@@ -524,7 +527,6 @@ _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
 _(aten, prod) \
-_(aten, pstrf) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, rand) \
@@ -656,9 +658,8 @@ _(aten, conv_dilated3d) \
 _(aten, conv_dilated3d_backward) \
 _(aten, conv_transpose2d) \
 _(aten, conv_transpose2d_backward) \
-_(aten, thnn_conv_transpose3d) \
-_(aten, thnn_conv_transpose3d_backward) \
-_(aten, thnn_conv_transpose3d_forward) \
+_(aten, conv_transpose3d) \
+_(aten, conv_transpose3d_backward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, to) \
@@ -765,6 +766,7 @@ _(attr, dimension) \
 _(attr, dims) \
 _(attr, dims_other) \
 _(attr, dims_self) \
+_(attr, divisor_override) \
 _(attr, dropout) \
 _(attr, dropout_seed) \
 _(attr, dropout_state) \

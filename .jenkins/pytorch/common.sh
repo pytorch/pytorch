@@ -17,8 +17,20 @@ function cleanup {
 
 set -ex
 
+# Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
+SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
+
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
+
+# Figure out which Python to use for ROCm
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  PYTHON=$(which "python${BASH_REMATCH[1]}")
+  # non-interactive bashs do not expand aliases by default
+  shopt -s expand_aliases
+  export PYTORCH_TEST_WITH_ROCM=1
+  alias python="$PYTHON"
+fi
 
 # This token is used by a parser on Jenkins logs for determining
 # if a failure is a legitimate problem, or a problem with the build
@@ -89,7 +101,7 @@ if which sccache > /dev/null; then
   sccache --zero-stats
   function sccache_epilogue() {
     echo '=================== sccache compilation log ==================='
-    python "$(dirname "${BASH_SOURCE[0]}")/print_sccache_log.py" ~/sccache_error.log
+    python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
     echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
     sccache --show-stats
     sccache --stop-server || true
@@ -145,9 +157,8 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
 fi
 
 function pip_install() {
-  local pkg=$1
   # retry 3 times
-  pip install -q ${pkg} --user || pip install -q ${pkg} --user || pip install -q ${pkg} --user
+  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@"
 }
 
 function get_exit_code() {

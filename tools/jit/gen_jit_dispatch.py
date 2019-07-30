@@ -41,6 +41,7 @@ TYPE_MAP = {
     'std::string': 'str',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
+    'MemoryFormat?': 'MemoryFormat?',
     'QScheme': 'QScheme',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
@@ -99,6 +100,7 @@ FROM_IVALUE = {
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
+    'MemoryFormat?': '{}.toOptional<c10::MemoryFormat>()',
     'QScheme': '{}.toQScheme()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
@@ -166,7 +168,8 @@ CONSTRUCTOR = CodeTemplate("""\
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
-    ${op}
+    ${op},
+    atenOperatorOptions()
 ),
 """)
 
@@ -176,6 +179,7 @@ blacklisted_types = {
     'DimnameList?',
     'ConstQuantizerPtr',
     'Dimname',
+    'DimnameList',
 }
 
 default_only_types = {'Generator'}

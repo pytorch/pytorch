@@ -1,3 +1,5 @@
+# @lint-ignore-every PYTHON3COMPATIMPORTS
+
 r"""
 The torch package contains data structures for multi-dimensional
 tensors and mathematical operations over these are defined.
@@ -222,6 +224,11 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
 class BoolStorage(_C.BoolStorageBase, _StorageBase):
     pass
 
+
+class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
+    pass
+
+
 class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
     pass
 
@@ -235,7 +242,7 @@ class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
     CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage
+    QInt32Storage, BFloat16Storage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -286,6 +293,7 @@ del CharStorageBase
 del ByteStorageBase
 del BoolStorageBase
 del QUInt8StorageBase
+del BFloat16StorageBase
 
 ################################################################################
 # Import most common subpackages
@@ -295,6 +303,7 @@ import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled  # noqa: F401
 import torch.nn
+import torch.nn._intrinsic
 import torch.nn.quantized
 import torch.optim
 import torch.multiprocessing

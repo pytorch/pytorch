@@ -1927,32 +1927,32 @@ class TestSparse(TestCase):
         def do_test(t):
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "raw_resize_ is not allowed on Tensor created from .data or .detach()"):
+                    "raw_resize_ is not allowed on a Tensor created from .data or .detach()"):
                 t.transpose_(0, 1)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "resize_ is not allowed on Tensor created from .data or .detach()"):
+                    "resize_ is not allowed on a Tensor created from .data or .detach()"):
                 t.resize_as_(self.sparse_empty(3, 3))
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
+                    "resize_and_clear_ is not allowed on a Tensor created from .data or .detach()"):
                 t.mul_(t)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_coalesced is not allowed on Tensor created from .data or .detach()"):
+                    "set_coalesced is not allowed on a Tensor created from .data or .detach()"):
                 t._coalesced_(True)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()"):
+                    "set_indices_and_values_unsafe is not allowed on a Tensor created from .data or .detach()"):
                 a = self.sparse_tensor(torch.tensor([[0, 1, 1], [2, 0, 2]]), torch.tensor([3., 4., 5.])).data
                 a.add_(a)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
+                    "resize_and_clear_ is not allowed on a Tensor created from .data or .detach()"):
                 a.zero_()
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "resize_ is not allowed on Tensor created from .data or .detach()"):
+                    "resize_ is not allowed on a Tensor created from .data or .detach()"):
                 a.copy_(self.sparse_empty(3, 3))
 
         do_test(self.sparse_empty(3, 0).data)

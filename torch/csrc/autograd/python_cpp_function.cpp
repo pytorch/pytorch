@@ -198,7 +198,7 @@ struct DefaultFunctionType {
   PyTypeObject type;
 };
 
-PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata)
+PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
 {
   static DefaultFunctionType default_type;
 
@@ -206,7 +206,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata)
     Py_RETURN_NONE;
   }
 
-  if (auto pfw = dynamic_cast<PyFunction*>(cdata.get())) {
+  if (auto pfw = dynamic_cast<PyNode*>(cdata.get())) {
     PyObject* obj = pfw->obj;
     Py_INCREF(obj);
     return obj;
@@ -227,7 +227,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata)
     THPObjectPtr obj(type->tp_alloc(type, 0));
     if (!obj) return nullptr;
     THPCppFunction* f = (THPCppFunction*)obj.get();
-    new (&f->cdata) std::shared_ptr<Function>(cdata);
+    new (&f->cdata) std::shared_ptr<Node>(cdata);
 
     // No INCREF here as we only have a weak reference
     cdata->set_pyobj(obj.release());
@@ -242,7 +242,7 @@ void registerCppFunction(const std::type_info& type, PyTypeObject* pytype)
   cpp_function_types[std::type_index(type)] = THPObjectPtr((PyObject*)pytype);
 }
 
-PyObject* registerFunctionHook(Function& fn, PyObject* hook)
+PyObject* registerFunctionHook(Node& fn, PyObject* hook)
 {
   PyObject* dict = Py_None;
   for (const auto& hook : fn.post_hooks()) {
