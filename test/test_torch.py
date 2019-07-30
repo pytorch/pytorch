@@ -1706,6 +1706,23 @@ class _TestTorchMixin(object):
             expected = torch.zeros(2, 3, device=device).bool()
             self.assertEqual(res, expected)
 
+    def test_bool_sub(self):
+        for device in torch.testing.get_all_device_types():
+            m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
+            m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool, device=device)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with two bool tensors is not supported. "
+                                   r"Use the `\^` operator instead.",
+                                   lambda: m1 - m2)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
+                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   lambda: 1 - m1)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
+                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   lambda: m2 - 1)
+
     def test_csub(self):
         # with a tensor
         a = torch.randn(100, 90)
@@ -12208,15 +12225,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         def do_test(t):
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()"):
+                    "set_sizes_contiguous is not allowed on a Tensor created from .data or .detach()"):
                 t.resize_((2, 1))
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_storage is not allowed on Tensor created from .data or .detach()"):
+                    "set_storage is not allowed on a Tensor created from .data or .detach()"):
                 t.set_()
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_storage_offset is not allowed on Tensor created from .data or .detach()"):
+                    "set_storage_offset is not allowed on a Tensor created from .data or .detach()"):
                 t.set_(t.storage(), 0, t.size(), list(t.stride()))
 
         do_test(torch.tensor([[1, 2]]).data)
