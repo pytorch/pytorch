@@ -66,6 +66,11 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
 }
 
 bool CUDAHooks::isPinnedPtr(void* data) const {
+  // First check if driver is broken/missing, in which case PyTorch CPU
+  // functionalities should still work, we should report `false` here.
+  if (!CUDAHooks::hasCUDA()) {
+    return false;
+  }
   // cudaPointerGetAttributes grabs context on the current device, so we set
   // device to one that already has context, if exists.
   at::OptionalDeviceGuard device_guard;
@@ -148,7 +153,7 @@ int64_t CUDAHooks::current_device() const {
 
 bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects valid device index, but got device_index=", device_index);
+              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
   unsigned int ctx_flags;
   int ctx_is_active;
   AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
