@@ -229,7 +229,7 @@ DEFAULT_MODULE_MAPPING = {
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Generated modules:
-    nn.Add: nnq.quantized.Add,
+    nn.Add: nnq.Add,
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,

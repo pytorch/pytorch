@@ -23,8 +23,8 @@ class Add(Module):
             "Input float module must have observer attached"
         assert (type(mod) == cls.__FLOAT_MODULE),\
             "nnq.Add.from_float only works for " + cls.__FLOAT_MODULE.__name__
-        qparams = mod.observer.calculate_qparams()
-        mod = Add(scale=qparams[0].item(), zero_point=qparams[1].item())
-        mod.scale = torch.tensor(qparams[0], dtype=torch.double)
-        mod.zero_point = torch.tensor(qparams[1], dtype=torch.long)
+        scale, zero_point = mod.observer.calculate_qparams()[:2]
+        mod = Add()
+        mod.scale = torch.tensor(scale, dtype=torch.double)
+        mod.zero_point = torch.tensor(zero_point, dtype=torch.long)
         return mod
