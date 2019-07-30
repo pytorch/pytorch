@@ -6,6 +6,9 @@
 #include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
 #include <c10/util/Optional.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisions, and trigonometric functions. It handles
@@ -18,10 +21,10 @@
 //
 // Example:
 //
-//   auto iter = TensorIterator::Builder()
-//      .add_output(output)
-//      .add_input(input)
-//      .build()
+//   auto iter = TensorIterator();
+//   iter.add_output(output);
+//   iter.add_input(input);
+//   iter.build()
 //
 // [MyKernel.cpp / MyKernel.cu]
 //   cpu_kernel(iter, [](float a, float b) {
@@ -117,9 +120,6 @@ struct CAFFE2_API OperandInfo {
 struct SplitUntil32Bit;
 
 struct CAFFE2_API TensorIterator {
-  struct Builder;
-  friend struct Builder;
-
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
 
@@ -142,11 +142,11 @@ struct CAFFE2_API TensorIterator {
 
   void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
 
-  static std::unique_ptr<TensorIterator> binary_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static std::unique_ptr<TensorIterator> unary_op(Tensor& out, const Tensor& a);
-  static std::unique_ptr<TensorIterator> nullary_op(Tensor& out);
-  static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
-  static std::unique_ptr<TensorIterator> reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
+  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator unary_op(Tensor& out, const Tensor& a);
+  static TensorIterator nullary_op(Tensor& out);
+  static TensorIterator reduce_op(Tensor& out, const Tensor& a);
+  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
@@ -255,6 +255,35 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
+  /// Construction
+  void add_output(const Tensor& output) {
+    operands_.emplace_back(output);
+    num_outputs_++;
+  }
+
+  void add_output(const Tensor& input, Device device, ScalarType dtype) {
+    operands_.emplace_back(input, device, dtype);
+    num_outputs_++;
+  }
+
+  void add_input(const Tensor& input) {
+    operands_.emplace_back(input);
+  }
+
+  void add_input(const Tensor& input, Device device, ScalarType dtype) {
+    operands_.emplace_back(input, device, dtype);
+  }
+
+  void dont_compute_common_dtype() {
+    compute_common_dtype_ = false;
+  }
+
+  void dont_resize_outputs() {
+    resize_outputs_ = false;
+  }
+
+  void build();
+
 protected:
   void mark_outputs();
   void compute_shape();
@@ -264,6 +293,9 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType> compute_common_type();
   void allocate_outputs();
+#ifdef BUILD_NAMEDTENSOR
+  void propagate_names_to_outputs();
+#endif
   void coalesce_dimensions();
 
 protected:
@@ -279,43 +311,6 @@ protected:
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
-};
-
-struct TensorIterator::Builder {
-  friend struct TensorIterator;
-
-  Builder() : iter_(new TensorIterator()) {};
-
-  void add_output(const Tensor& output) {
-    iter_->operands_.emplace_back(output);
-    iter_->num_outputs_++;
-  }
-
-  void add_output(const Tensor& input, Device device, ScalarType dtype) {
-    iter_->operands_.emplace_back(input, device, dtype);
-    iter_->num_outputs_++;
-  }
-
-  void add_input(const Tensor& input) {
-    iter_->operands_.emplace_back(input);
-  }
-
-  void add_input(const Tensor& input, Device device, ScalarType dtype) {
-    iter_->operands_.emplace_back(input, device, dtype);
-  }
-
-  void dont_compute_common_dtype() {
-    iter_->compute_common_dtype_ = false;
-  }
-
-  void dont_resize_outputs() {
-    iter_->resize_outputs_ = false;
-  }
-
-  std::unique_ptr<TensorIterator> build();
-
-protected:
-  std::unique_ptr<TensorIterator> iter_;
 };
 
 /// A container-like struct that acts as if it contains splits of a
