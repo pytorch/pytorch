@@ -101,7 +101,7 @@ public:
     return Vec256<double>(Sleef_atand4_u10(values));
   }
   Vec256<double> atan2(const Vec256<double> &b) const {
-    return b;
+    return Vec256<double>(Sleef_atan2d4_u10(values, b));
   }
   Vec256<double> erf() const {
     return Vec256<double>(Sleef_erfd4_u10(values));

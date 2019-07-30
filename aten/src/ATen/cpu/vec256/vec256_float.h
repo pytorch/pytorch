@@ -109,7 +109,7 @@ public:
     return Vec256<float>(Sleef_atanf8_u10(values));
   }
   Vec256<float> atan2(const Vec256<float> &b) const {
-    return b;
+    return Vec256<float>(Sleef_atan2f8_u10(values, b));
   }
   Vec256<float> erf() const {
     return Vec256<float>(Sleef_erff8_u10(values));

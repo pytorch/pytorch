@@ -155,14 +155,14 @@ Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
-  atan2_stub(iter.device_type(), *iter);
+  atan2_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor atan2(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
   auto iter = TensorIterator::binary_op(result, self, other);
-  atan2_stub(iter.device_type(), *iter);
+  atan2_stub(iter.device_type(), iter);
   return iter.output();
 }
 
