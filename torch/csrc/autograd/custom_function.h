@@ -261,7 +261,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
 template<class T>
 void CppNode<T>::release_variables() {
-  ctx_.saved_variables_.clear();
+  // ctx_.saved_variables_.clear();
   ctx_.has_freed_buffers = true;
 }
 

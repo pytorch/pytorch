@@ -107,11 +107,11 @@ void AutogradContext::save_for_backward(const variable_list &to_save) {
 // The logic for handling saved variables here is the same as python_function.cpp
 // See _save_variables() and unpack_saved_variables()
 void AutogradContext::save_variables() {
-  saved_variables_.clear();
+  // saved_variables_.clear();
   saved_variables_.reserve(to_save_.size());
   auto ptr = grad_fn_.lock();
 
-  for (auto& var : to_save_) {
+  for (const auto& var : to_save_) {
     bool is_output = var.grad_fn().get() == ptr.get();
     saved_variables_.emplace_back(var, is_output);
   }
