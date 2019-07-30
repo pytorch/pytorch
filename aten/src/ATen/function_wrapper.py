@@ -540,6 +540,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'mode': str,
     'python_module': str,
     'name': str,
+    'overload_name': str,
     'native_actuals': List[str],
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
