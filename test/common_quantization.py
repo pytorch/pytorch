@@ -205,12 +205,12 @@ class AnnotatedCustomConfigNestedModel(torch.nn.Module):
         self.fc3.qconfig = default_qconfig
         self.sub2.qconfig = default_qconfig
 
-        custum_options = {
+        custom_options = {
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
         custom_qconfig = QConfig(weight=default_weight_observer(),
-                                 activation=default_observer(**custum_options))
+                                 activation=default_observer(**custom_options))
         self.sub2.fc1.qconfig = custom_qconfig
 
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
@@ -237,27 +237,6 @@ class QuantSubModel(torch.nn.Module):
         x = self.fc3(x)
         return x
 
-class CustomeQConfigModel(torch.nn.Module):
-    def __init__(self):
-        super(CustomQConfigModel, self).__init__()
-        self.sub1 = LinearReluModel()
-        self.sub2 = QuantWrapper(TwoLayerLinearModel())
-        custum_options = {
-            'dtype': torch.quint8,
-            'qscheme': torch.per_tensor_affine
-        }
-        custom_qconfig = QConfig(weight=default_weight_observer(),
-                                 activation=default_observer(**custum_options))
-        self.sub2.qconfig = custom_qconfig
-        self.fc3 = torch.nn.Linear(5, 5).to(dtype=torch.float)
-        self.fc3.qconfig = default_qconfig
-
-    def forward(self, x):
-        x = self.sub1(x)
-        x = self.sub2(x)
-        x = self.fc3(x)
-        return x
-
 class InnerModule(torch.nn.Module):
     def __init__(self):
         super(InnerModule, self).__init__()
@@ -269,6 +248,9 @@ class InnerModule(torch.nn.Module):
         return self.relu(self.fc2(self.relu(self.fc1(x))))
 
 class SkipQuantModel(torch.nn.Module):
+    r"""We can skip quantization by explicitly
+    setting qconfig of a submodule to None
+    """
     def __init__(self):
         super(SkipQuantModel, self).__init__()
         self.qconfig = default_qconfig
