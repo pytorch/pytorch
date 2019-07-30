@@ -181,6 +181,9 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
       tensor_proto.strides().begin(), tensor_proto.strides().end());
   auto type = at::typeMetaToScalarType(
       caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
+  if (tensor_proto.is_quantized()) {
+    type = toQIntType(type);
+  }
   const std::string& record_key = tensor_proto.data().key();
   AT_ASSERT(tensor_proto.has_device() && !tensor_proto.device().empty());
   at::Device device(tensor_proto.device());
@@ -227,10 +230,21 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
   }
 
   at::Tensor result;
+
   if (device.type() == at::DeviceType::CPU) {
-    result =
-        at::empty({0}, at::CPU(type).options())
-            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    if (tensor_proto.is_quantized()) {
+      result = at::_empty_affine_quantized(
+          {0},
+          type,
+          tensor_proto.scale(),
+          tensor_proto.zero_point())
+          .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    }
+    else {
+      result =
+          at::empty({0}, at::CPU(type).options())
+              .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    }
   } else if (device.type() == at::DeviceType::CUDA) {
     result =
         at::empty(
