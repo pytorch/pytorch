@@ -153,10 +153,11 @@ THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, 
 
 THTensor *THTensor_(newClone)(THTensor *self)
 {
+  // already available in Aten as at::clone()
   THTensor *tensor = THTensor_(new)();
-  THTensor_(resizeAs)(tensor, self);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
+  tensor_wrap.resize_as_(self_wrap);
   at::native::copy_(tensor_wrap, self_wrap, false);
   return tensor;
 }
@@ -217,6 +218,7 @@ void THTensor_(resize)(THTensor *self, at::IntArrayRef size, at::IntArrayRef str
 
 void THTensor_(resizeAs)(THTensor *self, THTensor *src)
 {
+  // already available in Aten as at::resize_as_()
   if(!THTensor_(isSameSizeAs)(self, src))
     THTensor_(resizeNd)(self, src->dim(), THTensor_getSizePtr(src), NULL);
 }
