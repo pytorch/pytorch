@@ -59,6 +59,8 @@ struct TORCH_API VariableInfo {
   bool requires_grad;
 };
 
+// Node representing the operation implemented by the user defined Function
+// Calls to 'apply' are forward to the implementation of backward by the user.
 template <class T>
 struct CppNode : public Node {
 
