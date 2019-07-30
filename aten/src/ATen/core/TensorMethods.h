@@ -1545,8 +1545,8 @@ inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Sc
     static auto table = globalATenDispatch().getOpTable("aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, tensor1, tensor2, value);
 }
-inline std::tuple<Tensor,Tensor> Tensor::gels(const Tensor & A) const {
-    static auto table = globalATenDispatch().getOpTable("aten::gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)");
+inline std::tuple<Tensor,Tensor> Tensor::lstsq(const Tensor & A) const {
+    static auto table = globalATenDispatch().getOpTable("aten::lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)");
     return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, A);
 }
 inline std::tuple<Tensor,Tensor> Tensor::triangular_solve(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
