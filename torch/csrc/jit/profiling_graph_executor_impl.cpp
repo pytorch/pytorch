@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
@@ -51,6 +52,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   EliminateRedundantGuards(copy);
   InsertBailOuts(copy);
   // TODO: this runs specializeAutogradZero ??
+  GRAPH_DUMP("After InsertBailOuts: ", copy);
   runRequiredPasses(copy);
   if (needsGradient(copy)) {
     auto diff_nodes = CreateAutodiffSubgraphs(
@@ -72,12 +74,17 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   EliminateDeadCode(copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy);
+  GRAPH_DUMP("Optimized Plan: ", copy);
   return *optimized_plan_;
 }
 
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
-  AT_ERROR("not supported");
+  GraphExecutorState state;
+  TORCH_INTERNAL_ASSERT(optimized_plan_);
+  auto opt_plan = *optimized_plan_;
+  state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
+  return state;
 }
 
 } // namespace jit

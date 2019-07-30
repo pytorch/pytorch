@@ -663,10 +663,24 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   if (mayIntroduceGradient(graph->block()))
     return true;
 
-  for (const Value* input : graph->inputs()) {
-    if (input->type()->requires_grad())
-      return true;
+  if (getProfilingMode()) {
+    for (const Value* input : graph->inputs()) {
+      for (const auto& use : input->uses()) {
+        if (use.user->kind() == prim::BailOut) {
+          auto ptt = use.user->output()->type()->expect<ProfiledTensorType>();
+          if (ptt->requiresGrad() && *ptt->requiresGrad()) {
+            return true;
+          }
+        }
+      }
+    }
+  } else {
+    for (const Value* input : graph->inputs()) {
+      if (input->type()->requires_grad())
+        return true;
+    }
   }
+
   return false;
 }
 
