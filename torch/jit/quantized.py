@@ -38,7 +38,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        out = torch.fbgemm_linear_int8_weight_fp32_activation(
+        out = torch.fbgemm_linear_int8_weight(
             input.float(), self.weight, self.packed_tensor_ptr, self.col_offsets,
             self.scale, self.zero_point, self.bias)
         return out.to(input.dtype)
@@ -75,7 +75,7 @@ class QuantizedLinearFP16(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        out = torch.fbgemm_linear_fp16_weight_fp32_activation(
+        out = torch.fbgemm_linear_fp16_weight(
             input.float(), self.packed_weight, self.bias)
         return out
 
@@ -245,7 +245,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                      'batch_first', 'dropout', 'bidirectional', '_packed_weights',
                      '_quantized_weights', 'dtype']
 
-    def __init__(self, other, dtype=torch.uint8): 
+    def __init__(self, other, dtype=torch.int8): 
         super(QuantizedRNNBase, self).__init__()
         self.mode = other.mode
         self.input_size = other.input_size
@@ -266,7 +266,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         if self.mode != 'LSTM' and self.mode != 'GRU':
             raise RuntimeError('Only LSTM or GRU is supported for QuantizedRNN')
 
-        if dtype != torch.uint8 and dtype != torch.float16:
+        if dtype != torch.int8 and dtype != torch.float16:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
         self._all_weights = []
@@ -287,7 +287,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                     orig_weights.append(weight_name)
                     self.register_buffer(weight_name, weight)
 
-                    if dtype == torch.uint8: 
+                    if dtype == torch.int8: 
                         # for each layer, for each direction we need to quantize and pack
                         # weights and pack parameters in this order:
                         #
@@ -415,7 +415,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
     # @torch._jit_internal.torch.jit.script_method
     @torch.jit.script_method
     def _unpack(self):
-        if self.dtype == torch.uint8:
+        if self.dtype == torch.int8:
             packed_weights = self._get_packed_weights()
             quantized_weights = self._get_quantized_weights()
             assert len(packed_weights) == len(quantized_weights)
@@ -599,7 +599,7 @@ def quantize_rnn_cell_modules(module):
     return module
 
 
-def quantize_linear_modules(module, dtype=torch.uint8):
+def quantize_linear_modules(module, dtype=torch.int8):
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
@@ -611,7 +611,7 @@ def quantize_linear_modules(module, dtype=torch.uint8):
     for name, mod in reassign.items():
         setattr(module, name, mod)
     if isinstance(module, torch.nn.Linear):
-        if dtype == torch.uint8:
+        if dtype == torch.int8:
             return QuantizedLinear(module)
         elif dtype == torch.float16:
             return QuantizedLinearFP16(module)
@@ -621,7 +621,7 @@ def quantize_linear_modules(module, dtype=torch.uint8):
     return module
 
 
-def quantize_rnn_modules(module, dtype=torch.uint8):
+def quantize_rnn_modules(module, dtype=torch.int8):
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
@@ -633,7 +633,7 @@ def quantize_rnn_modules(module, dtype=torch.uint8):
     for name, mod in reassign.items():
         setattr(module, name, mod)
     if isinstance(module, torch.nn.LSTM):
-        if dtype != torch.uint8 and dtype != torch.float16:
+        if dtype != torch.int8 and dtype != torch.float16:
             raise RuntimeError("Unsupported dtype: {}".format(dtype))
         return QuantizedLSTM(module, dtype)
     if isinstance(module, torch.nn.GRU):
