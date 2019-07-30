@@ -191,6 +191,8 @@ class _TestTorchMixin(object):
                 else:
                     self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
 
+        # FIXME: All of the following should be marked as expected failures
+        # so that it is easier to tell when missing has been added.
         # FIXME: fix all the skipped ones below!
         test_namespace(torch.randn(1),
                        'as_strided_',
@@ -223,6 +225,7 @@ class _TestTorchMixin(object):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
+                       'set_names_',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
@@ -1702,6 +1705,23 @@ class _TestTorchMixin(object):
             res = torch.add(a, a, alpha=0)
             expected = torch.zeros(2, 3, device=device).bool()
             self.assertEqual(res, expected)
+
+    def test_bool_sub(self):
+        for device in torch.testing.get_all_device_types():
+            m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
+            m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool, device=device)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with two bool tensors is not supported. "
+                                   r"Use the `\^` operator instead.",
+                                   lambda: m1 - m2)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
+                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   lambda: 1 - m1)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
+                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   lambda: m2 - 1)
 
     def test_csub(self):
         # with a tensor

@@ -34,6 +34,7 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # At least the op_name should be specified,
     # but the op's attributes can optionally be
     # specified as well
+
     assert len(ops) == len(graph.node)
     for i in range(0, len(ops)):
         assert graph.node[i].op_type == ops[i]['op_name']
