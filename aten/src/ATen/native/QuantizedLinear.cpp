@@ -244,7 +244,7 @@ Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
       /*nRow=*/input_channels,
       /*nCol=*/output_channels,
       /*smat=*/contiguous_ptr,
-      /*ld=*/K,
+      /*ld=*/input_channels,
       /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
       /*groups=*/1);
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
