@@ -7,11 +7,7 @@ from __future__ import unicode_literals
 import torch
 from torch._ops import ops
 from torch._jit_internal import List
-
-def _extend_to_list(val, length=2):
-    if not isinstance(val, (tuple, list)):
-        val = [val] * length
-    return val
+from torch.nn.modules.utils import _pair
 
 relu = ops.quantized.relu
 add_relu = ops.quantized.add_relu
@@ -21,15 +17,13 @@ def conv2d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
            padding_mode='zeros',
            scale=1.0, zero_point=0,
-           dtype=torch.quint8,
-           prepacked=True):
+           dtype=torch.quint8):
     r"""
     conv2d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
            padding_mode='zeros',
            scale=1.0, zero_point=0,
-           dtype=torch.quint8,
-           prepacked=True) -> Tensor
+           dtype=torch.quint8) -> Tensor
 
     Applies a 2D convolution over a quantized 2D input composed of several input
     planes.
@@ -52,10 +46,10 @@ def conv2d(input, weight, bias,
         scale: quantization scale for the output. Default: 1.0
         zero_point: quantization zero_point for the output. Default: 0
         dtype: quantization data type to use. Default: ``torch.quint8``
-        prepacked: assume that the weights are prepacked. Default: True
 
     Examples::
 
+        >>> from torch.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, dtype=torch.float)
         >>> bias = torch.randn(4, dtype=torch.float)
@@ -70,16 +64,18 @@ def conv2d(input, weight, bias,
     """  # noqa: E501
     if padding_mode != 'zeros':
         raise NotImplementedError("Only zero-padding is supported!")
-    spatial_dim_len = len(input.shape) - 2  # no batches and channels
-    stride = _extend_to_list(stride, spatial_dim_len)
-    padding = _extend_to_list(padding, spatial_dim_len)
-    dilation = _extend_to_list(dilation, spatial_dim_len)
+    if input.ndim != 4:
+        raise ValueError("Input shape must be `(N, C, H, W)`!")
+    stride = _pair(stride)
+    padding = _pair(padding)
+    dilation = _pair(dilation)
 
-    if not prepacked:
-        weight = ops.quantized.fbgemm_conv_prepack(weight, groups)
-    return ops.quantized.fbgemm_conv2d(input, weight, bias,
+    prepacked_weight = ops.quantized.fbgemm_conv_prepack(weight.permute([0, 2, 3, 1]), stride, padding, dilation, groups)
+
+    return ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
+                                       prepacked_weight, bias,
                                        stride, padding, dilation,
-                                       groups, scale, zero_point)
+                                       groups, scale, zero_point).permute([0, 3, 1, 2])
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):

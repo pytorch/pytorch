@@ -6,6 +6,9 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace {
 
@@ -69,6 +72,14 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       }
     }
   });
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = unify_from_right(self.names(), src.names());
+  if (outnames.has_value()) {
+    at::internal_set_names_inplace(self, *outnames);
+  } else {
+    at::internal_set_names_inplace(self, nullopt);
+  }
+#endif
 }
 
 // Devices directly supported by this copy implementation. Other device types
@@ -119,19 +130,19 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
   }
 
-  auto builder = TensorIterator::Builder();
-  builder.add_output(self);
-  builder.add_input(src);
-  builder.dont_resize_outputs();
-  builder.dont_compute_common_dtype();
-  auto iter = builder.build();
+  auto iter = TensorIterator();
+  iter.add_output(self);
+  iter.add_input(src);
+  iter.dont_resize_outputs();
+  iter.dont_compute_common_dtype();
+  iter.build();
 
-  if (iter->numel() == 0) {
+  if (iter.numel() == 0) {
     return self;
   }
 
-  DeviceType device_type = iter->device_type(0);
-  if (iter->device_type(1) == kCUDA) {
+  DeviceType device_type = iter.device_type(0);
+  if (iter.device_type(1) == kCUDA) {
     device_type = kCUDA;
   }
 
@@ -140,7 +151,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     return self;
   }
 
-  copy_stub(device_type, *iter, non_blocking);
+  copy_stub(device_type, iter, non_blocking);
   return self;
 }
 
