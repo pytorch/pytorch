@@ -549,7 +549,8 @@ struct to_ir {
 
   // If the graph might not return, add an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
-    if (exit_blocks.count(graph->block()) == 0) {
+    auto decl_ret = def_stack_.back().declared_return_type_;
+    if (exit_blocks.count(block) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get()) {
         throw ErrorReport(def.range())
@@ -559,6 +560,14 @@ struct to_ir {
       WithInsertPoint b(*block->nodes().end());
       emitReturn(Return::create(
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
+    } else {
+      // if we haven't seen any return statements, but the graph block exits
+      // (the funciton always throws) then we accept the declared return type if
+      // it exists or set it to none
+      if (def_stack_.back().merged_return_type_ == nullptr) {
+        def_stack_.back().merged_return_type_ =
+            decl_ret != nullptr ? decl_ret : NoneType::get();
+      }
     }
   }
 
@@ -762,9 +771,9 @@ struct to_ir {
       const SourceRange& range,
       const FunctionSchema& schema,
       Block* block) {
-    // rewrites ensure there is always a return statement in program
+    // handleMaybeNoReturn ensures that merged_return_type_ is always set
     auto ret_type = def_stack_.back().merged_return_type_;
-    AT_ASSERT(ret_type);
+    TORCH_INTERNAL_ASSERT(ret_type);
 
     // in the ConvertToSSA pass, prim::ReturnStmts are lowered so that the
     // correct return value is set. Until then, we have a correctly-typed
@@ -1492,6 +1501,7 @@ struct to_ir {
     const std::string exception = "Exception";
     auto string_input = insertConstant(*graph, exception, nullptr, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
+    exit_blocks.insert(environment_stack->block());
   }
 
   void emitAssert(const Assert& stmt) {
