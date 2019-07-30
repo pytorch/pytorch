@@ -120,8 +120,6 @@ class ConvBn2d(Conv2d):
             # recovering original conv to get original batch_mean and batch_var
             conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
             batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
-            if self.bias is not None:
-                batch_mean = batch_mean + self.bias
             batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
             batch_rstd = torch.ones_like(batch_var) / torch.sqrt(batch_var + self.eps)
 
@@ -165,7 +163,7 @@ class ConvBn2d(Conv2d):
                          False,
                          qconfig.activation,
                          qconfig.weight)
-
+        assert qat_convbn.bias is None, 'QAT ConvBn should no bias'
         qat_convbn.weight = conv.weight
         qat_convbn.gamma = bn.weight
         qat_convbn.beta = bn.bias
