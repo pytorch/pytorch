@@ -215,7 +215,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         } else if (ch >= 64) {
           if (w >= 14) {
-            return true;  
+            return true;
           }
         } else if ((ch >= 32) && (w >=28)) {
           return true;
@@ -288,7 +288,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         } else if (w >= 56) {
           return true;
-        } 
+        }
       } else if (bs >= 1) {
         if ((ch >= 512) && (w >=112)) {
           return true;
@@ -495,6 +495,13 @@ at::Tensor convolution(
                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
 }
 
+at::Tensor convolution_generic(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding, int64_t groups) {
+  AT_ERROR("Backend should either override this function or use thnn implementation");
+}
+
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
@@ -531,6 +538,14 @@ at::Tensor _convolution(
 
   check_shape_forward(input, weight, bias, params, input_is_mkldnn);
 
+  // I have a choice here to move this above or under the views below.
+  // Temporarily put it above as this is the most generic version,
+  // could potentially move to the end of function if XLA doesn't handle
+  // it.
+  if (input.device() == at::kXLA) {
+    return at::convolution_generic(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
+  }
+
   if (k == 3) {
     params.view1d_as_2d();
     input = view4d(input);
@@ -549,7 +564,7 @@ at::Tensor _convolution(
         output = at::cudnn_convolution(
             input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
-        
+
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
             input, weight, bias,
@@ -698,6 +713,17 @@ at::Tensor _convolution_nogroup(
   }
 
   AT_ERROR("unsupported ConvNd parameters");
+}
+
+std::tuple<Tensor, Tensor, Tensor> convolution_generic_backward(
+        const Tensor& grad_output, const Tensor& input, const Tensor& weight, const Tensor& bias,
+        IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+        bool transposed, IntArrayRef output_padding, int64_t groups) {
+  AT_ERROR("Backend should either override this function or use thnn implementation");
+  return std::tuple<Tensor, Tensor, Tensor>(
+          at::empty_like(input),
+          at::empty_like(weight),
+          at::empty_like(bias));
 }
 
 static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
