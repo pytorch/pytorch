@@ -43,9 +43,10 @@ class {module_name}(Module):
         assert (hasattr(mod, 'observer')),\
             "Input float module must have observer attached"
         assert (type(mod) == cls.__FLOAT_MODULE),\
-            "nnq.{module_name}.from_float only works for " + cls.__FLOAT_MODULE.__name__
+            "nnq." + cls.__name__ + ".from_float only works for " \
+            + cls.__FLOAT_MODULE.__name__
         scale, zero_point = mod.observer.calculate_qparams()[:2]
-        mod = {module_name}()
+        mod = cls()
         mod.scale = torch.tensor(scale, dtype=torch.double)
         mod.zero_point = torch.tensor(zero_point, dtype=torch.long)
         return mod
