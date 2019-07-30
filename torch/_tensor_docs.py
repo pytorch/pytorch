@@ -2107,32 +2107,18 @@ specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
 index is specified by its index in :attr:`src` for ``dimension != dim`` and by
 the corresponding value in :attr:`index` for ``dimension = dim``.
 
-This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
-
-If :attr:`src` is a tensor, then:
-
-- :attr:`self` and :attr:`src` should have the same number of dimensions.
-- :attr:`index` should also have the same number of dimensions as :attr:`self` and :attr:`src`.
-- ``index.size(d) == src.size(d) == self.size(d)`` for all dimensions ``d != dim``.
-- ``index.size(dim) == src.size(dim)`` and ``index.max() < self.size(dim)``.
-
 For a 3-D tensor, :attr:`self` is updated as::
 
     self[index[i][j][k]][j][k] = src[i][j][k]  # if dim == 0
     self[i][index[i][j][k]][k] = src[i][j][k]  # if dim == 1
     self[i][j][index[i][j][k]] = src[i][j][k]  # if dim == 2
 
-If :attr:`src` is a scalar, then:
+This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-- :attr:`self` and :attr:`index` should have the same number of dimensions.
-- ``index.size(d) == self.size(d)`` for all dimensions ``d != dim``.
-- ``index.max() < self.size(dim)``.
-
-For a 3-D tensor :attr:`self` is updated as::
-
-    self[index[i][j][k]][j][k] = src  # if dim == 0
-    self[i][index[i][j][k]][k] = src  # if dim == 1
-    self[i][j][index[i][j][k]] = src  # if dim == 2
+:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should have same
+number of dimensions. It is also required that ``index.size(d) <= src.size(d)``
+for all dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all
+dimensions ``d != dim``.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row
@@ -2143,8 +2129,10 @@ Args:
     index (LongTensor): the indices of elements to scatter,
       can be either empty or the same size of src.
       When empty, the operation returns identity
-    src (Tensor or scalar): the source element(s) to scatter,
-      could be a tensor, or a value of the same dtype as ``self``.
+    src (Tensor): the source element(s) to scatter,
+      incase `value` is not specified
+    value (float): the source element(s) to scatter,
+      incase `src` is not specified
 
 Example::
 
@@ -2174,30 +2162,16 @@ an index in :attr:`self` which is specified by its index in :attr:`other`
 for ``dimension != dim`` and by the corresponding value in :attr:`index` for
 ``dimension = dim``.
 
-If :attr:`other` is a tensor, then:
-
-- :attr:`self` and :attr:`other` should have the same number of dimensions.
-- :attr:`index` should also have the same number of dimensions as :attr:`self` and :attr:`other`.
-- ``index.size(d) == other.size(d) == self.size(d)`` for all dimensions ``d != dim``.
-- ``index.size(dim) == other.size(dim)`` and ``index.max() < self.size(dim)``.
-
 For a 3-D tensor, :attr:`self` is updated as::
 
     self[index[i][j][k]][j][k] += other[i][j][k]  # if dim == 0
     self[i][index[i][j][k]][k] += other[i][j][k]  # if dim == 1
     self[i][j][index[i][j][k]] += other[i][j][k]  # if dim == 2
 
-If :attr:`other` is a scalar, then:
-
-- :attr:`self` and :attr:`index` should have the same number of dimensions.
-- ``index.size(d) == self.size(d)`` for all dimensions ``d != dim``.
-- ``index.max() < self.size(dim)``.
-
-For a 3-D tensor :attr:`self` is updated as::
-
-    self[index[i][j][k]][j][k] += other  # if dim == 0
-    self[i][index[i][j][k]][k] += other  # if dim == 1
-    self[i][j][index[i][j][k]] += other  # if dim == 2
+:attr:`self`, :attr:`index` and :attr:`other` (if it is a Tensor) should have same number of
+dimensions. It is also required that ``index.size(d) <= other.size(d)`` for all
+dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
+``d != dim``.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row along
@@ -2210,8 +2184,7 @@ Args:
     index (LongTensor): the indices of elements to scatter and add,
       can be either empty or the same size of src.
       When empty, the operation returns identity.
-    other (Tensor or scalar): the source element(s) to scatter and add,
-      could be a tensor, or a scalar of the same dtype as ``self``.
+    other (Tensor or scalar): the source elements to scatter and add
 
 Example::
 
