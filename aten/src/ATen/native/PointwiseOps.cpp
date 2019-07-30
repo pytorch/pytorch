@@ -36,15 +36,14 @@ Tensor& addcmul_cpu_out(
     const Tensor& tensor1,
     const Tensor& tensor2,
     Scalar value) {
-  assert_no_internal_overlap(result, "addcmul_cpu");
   checkBackend("addcmul_cpu", result, self.type().backend());
-  auto builder = at::TensorIterator::Builder();
-  builder.add_output(result);
-  builder.add_input(self);
-  builder.add_input(tensor1);
-  builder.add_input(tensor2);
-  auto iter = builder.build();
-  addcmul_stub(kCPU, *iter, value);
+  auto iter = at::TensorIterator();
+  iter.check_and_add_output(result);
+  iter.add_input(self);
+  iter.add_input(tensor1);
+  iter.add_input(tensor2);
+  iter.build();
+  addcmul_stub(kCPU, iter, value);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
