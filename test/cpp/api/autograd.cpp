@@ -21,7 +21,7 @@ std::string graph_desc(std::shared_ptr<autograd::Node> node) {
   return result+")";
 }
 
-TEST(AutogradTest, CustomFunction) {
+TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public torch::autograd::Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
       ctx->saved_data["mul"] = mul;
@@ -49,7 +49,7 @@ TEST(AutogradTest, CustomFunction) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5,5})*2);
 }
 
-TEST(AutogradTest, FunctionReturnsInput) {
+TEST(CustomAutogradTest, FunctionReturnsInput) {
   struct MyFunction : public torch::autograd::Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable var1) {
       return {var1};
@@ -65,7 +65,7 @@ TEST(AutogradTest, FunctionReturnsInput) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::full(1,2));
 }
 
-TEST(AutogradTest, NoGradCustomFunction) {
+TEST(CustomAutogradTest, NoGradCustomFunction) {
   // Custom Function should respect grad mode
  struct MyOp : public torch::autograd::Function<MyOp> {
    static variable_list forward(AutogradContext *ctx, Variable x) {
@@ -85,7 +85,7 @@ TEST(AutogradTest, NoGradCustomFunction) {
  }
 }
 
-TEST(AutogradTest, MarkNonDifferentiable) {
+TEST(CustomAutogradTest, MarkNonDifferentiable) {
   struct MyFunction : public torch::autograd::Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable v) {
       Variable output = v > 0;
@@ -105,7 +105,7 @@ TEST(AutogradTest, MarkNonDifferentiable) {
   y.sum().backward();
 }
 
-TEST(AutogradTest, ReturnLeafInplace) {
+TEST(CustomAutogradTest, ReturnLeafInplace) {
   struct Inplace : public torch::autograd::Function<Inplace> {
     static variable_list forward(AutogradContext *ctx, Variable a, Variable b) {
       ctx->mark_dirty({a});
