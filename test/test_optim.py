@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import warnings
 import math
 import unittest
@@ -34,10 +36,12 @@ def drosenbrock(tensor):
 
 class TestOptim(TestCase):
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
-                                sparse_only=False):
+                                sparse_only=False, test_cuda=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
         params_t = torch.Tensor([1.5, 1.5])
+        if test_cuda:
+            params_t = params_t.cuda()
 
         params = Variable(params_t, requires_grad=True)
         optimizer = constructor([params])
@@ -50,6 +54,8 @@ class TestOptim(TestCase):
             optimizer_c = constructor([params_c])
 
         solution = torch.Tensor([1, 1])
+        if test_cuda:
+            solution = solution.cuda()
         initial_dist = params.data.dist(solution)
 
         def eval(params, sparse_grad, w):
@@ -62,13 +68,23 @@ class TestOptim(TestCase):
             # uncoalesced sparse tensor
             if w:
                 i = torch.LongTensor([[0, 0]])
+                if test_cuda:
+                    i = i.cuda()
                 x = grad[0]
                 v = torch.DoubleTensor([x / 4., x - x / 4.])
+                if test_cuda:
+                    v = v.cuda()
             else:
                 i = torch.LongTensor([[1, 1]])
+                if test_cuda:
+                    i = i.cuda()
                 y = grad[1]
                 v = torch.DoubleTensor([y - y / 4., y / 4.])
+                if test_cuda:
+                    v = v.cuda()
             x = sparse.DoubleTensor(i, v, torch.Size([2]))
+            if test_cuda:
+                x = x.cuda()
             with torch.no_grad():
                 if sparse_grad:
                     params.grad = x
@@ -340,9 +356,32 @@ class TestOptim(TestCase):
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2),
             [],
-            True
+            sparse_only=True,
+            test_cuda=False,
         )
-        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SparseAdam(
+                params, lr=4e-2, fuse_kernels=False),
+            [],
+            sparse_only=True,
+            test_cuda=False,
+        )
+        if torch.cuda.is_available():
+            self._test_rosenbrock_sparse(
+                lambda params: optim.SparseAdam(params, lr=4e-2),
+                [],
+                sparse_only=True,
+                test_cuda=True,
+            )
+            self._test_rosenbrock_sparse(
+                lambda params: optim.SparseAdam(
+                    params, lr=4e-2, fuse_kernels=False),
+                [],
+                sparse_only=True,
+                test_cuda=True,
+            )
+        with self.assertRaisesRegex(
+                ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_adadelta(self):

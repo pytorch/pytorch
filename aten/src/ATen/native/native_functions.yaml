@@ -5623,3 +5623,9 @@
   dispatch:
     CPU: im2col_backward_cpu
     CUDA: im2col_backward_cuda
+
+- func: _sparse_adam_step(Tensor grad, Tensor moment1, Tensor moment2, float alpha, float beta1, float beta2, float eps, int step) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+  dispatch:
+    SparseCPU: sparse_adam_step_cpu
+    SparseCUDA: sparse_adam_step_cuda
