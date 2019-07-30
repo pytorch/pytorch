@@ -113,7 +113,7 @@ void AutogradContext::save_variables() {
 
   for (auto& var : to_save_) {
     bool is_output = var.grad_fn().get() == ptr.get();
-    saved_variables_.emplace_back(var, is_output);
+    saved_variables_.push_back({var, is_output});
   }
   to_save_.clear();
 }
