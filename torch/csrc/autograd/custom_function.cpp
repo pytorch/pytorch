@@ -124,9 +124,9 @@ variable_list AutogradContext::get_saved_variables() const {
   saved.reserve(saved_variables_.size());
   auto ptr = grad_fn_.lock();
   TORCH_INTERNAL_ASSERT(ptr);
-  for (auto& var : saved_variables_) {
-    saved.push_back(var.unpack(ptr));
-  }
+  // for (auto& var : saved_variables_) {
+  //   saved.push_back(var.unpack(ptr));
+  // }
   return saved;
 }
 
