@@ -9,8 +9,8 @@ class Add(torch.nn.Module):
 
     def __init__(self, scale=1.0, zero_point=0):
         super(Add, self).__init__()
-        self.scale = 1.0
-        self.zero_point = 0
+        self.scale = scale
+        self.zero_point = zero_point
 
     def forward(self, *args):
         return torch.ops.quantized.add(

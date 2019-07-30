@@ -21,12 +21,12 @@ class {module_name}(torch.nn.Module):
 _qmodule_body = r'''
 r"""{module_name} wraps the {qop_string} function."""
 class {module_name}(torch.nn.Module):
-    __FLOAT_MODULE = torch.nn.modules.{op_name}
+    __FLOAT_MODULE = torch.nn.modules.{float_op_name}
 
     def __init__(self, scale=1.0, zero_point=0):
         super({module_name}, self).__init__()
-        self.scale = 1.0
-        self.zero_point = 0
+        self.scale = scale
+        self.zero_point = zero_point
 
     def forward(self, *args):
         return {qop_string}(
@@ -62,7 +62,7 @@ def _make_module(op_string=None, qop_string=None):
     qparams = {
         'module_name': name,
         'qop_string': qop_string,
-        'op_name': name
+        'float_op_name': name
     }
 
     generated_qmodule = _qmodule_body.format(**qparams)

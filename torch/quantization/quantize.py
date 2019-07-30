@@ -224,13 +224,13 @@ def quantize_qat(model, run_fn, run_args, qconfig_dict=None):
 
 # Map for swapping float module to quantized ones
 DEFAULT_MODULE_MAPPING = {
-    torch.nn.Linear: nnq.Linear,
-    torch.nn.ReLU: nnq.ReLU,
-    torch.nn.Conv2d: nnq.Conv2d,
+    nn.Linear: nnq.Linear,
+    nn.ReLU: nnq.ReLU,
+    nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Generated modules:
-    torch.quantization.Add: torch.quantization.QAdd,
+    nn.Add: nnq.quantized.Add,
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,
@@ -238,8 +238,8 @@ DEFAULT_MODULE_MAPPING = {
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
-    torch.nn.Linear: qat.Linear,
-    torch.nn.Conv2d: qat.Conv2d,
+    nn.Linear: qat.Linear,
+    nn.Conv2d: qat.Conv2d,
 }
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
