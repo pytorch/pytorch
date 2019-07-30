@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/flat_hash_map.h>
+#include <deque>
 
 namespace torch { namespace autograd {
 
@@ -87,7 +88,7 @@ struct TORCH_API AutogradContext {
 private:
   std::unordered_set<at::TensorImpl*> non_differentiable_;
   std::unordered_set<at::TensorImpl*> dirty_inputs_;
-  std::vector<torch::autograd::SavedVariable> saved_variables_;
+  std::deque<torch::autograd::SavedVariable> saved_variables_;
   variable_list to_save_;
 
   std::weak_ptr<Node> grad_fn_;

@@ -308,6 +308,47 @@ class profile(object):
         return self.function_events.self_cpu_time_total
 
 
+class record_function(object):
+    """Context manager that adds a label to a block of Python code when running autograd
+    profiler.  It is useful when tracing the code profile.
+
+    Arguments:
+        name (str): Label assigned to the block of code.
+
+    Example:
+        >>> x = torch.randn((1, 1), requires_grad=True)
+        >>> with torch.autograd.profiler.profile() as prof:
+        ...     y = x ** 2
+        ...     with torch.autograd.profiler.record_function("label-z"): # label the block
+        ...         z = y ** 3
+        ...     y.backward()
+        ...
+        >>> # NOTE: some columns were removed for brevity
+        >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+        -----------------------------------  ---------------  ---------------  ---------------
+        Name                                 Self CPU total %  CPU time avg     Number of Calls
+        -----------------------------------  ---------------  ---------------  ---------------
+        pow                                  60.77%           47.470us         3
+        mul                                  21.73%           25.465us         2
+        PowBackward0                         12.03%           121.891us        1
+        torch::autograd::AccumulateGrad      2.70%            6.324us          1
+        label-z                              2.13%            12.421us         1
+        torch::autograd::GraphRoot           0.64%            1.503us          1
+        -----------------------------------  ---------------  ---------------  ---------------
+        Self CPU time total: 234.344us
+        CUDA time total: 0.000us
+    """
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        torch.autograd._push_range(self.name)
+
+    def __exit__(self, *args):
+        torch.autograd._pop_range()
+        return False
+
+
 class emit_nvtx(object):
     """Context manager that makes every autograd operation emit an NVTX range.
 
