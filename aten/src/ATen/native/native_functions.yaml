@@ -35,6 +35,10 @@
 - func: set_data(Tensor(a!) self, Tensor new_data) -> void
   variants: method
 
+- func: set_names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -1388,6 +1392,7 @@
     SparseCPU: mul
     SparseCUDA: mul
     MkldnnCPU: mkldnn_mul
+  named_guard: False
 
 
 - func: mul_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -1398,6 +1403,7 @@
     SparseCPU: mul_
     SparseCUDA: mul_
     MkldnnCPU: mkldnn_mul_
+  named_guard: False
 
 - func: mul(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1406,6 +1412,7 @@
     SparseCPU: mul_out
     SparseCUDA: mul_out
     MkldnnCPU: mkldnn_mul_out
+  named_guard: False
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul(Tensor self, Scalar other) -> Tensor
@@ -1979,11 +1986,21 @@
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: sum(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: sum(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
@@ -2022,11 +2039,22 @@
 
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: prod(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: prod(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
 
 - func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False

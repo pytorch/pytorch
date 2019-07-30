@@ -5,8 +5,10 @@ from __future__ import unicode_literals
 
 import torch
 import torch.nn.quantized as nnq
+import torch.nn._intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
+from torch.nn._intrinsic.quantized import ConvReLU2d
 from common_utils import TestCase, run_tests, tempfile
 from hypothesis import given
 from hypothesis import strategies as st
@@ -37,9 +39,10 @@ class ModuleAPITest(TestCase):
         in_features=st.integers(16, 32),
         out_features=st.integers(4, 8),
         use_bias=st.booleans(),
+        use_fused=st.booleans(),
     )
-    def test_linear_api(self, batch_size, in_features, out_features, use_bias):
-        """test API functionality for nn.quantized.linear"""
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused):
+        """test API functionality for nn.quantized.linear and nn._intrinsic.quantized.linear_relu"""
         W = torch.rand(out_features, in_features).float()
         W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
         W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
@@ -49,7 +52,10 @@ class ModuleAPITest(TestCase):
         B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32) if use_bias else None
         scale = 0.5
         zero_point = 3
-        qlinear = nnq.Linear(in_features, out_features)
+        if use_fused:
+            qlinear = nnq_fused.LinearReLU(in_features, out_features)
+        else:
+            qlinear = nnq.Linear(in_features, out_features)
         qlinear._packed_weight = W_pack
         qlinear.bias = B_q if use_bias else None
         qlinear.scale = torch.tensor([scale], dtype=torch.double)
@@ -57,7 +63,10 @@ class ModuleAPITest(TestCase):
         Z_q = qlinear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, scale, zero_point)
+        if use_fused:
+            Z_ref = torch.ops.quantized.fbgemm_linear_relu(X_q, W_pack, B_q, scale, zero_point)
+        else:
+            Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, scale, zero_point)
         self.assertEqual(Z_ref, Z_q)
 
         # Test serialization of quantized Linear Module using state_dict
@@ -71,7 +80,10 @@ class ModuleAPITest(TestCase):
             loaded_dict = torch.load(f)
         for key in model_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
-        loaded_qlinear = nnq.Linear(in_features, out_features)
+        if use_fused:
+            loaded_qlinear = nnq_fused.LinearReLU(in_features, out_features)
+        else:
+            loaded_qlinear = nnq.Linear(in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
 
         linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
@@ -118,8 +130,9 @@ class ModuleAPITest(TestCase):
 
     @given(
         use_bias=st.booleans(),
+        use_fused=st.booleans(),
     )
-    def test_conv_api(self, use_bias):
+    def test_conv_api(self, use_bias, use_fused):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
@@ -140,15 +153,26 @@ class ModuleAPITest(TestCase):
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
         qb = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        conv_under_test = Conv2d(in_channels=iC,
-                                 out_channels=oC,
-                                 kernel_size=(kH, kW),
-                                 stride=1,
-                                 padding=0,
-                                 dilation=1,
-                                 groups=g,
-                                 bias=use_bias,
-                                 padding_mode='zeros')
+        if use_fused:
+            conv_under_test = ConvReLU2d(in_channels=iC,
+                                         out_channels=oC,
+                                         kernel_size=(kH, kW),
+                                         stride=1,
+                                         padding=0,
+                                         dilation=1,
+                                         groups=g,
+                                         bias=use_bias,
+                                         padding_mode='zeros')
+        else:
+            conv_under_test = Conv2d(in_channels=iC,
+                                     out_channels=oC,
+                                     kernel_size=(kH, kW),
+                                     stride=1,
+                                     padding=0,
+                                     dilation=1,
+                                     groups=g,
+                                     bias=use_bias,
+                                     padding_mode='zeros')
         conv_under_test.weight = qw
         conv_under_test.bias = qb
         conv_under_test.scale = torch.tensor([scale], dtype=torch.double)
@@ -172,6 +196,17 @@ class ModuleAPITest(TestCase):
                                      stride=1, padding=0,
                                      dilation=1, groups=g, dtype=torch.quint8
                                      )
+        if use_fused:
+            # result_reference < zero_point doesn't work for qtensor yet
+            # result_reference[result_reference < zero_point] = zero_point
+            MB, OC, OH, OW = result_reference.size()
+            for i in range(MB):
+                for j in range(OC):
+                    for h in range(OH):
+                        for w in range(OW):
+                            if result_reference[i][j][h][w].int_repr() < zero_point:
+                                # assign 0. that gets converted to zero_point
+                                result_reference[i][j][h][w] = 0.
 
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
