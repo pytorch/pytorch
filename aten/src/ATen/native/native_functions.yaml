@@ -2996,6 +2996,7 @@
     CPU: legacy::cpu::_th_set_
     CUDA: legacy::cuda::_th_set_
     QuantizedCPU: set_storage_cpu
+  named_guard: False
 
 - func: set_(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
@@ -3057,6 +3058,7 @@
     CUDA: view
     MkldnnCPU: mkldnn_view
     QuantizedCPU: view
+  named_guard: False
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
