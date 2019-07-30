@@ -49,6 +49,8 @@ macos_brew_update: &macos_brew_update
   no_output_timeout: "1h"
   command: |
     set -ex
+    # See https://discourse.brew.sh/t/fetching-homebrew-repos-is-slow/5374/3
+    brew untap caskroom/homebrew-cask
     # moreutils installs a `parallel` executable by default, which conflicts
     # with the executable from the GNU `parallel`, so we must unlink GNU
     # `parallel` first, and relink it afterwards
@@ -442,6 +444,8 @@ binary_macos_brew_update: &binary_macos_brew_update
   no_output_timeout: "1h"
   command: |
     set -eux -o pipefail
+    # See https://discourse.brew.sh/t/fetching-homebrew-repos-is-slow/5374/3
+    brew untap caskroom/homebrew-cask
     # moreutils installs a `parallel` executable by default, which conflicts
     # with the executable from the GNU `parallel`, so we must unlink GNU
     # `parallel` first, and relink it afterwards
