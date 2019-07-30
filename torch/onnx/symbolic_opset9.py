@@ -419,7 +419,7 @@ def squeeze(g, self, dim=None):
         # Handle negative dims
         for i, dim in enumerate(dims):
             if dim < 0:
-                if self.type().kind() == "CompleteTensorType" or self.type().kind() == "DimensionedTensorType":
+                if sym_help._is_complete_or_dimensioned_tensor_type(self):
                     warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
                                   " might cause the onnx model to be incorrect. " +
                                   "Negative axis is not supported in ONNX. " +
@@ -498,7 +498,7 @@ def softmax(g, input, dim, dtype=None):
     # their semantics are equivalent.
     # So use softmax when dim and axis both equal to ndim - 1
     # otherwise compute softmax using a subgraph with other operators
-    if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
+    if sym_help._is_complete_or_dimensioned_tensor_type(input):
         if dim < 0:
             dim = input.type().dim() + dim
         if input.type().dim() == dim + 1:
@@ -981,6 +981,17 @@ def selu(g, input):
 
 @parse_args('v', 'i', 'v')
 def index_select(g, self, dim, index):
+    # In case of a scaler index, index_select returns a tensor with the same rank as the input.
+    # To match this bahavior in ONNX, we make index a 1D tensor so that the following gather
+    # also produces a tensor with the same rank as the input. 
+    index_const = sym_help._maybe_get_scalar(index)
+    if not sym_help._is_value(index_const):
+        # Index is a constant scalar. Make it a size 1 constant tensor.
+        index = g.op("Constant", value_t=torch.LongTensor([index_const]))
+    elif sym_help._is_complete_or_dimensioned_tensor_type(index):
+        if index.type().dim() == 0:
+            # Index is a scalar. Reshape it to a size 1 tensor. 
+            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
     return g.op("Gather", self, index, axis_i=dim)
 
 
@@ -1226,7 +1237,7 @@ def alias(g, self):
 def unsqueeze(g, self, dim):
     # Handle negative dim
     if dim < 0:
-        if self.type().kind() == "CompleteTensorType" or self.type().kind() == "DimensionedTensorType":
+        if sym_help._is_complete_or_dimensioned_tensor_type(self):
             warnings.warn("ONNX export unsqueeze with negative axis " + str(dim) +
                           " might cause the onnx model to be incorrect. " +
                           "Negative axis is not supported in ONNX. " +
