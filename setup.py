@@ -17,8 +17,8 @@
 #   CFLAGS
 #     flags to apply to both C and C++ files to be compiled (a quirk of setup.py
 #     which we have faithfully adhered to in our build system is that CFLAGS
-#     also applies to C++ files, in contrast to the default behavior of autogoo
-#     and cmake build systems.)
+#     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
+#     default behavior of autogoo and cmake build systems.)
 #
 #   CC
 #     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
