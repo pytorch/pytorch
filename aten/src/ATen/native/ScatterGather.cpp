@@ -22,12 +22,12 @@ Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  Tensor ret = self.clone().contiguous();
+  Tensor ret = self.clone();
   return at::_scatter_(ret, dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  Tensor ret = self.clone().contiguous();
+  Tensor ret = self.clone();
   return at::_scatter_(ret, dim, index, value);
 }
 
@@ -52,7 +52,7 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, Scalar v
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().contiguous().scatter_add_(dim, index, source);
+  return self.clone().scatter_add_(dim, index, source);
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, Scalar value) {

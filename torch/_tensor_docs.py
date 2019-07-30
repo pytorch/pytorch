@@ -2109,10 +2109,12 @@ the corresponding value in :attr:`index` for ``dimension = dim``.
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-If :attr:`src` is a tensor, then :attr:`self` and :attr:`src` should have same number
-of dimensions. Otherwise, :attr:`src` must be a scalar that have the same dtype as :attr:`self`.
-:attr:`index` should also have the same number of dimensions as :attr:`self` and :attr:`src`.
-It is also required that ``index.size(d) == src.size(d) == self.size(d)`` for all dimensions ``d != dim``.
+If :attr:`src` is a tensor, then:
+
+- :attr:`self` and :attr:`src` should have the same number of dimensions.
+- :attr:`index` should also have the same number of dimensions as :attr:`self` and :attr:`src`.
+- ``index.size(d) == src.size(d) == self.size(d)`` for all dimensions ``d != dim``.
+- ``index.size(dim) == src.size(dim)`` and ``index.max() < self.size(dim)``.
 
 For a 3-D tensor, :attr:`self` is updated as::
 
@@ -2120,7 +2122,13 @@ For a 3-D tensor, :attr:`self` is updated as::
     self[i][index[i][j][k]][k] = src[i][j][k]  # if dim == 1
     self[i][j][index[i][j][k]] = src[i][j][k]  # if dim == 2
 
-For a 3-D tensor and scalar :attr:`src`, :attr:`self` is updated as::
+If :attr:`src` is a scalar, then:
+
+- :attr:`self` and :attr:`index` should have the same number of dimensions.
+- ``index.size(d) == self.size(d)`` for all dimensions ``d != dim``.
+- ``index.max() < self.size(dim)``.
+
+For a 3-D tensor :attr:`self` is updated as::
 
     self[index[i][j][k]][j][k] = src  # if dim == 0
     self[i][index[i][j][k]][k] = src  # if dim == 1
@@ -2166,10 +2174,12 @@ an index in :attr:`self` which is specified by its index in :attr:`other`
 for ``dimension != dim`` and by the corresponding value in :attr:`index` for
 ``dimension = dim``.
 
-If :attr:`other` is a tensor, then :attr:`self` and :attr:`other` should have same number
-of dimensions. Otherwise, :attr:`other` must be a scalar that have the same dtype as :attr:`self`.
-:attr:`index` should also have the same number of dimensions as :attr:`self` and :attr:`other`.
-It is also required that ``index.size(d) == other.size(d) == self.size(d)`` for all dimensions ``d != dim``.
+If :attr:`other` is a tensor, then:
+
+- :attr:`self` and :attr:`other` should have the same number of dimensions.
+- :attr:`index` should also have the same number of dimensions as :attr:`self` and :attr:`other`.
+- ``index.size(d) == other.size(d) == self.size(d)`` for all dimensions ``d != dim``.
+- ``index.size(dim) == other.size(dim)`` and ``index.max() < self.size(dim)``.
 
 For a 3-D tensor, :attr:`self` is updated as::
 
@@ -2177,7 +2187,13 @@ For a 3-D tensor, :attr:`self` is updated as::
     self[i][index[i][j][k]][k] += other[i][j][k]  # if dim == 1
     self[i][j][index[i][j][k]] += other[i][j][k]  # if dim == 2
 
-For a 3-D tensor and scalar :attr:`other`, :attr:`self` is updated as::
+If :attr:`other` is a scalar, then:
+
+- :attr:`self` and :attr:`index` should have the same number of dimensions.
+- ``index.size(d) == self.size(d)`` for all dimensions ``d != dim``.
+- ``index.max() < self.size(dim)``.
+
+For a 3-D tensor :attr:`self` is updated as::
 
     self[index[i][j][k]][j][k] += other  # if dim == 0
     self[i][index[i][j][k]][k] += other  # if dim == 1
