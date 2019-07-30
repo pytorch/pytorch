@@ -4152,6 +4152,8 @@ class _TestTorchMixin(object):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+        x = torch.empty(1).expand(10)
+        self.assertRaises(RuntimeError, lambda: torch.arange(10, out=x))
         msg = "unsupported range"
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
@@ -4579,6 +4581,9 @@ class _TestTorchMixin(object):
         torch.zeros(5, 6).copy_(torch.zeros(6))
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
+    def test_copy_many_to_one(self):
+        self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
+
     def test_randperm(self):
         # Test core functionality. Ensure both integer and floating-point numbers are tested.
         for dtype in (torch.long, torch.half):
@@ -4949,6 +4954,14 @@ class _TestTorchMixin(object):
             x.tril(0).nonzero().transpose(0, 1), torch.tril_indices(3, 3))
         self.assertEqual(
             x.triu(0).nonzero().transpose(0, 1), torch.triu_indices(3, 3))
+
+        # test stride 0 cases
+        x = torch.ones(
+            3, 1, 3, 3, dtype=torch.long, device='cpu', layout=torch.strided)
+        output = x.triu(2).expand(3, 3, 3, 3)
+        b = x.clone().expand(3, 3, 3, 3)
+        self.assertEqual(b.triu(2), output)
+        self.assertRaises(RuntimeError, lambda: b.triu_(2))
 
     @staticmethod
     def _test_triu_tril(self, cast):
