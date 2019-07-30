@@ -19,6 +19,7 @@ TORCH_API extern const char* ERR_BACKWARD_TWICE;
 class TORCH_API SavedVariable {
  public:
   SavedVariable() = default;
+  SavedVariable(const SavedVariable&) = default;
   SavedVariable(const Variable& variable, bool is_output);
   SavedVariable(SavedVariable&&) = default;
   SavedVariable& operator=(SavedVariable&&) = default;

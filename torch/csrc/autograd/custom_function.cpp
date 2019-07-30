@@ -108,6 +108,7 @@ void AutogradContext::save_for_backward(const variable_list &to_save) {
 // See _save_variables() and unpack_saved_variables()
 void AutogradContext::save_variables() {
   saved_variables_.clear();
+  saved_variables_.reserve(to_save_.size());
   auto ptr = grad_fn_.lock();
 
   for (auto& var : to_save_) {
