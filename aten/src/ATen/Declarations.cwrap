@@ -1808,6 +1808,8 @@
 [[
   name: _th_cumsum
   cname: cumsum
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:
@@ -1820,6 +1822,8 @@
 [[
   name: _th_cumprod
   cname: cumprod
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:
