@@ -90,3 +90,6 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
         stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
+
+# TODO(zaf): Add documentation
+adaptive_avg_pool2d = torch.nn.functional.adaptive_avg_pool2d
