@@ -187,13 +187,6 @@ class CMake:
                 toolset_expr = ','.join(["{}={}".format(k, v) for k, v in toolset_dict.items()])
                 args.append('-T' + toolset_expr)
 
-        cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
-        ldflags = os.getenv('LDFLAGS', "")
-        if IS_WINDOWS:
-            CMake.defines(args, MSVC_Z7_OVERRIDE=not check_negative_env_flag(
-                'MSVC_Z7_OVERRIDE'))
-            cflags += " /EHa"
-
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
         install_dir = os.path.join(base_dir, "torch")
@@ -206,8 +199,8 @@ class CMake:
             # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
             'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
         }
-        # Build options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars. This is a
-        # dict that maps environment variables to the corresponding variable name in CMake.
+        # Build options that do not start with "BUILD_", "USE_", or "CMAKE_" and are directly controlled by env vars.
+        # This is a dict that maps environment variables to the corresponding variable name in CMake.
         additional_options = {
             # Key: environment variable name. Value: Corresponding variable name to be passed to CMake. If you are
             # adding a new build option to this block: Consider making these two names identical and adding this option
@@ -217,16 +210,15 @@ class CMake:
         }
         additional_options.update({
             # Build options that have the same environment variable name and CMake variable name and that do not start
-            # with "BUILD_" or "USE_". If you are adding a new build option, also make sure you add it to
+            # with "BUILD_", "USE_", or "CMAKE_". If you are adding a new build option, also make sure you add it to
             # CMakeLists.txt.
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
-             'CMAKE_BUILD_TYPE',
-             'CMAKE_PREFIX_PATH',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'MKL_THREADING',
              'MKLDNN_THREADING',
+             'MSVC_Z7_OVERRIDE',
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
@@ -264,10 +256,6 @@ class CMake:
         # Options starting with CMAKE_
         cmake__options = {
             'CMAKE_INSTALL_PREFIX': install_dir,
-            'CMAKE_C_FLAGS': cflags,
-            'CMAKE_CXX_FLAGS': cflags,
-            'CMAKE_EXE_LINKER_FLAGS': ldflags,
-            'CMAKE_SHARED_LINKER_FLAGS': ldflags,
         }
 
         # We set some CMAKE_* options in our Python build code instead of relying on the user's direct settings. Emit an

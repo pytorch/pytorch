@@ -54,8 +54,9 @@ def _observer_forward_hook(self, input, output):
     """
     return self.observer(output)
 
-# TODO(jerryzh): remove_observer?
-def add_observer(module):
+DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
+
+def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -74,7 +75,8 @@ def add_observer(module):
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
-    if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
+    if hasattr(module, 'qconfig') and module.qconfig is not None and \
+       len(module._modules) == 0 and type(module) not in skip_list:
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)

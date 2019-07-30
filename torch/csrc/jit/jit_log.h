@@ -14,7 +14,7 @@
 namespace torch {
 namespace jit {
 
-class Node;
+struct Node;
 
 enum class JitLoggingLevels {
   OFF,

@@ -613,7 +613,8 @@ class TestCase(expecttest.TestCase):
                 self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                  prec=prec, message=message,
                                  allow_inf=allow_inf)
-                self.assertEqual(x.int_repr(), y.int_repr(), prec=prec,
+                self.assertEqual(x.int_repr().to(torch.int32),
+                                 y.int_repr().to(torch.int32), prec=prec,
                                  message=message, allow_inf=allow_inf)
             else:
                 assertTensorsEqual(x, y)

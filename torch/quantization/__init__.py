@@ -32,11 +32,3 @@ _all__ = [
     # module transformations
     'fuse_modules',
 ]
-
-
-# Generated files.
-
-from ._generated.QAddGen import AddGen as Add  # noqa: F401
-from ._generated.QAddGen import QAddGen as QAdd  # noqa: F401
-
-__all__ += ['Add', 'QAdd']
