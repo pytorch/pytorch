@@ -1706,6 +1706,23 @@ class _TestTorchMixin(object):
             expected = torch.zeros(2, 3, device=device).bool()
             self.assertEqual(res, expected)
 
+    def test_bool_sub(self):
+        for device in torch.testing.get_all_device_types():
+            m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
+            m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool, device=device)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with two bool tensors is not supported. "
+                                   r"Use the `\^` operator instead.",
+                                   lambda: m1 - m2)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
+                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   lambda: 1 - m1)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
+                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   lambda: m2 - 1)
+
     def test_csub(self):
         # with a tensor
         a = torch.randn(100, 90)
@@ -3462,15 +3479,12 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
-
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.clone())
-                    continue
-
                 x_clone = x.clone()
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: copy(x))
+                    continue
                 y = copy(x)
                 y.fill_(1)
-
                 # copy is a shallow copy, only copies the tensor view,
                 # not the data
                 self.assertEqual(x, y)
@@ -3488,9 +3502,6 @@ class _TestTorchMixin(object):
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.resize_as_(y))
-                    continue
                 x.resize_as_(y)
                 self.assertEqual(y.shape, x.shape)
 
@@ -3519,11 +3530,11 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.clone())
-                    continue
-
                 y = x.clone()
+                if (device == 'cuda' and dt == torch.bfloat16):
+                    # `x - y` is used inside of the assertEqual
+                    self.assertRaises(RuntimeError, lambda: x - y)
+                    continue
                 self.assertEqual(x, y)
 
     def test_cat_all_dtypes_and_devices(self):
@@ -5771,28 +5782,35 @@ class _TestTorchMixin(object):
     def test_triangular_solve_batched_dims(self):
         self._test_triangular_solve_batched_dims(self, lambda t: t)
 
-    @skipIfNoLapack
-    def test_gels(self):
+    @staticmethod
+    def _test_lstsq(self, device):
+        def cast_fn(tensor):
+            return tensor.to(device=device)
+
         def _test_underdetermined(a, b, expectedNorm):
+            # underdetermined systems are not supported on the GPU
+            if 'cuda' in device:
+                return
+
             m = a.size()[0]
             n = a.size()[1]
             assert(m <= n)
 
             a_copy = a.clone()
             b_copy = b.clone()
-            res1 = torch.gels(b, a)[0]
+            res1 = torch.lstsq(b, a)[0]
             self.assertEqual(a, a_copy, 0)
             self.assertEqual(b, b_copy, 0)
             self.assertEqual((torch.mm(a, res1) - b).norm(), expectedNorm, 1e-8)
 
-            ta = torch.Tensor()
-            tb = torch.Tensor()
-            res2 = torch.gels(b, a, out=(tb, ta))[0]
+            ta = cast_fn(torch.Tensor())
+            tb = cast_fn(torch.Tensor())
+            res2 = torch.lstsq(b, a, out=(tb, ta))[0]
             self.assertEqual(a, a_copy, 0)
             self.assertEqual(b, b_copy, 0)
             self.assertEqual((torch.mm(a, res1) - b).norm(), expectedNorm, 1e-8)
 
-            res3 = torch.gels(b, a, out=(b, a))[0]
+            res3 = torch.lstsq(b, a, out=(b, a))[0]
             self.assertEqual((torch.mm(a_copy, b) - b_copy).norm(), expectedNorm, 1e-8)
             self.assertEqual(res1, tb, 0)
             self.assertEqual(res1, b, 0)
@@ -5806,7 +5824,6 @@ class _TestTorchMixin(object):
 
             def check_norm(a, b, expected_norm, gels_result):
                 # Checks |ax - b| and the residual info from the result
-                n = a.size()[1]
 
                 # The first n rows is the least square solution.
                 # Rows n to m-1 contain residual information.
@@ -5819,19 +5836,19 @@ class _TestTorchMixin(object):
 
             a_copy = a.clone()
             b_copy = b.clone()
-            res1 = torch.gels(b, a)[0]
+            res1 = torch.lstsq(b, a)[0]
             self.assertEqual(a, a_copy, 0)
             self.assertEqual(b, b_copy, 0)
             check_norm(a, b, expectedNorm, res1)
 
-            ta = torch.Tensor()
-            tb = torch.Tensor()
-            res2 = torch.gels(b, a, out=(tb, ta))[0]
+            ta = cast_fn(torch.Tensor())
+            tb = cast_fn(torch.Tensor())
+            res2 = torch.lstsq(b, a, out=(tb, ta))[0]
             self.assertEqual(a, a_copy, 0)
             self.assertEqual(b, b_copy, 0)
             check_norm(a, b, expectedNorm, res2)
 
-            res3 = torch.gels(b, a, out=(b, a))[0]
+            res3 = torch.lstsq(b, a, out=(b, a))[0]
             check_norm(a_copy, b_copy, expectedNorm, res3)
 
             self.assertEqual(res1, tb, 0)
@@ -5841,50 +5858,54 @@ class _TestTorchMixin(object):
 
         # basic test
         expectedNorm = 0
-        a = torch.Tensor(((1.44, -9.96, -7.55, 8.34),
-                          (-7.84, -0.28, 3.24, 8.09),
-                          (-4.39, -3.24, 6.27, 5.28),
-                          (4.53, 3.83, -6.64, 2.06))).t()
-        b = torch.Tensor(((8.58, 8.26, 8.48, -5.28),
-                          (9.35, -4.43, -0.70, -0.26))).t()
+        a = cast_fn(torch.Tensor(((1.44, -9.96, -7.55, 8.34),
+                                  (-7.84, -0.28, 3.24, 8.09),
+                                  (-4.39, -3.24, 6.27, 5.28),
+                                  (4.53, 3.83, -6.64, 2.06)))).t()
+        b = cast_fn(torch.Tensor(((8.58, 8.26, 8.48, -5.28),
+                                  (9.35, -4.43, -0.70, -0.26)))).t()
         _test_underdetermined(a, b, expectedNorm)
 
-        # test overderemined
+        # test overdetermined
         expectedNorm = 17.390200628863
-        a = torch.Tensor(((1.44, -9.96, -7.55, 8.34, 7.08, -5.45),
-                          (-7.84, -0.28, 3.24, 8.09, 2.52, -5.70),
-                          (-4.39, -3.24, 6.27, 5.28, 0.74, -1.19),
-                          (4.53, 3.83, -6.64, 2.06, -2.47, 4.70))).t()
-        b = torch.Tensor(((8.58, 8.26, 8.48, -5.28, 5.72, 8.93),
-                          (9.35, -4.43, -0.70, -0.26, -7.36, -2.52))).t()
+        a = cast_fn(torch.Tensor(((1.44, -9.96, -7.55, 8.34, 7.08, -5.45),
+                                  (-7.84, -0.28, 3.24, 8.09, 2.52, -5.70),
+                                  (-4.39, -3.24, 6.27, 5.28, 0.74, -1.19),
+                                  (4.53, 3.83, -6.64, 2.06, -2.47, 4.70)))).t()
+        b = cast_fn(torch.Tensor(((8.58, 8.26, 8.48, -5.28, 5.72, 8.93),
+                                  (9.35, -4.43, -0.70, -0.26, -7.36, -2.52)))).t()
         _test_overdetermined(a, b, expectedNorm)
 
         # test underdetermined
         expectedNorm = 0
-        a = torch.Tensor(((1.44, -9.96, -7.55),
-                          (-7.84, -0.28, 3.24),
-                          (-4.39, -3.24, 6.27),
-                          (4.53, 3.83, -6.64))).t()
-        b = torch.Tensor(((8.58, 8.26, 8.48),
-                          (9.35, -4.43, -0.70))).t()
+        a = cast_fn(torch.Tensor(((1.44, -9.96, -7.55),
+                                  (-7.84, -0.28, 3.24),
+                                  (-4.39, -3.24, 6.27),
+                                  (4.53, 3.83, -6.64)))).t()
+        b = cast_fn(torch.Tensor(((8.58, 8.26, 8.48),
+                                  (9.35, -4.43, -0.70)))).t()
         _test_underdetermined(a, b, expectedNorm)
 
         # test reuse
         expectedNorm = 0
-        a = torch.Tensor(((1.44, -9.96, -7.55, 8.34),
-                          (-7.84, -0.28, 3.24, 8.09),
-                          (-4.39, -3.24, 6.27, 5.28),
-                          (4.53, 3.83, -6.64, 2.06))).t()
-        b = torch.Tensor(((8.58, 8.26, 8.48, -5.28),
-                          (9.35, -4.43, -0.70, -0.26))).t()
-        ta = torch.Tensor()
-        tb = torch.Tensor()
-        torch.gels(b, a, out=(tb, ta))
+        a = cast_fn(torch.Tensor(((1.44, -9.96, -7.55, 8.34),
+                                  (-7.84, -0.28, 3.24, 8.09),
+                                  (-4.39, -3.24, 6.27, 5.28),
+                                  (4.53, 3.83, -6.64, 2.06)))).t()
+        b = cast_fn(torch.Tensor(((8.58, 8.26, 8.48, -5.28),
+                                  (9.35, -4.43, -0.70, -0.26)))).t()
+        ta = cast_fn(torch.Tensor())
+        tb = cast_fn(torch.Tensor())
+        torch.lstsq(b, a, out=(tb, ta))
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
-        torch.gels(b, a, out=(tb, ta))
+        torch.lstsq(b, a, out=(tb, ta))
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
-        torch.gels(b, a, out=(tb, ta))
+        torch.lstsq(b, a, out=(tb, ta))
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
+
+    @skipIfNoLapack
+    def test_lstsq(self):
+        self._test_lstsq(self, 'cpu')
 
     @skipIfNoLapack
     def test_eig(self):
@@ -8906,9 +8927,9 @@ class _TestTorchMixin(object):
             q, r = fn(torch.qr, (3, 0), False)
             self.assertEqual([(3, 3), (3, 0)], [q.shape, r.shape])
 
-            # gels
-            self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0, 0), torch.randn(0, 0)))
-            self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0,), torch.randn(0, 0)))
+            # lstsq
+            self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0, 0), torch.randn(0, 0)))
+            self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0,), torch.randn(0, 0)))
 
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)
@@ -12180,6 +12201,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_cosh_unary_mem_overlap(self):
         self.unary_check_mem_overlap(lambda t: t.cosh_())
 
+    @unittest.expectedFailure
+    def test_lerp_mem_overlap(self):
+        start = torch.randn(1, device=device).expand(3, 3)
+        end = torch.randn(3, 3, device=device)
+        weight = torch.randn(3, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            start.lerp_(end, weight)
+
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):
         self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to("cuda:1"))    # __radd__
@@ -12208,15 +12237,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         def do_test(t):
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()"):
+                    "set_sizes_contiguous is not allowed on a Tensor created from .data or .detach()"):
                 t.resize_((2, 1))
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_storage is not allowed on Tensor created from .data or .detach()"):
+                    "set_storage is not allowed on a Tensor created from .data or .detach()"):
                 t.set_()
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_storage_offset is not allowed on Tensor created from .data or .detach()"):
+                    "set_storage_offset is not allowed on a Tensor created from .data or .detach()"):
                 t.set_(t.storage(), 0, t.size(), list(t.stride()))
 
         do_test(torch.tensor([[1, 2]]).data)

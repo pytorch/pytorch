@@ -182,19 +182,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_clone
-  cname: newClone
-  return: THTensor*
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_view
   cname: newView
   cpu_half: True
@@ -209,21 +196,6 @@
     - THTensor* self
     - arg: IntArrayRefSize size
       long_args: True
-]]
-[[
-  name: _th_resize_as_
-  cname: resizeAs
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  return: self
-  scalar_check: the_template_->dim() == 0
-  arguments:
-    - THTensor* self
-    - THTensor* the_template
 ]]
 [[
   name: _th_index_select
