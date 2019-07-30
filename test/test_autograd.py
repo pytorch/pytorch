@@ -3488,7 +3488,7 @@ def gradgradcheck_method_precision_override(test_name):
     return override
 
 GRADCHECK_EPS_OVERRIDE = {
-    #'test_cdist': 1e-3,
+    'test_cdist': 1e-7,
 }
 
 GRADCHECK_PRECISION_OVERRIDE = {
