@@ -534,9 +534,14 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
   }
 }
 
-TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
+    const Tensor& b, bool check_internal_overlap) {
   auto iter = TensorIterator();
-  iter.add_output(out);
+  if (check_internal_overlap) {
+    iter.check_and_add_output(out);
+  } else {
+    iter.add_output(out);
+  }
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
@@ -544,9 +549,14 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Ten
   return iter;
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
+    bool check_internal_overlap) {
   auto iter = TensorIterator();
-  iter.add_output(out);
+  if (check_internal_overlap) {
+    iter.check_and_add_output(out);
+  } else {
+    iter.add_output(out);
+  }
   iter.add_input(a);
   iter.num_outputs_ = 1;
   iter.build();

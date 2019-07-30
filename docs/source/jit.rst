@@ -7,18 +7,21 @@ TorchScript
 .. currentmodule:: torch.jit
 
 TorchScript is a way to create serializable and optimizable models from PyTorch code.
-Any code written in TorchScript can be saved from a Python
+Any TorchScript program can be saved from a Python
 process and loaded in a process where there is no Python dependency.
 
 We provide tools to incrementally transition a model from a pure Python program
-to a TorchScript program that can be run independently from Python, for instance, in a standalone C++ program.
-This makes it possible to train models in PyTorch using familiar tools and then export
-the model via TorchScript to a production environment where it is not a good idea to run models as Python programs
+to a TorchScript program that can be run independently from Python, such as in a standalone C++ program.
+This makes it possible to train models in PyTorch using familiar tools in Python and then export
+the model via TorchScript to a production environment where Python programs may be disadvantageous.
 for performance and multi-threading reasons.
 
 Creating TorchScript Code
 --------------------------
 
+.. autofunction:: script
+
+.. autofunction:: trace
 
 .. autoclass:: ScriptModule
     :members:
@@ -27,14 +30,13 @@ Creating TorchScript Code
 
 .. autofunction:: load
 
-.. autofunction:: trace
 
 
 Mixing Tracing and Scripting
 ----------------------------
 
 In many cases either tracing or scripting is an easier approach for converting a model to TorchScript.
-We allow you to compose tracing and scripting to suit the particular requirements
+Tracing and scripting can be composed to suit the particular requirements
 of a part of a model.
 
 Scripted functions can call traced functions. This is particularly useful when you need
@@ -77,7 +79,7 @@ Example::
 
     traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3)))
 
-This composition also works for ``ScriptModule``\s as well, where it can be used to generate
+This composition also works for ``nn.Module``\s as well, where it can be used to generate
 a submodule using tracing that can be called from the methods of a script module:
 
 Example::
@@ -85,7 +87,7 @@ Example::
     import torch
     import torchvision
 
-    class MyScriptModule(torch.jit.ScriptModule):
+    class MyScriptModule(torch.nn.Module):
         def __init__(self):
             super(MyScriptModule, self).__init__()
             self.means = torch.nn.Parameter(torch.tensor([103.939, 116.779, 123.68])
@@ -93,9 +95,10 @@ Example::
             self.resnet = torch.jit.trace(torchvision.models.resnet18(),
                                           torch.rand(1, 3, 224, 224))
 
-        @torch.jit.script_method
         def forward(self, input):
             return self.resnet(input - self.means)
+
+    my_script_module = torch.jit.script(MyScriptModule())
 
 
 TorchScript Language Reference
