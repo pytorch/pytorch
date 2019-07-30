@@ -8171,15 +8171,6 @@ class _TestTorchMixin(object):
                                                 [False, True, False, True, False],
                                                 [True, False, True, False, True]], device=device))
 
-    def test_scatter_contiguous(self):
-        x = torch.tensor(1.0, dtype=torch.double, requires_grad=True).expand(2, 3)
-        source = torch.zeros(2, 2, dtype=torch.double)
-        index = torch.randint_like(source, 3, dtype=torch.long)
-        with self.assertRaises(RuntimeError):
-            x.scatter_(1, index, source)
-        with self.assertRaises(RuntimeError):
-            x.scatter_add_(1, index, source)
-
     def test_masked_scatter(self):
         for dtype in [torch.uint8, torch.bool]:
             num_copy, num_dest = 3, 10

@@ -14,12 +14,10 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  TORCH_CHECK(self.is_contiguous(), "scatter_ only apply to contiguous tensor");
   return at::_scatter_(self, dim, index, source);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  TORCH_CHECK(self.is_contiguous(), "scatter_ only apply to contiguous tensor");
   return at::_scatter_(self, dim, index, value);
 }
 
@@ -34,7 +32,6 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar va
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  TORCH_CHECK(self.is_contiguous(), "scatter_add_ only apply to contiguous tensor");
   if (index.numel() == 0) {
     return self;
   }
