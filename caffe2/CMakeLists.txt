@@ -459,16 +459,15 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
 
   if (NOT INTERN_BUILD_MOBILE)
-    list(APPEND TORCH_SRCS ${TORCH_SRC_DIR}/csrc/jit/export.cpp)
-    list(APPEND TORCH_SRCS ${TORCH_ROOT}/test/cpp/jit/test.cpp)
-    if(NOT WIN32)
-      list(APPEND TORCH_SRCS ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
+    list(APPEND TORCH_SRCS 
+      ${TORCH_SRC_DIR}/csrc/jit/export.cpp)
+      ${TORCH_ROOT}/test/cpp/jit/test.cpp)
+    )
+    if (NOT WIN32)
+      list(APPEND TORCH_SRCS 
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
     endif()
   endif()
-
-  if (NOT WIN32 AND NOT INTERN_BUILD_MOBILE)
-
-  endif ()
 
   if (USE_CUDA)
     if (NOT USE_ROCM)
