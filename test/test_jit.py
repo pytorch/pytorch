@@ -3069,7 +3069,9 @@ def foo(x):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
-        module = torch.jit.trace_module(n, inputs, True, check_inputs)
+        module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
+        self.assertTrue(module._c._has_method("forward"))
+        self.assertTrue(module._c._has_method("weighted_kernel_sum"))
 
         module = torch.jit.trace(n.forward, example_forward_input)
         module = torch.jit.trace(n.forward, example_forward_input, True, [example_forward_input])
@@ -5679,58 +5681,49 @@ a")
             foo()
 
     @suppress_warnings
-    def test_torch_tensor_empty_list(self):
+    def test_torch_tensor_as_tensor_empty_list(self):
+        tensor_template = dedent('''
         def func():
-            return torch.tensor(torch.jit.annotate(List[int], []))
-        cu = torch.jit.script(func)
-        t1 = cu()
-        t2 = func()
+            empty_list = torch.jit.annotate(List[int], [])
+            ten1 = torch.{tensor_op}({input})
+            return ten1
+        ''')
+        ops = ['tensor', 'as_tensor']
+        inputs = ['empty_list', '[empty_list, empty_list]', '[[[empty_list]]]']
 
-        # torchscript returns int tensor, python returns float tensor
-        self.assertNotEqual(t1.dtype, t2.dtype)
+        for op in ops:
+            for inp in inputs:
+                code = tensor_template.format(tensor_op=op, input=inp)
+                scope = {}
+                exec(code, globals(), scope)
+                cu = torch.jit.CompilationUnit(code)
+                t1 = cu.func()
+                t2 = scope['func']()
+                if inp == 'empty_list':
+                    # torchscript returns int tensor, python returns float tensor
+                    self.assertNotEqual(t1.dtype, t2.dtype)
 
+                self.assertEqual(t1, t2)
+                self.assertEqual(t1.device, t2.device)
+
+    def test_tensor_as_tensor_shape_prop(self):
+        tensor_template = dedent('''
         def func():
-            li = torch.jit.annotate(List[int], [])
-            return torch.tensor([li, li])
-
-        self.checkScript(func, ())
-
-        def func():
-            li = torch.jit.annotate(List[int], [])
-            return torch.tensor([[[li]]])
-
-        self.checkScript(func, ())
-
-    def test_tensor_shape_prop(self):
-        def func1():
-            return torch.tensor([1])
-
-        def func2():
-            return torch.tensor([False])
-
-        def func3():
-            return torch.tensor([2.5])
-
-        def func4():
-            return torch.tensor(0.5)
-
-        def func5():
-            return torch.tensor(1)
-
-        def func6():
-            return torch.tensor(False)
-
-        def func7():
-            return torch.tensor([[1]])
-
-        list_input = [func1, func2, func3, func4, func5, func6, func7]
+            return torch.{tensor_op}({input})
+        ''')
+        ops = ['tensor', 'as_tensor']
+        inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
         expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
 
-        for fn, expect in zip(list_input, expected_shape):
-            self.checkScript(fn, ())
-            g = torch.jit.script(fn)
-            torch._C._jit_pass_complete_shape_analysis(g.graph, (), False)
-            FileCheck().check(expect).check("aten::tensor").run(g.graph)
+        for op in ops:
+            for inp, expect in zip(inputs, expected_shape):
+                code = tensor_template.format(tensor_op=op, input=inp)
+                scope = {}
+                exec(code, globals(), scope)
+                self.checkScript(code, ())
+                cu = torch.jit.CompilationUnit(code)
+                torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
+                FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
 
         @torch.jit.script
         def test_dtype(inp_dtype):
@@ -5738,10 +5731,18 @@ a")
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
             return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
-        test_dtype(5)
         g = test_dtype.graph_for(5)
         # first should have type set second should not
         FileCheck().check("Float() = aten::tensor").check("Tensor = aten::tensor").run(g)
+
+        @torch.jit.script
+        def test_as_tensor_tensor_input(input):
+            a = torch.as_tensor(input, dtype=input.dtype)
+            return a, torch.as_tensor(input, dtype=torch.float)
+
+        g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
+        FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *) = aten::as_tensor").run(g)
+
 
     def test_tensor_requires_grad(self):
         @torch.jit.script
@@ -5773,11 +5774,12 @@ a")
         b_script.backward()
         self.assertEqual(a.grad, a_script.grad)
 
-    def test_torch_tensor(self):
-        template = dedent('''
+    def test_torch_tensor_as_tensor(self):
+        tensor_template = dedent('''
         def func():
             li = {list_create}
-            return torch.tensor(li {options})
+            ten1 = torch.{tensor_op}(li {options})
+            return ten1
         ''')
 
         lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
@@ -5787,28 +5789,37 @@ a")
                   ", dtype=torch.uint8", ", dtype=torch.int8", ", dtype=torch.short",
                   ", dtype=torch.int", ", dtype=torch.long"]
 
+        ops = ['tensor', 'as_tensor']
         devices = ['', ", device='cpu'"]
         if RUN_CUDA:
             devices.append(", device='cuda'")
 
         option_pairs = [dtype + device for dtype in dtypes for device in devices]
-        for li in lists:
-            for option in option_pairs:
-                # tensor from empty list is type float in python and annotated type in torchscript
-                if "annotate" in li and "dtype" not in option:
-                    continue
-                code = template.format(list_create=li, options=option)
-                scope = {}
-                exec(code, globals(), scope)
-                cu = torch.jit.CompilationUnit(code)
-                t1 = cu.func()
-                t2 = scope['func']()
-                if t1.dtype == torch.float16:  # equality NYI for half tensor
-                    self.assertTrue(str(t1) == str(t2))
-                else:
-                    self.assertEqual(t1, t2)
-                self.assertEqual(t1.dtype, t2.dtype)
-                self.assertEqual(t1.device, t2.device)
+        for op in ops:
+            for li in lists:
+                for option in option_pairs:
+                    # tensor from empty list is type float in python and annotated type in torchscript
+                    if "annotate" in li and "dtype" not in option:
+                        continue
+                    code = tensor_template.format(list_create=li, tensor_op=op, options=option)
+                    scope = {}
+                    exec(code, globals(), scope)
+                    cu = torch.jit.CompilationUnit(code)
+                    t1 = cu.func()
+                    t2 = scope['func']()
+                    if t1.dtype == torch.float16:  # equality NYI for half tensor
+                        self.assertTrue(str(t1) == str(t2))
+                    else:
+                        self.assertEqual(t1, t2)
+                    self.assertEqual(t1.dtype, t2.dtype)
+                    self.assertEqual(t1.device, t2.device)
+
+        def test_as_tensor_tensor_input(input):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return torch.as_tensor(input, dtype=torch.float), torch.as_tensor(input, dtype=torch.int32)
+
+        inp = torch.randn(3, 4)
+        self.checkScript(test_as_tensor_tensor_input, (inp,))
 
     # adapted from test in test_torch
     def test_tensor_to(self):
@@ -7797,6 +7808,39 @@ a")
 
         f = io.BytesIO()
         torch.onnx._export(m, (x, seq_lens), f, verbose=False)
+
+    def test_script_pack_padded_sequence(self):
+        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+        def pack_padded_pad_packed_script(x, seq_lens):
+            x = pack_padded_sequence(x, seq_lens)
+            x, lengths = pad_packed_sequence(x)
+            return x, lengths
+
+        T, B, C = 3, 5, 7
+        x = torch.ones((T, B, C))
+        seq_lens = torch.tensor([3, 3, 2, 2, 1])
+        # set padding value so we can test equivalence
+        for b in range(B):
+            if seq_lens[b] < T:
+                x[seq_lens[b]:, b, :] = 0
+
+        eager_seq, eager_lengths = pack_padded_pad_packed_script(x, seq_lens)
+        scripted_pack_padded_seq = torch.jit.script(pack_padded_pad_packed_script)
+        script_seq, script_lengths = scripted_pack_padded_seq(x, seq_lens)
+        self.assertEqual(eager_seq, script_seq)
+        self.assertEqual(eager_lengths, script_lengths)
+
+    def test_script_get_tracing_state(self):
+        def test_if_tracing(x):
+            if torch._C._get_tracing_state():
+                return x + 1
+            else:
+                return x - 1
+
+        inp = torch.randn(3, 3)
+
+        self.checkScript(test_if_tracing, (inp,))
 
     def test_script_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
