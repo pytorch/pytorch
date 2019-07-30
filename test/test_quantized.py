@@ -253,14 +253,6 @@ class TestQuantizedOps(TestCase):
             qX_repr = qX_hat.int_repr()
             self.assertEqual(X_ref, qX_repr,
                              message=error_message.format(name, X_ref, qX_repr))
-        # Quantized kernel signature is very rigid. Testing separately.
-        name = "ops.quantized"
-        op = torch.ops.quantized.adaptive_avg_pool2d
-        output_size = _pair(output_size)
-        qX_hat = op(qX, output_size=output_size)
-        qX_repr = qX_hat.int_repr()
-        self.assertEqual(X_ref, qX_repr,
-                         message=error_message.format(name, X_ref, qX_repr))
 
 
     """Tests quantize concatenation (both fused and not)."""

@@ -306,7 +306,8 @@ namespace {
     const Tensor& input,
     IntArrayRef output_size)
   {
-    adaptive_avg_pool2d_out_cpu_template(output, input, output_size);
+    adaptive_avg_pool2d_out_cpu_template(
+      output, input, output_size);
     return output;
   }
 
@@ -314,15 +315,9 @@ namespace {
     at::Tensor const& input,
     IntArrayRef output_size)
   {
-    Tensor output;
-    if (input.is_quantized()) {
-      output = at::_empty_affine_quantized({0}, input.options(),
-                                           input.q_scale(),
-                                           input.q_zero_point());
-    } else {
-      output = at::empty({0}, input.options());
-    }
-    adaptive_avg_pool2d_out_cpu_template(output, input, output_size);
+    auto output = at::empty({0}, input.options());
+    adaptive_avg_pool2d_out_cpu_template(
+      output, input, output_size);
     return output;
   }
 

@@ -97,17 +97,7 @@ void adaptive_avg_pool2d_out_frame(scalar_t *input_p,
 }
 
 void adaptive_avg_pool2d_out_template(Tensor& output, Tensor input,
-                                      IntArrayRef output_size) {
-  for (int64_t i = 0; i < input.dim(); i++) {
-    TORCH_CHECK(input.size(i) > 0,
-      "adaptive_avg_pooling2d(): expected input to have non-empty spatial "
-      "dimensions, but input has sizes ", input.sizes(), " with dimension ", i,
-      " being empty");
-  }
-
-  TORCH_CHECK((input.dim() == 3 || input.dim() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
+                                      std::vector<int64_t> output_shape) {
   /* sizes */
   int64_t sizeD  = input.size(-3);
   int64_t isizeH = input.size(-2);
@@ -117,22 +107,9 @@ void adaptive_avg_pool2d_out_template(Tensor& output, Tensor input,
   int64_t istrideH = input.stride(-2);
   int64_t istrideW = input.stride(-1);
 
-  auto osizeH = output_size[0];
-  auto osizeW = output_size[1];
-
-  /* resize output */
-  std::vector<int64_t> output_sizes;
-  int64_t sizeB = 0;
-  if (input.dim() == 3) {
-    output_sizes = {sizeD, osizeH, osizeW};
-  } else {
-    sizeB = input.size(-4);
-    output_sizes = {sizeB, sizeD, osizeH, osizeW};
-  }
-  if (!output.is_quantized() || output.sizes() != output_sizes) {
-    output = at::_empty_affine_quantized(output_sizes, input.options(),
-                                         input.q_scale(), input.q_zero_point());
-  }
+  auto osizeH = output_shape[output_shape.size() - 2];
+  auto osizeW = output_shape[output_shape.size() - 1];
+  int64_t sizeB = output_shape.size() == 3 ? 0 : output_shape[0];
 
   if (input.dim() == 3 || input.size(0) == 1) {
     AT_DISPATCH_QINT_TYPES(input.scalar_type(),
@@ -171,31 +148,54 @@ void adaptive_avg_pool2d_out_template(Tensor& output, Tensor input,
   }
 }
 
-class QAdaptiveAvgPool2D final : public torch::OperatorKernel {
- public:
-  Tensor operator()(Tensor qx, std::vector<int64_t> output_size) {
-    return at::adaptive_avg_pool2d(qx, output_size);
+std::vector<int64_t> get_output_shape(Tensor input, IntArrayRef output_size) {
+  for (int64_t i = 0; i < input.dim(); i++) {
+    TORCH_CHECK(input.size(i) > 0,
+      "adaptive_avg_pooling2d(): expected input to have non-empty spatial "
+      "dimensions, but input has sizes ", input.sizes(), " with dimension ", i,
+      " being empty");
   }
-};
 
-static auto registry = torch::RegisterOperators().op(
-  "quantized::adaptive_avg_pool2d(Tensor qx, int[] output_size) -> Tensor",
-  torch::RegisterOperators::options()
-    .kernel<QAdaptiveAvgPool2D>(QuantizedCPUTensorId()));
+  TORCH_CHECK((input.dim() == 3 || input.dim() == 4),
+    "non-empty 3D or 4D (batch mode) tensor expected for input");
 
+  /* sizes */
+  int64_t sizeD  = input.size(-3);
+  const auto osizeH = output_size[0];
+  const auto osizeW = output_size[1];
+
+  /* resize output */
+  std::vector<int64_t> output_shape;
+  int64_t sizeB = 0;
+  if (input.dim() == 3) {
+    output_shape = {sizeD, osizeH, osizeW};
+  } else {
+    sizeB = input.size(-4);
+    output_shape = {sizeB, sizeD, osizeH, osizeW};
+  }
+
+  return output_shape;
+}
 }  // namespace
 
 
 Tensor& quantized_adaptive_avg_pool2d_out(Tensor& output, const Tensor& input,
                                           IntArrayRef output_size) {
-  adaptive_avg_pool2d_out_template(output, input, output_size);
+  const auto output_shape = get_output_shape(input, output_size);
+  TORCH_CHECK(output.is_quantized() && output.sizes() == output_shape,
+              "Output Tensor must be quantized and have a shape of ",
+              "{ ", output_shape, " }.");
+  adaptive_avg_pool2d_out_template(output, input, output_shape);
   return output;
 }
 
 Tensor quantized_adaptive_avg_pool2d(const at::Tensor& input,
                                      IntArrayRef output_size) {
-  Tensor output;
-  adaptive_avg_pool2d_out_template(output, input, output_size);
+  const auto output_shape = get_output_shape(input, output_size);
+  Tensor output = at::_empty_affine_quantized(output_shape, input.options(),
+                                              input.q_scale(),
+                                              input.q_zero_point());;
+  adaptive_avg_pool2d_out_template(output, input, output_shape);
   return output;
 }
 
