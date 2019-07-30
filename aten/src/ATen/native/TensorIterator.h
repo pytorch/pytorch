@@ -6,6 +6,9 @@
 #include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
 #include <c10/util/Optional.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisions, and trigonometric functions. It handles
@@ -290,6 +293,9 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType> compute_common_type();
   void allocate_outputs();
+#ifdef BUILD_NAMEDTENSOR
+  void propagate_names_to_outputs();
+#endif
   void coalesce_dimensions();
 
 protected:
