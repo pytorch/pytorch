@@ -1062,7 +1062,7 @@ jobs:
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GITHUB_PYTORCHBOT_TOKEN=${GITHUB_PYTORCHBOT_TOKEN}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/python_doc_push_script.sh docs/master master site") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           # stable release docs push. Due to some circleci limitations, we keep
-          # an eternal PR open (#16502) for merging v1.2.0 -> master for this job.
+          # an eternal PR open for merging v1.2.0 -> master for this job.
           # XXX: The following code is only run on the v1.2.0 branch, which might
           # not be exactly the same as what you see here.
           elif [[ "${CIRCLE_BRANCH}" == "v1.2.0" ]]; then
