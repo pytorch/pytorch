@@ -165,8 +165,8 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   {
     WithInsertPoint guard(node->next());
     auto fw_graph = compiled_graphs->forward;
-    new_outputs = inlineCallTo(
-        *graph, *fw_graph, node->inputs(), /*unpack_outputs=*/true);
+    new_outputs = insertGraph(*graph, *fw_graph, node->inputs());
+    new_outputs = unpackOutputs(new_outputs);
     auto outputs = node->outputs();
     AT_ASSERT(new_outputs.size() == outputs.size() + 1);
     for (size_t i = 0; i < outputs.size(); ++i) {
@@ -184,8 +184,8 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());
   ArrayRef<Value*> grad(grad_vec);
-  auto grad_inputs =
-      inlineCallTo(*graph, *bw_graph, grad, /*unpack_outputs=*/true);
+  auto grad_inputs = insertGraph(*graph, *bw_graph, grad);
+  grad_inputs = unpackOutputs(grad_inputs);
   return grad_inputs;
 };
 
