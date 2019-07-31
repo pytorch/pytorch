@@ -12,7 +12,7 @@ import distutils.sysconfig
 from distutils.version import LooseVersion
 
 from . import escape_path, which
-from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_env_flag, check_negative_env_flag, build_type)
+from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
@@ -31,6 +31,57 @@ def _mkdir_p(d):
 USE_NINJA = (not check_negative_env_flag('USE_NINJA') and
              which('ninja') is not None)
 
+def convert_cmake_value_to_python_value(cmake_value, cmake_type):
+    r"""Convert a CMake value in a string form to a Python value.
+
+    Arguments:
+      cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
+      cmake_type (string): The CMake type of :attr:`cmake_value`.
+
+    Returns:
+      A Python value corresponding to :attr:`cmake_value` with type :attr:`cmake_type`.
+    """
+
+    cmake_type = cmake_type.upper()
+    up_val = cmake_value.upper()
+    if cmake_type == 'BOOL':
+        # https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/VariablesListsStrings#boolean-values-in-cmake
+        return not (up_val in ('FALSE', 'OFF', 'N', 'NO', '0', '', 'NOTFOUND') or up_val.endswith('-NOTFOUND'))
+    elif cmake_type == 'FILEPATH':
+        if up_val.endswith('-NOTFOUND'):
+            return None
+        else:
+            return cmake_value
+    else:  # Directly return the cmake_value.
+        return cmake_value
+
+def get_cmake_cache_variables_from_file(cmake_cache_file):
+    r"""Gets values in CMakeCache.txt into a dictionary.
+
+    Arguments:
+      cmake_cache_file: A CMakeCache.txt file object.
+    Returns:
+      dict: A ``dict`` containing the value of cached CMake variables.
+    """
+
+    results = dict()
+    for i, line in enumerate(cmake_cache_file, 1):
+        line = line.strip()
+        if not line or line.startswith(('#', '//')):
+            # Blank or comment line, skip
+            continue
+
+        # Space can also be part of variable name and value
+        matched = re.match(r'(\S.*):\s*([a-zA-Z_-][a-zA-Z0-9_-]*)\s*=\s*(.*)', line)
+        if matched is None:  # Illegal line
+            raise ValueError('Unexpected line {} in {}: {}'.format(i, repr(cmake_cache_file), line))
+        variable, type_, value = matched.groups()
+        if type_.upper() in ('INTERNAL', 'STATIC'):
+            # CMake internal variable, do not touch
+            continue
+        results[variable] = convert_cmake_value_to_python_value(value, type_)
+
+    return results
 
 class CMake:
     "Manages cmake."
@@ -88,67 +139,13 @@ class CMake:
             if value is not None:
                 args.append('-D{}={}'.format(key, value))
 
-    @staticmethod
-    def convert_cmake_value_to_python_value(cmake_value, cmake_type):
-        r"""Convert a CMake value in a string form to a Python value.
-
-        Arguments:
-          cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
-          cmake_type (string): The CMake type of :attr:`cmake_value`.
-
-        Returns:
-          A Python value corresponding to :attr:`cmake_value` with type :attr:`cmake_type`.
-        """
-
-        cmake_type = cmake_type.upper()
-        up_val = cmake_value.upper()
-        if cmake_type == 'BOOL':
-            # https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/VariablesListsStrings#boolean-values-in-cmake
-            return not (up_val in ('FALSE', 'OFF', 'N', 'NO', '0', '', 'NOTFOUND') or up_val.endswith('-NOTFOUND'))
-        elif cmake_type == 'FILEPATH':
-            if up_val.endswith('-NOTFOUND'):
-                return None
-            else:
-                return cmake_value
-        else:  # Directly return the cmake_value.
-            return cmake_value
-
-    @staticmethod
-    def _get_cmake_cache_variables(cmake_cache_file):
-        r"""Gets values in CMakeCache.txt into a dictionary.
-
-        Arguments:
-          cmake_cache_file: A CMakeCache.txt file object.
-        Returns:
-          dict: A ``dict`` containing the value of cached CMake variables.
-        """
-
-        results = dict()
-        for line in cmake_cache_file:
-            line = line.strip()
-            if not line or line.startswith(('#', '//')):
-                # Blank or comment line, skip
-                continue
-
-            # Space can also be part of variable name and value
-            matched = re.match(r'(\S.*):\s*([a-zA-Z_-][a-zA-Z0-9_-]*)\s*=\s*(.*)', line)
-            if matched is None:  # Illegal line
-                raise ValueError('Unexpected line in {}: {}'.format(repr(cmake_cache_file), line))
-            variable, type_, value = matched.groups()
-            if type_.upper() in ('INTERNAL', 'STATIC'):
-                # CMake internal variable, do not touch
-                continue
-            results[variable] = CMake.convert_cmake_value_to_python_value(value, type_)
-
-        return results
-
     def get_cmake_cache_variables(self):
         r"""Gets values in CMakeCache.txt into a dictionary.
         Returns:
           dict: A ``dict`` containing the value of cached CMake variables.
         """
         with open(self._cmake_cache_file) as f:
-            return CMake._get_cmake_cache_variables(f)
+            return get_cmake_cache_variables_from_file(f)
 
     def generate(self, version, cmake_python_library, build_python, build_test, my_env, rerun):
         "Runs cmake to generate native build files."
@@ -192,10 +189,6 @@ class CMake:
 
         cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
         ldflags = os.getenv('LDFLAGS', "")
-        if IS_WINDOWS:
-            CMake.defines(args, MSVC_Z7_OVERRIDE=not check_negative_env_flag(
-                'MSVC_Z7_OVERRIDE'))
-            cflags += " /EHa"
 
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
@@ -209,8 +202,8 @@ class CMake:
             # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
             'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
         }
-        # Build options that do not start with 'USE_' or 'BUILD_' and are directly controlled by env vars. This is a
-        # dict that maps environment variables to the corresponding variable name in CMake.
+        # Build options that do not start with "BUILD_", "USE_", or "CMAKE_" and are directly controlled by env vars.
+        # This is a dict that maps environment variables to the corresponding variable name in CMake.
         additional_options = {
             # Key: environment variable name. Value: Corresponding variable name to be passed to CMake. If you are
             # adding a new build option to this block: Consider making these two names identical and adding this option
@@ -220,19 +213,18 @@ class CMake:
         }
         additional_options.update({
             # Build options that have the same environment variable name and CMake variable name and that do not start
-            # with "BUILD_" or "USE_". If you are adding a new build option, also make sure you add it to
+            # with "BUILD_", "USE_", or "CMAKE_". If you are adding a new build option, also make sure you add it to
             # CMakeLists.txt.
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
-             'CMAKE_BUILD_TYPE',
-             'CMAKE_PREFIX_PATH',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'MKL_THREADING',
              'MKLDNN_THREADING',
+             'MSVC_Z7_OVERRIDE',
              'ONNX_ML',
              'ONNX_NAMESPACE',
-             'PARALLEL_BACKEND',
+             'ATEN_THREADING',
              'WERROR')
         })
 
@@ -321,6 +313,8 @@ class CMake:
 
     def build(self, my_env):
         "Runs cmake to build binaries."
+
+        from .env import build_type
 
         max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
         build_args = ['--build', '.', '--target', 'install', '--config', build_type.build_type_string]

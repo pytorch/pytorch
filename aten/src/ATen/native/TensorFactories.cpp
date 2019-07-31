@@ -122,6 +122,10 @@ Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
     const TensorOptions& options) {
+  TORCH_CHECK(options.layout() == Layout::Strided,
+      "NYI: named tensors only support strided layout");
+  TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
+      "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::empty(size, options);
   internal_set_names_inplace(result, names);
   return result;
@@ -820,6 +824,14 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor clone(const Tensor& src) {
+  auto self = at::empty_like(src);
+  self.copy_(src);
+  return self;
 }
 
 } // namespace native

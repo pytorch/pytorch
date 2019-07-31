@@ -99,8 +99,7 @@ struct GraphExecutorImplBase {
       }
     }
     PropagateInputShapes(local_graph);
-    auto output_values =
-        inlineCallTo(*state->graph, *local_graph, input_values);
+    auto output_values = insertGraph(*state->graph, *local_graph, input_values);
 
     auto outputs = last(stack, num_outputs);
     for (size_t i = 0; i < outputs.size(); ++i) {

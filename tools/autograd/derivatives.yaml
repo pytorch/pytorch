@@ -345,10 +345,6 @@
   self: zeros_like(self)
   other: zeros_like(other)
 
-- name: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  self: not_implemented("gels")
-  A: not_implemented("gels")
-
 - name: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
 
@@ -466,6 +462,10 @@
 
 - name: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   self: logsumexp_backward(grad, self, result, dim, keepdim)
+
+- name: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
+  self: not_implemented("lstsq")
+  A: not_implemented("lstsq")
 
 - name: lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)

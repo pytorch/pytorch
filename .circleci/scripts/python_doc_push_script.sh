@@ -1,13 +1,8 @@
 # =================== The following code **should** be executed inside Docker container ===================
 
-curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
-echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
-
 # Install dependencies
 sudo apt-get -y update
-sudo apt-get -y install expect-dev yarn
-yarn global add katex
-export PATH="$PATH:`yarn global bin`"
+sudo apt-get -y install expect-dev
 
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"

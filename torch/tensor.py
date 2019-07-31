@@ -272,6 +272,12 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
+    def gels(self, A):
+        r"""See :func:`torch.lstsq`"""
+        warnings.warn("torch.gels is deprecated in favour of torch.lstsq and will be "
+                      "removed in the next release. Please use torch.lstsq instead.", stacklevel=2)
+        return super(Tensor, self).lstsq(A)
+
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
