@@ -3,10 +3,39 @@
 
 namespace at {
 
+struct SizeAndStride {
+  int64_t size;
+  int64_t stride;
+};
+
+/*
+ A comparator that will sort SizeAndStride structs by stride,
+ in ascending order.
+ */
+ int compareSizeAndStride(const void* a, const void* b) {
+  const SizeAndStride* aS = (const SizeAndStride*) a;
+  const SizeAndStride* bS = (const SizeAndStride*) b;
+
+  if (aS->stride < bS->stride) return -1;
+  if (aS->stride == bS->stride) return 0;
+  return 1;
+}
+
 MemOverlap has_internal_overlap(const Tensor& tensor) {
   return has_internal_overlap(tensor.unsafeGetTensorImpl());
 }
 
+/*
+Returns false if there is no possibility that the tensor
+has "overlapping" indices and true otherwise.
+"Overlapping" indices are two+ valid indices that specify
+the same offset within the tensor.
+The function does this by checking for a sufficient but not
+necessary condition of no overlap. In particular, that
+that there exists an ordering of the tensor's dimensions
+that is nicely "nested," with each dimension contained
+within the next one.
+*/
 MemOverlap has_internal_overlap(TensorImpl* t) {
   AT_ASSERT(t->layout() == kStrided);
 
@@ -14,13 +43,43 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
     return MemOverlap::NO;
   }
 
-  auto strides = t->strides();
-  if (strides.end() != std::find_if(
-        strides.begin(), strides.end(), [](int64_t s) { return s == 0; })) {
-    return MemOverlap::YES;
+  std::vector<SizeAndStride> info(t->dim());
+
+  int dims = t->dim();
+  int nonSize1Dims = 0;
+
+  for (int i = 0; i < dims; ++i) {
+    int64_t size = t->sizes()[i];
+    if (size > 1) {
+      info[nonSize1Dims].size = size;
+      info[nonSize1Dims].stride = t->strides()[i];
+
+      if (info[nonSize1Dims].stride < 1) {
+        return MemOverlap::YES;
+      }
+
+      ++nonSize1Dims;
+    }
   }
 
-  return MemOverlap::TOO_HARD;
+  // Short-circuits if tensor is a single element.
+  if (nonSize1Dims == 0) {
+    return MemOverlap::NO;
+  }
+
+  /* Ascending order (innermost dimension in sorted view is at [0]) */
+  qsort(info.data(), nonSize1Dims, sizeof(SizeAndStride), compareSizeAndStride);
+
+  /* There's no easy solution to a linear Diophantine equation with restricted
+   * coefficients
+   */
+  for (int i = 0; i < (nonSize1Dims - 1); ++i) {
+    if (((info[i].size - 1) * info[i].stride) >= info[i + 1].stride) {
+      return MemOverlap::TOO_HARD;
+    }
+  }
+
+  return MemOverlap::NO;
 }
 
 void assert_no_internal_overlap(const Tensor& t) {

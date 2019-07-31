@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <math.h>
 
@@ -645,7 +646,7 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
   /*
   Since this is a unary op, we can easily first check for expanded dimensions
   (with stride 0), and remove them, to avoid calling .contiguous() in such
-  case when detail::maybeOverlappingIndices(a) returns true.
+  case when has_internal_overlap(a) returns true.
   */
   std::vector<int64_t> collapsed_shape;
   std::vector<int64_t> collapsed_strides;
@@ -687,7 +688,7 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
   */
   Tensor oldA;
 
-  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
+  if (aType == TensorArgType::ReadWrite && has_internal_overlap(a) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldA = a;
     a = a.contiguous();
@@ -809,12 +810,12 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
   Tensor oldA;
   Tensor oldB;
 
-  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
+  if (aType == TensorArgType::ReadWrite && has_internal_overlap(a) != MemOverlap::NO ) {
     // Must perform in contiguous space
     oldA = a;
     a = a.contiguous();
   }
-  if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
+  if (bType == TensorArgType::ReadWrite && has_internal_overlap(b) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldB = b;
     b = b.contiguous();
@@ -974,17 +975,17 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
   Tensor oldB;
   Tensor oldC;
 
-  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
+  if (aType == TensorArgType::ReadWrite && has_internal_overlap(a) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldA = a;
     a = a.contiguous();
   }
-  if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
+  if (bType == TensorArgType::ReadWrite && has_internal_overlap(b) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldB = b;
     b = b.contiguous();
   }
-  if (cType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(c)) {
+  if (cType == TensorArgType::ReadWrite && has_internal_overlap(c) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldC = c;
     c = c.contiguous();
@@ -1181,22 +1182,22 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
   Tensor oldC;
   Tensor oldD;
 
-  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
+  if (aType == TensorArgType::ReadWrite && has_internal_overlap(a) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldA = a;
     a = a.contiguous();
   }
-  if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
+  if (bType == TensorArgType::ReadWrite && has_internal_overlap(b) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldB = b;
     b = b.contiguous();
   }
-  if (cType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(c)) {
+  if (cType == TensorArgType::ReadWrite && has_internal_overlap(c) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldC = c;
     c = c.contiguous();
   }
-  if (dType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(c)) {
+  if (dType == TensorArgType::ReadWrite && has_internal_overlap(d) != MemOverlap::NO) {
     // Must perform in contiguous space
     oldD = d;
     d = d.contiguous();
