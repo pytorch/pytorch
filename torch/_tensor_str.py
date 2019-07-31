@@ -1,7 +1,6 @@
 import math
 import torch
 from torch._six import inf
-from torch.__config__ import _BUILD_NAMEDTENSOR
 
 
 class __PrinterOptions(object):
@@ -311,7 +310,7 @@ def _str(self):
     elif self.requires_grad:
         suffixes.append('requires_grad=True')
 
-    if _BUILD_NAMEDTENSOR and self.has_names():
+    if torch.compiled_with_BUILD_NAMEDTENSOR() and self.has_names():
         suffixes.append('names={}'.format(self.names))
 
     return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
