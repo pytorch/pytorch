@@ -13537,7 +13537,7 @@ class TestRecursiveScript(JitTestCase):
 
     def test_repeated_error_stack(self):
         def d(x):
-            import pdb  # noqa
+            return "a" - 2
 
         def c(x):
             return d(x)

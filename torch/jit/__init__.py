@@ -1154,9 +1154,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
 
-    # In case there were some previous failed compilations, clear out the stack
-    torch._C._clear_compilation_error_stack()
-
     if optimize is not None:
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
