@@ -1344,7 +1344,7 @@ class TestCuda(TestCase):
 
         # Bool test case
         t = torch.tensor([[False, True], [True, True]], device='cuda')
-        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')), 
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')),
                          torch.tensor([[False, False], [True, True]], device='cuda'))
 
     def test_gather(self):
@@ -2219,6 +2219,10 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         _TestTorchMixin._test_det_logdet_slogdet(self, 'cuda')
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_det_logdet_slogdet_batched(self):
+        _TestTorchMixin._test_det_logdet_slogdet_batched(self, 'cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_solve(self):
