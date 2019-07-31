@@ -124,13 +124,6 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
-# Overrideable stubs to be used in user-extendable backends
-NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${type_method_formals}) {
-    return ${Type}Dispatch::get_function<${return_type} (*)(${formals_types})>("${schema}")(${native_actuals});
-}
-""")
-
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
@@ -551,8 +544,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'return': ReturnDecl,
     'returns': List[ReturnType],
     'scalar_check': str,
-    # schema used for extension backend operator registration
-    'schema': str,
     'sparse': bool,
     'type_definition_body': List[str],
     'type_method_actuals': List[str],
@@ -1658,29 +1649,3 @@ def create_derived(backend_type_env, declarations):
                     pass
     return (type_object_declarations, type_object_definitions, function_registrations, legacy_th_declarations,
             legacy_th_definitions)
-
-
-def create_extension_backend(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str]]
-    type_object_declarations = []
-    type_object_definitions = []
-    function_registrations = []
-
-    for declaration in declarations:
-        for option in declaration['options']:
-            if not option.get('skip', False) and option['mode'] == 'native':
-                try:
-                    schema_args = ", ".join(
-                        ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
-                    return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
-                    option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
-                    env = nested_dict(option, backend_type_env)
-                    type_object_declarations.append(
-                        NATIVE_DISPATCH_DECLARATION.substitute(env))
-                    type_object_definitions.append(
-                        NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND.substitute(env))
-                    function_registrations.append(
-                        BACKEND_FUNCTION_REGISTRATION.substitute(env))
-                except NYIError:
-                    pass
-    return type_object_declarations, type_object_definitions, function_registrations

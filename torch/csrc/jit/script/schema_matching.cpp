@@ -530,7 +530,7 @@ Value* emitBuiltinCall(
               allow_conversions)) {
         // we inline builtin calls because they are normally very small
         // wrappers and are not useful for keeping around to debug
-        return inlineCallTo(graph, *method->graph(), result->inputs).at(0);
+        return insertGraph(graph, *method->graph(), result->inputs).at(0);
       }
     }
   }
