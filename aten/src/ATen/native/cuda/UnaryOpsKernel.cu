@@ -1,5 +1,4 @@
 #include <limits>
-#include <cuda_fp16.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/Context.h>
@@ -15,14 +14,12 @@ void abs_kernel_cuda(TensorIterator& iter) {
     case ScalarType::Bool:
       gpu_kernel(iter, []GPU_LAMBDA(bool a) { return a; });
       break;
-#if __CUDA_ARCH__ >= 530
     case ScalarType::Half:
-      gpu_kernel(iter, []GPU_LAMBDA(half a) -> half {
-        half nega = __hneg(a);
-        return __hge(a, nega) ? a : nega;
+      gpu_kernel(iter, []GPU_LAMBDA(at::Half a) -> half {
+        at::Half nega = -a;
+        return a >= nega ? a : nega;
       });
       break;
-#endif
     default:
       AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {

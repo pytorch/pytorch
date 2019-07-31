@@ -570,7 +570,7 @@ simple_pointwise = [
     'sign',
 ]
 for fn in simple_pointwise:
-    tests.append((fn, small_3d, lambda t: [], None, types + [torch.BoolTensor]))
+    tests.append((fn, small_3d, lambda t: [], None, types + [torch.BoolTensor, torch.HalfTensor]))
 
 simple_pointwise_float = [
     'log',

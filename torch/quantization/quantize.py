@@ -275,7 +275,7 @@ def swap_module(mod, mapping):
         The corresponding quantized module of `mod`
     """
     new_mod = mod
-    if hasattr(mod, 'observer'):
+    if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
 
