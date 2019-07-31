@@ -2229,28 +2229,17 @@ class TestAutograd(TestCase):
                               True, f_args_variable, f_args_tensor)
 
     def test_cdist(self):
-        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-            x = torch.randn(S, S, requires_grad=True)
-            y = torch.randn(S, S, requires_grad=True)
-            eps=1e-6
-            x = x - (((x - y) < eps).double() * 2 * eps)
-            f_args_variable = (x, y)
-
-            def f(a, b):
-                return torch.cdist(a, b, p)
-
-            f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-            run_functional_checks(self, "test_cdist", "cdist", f,
-                                  True, f_args_variable, f_args_tensor)
-
-
-    def test_cdist_cuda_0(self):
         def _test_cdist_for_size(sizes):
-            devices = [] if not torch.cuda.is_available() else ['cuda']
-            for p in [0]:
+            devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
+                    x = torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double)
+
+                    eps = 1e-6
+                    x = x - (((x - y) < eps).double() * 2 * eps)
+
+                    f_args_variable = (x, y)
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
@@ -2265,127 +2254,6 @@ class TestAutograd(TestCase):
         _test_cdist_for_size((2, 3, 5))
         _test_cdist_for_size((1, 2, 3))
 
-    def test_cdist_cuda_1(self):
-        def _test_cdist_for_size(sizes):
-            devices = [] if not torch.cuda.is_available() else ['cuda']
-            for p in [1]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cuda_2(self):
-        def _test_cdist_for_size(sizes):
-            devices = [] if not torch.cuda.is_available() else ['cuda']
-            for p in [2]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cuda_3(self):
-        def _test_cdist_for_size(sizes):
-            devices = [] if not torch.cuda.is_available() else ['cuda']
-            for p in [3]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cuda_15(self):
-        def _test_cdist_for_size(sizes):
-            devices = [] if not torch.cuda.is_available() else ['cuda']
-            for p in [1.5]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cuda_25(self):
-        def _test_cdist_for_size(sizes):
-            devices = [] if not torch.cuda.is_available() else ['cuda']
-            for p in [2.5]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-    def test_cdist_cuda_inf(self):
-        def _test_cdist_for_size(sizes):
-            devices = [] if not torch.cuda.is_available() else ['cuda']
-            for p in [float('inf')]:
-                for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double),
-                                       torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double))
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
-                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-
-        _test_cdist_for_size((3, 3))
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
