@@ -171,6 +171,7 @@ class TestNamedTensor(TestCase):
         tensor.data_ptr()
         tensor.ndim
         tensor.item()
+        tensor.type()
 
     def test_split_fns_propagates_names(self):
         fns = [
@@ -234,7 +235,10 @@ class TestNamedTensor(TestCase):
             )
 
         tests = [
+            fn_method_and_inplace('add'),
+            fn_method_and_inplace('div'),
             fn_method_and_inplace('mul'),
+            fn_method_and_inplace('sub'),
             method('copy_'),
         ]
         tests = flatten(tests)
@@ -250,6 +254,9 @@ class TestNamedTensor(TestCase):
             out = testcase.lambd(tensor)
             self.assertEqual(out.names, tensor.names,
                              message=testcase.name)
+
+        def fn(name, *args, **kwargs):
+            return [Function(name, lambda t: getattr(torch, name)(t, *args, **kwargs))]
 
         def method(name, *args, **kwargs):
             return [Function(name, lambda t: getattr(t, name)(*args, **kwargs))]
@@ -282,6 +289,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('clamp', -1, 1),
             fn_method_and_inplace('clamp_min', -2),
             fn_method_and_inplace('clamp_max', 2),
+            method('clone'),
             method('cauchy_'),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
@@ -323,6 +331,22 @@ class TestNamedTensor(TestCase):
             method('zero_'),
             method('fill_', 1),
             method('fill_', torch.tensor(3.14)),
+
+            # conversions
+            method('to', dtype=torch.long),
+            method('to', device='cpu'),
+            method('to', torch.empty([])),
+            method('bool'),
+            method('byte'),
+            method('char'),
+            method('cpu'),
+            method('double'),
+            method('float'),
+            method('long'),
+            method('half'),
+            method('int'),
+            method('short'),
+            method('type', dtype=torch.long),
 
             # views
             method('narrow', 0, 0, 1),

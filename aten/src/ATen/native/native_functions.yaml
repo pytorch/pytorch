@@ -149,6 +149,7 @@
     SparseCPU: add
     SparseCUDA: add
     MkldnnCPU: mkldnn_add
+  named_guard: False
 
 - func: add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -158,6 +159,7 @@
     SparseCPU: add_
     SparseCUDA: add_
     MkldnnCPU: mkldnn_add_
+  named_guard: False
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -166,13 +168,16 @@
     SparseCPU: add_out
     SparseCUDA: add_out
     MkldnnCPU: mkldnn_add_out
+  named_guard: False
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: add_(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -660,18 +665,23 @@
 
 - func: div(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: div_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 - func: div(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div(Tensor self, Scalar other) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: div_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
   variants: function, method
@@ -2390,6 +2400,7 @@
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
     QuantizedCPU: quantized_clone
+  named_guard: False
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   variants: function, method
@@ -2425,26 +2436,33 @@
     MkldnnCPU: mkldnn_zero_
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: sub_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: sub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: sub_(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 - func: rsub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
+  named_guard: False
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: function
+  named_guard: False
 
 - func: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2860,14 +2878,17 @@
 - func: to(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor
   variants: method
   device_guard: False
+  named_guard: False
 
 - func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
   variants: method
   device_guard: False
+  named_guard: False
 
 - func: to(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
   variants: method
   device_guard: False
+  named_guard: False
 
 - func: to(Tensor self, Tensor other, bool non_blocking=False, bool copy=False) -> Tensor
   variants: method
