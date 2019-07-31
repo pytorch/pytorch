@@ -196,8 +196,8 @@ static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor
   };                                                                    \
                                                                         \
   void THCTensor_(NAME)(THCState* state, THCTensor* self_, THCTensor* src) { \
-    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));               \
-    at::assert_no_internal_overlap(self_, #NAME);                       \
+    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));       \
+    at::assert_no_internal_overlap(self_);                              \
     if (self_ == src) {                                                 \
       if (!THC_pointwiseApply1<scalar_t>(state, self_, Tensor_##NAME##_##REAL##_Op())) { \
         THArgCheck(false, 2, CUTORCH_DIM_WARNING);                      \
