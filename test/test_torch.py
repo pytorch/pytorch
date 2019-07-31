@@ -6497,6 +6497,59 @@ class _TestTorchMixin(object):
         self._test_det_logdet_slogdet(self, 'cpu')
 
     @staticmethod
+    def _test_det_logdet_slogdet_batched(self, device):
+        from common_utils import (random_symmetric_matrix, random_symmetric_psd_matrix,
+                                  random_symmetric_pd_matrix, random_square_matrix_of_rank)
+
+        # mat_chars denotes matrix characteristics
+        # possible values are: sym, sym_psd, sym_pd, sing, non_sym
+        def run_test(matsize, batchdims, mat_chars):
+            num_matrices = reduce(lambda x, y: x * y, batchdims, 1)
+            list_of_matrices = []
+
+            for idx in range(num_matrices):
+                mat_type = idx % len(mat_chars)
+                if mat_chars[mat_type] == 'sym':
+                    list_of_matrices.append(random_symmetric_matrix(matsize).to(device=device))
+                elif mat_chars[mat_type] == 'sym_psd':
+                    list_of_matrices.append(random_symmetric_psd_matrix(matsize).to(device=device))
+                elif mat_chars[mat_type] == 'sym_pd':
+                    list_of_matrices.append(random_symmetric_pd_matrix(matsize).to(device=device))
+                elif mat_chars[mat_type] == 'sing':
+                    list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize // 2).to(device=device))
+                elif mat_chars[mat_type] == 'non_sing':
+                    list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize).to(device=device))
+            full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))
+            # Scaling adapted from `get_random_mat_scale` in _test_det_logdet_slogdet
+            full_tensor *= (math.factorial(matsize - 1) ** (-1.0 / (2 * matsize)))
+
+            for fn in [torch.det, torch.logdet, torch.slogdet]:
+                expected_value = []
+                actual_value = fn(full_tensor)
+                for full_idx in product(*map(lambda x: list(range(x)), batchdims)):
+                    expected_value.append(fn(full_tensor[full_idx]))
+
+                if fn == torch.slogdet:
+                    sign_value = torch.stack([tup[0] for tup in expected_value], dim=0).reshape(batchdims)
+                    expected_value = torch.stack([tup[1] for tup in expected_value], dim=0).reshape(batchdims)
+                    self.assertEqual(sign_value, actual_value[0], allow_inf=True)
+                    self.assertEqual(expected_value, actual_value[1], allow_inf=True)
+                else:
+                    expected_value = torch.stack(expected_value, dim=0).reshape(batchdims)
+                    self.assertEqual(actual_value, expected_value, allow_inf=True)
+
+        for matsize, batchdims in product([3, 5], [(3,), (5, 3)]):
+            run_test(matsize, batchdims, mat_chars=['sym_pd'])
+            run_test(matsize, batchdims, mat_chars=['sing'])
+            run_test(matsize, batchdims, mat_chars=['non_sing'])
+            run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
+            run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
+
+    @skipIfNoLapack
+    def test_det_logdet_slogdet_batched(self):
+        self._test_det_logdet_slogdet_batched(self, 'cpu')
+
+    @staticmethod
     def _test_fft_ifft_rfft_irfft(self, device='cpu'):
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(torch.randn(*sizes, device=device))
