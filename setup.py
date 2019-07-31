@@ -43,7 +43,7 @@
 #     disables use of MKLDNN
 #
 #   MKLDNN_THREADING
-#     MKL-DNN threading mode (https://github.com/intel/mkl-dnn/)
+#     MKL-DNN threading mode: TBB or OMP (default)
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -103,7 +103,7 @@
 #     the BLAS will be chosen based on what is found on your system.
 #
 #   MKL_THREADING
-#     MKL flavor: SEQ, TBB or OMP (default)
+#     MKL threading mode: SEQ, TBB or OMP (default)
 #
 #   USE_FBGEMM
 #     Enables use of FBGEMM
@@ -150,15 +150,15 @@
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
 #
-#   PARALLEL_BACKEND
-#     parallel backend to use for intra- and inter-op parallelism
+#   ATEN_THREADING
+#     ATen parallel backend to use for intra- and inter-op parallelism
 #     possible values:
-#       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
+#       OMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
-#       NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
+#       TBB - using TBB for intra- and native thread pool for inter-op parallelism
 #
 #   USE_TBB
-#      use TBB for parallelization
+#      enable TBB support
 #
 
 from __future__ import print_function

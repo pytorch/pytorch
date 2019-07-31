@@ -1217,8 +1217,8 @@ std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
     singleCheckErrors(infos[0], "qr_cuda");
   }
 
-  return std::make_tuple(q_working_copy.narrow_copy(-1, 0, n_columns_q),
-                         r_working_copy.narrow_copy(-2, 0, n_columns_q).triu_());
+  return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q),
+                         r_working_copy.narrow(-2, 0, n_columns_q).triu());
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

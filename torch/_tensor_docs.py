@@ -1040,13 +1040,6 @@ ge_(other) -> Tensor
 In-place version of :meth:`~Tensor.ge`
 """)
 
-add_docstr_all('gels',
-               r"""
-gels(A) -> Tensor
-
-See :func:`torch.gels`
-""")
-
 add_docstr_all('geometric_',
                r"""
 geometric_(p, *, generator=None) -> Tensor
@@ -1317,6 +1310,11 @@ is_contiguous() -> bool
 Returns True if :attr:`self` tensor is contiguous in memory in C order.
 """)
 
+add_docstr_all('is_pinned',
+               r"""
+Returns true if this tensor resides in pinned memory.
+""")
+
 add_docstr_all('is_floating_point',
                r"""
 is_floating_point() -> bool
@@ -1464,6 +1462,13 @@ add_docstr_all('logsumexp',
 logsumexp(dim, keepdim=False) -> Tensor
 
 See :func:`torch.logsumexp`
+""")
+
+add_docstr_all('lstsq',
+               r"""
+lstsq(A) -> (Tensor, Tensor)
+
+See :func:`torch.lstsq`
 """)
 
 add_docstr_all('lt',
