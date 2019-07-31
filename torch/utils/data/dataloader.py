@@ -41,6 +41,9 @@ class _DatasetKind(object):
 class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
+
+    Arguments:
+        data_source (Dataset): dataset to sample from
     """
 
     def __init__(self):
@@ -49,12 +52,6 @@ class _InfiniteConstantSampler(Sampler):
     def __iter__(self):
         while True:
             yield None
-
-    def __len__(self):
-        # This has to be a TypeError, otherwise, since this is used in
-        # `len(dataloader)`, `list(dataloader)` will fail.
-        # see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
-        raise TypeError('Cannot determine the DataLoader length of a IterableDataset')
 
 
 class DataLoader(object):
@@ -107,12 +104,12 @@ class DataLoader(object):
 
     .. note:: ``len(dataloader)`` heuristic is based on the length of the sampler used.
               When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
-              an infinite sampler is used, whose :meth:`__len__` is not
-              implemented, because the actual length depends on both the
-              iterable as well as multi-process loading configurations. So one
-              should not query this method unless they work with a map-style
-              dataset. See `Dataset Types`_ for more details on these two types
-              of datasets.
+              ``len(dataset)`` (if implemented) is returned instead, regardless
+              of multi-process loading configurations, because PyTorch trust
+              user :attr:`dataset` code in correctly handling multi-process
+              loading to avoid duplicate data. See `Dataset Types`_ for more
+              details on these two types of datasets and how
+              :class:`~torch.utils.data.IterableDataset` interacts with `Multi-process data loading`_.
     """
 
     __initialized = False
@@ -294,7 +291,18 @@ class DataLoader(object):
             return self.sampler
 
     def __len__(self):
-        return len(self._index_sampler)  # with iterable-style dataset, this will error
+        if self._dataset_kind == _DatasetKind.Iterable:
+            # Note that this could be inaccurate when one naively does
+            # multi-processing data loading, since the samples will be duplicated.
+            # However, no real use case should be actually using that behavior, so
+            # it should count as a user error. We should generally trust dataset
+            # code to do the proper thing (e.g., configure each replica differently
+            # in `__iter__`), and give us the correct `__len__` if they choose to
+            # implement it (this will still throw if the dataset does not implement
+            # a `__len__`).
+            return len(self.dataset)
+        else:
+            return len(self._index_sampler)
 
 
 class _BaseDataLoaderIter(object):
