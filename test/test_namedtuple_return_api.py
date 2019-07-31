@@ -20,7 +20,7 @@ class TestNamedTupleAPI(unittest.TestCase):
 
     def test_native_functions_yaml(self):
         operators_found = set()
-        regex = re.compile(r"^(\w*)(\|\.)")
+        regex = re.compile(r"^(\w*)(\(|\.)")
         file = open(aten_native_yaml, 'r')
         for f in yaml.load(file.read()):
             f = f['func']
