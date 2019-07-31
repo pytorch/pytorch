@@ -176,4 +176,15 @@ TEST(NamedTensorTest, unifyFromRight) {
   check_unify_error({ H, None, C }, { H });
 }
 
+TEST(NamedTensorTest, alias) {
+  // tensor.alias is not exposed in Python so we test its name propagation here
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  std::vector<Dimname> names = { N, C };
+
+  auto tensor = at::empty({2, 3}, std::vector<Dimname>{ N, C });
+  auto aliased = tensor.alias();
+  ASSERT_TRUE(dimnames_equal(tensor.names().value(), aliased.names().value()));
+}
+
 #endif

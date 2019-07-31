@@ -115,6 +115,20 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
             tensor.set_names_(['N', 'N'])
 
+    def test_set_names(self):
+        tensor = torch.empty(1, 1, names=('N', 'C'))
+
+        self.assertEqual(tensor.set_names(None).names, (None, None))
+        self.assertEqual(tensor.set_names(['H', 'W']).names, ('H', 'W'))
+
+        # Check that we didn't modify tensor.names
+        self.assertEqual(tensor.names, ('N', 'C'))
+
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            tensor.set_names(['N', 'C', 'W'])
+        with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
+            tensor.set_names(['N', 'N'])
+
     def test_set_names_property(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
 
