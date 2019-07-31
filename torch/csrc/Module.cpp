@@ -745,7 +745,7 @@ PyObject* initModule() {
 #endif
 
 #ifdef BUILD_NAMEDTENSOR
-  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
+  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_True));
 #else
   ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_False));
 #endif
