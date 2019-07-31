@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn import Conv2d as NNConv2d
-from torch.quantization.QConfig import default_qat_qconfig
 
 class Conv2d(NNConv2d):
     r"""

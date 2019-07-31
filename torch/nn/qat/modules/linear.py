@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from ...modules.linear import Linear as NNLinear
-from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
 class Linear(NNLinear):
