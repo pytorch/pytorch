@@ -1772,6 +1772,13 @@ class _TestTorchMixin(object):
             res_neg_op = -a.clone()
             self.assertEqual(res_neg_op, res_add)
 
+            # bool
+            self.assertRaisesRegex(
+                RuntimeError,
+                r"Negation, the `\-` operator, on a bool tensor is not supported. "
+                r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                lambda: - cast(torch.tensor([False, True])))
+
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
