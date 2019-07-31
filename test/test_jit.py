@@ -329,6 +329,22 @@ class TestJit(JitTestCase):
         t2 = torch.rand(3, 4)
         self.assertEqual(r(t2), m.x + t2)
 
+    def test_trace_nested_fn(self):
+        class TracedInlineDecision(torch.nn.Module):
+            def forward(self, x, flag):
+                @torch.jit.script
+                def make_decision(flag, x):
+                    if flag:
+                        return x
+                    else:
+                        return torch.zeros_like(x)
+                x = torch.neg(x)
+                return make_decision(flag, x)
+
+
+        decision = TracedInlineDecision()
+        torch.jit.trace(decision, (torch.rand(3, 4), torch.tensor([True], dtype=torch.bool)), check_trace=True)
+
     def test_restore_device(self):
         # main purpose is checking map_location works
         m = torch.jit.ScriptModule()
@@ -13698,6 +13714,22 @@ class TestRecursiveScript(JitTestCase):
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
+    def test_error_stack_class(self):
+        class X(object):
+            def bad_fn(self):
+                import pdb  # noqa
+
+        def fn(x):
+            return X(10)
+
+        try:
+            torch.jit.script(fn)
+        except Exception as e:
+            checker = FileCheck()
+            checker.check("import statements")
+            checker.check("is being compiled since it was called from")
+            checker.run(str(e))
+
     def test_module_basic(self):
         class Other(torch.nn.Module):
             __constants__ = ['x']
@@ -14511,6 +14543,11 @@ EXCLUDE_TYPE_CHECK = {
     'test_slogdet_pos_det',
     'test_slogdet_symmetric',
     'test_slogdet_symmetric_pd',
+    'test_slogdet_batched_1x1_neg_det',
+    'test_slogdet_batched_pos_det',
+    'test_slogdet_batched_symmetric',
+    'test_slogdet_batched_symmetric_pd',
+    'test_slogdet_batched_distinct_singular_values'
 }
 
 # known to be failing in script

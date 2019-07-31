@@ -1310,6 +1310,11 @@ is_contiguous() -> bool
 Returns True if :attr:`self` tensor is contiguous in memory in C order.
 """)
 
+add_docstr_all('is_pinned',
+               r"""
+Returns true if this tensor resides in pinned memory.
+""")
+
 add_docstr_all('is_floating_point',
                r"""
 is_floating_point() -> bool

@@ -182,20 +182,32 @@
     - THTensor* self
 ]]
 [[
-  name: _th_view
-  cname: newView
+  name: _th_clone
+  cname: newClone
+  return: THTensor*
+  variants:
+    - function
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
+  cpu_bfloat16: True
+  arguments:
+    - THTensor* self
+]]
+[[
+  name: _th_resize_as_
+  cname: resizeAs
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
   variants:
     - function
-  device_guard: False
-  return: THTensor*
+  return: self
+  scalar_check: the_template_->dim() == 0
   arguments:
     - THTensor* self
-    - arg: IntArrayRefSize size
-      long_args: True
+    - THTensor* the_template
 ]]
 [[
   name: _th_index_select
@@ -2670,23 +2682,6 @@
     - double p
 ]]
 
-# In theory, this could be a part of the above declaration. But in
-# practice this leads to all sorts of problems with ambiguous overloads.
-# So we add it here with a separate name.
-[[
-  name: _th_alias
-  return: THTensor*
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  options:
-    - cname: newWithTensor
-      arguments:
-        - THTensor* self
-]]
 [[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
