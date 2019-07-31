@@ -43,6 +43,13 @@
   variants: method
   named_guard: False
 
+- func: align_to(Tensor self, DimnameList names) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: align_tensors(Tensor[] tensors) -> Tensor[]
+  named_guard: False
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
