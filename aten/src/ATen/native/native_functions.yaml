@@ -1545,8 +1545,11 @@
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
+- func: is_pinned(Tensor self) -> bool
+  variants: method
+
 - func: pin_memory(Tensor self) -> Tensor
-  variants: function, method
+  variants: method
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
   variants: function, method
