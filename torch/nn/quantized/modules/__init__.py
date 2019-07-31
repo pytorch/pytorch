@@ -16,3 +16,8 @@ __all__ = [
     'Quantize',
     'ReLU',
 ]
+
+# Generated modules -- use torch/quantization/tools/make_modules to regenerate.
+from ._generated import Add
+
+__all__ += ['Add']

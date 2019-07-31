@@ -826,5 +826,13 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     return tensor;
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor clone(const Tensor& src) {
+  auto self = at::empty_like(src);
+  self.copy_(src);
+  return self;
+}
+
 } // namespace native
 } // namespace at
