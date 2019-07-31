@@ -7759,6 +7759,18 @@ class _TestTorchMixin(object):
         t = torch.from_numpy(np.empty((0, 4)))
         t[:, 1::2] *= 1
 
+    def test_atan2(self):
+        def _test_atan2_with_size(size, device):
+            a = torch.rand(size=size, device=device, dtype=torch.double).view(-1)
+            b = torch.rand(size=size, device=device, dtype=torch.double).view(-1)
+            actual = a.atan2(b)
+            expected = torch.tensor([math.atan2(a[i].item(), b[i].item()) for i in range(a.numel())], device=device)
+            self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
+        for device in torch.testing.get_all_device_types():
+            _test_atan2_with_size((2, 2), device)
+            _test_atan2_with_size((3, 3), device)
+            _test_atan2_with_size((5, 5), device)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
