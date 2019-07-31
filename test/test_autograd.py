@@ -2230,8 +2230,11 @@ class TestAutograd(TestCase):
 
     def test_cdist(self):
         for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-            f_args_variable = (torch.randn(S, S, requires_grad=True),
-                               torch.randn(S, S, requires_grad=True))
+            x = torch.randn(S, S, requires_grad=True)
+            y = torch.randn(S, S, requires_grad=True)
+            eps=1e-6
+            x = x - (((x - y) < eps).double() * 2 * eps)
+            f_args_variable = (x, y)
 
             def f(a, b):
                 return torch.cdist(a, b, p)
@@ -3488,7 +3491,7 @@ def gradgradcheck_method_precision_override(test_name):
     return override
 
 GRADCHECK_EPS_OVERRIDE = {
-    'test_cdist': 1e-7,
+    #'test_cdist': 1e-7,
 }
 
 GRADCHECK_PRECISION_OVERRIDE = {
