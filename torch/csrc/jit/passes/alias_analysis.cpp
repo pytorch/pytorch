@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -56,6 +57,7 @@ AliasDb::~AliasDb() = default;
 AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
   memoryDAG_ = torch::make_unique<MemoryDAG>();
   analyze(graph_);
+  GRAPH_DEBUG(toString());
 }
 
 bool AliasDb::hasWriters(const Node* n) const {
@@ -159,8 +161,17 @@ MemoryLocations AliasDb::getReads(Node* n) const {
   return reads;
 }
 
-static std::string getElementName(const Element* e) {
+std::string AliasDb::getElementName(const Element* e) const {
   if (e->value == nullptr) {
+    // not the most efficient way, but given the fact there are
+    // not too many types and even fewer of them will end up in
+    // wildcardIndex_, we should be fine with a linear search
+    // each time we hit a wildcard leaf
+    for (const auto& ent : wildcardIndex_) {
+      if (ent.second == e) {
+        return std::string("WILDCARD for type ") + typeKindToString(ent.first);
+      }
+    }
     return "WILDCARD";
   } else {
     return e->value->debugName();
@@ -168,40 +179,49 @@ static std::string getElementName(const Element* e) {
 }
 
 void AliasDb::dump() const {
-  std::cout << "\n===1. GRAPH===\n";
-  graph_->dump();
+  std::cout << toString();
+}
 
-  std::cout << "\n===2. ALIAS DB===\n";
+std::string AliasDb::toString() const {
+  std::stringstream ss{};
+  std::unordered_map<size_t, Element*> indexToElementMap;
+
+  ss << "\n===1. GRAPH===\n";
+  ss << graph_->toString();
+
+  ss << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
+    indexToElementMap[element->index] = element;
     if (!element->pointsTo.empty()) {
-      std::cout << getElementName(element) << " points to: ";
+      ss << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
-        std::cout << getElementName(memoryDAG_->fromIndex(pointedTo)) << ", ";
+        ss << getElementName(memoryDAG_->fromIndex(pointedTo)) << ", ";
       }
-      std::cout << "\n";
+      ss << "\n";
     }
     if (!element->containedElements.empty()) {
-      std::cout << getElementName(element) << " contains: ";
+      ss << getElementName(element) << " contains: ";
       for (const auto contained : element->containedElements) {
-        std::cout << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
+        ss << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
       }
-      std::cout << "\n";
+      ss << "\n";
     }
   }
 
-  // std::cout << "\n===3. Writes===\n";
-  // for (const auto& pr : writeIndex_) {
-  //   const auto node = pr.first;
-  //   const auto& values = pr.second;
-  //   std::cout << *node;
-  //   std::cout << "  ";
-  //   for (const auto value : values) {
-  //     std::cout << value->debugName() << ", ";
-  //   }
-  //   std::cout << "\n";
-  // }
-  std::cout << "\n";
+  ss << "\n===3. Writes===\n";
+  for (const auto& pr : writeIndex_) {
+    const auto node = pr.first;
+    const auto& values = pr.second;
+    ss << *node;
+    ss << "  ";
+    for (const auto value : values) {
+      ss << indexToElementMap[value]->value->debugName() << ", ";
+    }
+    ss << "\n";
+  }
+  ss << "\n";
+  return ss.str();
 }
 
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
@@ -258,7 +278,7 @@ void AliasDb::analyzeImpl(Node* node) {
           "Op ",
           node->kind().toDisplayString(),
           " has a special case and should be registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but is registered with ",
-          toString(analysis));
+          c10::toString(analysis));
     }
   } else {
     TORCH_INTERNAL_ASSERT(
