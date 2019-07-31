@@ -28,7 +28,7 @@ class LinearReLU(QATLinear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __FLOAT_MODULE__ = NNLinearReLU2d
+    _FLOAT_MODULE = NNLinearReLU2d
 
     def __init__(self, in_features, out_features, bias=True,
                  activation_fake_quant=default_qat_qconfig.activation,

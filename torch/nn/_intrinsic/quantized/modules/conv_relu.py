@@ -13,7 +13,7 @@ class ConvReLU2d(Conv2d):
         Same as torch.nn.quantized.Conv2d
 
     """
-    __FLOAT_MODULE = NNConvReLU2d
+    _FLOAT_MODULE = NNConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,

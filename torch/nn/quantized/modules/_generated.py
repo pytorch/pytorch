@@ -6,7 +6,7 @@ from torch.nn.modules import Module
 
 r"""Add wraps the torch.ops.quantized.add function."""
 class Add(Module):
-    __FLOAT_MODULE = torch.nn.modules.Add
+    _FLOAT_MODULE = torch.nn.modules.Add
 
     def __init__(self):
         super(Add, self).__init__()
@@ -21,9 +21,9 @@ class Add(Module):
     def from_float(cls, mod):
         assert (hasattr(mod, 'observer')),\
             "Input float module must have observer attached"
-        assert (type(mod) == cls.__FLOAT_MODULE),\
+        assert (type(mod) == cls._FLOAT_MODULE),\
             "nnq." + cls.__name__ + ".from_float only works for " \
-            + cls.__FLOAT_MODULE.__name__
+            + cls._FLOAT_MODULE.__name__
         scale, zero_point = mod.observer.calculate_qparams()[:2]
         mod = cls()
         mod.scale = torch.tensor(scale, dtype=torch.double)

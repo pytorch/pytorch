@@ -21,7 +21,7 @@ class ConvReLU2d(QATConv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    __FLOAT_MODULE__ = NNConvReLU2d
+    _FLOAT_MODULE = NNConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
