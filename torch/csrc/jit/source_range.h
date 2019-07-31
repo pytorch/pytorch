@@ -8,7 +8,7 @@
 namespace torch {
 namespace jit {
 
-struct SourceRangeUnpickler;
+class SourceRangeUnpickler;
 struct SourceRange;
 
 // Source represents a code segment. It keeps track of:

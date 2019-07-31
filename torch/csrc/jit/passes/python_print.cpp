@@ -176,7 +176,7 @@ struct PythonPrintPass {
       if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
         stack->push_back(std::move(gen_source.value()));
       } else {
-        stack->push_back(std::move(n->sourceRange()));
+        stack->push_back(n->sourceRange());
       }
     }
 

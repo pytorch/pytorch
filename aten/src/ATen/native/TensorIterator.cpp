@@ -213,6 +213,40 @@ void TensorIterator::allocate_outputs() {
   }
 }
 
+#ifdef BUILD_NAMEDTENSOR
+void TensorIterator::propagate_names_to_outputs() {
+  NameVector names;
+
+  // build names
+  for (auto& op : operands_) {
+    if (!op.tensor.defined()) continue;
+    // don't include output tensors that are not also input tensors.
+    if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
+    // perform name inference
+    if (!op.tensor.has_names()) {
+      continue;
+    }
+    auto tensor_names = *op.tensor.names();
+    if (names.empty()) {
+      names = tensor_names;
+    } else {
+      names = NameVector(unify_from_right(names, tensor_names).value());
+    }
+  }
+  if (names.empty()) {
+    return;
+  }
+
+  // propagate names
+  for (int i = 0; i < num_outputs_; i++) {
+    auto& op = operands_[i];
+    // must call propagate_names_to_outputs after outputs have been allocated.
+    TORCH_INTERNAL_ASSERT(op.tensor.defined());
+    at::internal_set_names_inplace(op.tensor, names);
+  }
+}
+#endif
+
 void TensorIterator::coalesce_dimensions() {
   if (ndim() <= 1) {
     return;
@@ -500,9 +534,14 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
   }
 }
 
-TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
+    const Tensor& b, bool check_internal_overlap) {
   auto iter = TensorIterator();
-  iter.add_output(out);
+  if (check_internal_overlap) {
+    iter.check_and_add_output(out);
+  } else {
+    iter.add_output(out);
+  }
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
@@ -510,9 +549,14 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Ten
   return iter;
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
+    bool check_internal_overlap) {
   auto iter = TensorIterator();
-  iter.add_output(out);
+  if (check_internal_overlap) {
+    iter.check_and_add_output(out);
+  } else {
+    iter.add_output(out);
+  }
   iter.add_input(a);
   iter.num_outputs_ = 1;
   iter.build();
@@ -700,6 +744,10 @@ void TensorIterator::build() {
   compute_types();
   // allocate the output tensor if it's not provided
   allocate_outputs();
+#ifdef BUILD_NAMEDTENSOR
+  // perform name inference
+  propagate_names_to_outputs();
+#endif
   // coalesce adjacent dimensions when possible
   coalesce_dimensions();
 
