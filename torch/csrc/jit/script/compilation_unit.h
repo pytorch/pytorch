@@ -150,9 +150,6 @@ struct TORCH_API CompilationUnit {
    * Register a class as being owned by this compilation unit.
    */
   void register_class(c10::NamedTypePtr namedType) {
-    if (namedType->qualname() == "torch.upsample") {
-      LOG(ERROR) << "hello";
-    }
     if (auto classType = namedType->cast<c10::ClassType>()) {
       // TODO: class types cannot be redefined because we have no way right now
       // of invalidating their methods. NamedTuples are fine though, since they
