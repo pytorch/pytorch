@@ -877,7 +877,7 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   } else {
     singleCheckErrors(infos[0], "qr_cpu");
   }
-  return std::make_tuple(q_working_copy.narrow_copy(-1, 0, n_columns_q), R);
+  return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
 }
 
 std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
