@@ -64,6 +64,10 @@ struct TORCH_API Function {
 
 // Context to save information during forward that can be accessed in backward
 struct TORCH_API AutogradContext {
+  AutogradContext() = default;
+  AutogradContext(const AutogradContext &other) = delete;
+  AutogradContext& operator=(const AutogradContext& other) = delete;
+
   // Can be used to save non-variable data for backward()
   ska::flat_hash_map<std::string, at::IValue> saved_data;
 
