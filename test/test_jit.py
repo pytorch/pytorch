@@ -13530,14 +13530,14 @@ a")
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, 'variable number'):
             torch.jit.script(fn)
 
-        def other(*args):
+        def another_other(*args):
             print(args)
 
-        def fn():
-            return other()
+        def another_fn():
+            return another_other()
 
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, 'variable number'):
-            torch.jit.script(fn)
+            torch.jit.script(another_fn)
 
     def test_inferred_error_msg(self):
         """
