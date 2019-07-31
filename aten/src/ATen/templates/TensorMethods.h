@@ -98,8 +98,8 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 
-inline bool Tensor::is_named() const {
-  return impl::internal_is_named(unsafeGetTensorImpl());
+inline bool Tensor::has_names() const {
+  return impl::internal_has_names(unsafeGetTensorImpl());
 }
 #endif
 

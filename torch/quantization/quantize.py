@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.qat as qat
-import torch
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
@@ -54,8 +53,9 @@ def _observer_forward_hook(self, input, output):
     """
     return self.observer(output)
 
-# TODO(jerryzh): remove_observer?
-def add_observer(module):
+DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
+
+def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -74,7 +74,8 @@ def add_observer(module):
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
-    if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
+    if hasattr(module, 'qconfig') and module.qconfig is not None and \
+       len(module._modules) == 0 and type(module) not in skip_list:
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
@@ -222,11 +223,13 @@ def quantize_qat(model, run_fn, run_args, qconfig_dict=None):
 
 # Map for swapping float module to quantized ones
 DEFAULT_MODULE_MAPPING = {
-    torch.nn.Linear: nnq.Linear,
-    torch.nn.ReLU: nnq.ReLU,
-    torch.nn.Conv2d: nnq.Conv2d,
+    nn.Linear: nnq.Linear,
+    nn.ReLU: nnq.ReLU,
+    nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
+    # Generated modules:
+    nn.Add: nnq.Add,
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,
@@ -234,8 +237,8 @@ DEFAULT_MODULE_MAPPING = {
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
-    torch.nn.Linear: qat.Linear,
-    torch.nn.Conv2d: qat.Conv2d,
+    nn.Linear: qat.Linear,
+    nn.Conv2d: qat.Conv2d,
 }
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
@@ -273,7 +276,7 @@ def swap_module(mod, mapping):
         The corresponding quantized module of `mod`
     """
     new_mod = mod
-    if hasattr(mod, 'observer'):
+    if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
 

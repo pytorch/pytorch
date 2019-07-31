@@ -1146,20 +1146,20 @@ The intention is that if you only mutate the graph through `AliasDb`, you don't 
 TODO: differentiation, symbolic autograd,
 TODO: fusion, operators
 
-# Profiling Programs 
+# Profiling Programs
 
-`prim::profile` nodes are inserted on every **use** of a value by `ProfilingRecord::instrumentBlock`. Every `prim::profile` node runs a lambda that uses a captured, initial type value and the type of an incoming tensor and merges the two into `ProfiledTensorType` 
+`prim::profile` nodes are inserted on every **use** of a value by `ProfilingRecord::instrumentBlock`. Every `prim::profile` node runs a lambda that uses a captured, initial type value and the type of an incoming tensor and merges the two into `ProfiledTensorType`
 
 `prim::profile` nodes are replaced with `prim::Guard` nodes by `InsertGuards`. `prim::Guard` nodes are inserted to guarantee that beyond the guard a guarded tensor will always be of the profiled shape. This guarantee will enable optimizations and codegens to generate more efficient code.
 
-JIT attempts to reduce the number of `prim::Guard` nodes as these nodes may interefere with optimizations. 
-* First, `GuardElimination::moveGuardsToDefs` tries to move `prim::Guards` to their definitions, so the guards guarding the same tensor follow the definition directly or another guard on the same tensor. This step is done in 
-* This ordering allows us to **coalesce** (done in `GuardElimination::coalesceGuards`) multiple guards into a single one. 
+JIT attempts to reduce the number of `prim::Guard` nodes as these nodes may interefere with optimizations.
+* First, `GuardElimination::moveGuardsToDefs` tries to move `prim::Guards` to their definitions, so the guards guarding the same tensor follow the definition directly or another guard on the same tensor. This step is done in
+* This ordering allows us to **coalesce** (done in `GuardElimination::coalesceGuards`) multiple guards into a single one.
 * After guards are  **coaslesced** , `GuardElimination::eliminateGuards` attempts to eliminate more guards as follows: it inspects each operation and its inputs. It checks if inputs to the operation are guarded and also if the operation produces the consistent shapes given the guarded inputs. For example, if two inputs to `add` are guaranteed to be of shape `(2, 3) `, the output shape will also always be `(2, 3)` If this property holds, JIT is allowed to remove the guard guarding operation's output.
 
 Lastly, JIT needs to be handle cases when the assumptions about tensor shapes fail at runtime. To handle guard failures, JIT needs to be able to run the original code i.e. the code  that doesn't rely on assumptions about shapes. As guards can be inserted and moved (by Optimizer) at/to arbitrary points in a computional graph, JIT needs to be able to resume execution starting from those arbitrary points onward.
 
-`InsertBailoutNodes` builds deoptimized versions of the original computational graph, that contain the rest of computations starting from their corresponding guard failure poins and, also, captures live values needed to execute those deoptimized graphs. In other words, the pass replaces `prim::Guard` nodes with `prim::BailOut` nodes which have the`attr::Subgraph` attributes set to the deoptimized versions of the  remaining computations at their corresponding `prim::Guard`s. 
+`InsertBailoutNodes` builds deoptimized versions of the original computational graph, that contain the rest of computations starting from their corresponding guard failure poins and, also, captures live values needed to execute those deoptimized graphs. In other words, the pass replaces `prim::Guard` nodes with `prim::BailOut` nodes which have the`attr::Subgraph` attributes set to the deoptimized versions of the  remaining computations at their corresponding `prim::Guard`s.
 
 # Saving Programs
 
@@ -1246,232 +1246,6 @@ def forward(self,
     x0 = torch.add(x, y, 1)
   return x0
 ```
-
-## Serialization
-
-[export.cpp](export.cpp)
-[pickler.cpp](pickler.cpp)
-[import.cpp](import.cpp)
-[caffe2/proto/torch.proto](../../../caffe2/proto/torch.proto)
-
-
-TorchScript programs are serialized with a call to `torch.jit.save()`. The resulting file (ending in `.pt` by convention) can be loaded/executed in C++ and Python.
-
-### Overview
-
-The `.pt` file is a zip archive (which can be opened with tools such as `unzip`) and contains:
-  * code - the Python printed graph of a module
-  * `model.json` - a JSON file of a model Protobuf def (defined in [torch.proto](caffe2/proto/torch.proto))
-  * `tensors/` - each of the tensors of the model, with their tensor storage stored directly in a file
-  * `attributes.pkl` - a Python `pickle` archive of the attributes of a module
-
-### `model.json`
-The `model.json` contains the structure information of the model. Each model must contain one main Module, and each module may contain multiple submodules, and each module contains a bunch of parameters (tensors). We serialize the metadata for each tensor inline in `model.json` (e.g., dims, strides, record name, etc).
-
-### `code/`
-
-The `code` directory contains the Python Printed `Graph`s of the main module and its submodules.
-
-### `tensors/`
-
-During export a list of all the tensors in a model is created. Tensors can come from either module parameters or Tensor type attributes. Metadata about each tensor is stored in `model.json` with an index into this list. The `data` field refers to the file which contains the tensor storage data. Tensors are saved by directly writing the Tensor storage to a file.
-
-`model.json`
-```json
-{
-  ...
-  "tensors": [
-    {
-      "dims": [
-        "40",
-        "800"
-      ],
-      "offset": "0",
-      "strides": [
-        "800",
-        "1"
-      ],
-      "requiresGrad": true,
-      "dataType": "FLOAT",
-      "data": {
-        "key": "tensors/0"
-      },
-      "device": "cpu"
-    }
-  ],
-  ...
-}
-```
-
-### `attributes.pkl`
-
-[pickler.h](pickler.h),
-[pickler.cpp](pickler.cpp),
-[torch/jit/_pickle.py](../../../torch/jit/_pickle.py)
-[caffe2/proto/torch.proto](../../../caffe2/proto/torch.proto)
-
-Attributes are all module properties that are not parameters or constants. Attributes are saved in a list in the order they were defined on the module. A given module may have many attributes of different types and many submodules, each with their own attributes. Attribute metadata is recorded in `model.json`:
-* `type` - the full type of the attribute (in [Mypy syntax](https://mypy.readthedocs.io/en/latest/cheat_sheet_py3.html))
-* `name` - the attribute's name
-* `id` - the offset into the saved list of all model attributes
-
-In `model.json`:
-```json
-{
-  "mainModule": {
-    "submodules": [
-      {
-        ...
-        "attributes": [
-          {
-            "type": "Dict[str, str]",
-            "name": "my_submodule_dictionary",
-            "id": 0
-          },
-          {
-            "type": "List[Tuple[int, int]]",
-            "name": "my_submodule_list",
-            "id": 1
-          }
-        ]
-        ...
-      },
-      ...
-    ],
-    ...
-    "attributes": [
-      {
-        "type": "Dict[str, str]",
-        "name": "my_main_module_dictionary",
-        "id": 2
-      },
-      {
-        "type": "Tensor",
-        "name": "my_main_module_tensor",
-        "id": 3
-      }
-    ]
-    ...
-  },
-}
-```
-
-Attributes of the main module and its submodules are saved to a single file in the `zip` archive of a `.pt` file named `attributes.pkl`. Attributes are stored as a Python `pickle` archive. `pickle`'s format was chosen due to:
-* **user friendliness** - the attributes file can be loaded in Python with `pickle`
-* **size limits** - formats such as Protobuf empose size limits on total message size, whereas pickle limits are on individual values (e.g. strings cannot be longer than 4 GB)
-* **standard format** - `pickle` is a standard Python module with a reasonably simple format. The format is a program to be consumed by a stack machine that is detailed in Python's [`pickletools.py`](https://svn.python.org/projects/python/trunk/Lib/pickletools.py)
-* **built-in memoization** - for shared reference types (e.g. Tensor, string, lists, dicts)
-* **self describing** - a separate definition file is not needed to understand the pickled data
-* **eager mode save** - `torch.save()` already produces a `pickle` archive, so doing the same with attributes avoids introducing yet another format
-
-[pickler.cpp](pickler.cpp) implements a subset of the Pickle format necessary for TorchScript models.
-
-
-A single file is used for the top level module and all submodules so that attributes can reference each other and share values. Unpickling `attributes.pkl`  will return a tuple of values corresponding to the attributes.
-
-All attributes are written into the `attributes.pkl` file with the exception of tensors, which store only a tensor table index (see "tensors" above). PyTorch functions defined in [torch/jit/_pickle.py](../../../torch/jit/_pickle.py) are used to mark special data types, such as this tensor table index or specialized lists. To load the `attributes.pkl` file, use the `pickle` module in Python:
-
-```python
-import pickle
-# attributes.pkl include references to functions in torch.jit._pickle
-import torch
-
-pickle.load(open("attributes.pkl", "rb"))
-```
-
-If for some reason you don't have PyTorch installed, you can still load `attributes.pkl` with a custom [`Unpickler`](https://docs.python.org/3/library/pickle.html#pickle.Unpickler):
-
-```python
-import pickle
-
-class JitUnpickler(pickle.Unpickler):
-    def find_class(self, module, name):
-        if module != 'torch.jit._pickle':
-            raise RuntimeError("Unknown module")
-
-        identity = lambda x: x
-        if name == 'build_tensor_from_id':
-            # Without the tensor table we can't do anything other than
-            # return the tensor ID
-            return identity
-        elif name == 'build_intlist':
-            return identity
-
-print(JitUnpickler(open("out_dir/out/attributes.pkl", "rb")).load())
-```
-
-#### Binary Format
-
-Running the following snippet produces a `ScriptModule` with several attributes.
-Python's `pickletools` module can be used to decode the binary blob of `attributes.pkl` into a human readable format.
-
-```python
-import pickletools
-import zipfile
-import torch
-from typing import Tuple, List
-
-class M(torch.jit.ScriptModule):
-    def __init__(self):
-        super(M, self).__init__()
-        self.float = torch.jit.Attribute(2.3, float)
-        self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
-        self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
-        self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
-
-    @torch.jit.script_method
-    def forward(self):
-        return (self.float, self.tuple, self.tensor, self.int_list)
-
-M().save("out.zip")
-model_zip = zipfile.ZipFile("out.zip", 'r')
-model_zip.extractall("out_dir")
-pickletools.dis(open("out_dir/out/attributes.pkl", "rb"))
-```
-
-
-The output of the above commands demonstrates the concepts described earlier. Attributes are wrapped in with `2: EMPTY_LIST` and appear in the order they are defined on the module. Functions for certain special types (e.g. `List[int]`, `Tensor`) can be seen at `37: GLOBAL` and `66: GLOBAL`, followed by data specific to that type, then finally by an instruction to build the object at `65: BUILD` and `113: BUILD` respectively.
-```
-  0: \x80 PROTO      2
-  2: (    MARK
-  3: G        BINFLOAT   2.3
- 12: (        MARK
- 13: K            BININT1    1
- 15: K            BININT1    2
- 17: K            BININT1    3
- 19: K            BININT1    4
- 21: t            TUPLE      (MARK at 12)
- 22: q        BINPUT     0
- 24: c        GLOBAL     'torch.jit._pickle build_tensor_from_id'
- 64: q        BINPUT     1
- 66: (        MARK
- 67: K            BININT1    0
- 69: t            TUPLE      (MARK at 66)
- 70: R        REDUCE
- 71: c        GLOBAL     'torch.jit._pickle build_intlist'
-104: q        BINPUT     2
-106: (        MARK
-107: ]            EMPTY_LIST
-108: (            MARK
-109: K                BININT1    1
-111: K                BININT1    2
-113: K                BININT1    3
-115: K                BININT1    4
-117: e                APPENDS    (MARK at 108)
-118: t            TUPLE      (MARK at 106)
-119: R        REDUCE
-120: q        BINPUT     3
-122: t        TUPLE      (MARK at 2)
-123: .    STOP
-highest protocol among opcodes = 2
-```
-
-
-
-### Implementation Details
-
-[export.cpp](export.cpp) and [import.cpp](import.cpp) handle producing the proper protobuf definitions and (de)serializing tensor data. They use [pickler.h](pickler.cpp) which implements a subset of the `pickle` stack machine.
-
 
 # Python Bindings
 
