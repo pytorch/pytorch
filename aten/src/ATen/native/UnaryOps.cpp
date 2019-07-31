@@ -66,7 +66,6 @@ Tensor& neg_(Tensor& self) {
 }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
-  checkBackend("neg", result, self.type().backend());
   auto iter = TensorIterator::unary_op(result, self,
     /*check_internal_overlap=*/true);
   neg_stub(iter.device_type(), iter);
