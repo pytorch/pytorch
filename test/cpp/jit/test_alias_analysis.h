@@ -523,7 +523,7 @@ void testWriteTracking() {
     auto node_iter = graph->block()->nodes().begin();
     auto relu = *node_iter;
     AliasDb aliasDb(graph);
-    AT_ASSERT(aliasDb.isInPlace(relu));
+    AT_ASSERT(aliasDb.isMutable(relu));
   }
   {
     auto graph = std::make_shared<Graph>();
@@ -537,7 +537,7 @@ void testWriteTracking() {
     auto node_iter = graph->block()->nodes().begin();
     auto mul = *node_iter;
     AliasDb aliasDb(graph);
-    AT_ASSERT(!aliasDb.isInPlace(mul));
+    AT_ASSERT(!aliasDb.isMutable(mul));
   }
   {
     auto graph = std::make_shared<Graph>();
@@ -554,7 +554,7 @@ void testWriteTracking() {
     auto add = vmap["b"]->node();
     AliasDb aliasDb(graph);
     AT_ASSERT(aliasDb.hasWriters(add));
-    AT_ASSERT(aliasDb.isInPlace(add));
+    AT_ASSERT(aliasDb.isMutable(add));
   }
 }
 

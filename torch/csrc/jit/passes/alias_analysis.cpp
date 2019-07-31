@@ -58,7 +58,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
   analyze(graph_);
 }
 
-bool AliasDb::isInPlace(Node* n) const {
+bool AliasDb::isMutable(Node* n) const {
   ValueSet vs;
   for (const auto input : n->inputs()) {
     vs.insert(input);

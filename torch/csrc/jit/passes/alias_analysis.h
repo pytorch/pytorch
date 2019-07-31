@@ -72,7 +72,7 @@ class AliasDb {
 
   // Is the operation in-place? i.e. doesn't write anywhere but locations it
   // reads from.
-  TORCH_API bool isInPlace(Node* n) const;
+  TORCH_API bool isMutable(Node* n) const;
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
