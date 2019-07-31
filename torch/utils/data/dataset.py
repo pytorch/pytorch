@@ -1,8 +1,10 @@
 import bisect
 import warnings
+import random
 
 from torch._utils import _accumulate
 from torch import randperm
+from torch.utils.data._utils.worker import get_worker_info
 
 
 class Dataset(object):
@@ -223,6 +225,7 @@ class ChainDataset(IterableDataset):
     Arguments:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
+
     def __init__(self, datasets):
         super(ChainDataset, self).__init__()
         self.datasets = datasets
@@ -249,6 +252,7 @@ class Subset(Dataset):
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
+
     def __init__(self, dataset, indices):
         self.dataset = dataset
         self.indices = indices
@@ -258,6 +262,130 @@ class Subset(Dataset):
 
     def __len__(self):
         return len(self.indices)
+
+
+class ChunkDataset(IterableDataset):
+    r"""Dataset which uses hierarchical sampling for efficient data reading.
+
+
+    ``ChunkDataset`` is a stateful dataset that supports hierarchical sampling and
+    efficient reading through chunks. A chunk is selected based on a sampling strategy
+    (first level) and its content is shuffled (second level) before producing
+    a batch or an example.
+
+    In this context, chunks could be files, contents of a folder,
+    sections of large text file, etc. In distributed training, to eliminate different workers reading
+    uneven amount of data, the chunks need to be roughly the same size.
+    Please consult ChunkDataReader for more details.
+
+    ``ChunkDataset`` extends ``IterableDataset`` because the length of the dataset
+    (or simply the size) is unknown. Only the number of chunks is known for the dataset.
+
+    In a distributed setup, each `DataLoader` worker has an instance of ``ChunkDataset`` that uses
+    ``DistributedChunkSampler`` sampler to select chunks based on their global worker rank.
+    Once a chunk index has been selected, it is passed to ``ChunkDataReader`` that will load
+    data into the ``ChunkDataset`` internal cache. Only then ``ChunkDataset`` returns batches.
+
+    Arguments:
+        chunk_sampler (DistributedSampler or DistributedChunkSampler): Draw indices for chunks.
+            Typically used to split data amongst dataloader workers (first level of sampling)
+        chunk_reader (ChunkDataReader): Specialized reader for a given input type
+        shuffle_cache (bool): Setting `True` trigger shuffling of the internal chunk cache
+            (second level of sampling) (default: `True`)
+    """
+
+    def __init__(self, chunk_sampler, chunk_reader, shuffle_cache=True):
+        super(ChunkDataset, self).__init__()
+        assert callable(chunk_reader), 'chunk_reader must be `callable()` and return a container with data'
+        assert isinstance(shuffle_cache, bool), 'shuffle_cache must be a `bool`'
+
+        self.chunk_sampler = chunk_sampler
+        self.chunk_reader = chunk_reader
+        self.shuffle_cache = shuffle_cache
+
+        # Internal state
+        self._chunk_sampler_iter = None
+        self._cache = []
+        self._min_cache = 1000
+        self._is_ready = False
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        # `IterableDataset` classes have unknown dataset size
+        raise NotImplementedError
+
+    def __next__(self):
+        r"""Returns a batch or raises exception when exhausted"""
+
+        # Run once: update global worker rank on each worker process
+        if not self._is_ready:
+            self._update_global_worker_rank()
+
+        cache_size = 0
+        if len(self._cache) > 0:
+            cache_size = len(self._cache)
+
+        if (cache_size < self._min_cache):
+            new_chunk = None
+            # Try reading a new chunk
+            # Ignore EOF here because there may be internal cache entries to be returned yet
+            try:
+                new_chunk = self.chunk_reader(next(self._chunk_sampler_iter))
+                assert isinstance(new_chunk, list), "Chunk data reader must return a `list(samples)`"
+            except StopIteration:
+                pass
+
+            # Apply second level of shuffling
+            if new_chunk and self.shuffle_cache:
+                random.shuffle(new_chunk)
+
+            # Updates internal cache
+            if new_chunk and cache_size > 0:
+                self._cache = self._cache + new_chunk
+            elif new_chunk:
+                self._cache = new_chunk
+            elif not new_chunk and cache_size == 0:
+                raise StopIteration
+
+        # Get a batch and update internal cache cache
+        if len(self._cache) > 0:
+            batch = self._cache[:1]
+            self._cache = self._cache[1:]
+
+        return batch[0]
+
+    def reset(self, epoch=None):
+        r"""Resets internal state of ChunkDataset
+
+        Typically will be used before a new epoch starts.
+        """
+
+        if isinstance(epoch, int):
+            assert epoch >= 0, "epoch must be >= 0"
+            self.chunk_sampler.set_epoch(epoch)
+        self._chunk_sampler_iter = iter(self.chunk_sampler)
+
+    def _update_global_worker_rank(self):
+        r"""Updates global worker rank for the current process"""
+
+        worker_id = 0
+        num_workers = 0
+        try:
+            # Calculate global worker rank based on DataLoader workers and distributed rank
+            worker_id = get_worker_info().id
+            num_workers = get_worker_info().num_workers
+            global_worker_rank = worker_id + self.chunk_sampler.rank * num_workers
+            self.chunk_sampler.set_rank(global_worker_rank)
+        except AttributeError:
+            # Ignore when DataLoader num_workers are not used
+            pass
+
+        self.reset()
+        self._is_ready = True
+
+    next = __next__  # py2 compatibility
 
 
 def random_split(dataset, lengths):

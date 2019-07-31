@@ -94,3 +94,112 @@ class DistributedSampler(Sampler):
 
     def set_epoch(self, epoch):
         self.epoch = epoch
+
+class ChunkDataReader(object):
+    r"""Reads a chunk of data given a chunk index.
+
+    A chunk could be full file, section of a large file, folders, URLs, or any other
+    abstraction that allows data to be segmented roughly the same size.
+
+    As an example, chunking could be used in a scenario where a dataset is split between
+    several CSV files each containing complete records or examples. In this case,
+    each file could be a chunk. Similarly a large CSV file can be considered as a
+    collection of chunks by defining chunk boundary based on some physical size
+    (e.g. 32MB) and seeking to the first record in each chunk during reading.
+
+    Another example would be chunks as individual folders, containing multiple audio files.
+    In this scenario, each worker would have access to different folders, 
+    where binary files would be read from the filesystem.
+
+    The reading logic must be implemented inside `__call__` method
+    """
+
+    def __init__(self):
+        pass
+
+    def __call__(self, idx):
+        r"""Returns `list(samples)`
+
+        If `samples` contain tensors, numpy arrays, numbers,
+        dicts or lists, the default collate function can be implicitly used.
+        Otherwise, a custom `collate_fn` must be provided to `DataLoader`
+
+        When no more data is available, `StopIteration` must be raised.
+        """
+        raise NotImplementedError
+
+class DistributedChunkSampler(Sampler):
+    r"""This sampler introduces distributed sampling without padding and dataset dependency.
+
+    This sampler is very similar to the `DistributedSampler`, however without padding and
+    the dependency on the size of the dataset. With two levels of sampling, the
+    `DistributedChunkSampler` is used by the dataset and hence run by a dataloader worker.
+
+    Python DataLoader uses multi-processing instead of
+    multi-threading for parallelism, therefore, each worker
+    is a separate process with an identical copy of sampler.
+    Because of that, on a distributed environment, different processes
+    could read the same portion of the dataset. This sampler uses strides,
+    based on the rank concept, to coordinate parallel reading of chunks of data.
+
+    For example, assume 2 workers reading the same `ChunkDataset` dataset.
+    Each worker process needs to configure their `DistributedChunkSampler`
+    so that one of them reads all even batches (e.g. `rank` 0)
+    while the other process reads all odd batches (e.g. `rank` 1).
+
+    Args:
+        num_replicas (int): Number of processes participating in the data reading.
+            Must be equal to the number of distributed processes * number of DataLoader workers.
+        rank (int, optional): Current rank of the worker
+            Internally, :attr:`rank` will be recalculated on each `DataLoader` worker
+            based on current :attr:`rank`, and `DataLoader` information
+            such as number of workers and worker ID, following the expression:
+                `rank`=`worker_id`+`current_rank`*`num_workers`. (default: ``0``)
+        num_chunks (int, optional): Number of chunks participating in the sampling.
+            (default: ``0``)
+        shuffle (bool, optional): set to ``True`` to have the chunk indices reshuffled.
+            (default: ``False``)
+    """
+
+    def __init__(self, num_replicas, rank=0, num_chunks=0, shuffle=False):
+        super(DistributedChunkSampler, self).__init__(None)
+        assert rank >= 0, 'rank must be >= 0'
+        assert num_replicas >= 0, 'num_replicas must be >= 0'
+        assert rank <= num_replicas, 'rank must be <= num_replicas'
+        assert num_chunks >= num_replicas, 'num_chunks must be >= num_replicas'
+        self.rank = rank
+        self.num_replicas = num_replicas
+        self.num_chunks = num_chunks
+        self.shuffle = shuffle
+        self.epoch = 0
+
+    def __iter__(self):
+        r"""Stride logic is implemented here"""
+
+        # Deterministically shuffle based on epoch
+        g = torch.Generator()
+        g.manual_seed(self.epoch)
+        if self.shuffle:
+            indices = torch.randperm(self.num_chunks, generator=g).tolist()
+        else:
+            indices = list(range(self.num_replicas))
+
+        # Create a strided sublist
+        indices = indices[self.rank:self.num_chunks:self.num_replicas]
+        return iter(indices)
+
+    def __len__(self):
+        raise NotImplementedError
+
+    def set_rank(self, rank):
+        r"""Sets current global worker rank
+
+        Typically used after new processes are spawned with a copy of this sampler
+        to prevent sampling the same indices in different workers
+        """
+        assert rank >= 0, 'rank must be >= 0'
+        assert rank < self.num_replicas, 'rank must < num_replicas'
+        self.rank = rank
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
