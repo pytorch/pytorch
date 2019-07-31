@@ -3,6 +3,8 @@ import warnings
 
 from torch._utils import _accumulate
 from torch import randperm
+from torch.utils.data import BatchSampler, StrideSampler
+from torch.utils.data._utils.worker import get_worker_info
 
 
 class Dataset(object):
@@ -223,6 +225,7 @@ class ChainDataset(IterableDataset):
     Arguments:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
+
     def __init__(self, datasets):
         super(ChainDataset, self).__init__()
         self.datasets = datasets
@@ -249,6 +252,7 @@ class Subset(Dataset):
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
+
     def __init__(self, dataset, indices):
         self.dataset = dataset
         self.indices = indices
@@ -258,6 +262,74 @@ class Subset(Dataset):
 
     def __len__(self):
         return len(self.indices)
+
+
+class ChunkDataReader(object):
+    r"""Reads a chunk of data for a particular index.
+
+    Chunks can be files, contents of folder, pieces lines
+    of a text file, etc
+
+    The reading login must be implemented inside `__call__` method
+    """
+
+    def __init__(self):
+        pass
+
+    def __call__(self, idx):
+        raise NotImplementedError
+
+
+class ChunkDataset(IterableDataset):
+    r"""Dataset which uses hierarchical sampling for efficient data reading.
+
+    Instead of reading the full dataset at once, `ChunkDataset` splits the data in
+    chunks before loading some of them. Each chunk is then shuffled again before being returned.
+
+    ``ChunkDataset`` extends ``IterableDataset`` because the
+    size of the dataset is unknown .
+    """
+
+    def __init__(self, example_sampler, chunk_sampler, chunk_reader):
+        super(ChunkDataset, self).__init__()
+        assert isinstance(example_sampler, BatchSampler), 'sampler must be a `BatchSampler`'
+        assert isinstance(chunk_sampler, StrideSampler), 'sampler must be a `StrideSampler`'
+        assert callable(chunk_reader), 'chunk_reader must be `callable()` and return a container with data'
+        self.example_sampler = example_sampler
+        self.chunk_sampler = chunk_sampler
+        self.chunk_reader = chunk_reader
+        self._example_sampler_iter = iter(self.example_sampler)
+        self._chunk_sampler_iter = iter(self.chunk_sampler)
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        raise NotImplementedError
+
+    def __next__(self):
+        r"""Returns a batch or raises exception when exhausted"""
+        original_batch = self.chunk_reader(next(self._chunk_sampler_iter))
+        if original_batch is None:
+            raise StopIteration
+
+        example_indices = next(self._example_sampler_iter)
+        shuffled_batch = [original_batch[i] for i in example_indices]
+
+        return shuffled_batch
+
+    def reset(self):
+        r"""Resets internal state
+
+        Typically will be used before a new epoch starts.
+        """
+        worker_id = get_worker_info().id
+        # print('ChunkDataset.reset({})'.format(worker_id))
+        self.chunk_sampler.reset(worker_id)
+        self._example_sampler_iter = iter(self.example_sampler)
+        self._chunk_sampler_iter = iter(self.chunk_sampler)
+
+    next = __next__  # py2 compatibility
 
 
 def random_split(dataset, lengths):

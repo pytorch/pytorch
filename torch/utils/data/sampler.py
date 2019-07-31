@@ -210,3 +210,61 @@ class BatchSampler(Sampler):
             return len(self.sampler) // self.batch_size
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size
+
+
+class StrideSampler(Sampler):
+    r"""This sampler introduces the stride concept into a regular sampler.
+
+    Python DataLoader uses multi-processing instead of
+    multi-threading for parallelism, therefore, each worker
+    is a separate process with a copy of sampler.
+
+    To prevent different processes to read the same data in a dataset
+    with unknown size, sampler strides are needed to coordinate reading.
+
+    Each instance of `StrideSampler` must be configured with different strides,
+    so that sampling happens in a round-robin fashion:
+    stride0, stride1, ..., strideN, stride0, stride1, ..., strideN, ...
+
+    For example, assume 2 workers reading the same `ChunkDataset` dataset.
+    Each worker process needs to configure their `StrideSampler`
+    so that one of them reads all even (stride 0) batches
+    while the other reads all odd batches (stride 1).
+
+    Args:
+        sampler (Sampler): Sampler to be strided
+        current_stride (int): Current stride for the sampler, starting at 0.
+        total_strides (int): Total number of strides (must match the number of workers).
+    """
+
+    def __init__(self, sampler, current_stride, total_strides):
+        super(StrideSampler, self).__init__(None)
+        assert isinstance(sampler, Sampler), 'sampler must be an instance of `Sampler` class'
+        assert current_stride >= 0, 'current_stride must be >= 0'
+        assert total_strides >= 0, 'total_strides must be >= 0'
+        assert current_stride < total_strides, 'current_stride must < total_strides'
+        self.sampler = sampler
+        self.current_stride = current_stride
+        self.total_strides = total_strides
+
+    def __iter__(self):
+        r"""Stride logic is implemented here"""
+        for idx in self.sampler:
+            if self.total_strides == 0:
+                yield idx
+            else:
+                if idx % self.total_strides == self.current_stride:
+                    yield idx
+
+    def __len__(self):
+        raise NotImplementedError
+
+    def reset(self, current_stride):
+        r"""Resets current stride
+
+        Typically used after new processes are spawned with a copy of this sampler
+        to prevent sampling the same indices in different workers
+        """
+        assert current_stride >= 0, 'current_stride must be >= 0'
+        assert current_stride < self.total_strides, 'current_stride must < total_strides'
+        self.current_stride = current_stride
