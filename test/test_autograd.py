@@ -2233,11 +2233,13 @@ class TestAutograd(TestCase):
             devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for device in devices:
-                    x = torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double)
-                    y = torch.randn(sizes, device=device, requires_grad=True, dtype=torch.double)
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
 
                     eps = 1e-6
                     x = x - (((x - y) < eps).double() * 2 * eps)
+                    x.requires_grad = True
+                    y.requires_grad = True
 
                     f_args_variable = (x, y)
 
