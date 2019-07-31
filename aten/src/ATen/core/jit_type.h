@@ -69,17 +69,6 @@ using TypePtr = std::shared_ptr<Type>;
 struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
  private:
   TypeKind kind_;
-  template <typename T>
-  static std::shared_ptr<T> sliceType(std::shared_ptr<const T> ptr) {
-    auto result = std::make_shared<typename std::remove_const<T>::type>(*ptr);
-    // XXX: the line above will correctly slice the struct, and make its runtype
-    // type exactly equal to T. However, kind_ is a field of Type, so it will
-    // simply be copied, and we need to fix it in here to match the dynamic
-    // type.
-    result->kind_ = T::Kind;
-    return result;
-  }
-
  protected:
   Type(TypeKind kind) : kind_(kind) {}
 
@@ -119,33 +108,24 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
 
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid.
-  // NOTE: if the cast succeeds, but the casted kind is not the
-  // run-time kind of the type, we also slice the structure, so
-  // that assignments of those types to values don't accidentally
-  // inherit more detailed information from subclasses.
+  // NOTE: the static type of a TypePtr may be different than
+  // its dynamic type. 
+  //   DimensionedTensorType d = t->cast<DimensionedTensorType>(); 
+  //   v->setType(d); // this might set v to a CompleteTensorType
+  //   v->setType(DimensionedTensorType::create(*d)); // this will ensure it must be a DimensionedTensorType
   template <typename T>
   std::shared_ptr<T> cast() {
-    std::shared_ptr<T> r = nullptr;
     if (isSubclass(T::Kind)) {
-      r = std::static_pointer_cast<T>(shared_from_this());
+      return std::static_pointer_cast<T>(shared_from_this());
     }
-    if (!r || T::Kind == kind()) {
-      return r;
-    } else {
-      return sliceType<T>(r);
-    }
+    return nullptr;
   }
   template <typename T>
   std::shared_ptr<const T> cast() const {
-    std::shared_ptr<const T> r = nullptr;
     if (isSubclass(T::Kind)) {
-      r = std::static_pointer_cast<const T>(shared_from_this());
+      return std::static_pointer_cast<const T>(shared_from_this());
     }
-    if (!r || T::Kind == kind()) {
-      return r;
-    } else {
-      return sliceType<T>(r);
-    }
+    return nullptr;
   }
   template <typename T>
   std::shared_ptr<T> expect() {
@@ -436,6 +416,9 @@ struct CAFFE2_API DimensionedTensorType : public TensorType {
         requires_grad_(at::isFloatingType(scalar_type) && requires_grad),
         device_(device),
         dim_(dim) {}
+  
+  DimensionedTensorType(const DimensionedTensorType& rhs)
+  : DimensionedTensorType(rhs.scalarType(), rhs.device(), rhs.dim(), rhs.requires_grad()) {}
 
   at::ScalarType scalar_type_;
   bool requires_grad_;
@@ -717,7 +700,7 @@ struct CAFFE2_API CompleteTensorType : public DimensionedTensorType {
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
     if (rhs->kind() == TypeKind::DimensionedTensorType)
-      return *expect<DimensionedTensorType>() == *rhs;
+      return *DimensionedTensorType::create(*expect<DimensionedTensorType>()) == *rhs;
     return rhs->kind() == TypeKind::TensorType || TensorType::isSubtypeOf(rhs);
   }
   bool isSubclass(const TypeKind kind) const override {
