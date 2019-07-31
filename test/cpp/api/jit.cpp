@@ -5,8 +5,6 @@
 #include <torch/types.h>
 
 #include <string>
-#include <iostream>
-#include <cstdio>
 
 TEST(TorchScriptTest, CanCompileMultipleFunctions) {
   auto module = torch::jit::compile(R"JIT(

@@ -536,8 +536,7 @@ void Unpickler::run() {
       "Only Pickle protocol 2 is supported, found protocol = ",
       protocol);
 
-  // TODO: fix this infinite loop if there is no STOP
-  while (true) {
+  while (bounds_checker_()) {
     OpCode opcode = readInstruction();
     if (opcode == OpCode::STOP) {
       return;
