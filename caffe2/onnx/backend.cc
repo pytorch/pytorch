@@ -636,6 +636,7 @@ Caffe2Ops Caffe2Backend::CreateMultinomialOp(
   caffe2::Argument c2_arg_op;
   c2_arg_op.set_name("operator");
   c2_arg_op.set_s("multinomial");
+  // ONNX Multinomial only supports replacement=True.
   caffe2::Argument c2_arg_rep;
   c2_arg_rep.set_name("replacement");
   c2_arg_rep.set_i(1);
@@ -649,10 +650,20 @@ Caffe2Ops Caffe2Backend::CreateMultinomialOp(
   auto onnx_dtype =
     onnx_attributes.get<int64_t>("dtype", TensorProto::UNDEFINED);
   if (onnx_dtype == ::ONNX_NAMESPACE::TensorProto::INT64) {
-    BuildOperator(c2_multinomial, "ATen", {c2_exp_output}, {onnx_node->node.output(0)}, {c2_arg_op, c2_arg_rep, c2_arg_num});
+    BuildOperator(
+        c2_multinomial,
+        "ATen",
+        {c2_exp_output},
+        {onnx_node->node.output(0)},
+        {c2_arg_op, c2_arg_rep, c2_arg_num});
   } else if (onnx_dtype == ::ONNX_NAMESPACE::TensorProto::INT32) {
     auto c2_multinomial_output = dummy_->NewDummyName();
-    BuildOperator(c2_multinomial, "ATen", {c2_exp_output}, {c2_multinomial_output}, {c2_arg_op, c2_arg_rep, c2_arg_num});
+    BuildOperator(
+        c2_multinomial,
+        "ATen",
+        {c2_exp_output},
+        {c2_multinomial_output},
+        {c2_arg_op, c2_arg_rep, c2_arg_num});
 
     auto* c2_cast = ret.ops.Add();
     caffe2::Argument to;
