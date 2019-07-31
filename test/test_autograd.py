@@ -1610,16 +1610,26 @@ class TestAutograd(TestCase):
         target_length = 15
         gradcheck_input_size = 10
 
-        # device, input_length
-        tests = [('cpu', 150, False),
-                 ('cpu', 150, True)]
-        if torch.cuda.is_available():
-            tests += [('cuda', 50, False),
-                      ('cuda', 150, False),
-                      ('cuda', 50, True),
-                      ('cuda', 150, True)]
+        ZERO_NONE = 0
+        ZERO_SOME = 1
+        ZERO_ALL = 2
 
-        for device, input_length, vary_lengths in tests:
+        # device, input_length, vary_lengths, zero_lengths
+        tests = [('cpu', 150, False, ZERO_NONE),
+                 ('cpu', 150, True, ZERO_NONE),
+                 ('cpu', 50, True, ZERO_SOME),
+                 ('cpu', 50, True, ZERO_ALL)]
+        if torch.cuda.is_available():
+            tests += [('cuda', 50, False, ZERO_NONE),
+                      ('cuda', 150, False, ZERO_NONE),
+                      ('cuda', 50, True, ZERO_NONE),
+                      ('cuda', 150, True, ZERO_NONE),
+                      ('cuda', 50, True, ZERO_SOME),
+                      ('cuda', 150, True, ZERO_SOME),
+                      ('cuda', 50, True, ZERO_ALL),
+                      ('cuda', 150, True, ZERO_ALL)]
+
+        for device, input_length, vary_lengths, zero_mode in tests:
             targets = torch.randint(1, num_labels, (batch_size, target_length),
                                     device=device, dtype=torch.long)
             x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
@@ -1627,8 +1637,15 @@ class TestAutograd(TestCase):
                                        device=device)
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
                               if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
-            target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
-                               if vary_lengths else target_length) for i in range(batch_size)]
+            if zero_mode == ZERO_ALL:
+                target_lengths = [0 for _ in range(batch_size)]
+            else:
+                target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
+                                   if vary_lengths else target_length) for _ in range(batch_size)]
+                if zero_mode == ZERO_SOME:
+                    idxes = torch.randint(0, batch_size, (10,))
+                    for i in idxes:
+                        target_lengths[i] = 0
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
