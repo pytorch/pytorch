@@ -25,6 +25,9 @@ fi
 pkg="/final_pkgs/\$(ls /final_pkgs)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   conda install -y "\$pkg" --offline
+  if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
+    conda install -y cpu-only -c pytorch
+  fi
   retry conda install -yq future numpy protobuf six
   if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
     # DESIRED_CUDA is in format cu90 or cu100
