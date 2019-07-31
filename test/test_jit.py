@@ -14532,6 +14532,11 @@ EXCLUDE_TYPE_CHECK = {
     'test_slogdet_pos_det',
     'test_slogdet_symmetric',
     'test_slogdet_symmetric_pd',
+    'test_slogdet_batched_1x1_neg_det',
+    'test_slogdet_batched_pos_det',
+    'test_slogdet_batched_symmetric',
+    'test_slogdet_batched_symmetric_pd',
+    'test_slogdet_batched_distinct_singular_values'
 }
 
 # known to be failing in script
