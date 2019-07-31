@@ -285,23 +285,14 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
                 if not torch.allclose(a, n, rtol, atol):
-                    sign = (-1 * (n < 0).double()) + (n > 0).double()
-                    diff = a.abs() - n.abs()
-                    err = diff.abs() > eps
-                    signs = (sign.double() - a)
-
-                    err_v = err.view(-1)
-                    a_v = a.view(-1)
-                    n_v = n.view(-1)
-                    err_p = []
-                    for i in range(err.numel()):
-                        if err_v[i].item() != 0:
-                            err_p.append((i, a_v[i].item(), n_v[i].item()))
+                    actual_error = (a - n).abs()
+                    max_error = atol + rtol * n.abs()
+                    close = actual_error <= max_error
 
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
-                                     'sign:%s\ndiff:%s\nerr:%s\nsigns:%s\n'
+                                     'actual_error:%s\nmax_error:%s\nclose:%s\n'
                                      'output:%s\ntupled_inputs:%s\n'
-                                     'numerical:%s\nanalytical:%s\n' % (i, j, sign, diff, err, signs, o, tupled_inputs, n, a))
+                                     'numerical:%s\nanalytical:%s\n' % (i, j, actual_error, max_error, close, o, tupled_inputs, n, a))
                 #else:
                 #    if printDebug:
                 #        print("=================CDIST=======================")
