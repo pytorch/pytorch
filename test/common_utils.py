@@ -18,6 +18,7 @@ import warnings
 import random
 import contextlib
 import socket
+import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -46,9 +47,12 @@ torch.backends.cudnn.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('--subprocess', action='store_true',
+                    help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
+TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
@@ -56,8 +60,61 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
+def shell(command, cwd=None):
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # The following cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    try:
+        return p.wait()
+    except KeyboardInterrupt:
+        # Give `p` a chance to handle KeyboardInterrupt. Without this,
+        # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except:  # noqa E722, copied from python core library
+        p.kill()
+        raise
+    finally:
+        # Always call p.wait() to ensure exit
+        p.wait()
+
+
 def run_tests(argv=UNITTEST_ARGS):
-    unittest.main(argv=argv)
+    if TEST_IN_SUBPROCESS:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = []
+
+        def add_to_test_cases(suite_or_case):
+            if isinstance(suite_or_case, unittest.TestCase):
+                test_cases.append(suite_or_case)
+            else:
+                for element in suite_or_case:
+                    add_to_test_cases(element)
+
+        add_to_test_cases(suite)
+        failed_tests = []
+        for case in test_cases:
+            test_case_full_name = case.id().split('.', 1)[1]
+            exitcode = shell([sys.executable] + argv + [test_case_full_name])
+            if exitcode != 0:
+                failed_tests.append(test_case_full_name)
+
+        assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
+            len(failed_tests), '\n\t'.join(failed_tests))
+    else:
+        unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
@@ -495,19 +552,23 @@ class TestCase(expecttest.TestCase):
             prec = self.precision
 
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, prec, message, allow_inf)
+            self.assertEqual(x.item(), y, prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), prec, message, allow_inf)
+            self.assertEqual(x, y.item(), prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
-            self.assertEqual(x.item(), y, prec, message, allow_inf)
+            self.assertEqual(x.item(), y, prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
-            self.assertEqual(x, y.item(), prec, message, allow_inf)
+            self.assertEqual(x, y.item(), prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
-                    if a.device.type == 'cpu' and a.dtype == torch.float16:
-                        # CPU half tensors don't have the methods we need below
+                    if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
+                        # CPU half and bfloat16 tensors don't have the methods we need below
                         a = a.to(torch.float32)
                     b = b.to(a)
 
@@ -538,11 +599,23 @@ class TestCase(expecttest.TestCase):
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
+            super(TestCase, self).assertEqual(x.is_quantized, y.is_quantized, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
+            elif x.is_quantized and y.is_quantized:
+                self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(x.q_zero_point(), y.q_zero_point(),
+                                 prec=prec, message=message,
+                                 allow_inf=allow_inf)
+                self.assertEqual(x.int_repr().to(torch.int32),
+                                 y.int_repr().to(torch.int32), prec=prec,
+                                 message=message, allow_inf=allow_inf)
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -551,15 +624,21 @@ class TestCase(expecttest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
-                self.assertEqual(x.items(), y.items())
+                self.assertEqual(x.items(), y.items(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
             else:
-                self.assertEqual(set(x.keys()), set(y.keys()))
+                self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
+                                 message=message, allow_inf=allow_inf)
                 key_list = list(x.keys())
-                self.assertEqual([x[k] for k in key_list], [y[k] for k in key_list])
+                self.assertEqual([x[k] for k in key_list],
+                                 [y[k] for k in key_list],
+                                 prec=prec, message=message,
+                                 allow_inf=allow_inf)
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, prec, message)
+                self.assertEqual(x_, y_, prec=prec, message=message,
+                                 allow_inf=allow_inf)
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
@@ -787,6 +866,11 @@ class TestCase(expecttest.TestCase):
         # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 
+    if sys.version_info < (3, 5):
+        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
+        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
+
+
 
 def download_file(url, binary=True):
     if sys.version_info < (3,):
@@ -863,32 +947,37 @@ def random_square_matrix_of_rank(l, rank):
     return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
 
 
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
-    for i in range(l):
-        for j in range(i):
-            A[i, j] = A[j, i]
+def random_symmetric_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
+def random_symmetric_psd_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    return torch.matmul(A, A.transpose(-2, -1))
 
 
 def random_symmetric_pd_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
+    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
+    s.clamp_(min=min_singular_value)
+    A = torch.matmul(u, torch.matmul(torch.diag_embed(s), v.transpose(-2, -1)))
+    det = A.det()
     if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
+        if A.dim() == 2:
+            det = det.item()
+            if (det < 0) ^ (sign < 0):
+                A[0, :].neg_()
+        else:
+            cond = ((det < 0) ^ (sign < 0)).nonzero()
+            if cond.size(0) > 0:
+                for i in range(cond.size(0)):
+                    A[list(cond[i])][0, :].neg_()
     return A
 
 

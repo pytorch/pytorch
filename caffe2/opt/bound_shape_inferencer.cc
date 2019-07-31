@@ -50,7 +50,9 @@ void BoundShapeInferencer::InferOps(
       op.type() == "SparseLengthsWeightedSum" ||
       op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
     InferSparseLengthsSum(op);
-  } else if (op.type() == "FC" || op.type() == "FCTransposed") {
+  } else if (
+      op.type() == "FC" || op.type() == "FCTransposed" ||
+      op.type() == "FbFCPacked") {
     InferFC(op);
   } else if (op.type() == "Concat") {
     InferConcat(op);
@@ -78,20 +80,29 @@ void BoundShapeInferencer::InferBoundShapeAndType(
   const static std::unordered_set<std::string> unsupported{"Tile"};
   shape_info_ = info;
 
-  for (const auto& op : net.op()) {
-    VLOG(1) << op.type();
-    if (unsupported.count(op.type())) {
-      continue;
-    }
-    InferOps(op, ws);
-  }
+  bool inferFinished = false;
 
-  // Doing a reverse pass to infer the input shapes if applicable
-  for (int i = net.op_size() - 1; i >= 0; --i) {
-    const auto& op = net.op(i);
-    if (op.type() == "Concat") {
-      InferConcatInputs(op);
+  auto old_shape_num = shape_info_.size();
+  while (!inferFinished) {
+    for (const auto& op : net.op()) {
+      VLOG(1) << op.type();
+      if (unsupported.count(op.type())) {
+        continue;
+      }
+      InferOps(op, ws);
     }
+
+    // Doing a reverse pass to infer the input shapes if applicable
+    for (int i = net.op_size() - 1; i >= 0; --i) {
+      const auto& op = net.op(i);
+      if (op.type() == "Concat") {
+        InferConcatInputs(op);
+      }
+    }
+    inferFinished = old_shape_num == shape_info_.size();
+    LOG(INFO) << "old shape info num: " << old_shape_num
+              << ", new shape info num: " << shape_info_.size();
+    old_shape_num = shape_info_.size();
   }
 
   // Make sure shape has name
@@ -417,6 +428,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
       op.input(2),
       " needs to be presented");
   const ShapeInfo& b_shape_info = b_it->second;
+  bool fp16 = (op.type() == "FbFCPacked");
   auto x_it = shape_info_.find(op.input(0));
   if (x_it == shape_info_.end()) {
     // We don't have a hint at the x input we try to deduce it from weight
@@ -425,7 +437,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
     auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
     const TensorShape w_shape = w_shape_info.shape;
-    bool transposed = (op.type() == "FC") ? false : true;
+    bool transposed = (op.type() == "FCTransposed") ? true : false;
     const int canonical_axis_w =
         canonical_axis_index_(axis_w, w_shape.dims().size());
     const int64_t K = transposed ? SizeToDim(w_shape, canonical_axis_w)
@@ -438,11 +450,12 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     dims.push_back(K);
     current_dim_type_ = ShapeInfo::DimType::BATCH;
     current_max_batch_size_ = spec_.max_batch_size;
+    // Note: for FbFCPacked, weight is fp16 but actications are in fp32
     CheckAndSetTensorShapeAndType(
         op.input(0),
         ShapeInfo::DimType::BATCH,
         dims,
-        w_shape.data_type(),
+        fp16 ? TensorProto_DataType_FLOAT : w_shape.data_type(),
         false);
   } else {
     ShapeInfo& x_shape_info = x_it->second;
@@ -462,7 +475,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
       op.output(0),
       ShapeInfo::DimType::BATCH,
       ConvertToVec(output_shapes[0].dims()),
-      output_shapes[0].data_type(),
+      fp16 ? TensorProto_DataType_FLOAT : output_shapes[0].data_type(),
       false);
 }
 

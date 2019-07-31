@@ -5,9 +5,9 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional
+    is_optional, _qualified_name
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType
+    ListType, StringType, DictType, BoolType, OptionalType, ClassType
 from textwrap import dedent
 
 
@@ -120,7 +120,6 @@ def get_type_line(source):
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
     lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
 
-
     if len(type_lines) == 0:
         type_pattern = re.compile('#[\t ]*type[\t ]*:')
         wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
@@ -223,6 +222,8 @@ def ann_to_type(ann):
         return StringType.get()
     elif ann is bool:
         return BoolType.get()
+    elif hasattr(ann, "__torch_script_class__"):
+        return ClassType(_qualified_name(ann))
     raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 

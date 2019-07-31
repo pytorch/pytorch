@@ -29,16 +29,22 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   }
 
   out << ") -> ";
-  if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
-  } else if (schema.returns().size() > 1) {
-    out << "(";
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0) out << ", ";
-      out << schema.returns()[i].type()->str();
+
+  const auto& returns = schema.returns();
+  out << "(";
+  for(size_t i = 0; i < returns.size(); ++i) {
+    if (i > 0) {
+      out << ", ";
     }
-    out << ")";
+    out << returns.at(i);
   }
+  if (schema.is_varret()) {
+    if (returns.size() != 0) {
+      out << ", ";
+    }
+    out << "...";
+  }
+  out << ")";
   return out;
 }
 
@@ -180,4 +186,21 @@ inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
       is_varret());
 }
 
+inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {
+  return lhs.name == rhs.name && lhs.overload_name == rhs.overload_name;
+}
+
+inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
+  return !operator==(lhs, rhs);
+}
+
 } // namespace c10
+
+namespace std {
+  template <>
+  struct hash<::c10::OperatorName> {
+    size_t operator()(const ::c10::OperatorName& x) const {
+      return std::hash<std::string>()(x.name) ^ (~ std::hash<std::string>()(x.overload_name));
+    }
+  };
+}

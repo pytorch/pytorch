@@ -1,3 +1,5 @@
+#include <ATen/ATen.h>
+
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
@@ -9,14 +11,12 @@ static PyObject * THPStorage_(size)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THD_GENERIC_FILE
 static PyObject * THPStorage_(dataPtr)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THWStorage_(data)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
-#endif
 
 static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
@@ -25,28 +25,16 @@ static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *k
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THD_GENERIC_FILE
 static PyObject * THPStorage_(isPinned)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
 #if defined(USE_CUDA)
-  cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, THWStorage_(data)(LIBRARY_STATE self->cdata));
-  if (err != cudaSuccess) {
-    cudaGetLastError();
-    Py_RETURN_FALSE;
-  }
-  #if CUDA_VERSION >= 10000
-    return PyBool_FromLong(attr.type == cudaMemoryTypeHost);
-  #else
-    return PyBool_FromLong(attr.memoryType == cudaMemoryTypeHost);
-  #endif
+  return PyBool_FromLong(at::globalContext().isPinnedPtr(THWStorage_(data)(LIBRARY_STATE self->cdata)));
 #else
   Py_RETURN_FALSE;
 #endif
   END_HANDLE_TH_ERRORS
 }
-#endif
 
 static PyObject * THPStorage_(elementSize)(THPStorage *self)
 {
@@ -89,7 +77,7 @@ static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
-#if !defined(THC_GENERIC_FILE) && !defined(THD_GENERIC_FILE)
+#if !defined(THC_GENERIC_FILE)
 static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
   HANDLE_TH_ERRORS
@@ -174,6 +162,8 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   THP_decodeInt64Buffer((int64_t*) THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_HALF)
   THP_decodeHalfBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_BFLOAT16)
+  THP_decodeBFloat16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
   THP_decodeFloatBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
@@ -206,7 +196,6 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THD_GENERIC_FILE
 PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *args)
 {
   HANDLE_TH_ERRORS
@@ -287,7 +276,6 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   return (PyObject *) self;
   END_HANDLE_TH_ERRORS
 }
-#endif // !defined(THD_GENERIC_FILE)
 
 #ifdef THC_GENERIC_FILE
 PyObject * THPStorage_(getDevice)(THPStorage *self)
@@ -320,14 +308,12 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, nullptr},
   {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, nullptr},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, nullptr},
-#ifndef THD_GENERIC_FILE
   {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, nullptr},
   {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, nullptr},
   {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_VARARGS, nullptr},
   {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
   {"_set_from_file", (PyCFunction)THPStorage_(setFromFile), METH_VARARGS, nullptr},
-#endif // !defined(THD_GENERIC_FILE)
-#if !defined(THC_GENERIC_FILE) && !defined(THD_GENERIC_FILE)
+#if !defined(THC_GENERIC_FILE)
   {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #endif
   {"from_file", (PyCFunction)THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
@@ -335,7 +321,5 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, nullptr},
 #endif
   {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, nullptr},
-#ifndef THD_GENERIC_FILE
-#endif
   {nullptr}
 };

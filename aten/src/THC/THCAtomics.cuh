@@ -95,6 +95,10 @@ static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
   AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
 }
 
+static inline __device__ void atomicAdd(bool *address, bool val) {
+  *address = address && val;
+}
+
 static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
   #if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
     unsigned int * address_as_ui =

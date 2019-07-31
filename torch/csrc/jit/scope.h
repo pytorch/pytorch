@@ -3,6 +3,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/source_range.h>
 #include <unordered_map>
 
 namespace torch {
@@ -47,29 +48,43 @@ struct TORCH_API Scope : public c10::intrusive_ptr_target {
   std::string namesFromRoot(const std::string& separator = "/") const;
 };
 
-/**
- * CallStack is a node of a trie that represents the callstack.
- * Initially callstacks are always only one level deep: when we create a graph
- * for a function FOO every node in this graph and the graph itself has a
- * callstack [FOO]. However, when we inline FOO to another function BAR, nodes
- * inserted to the caller (BAR) get callstacks of [BAR, FOO].
- */
 struct Function;
 struct CallStack;
+
+/**
+ * CallStack is a node of a trie that represents the callstack.
+ * Each node in the trie is a pair [Function, SourceRange].
+ * Each IR Node has a callstack field, which is basically a pointer to a trie node.
+ * Initially the field is null, but if the node is created during an inlining
+ * from a different function it gets filled with the function and source range
+ * info. As inlining continues, the trie can grow.
+ */
 using CallStackPtr = c10::intrusive_ptr<CallStack>;
+using CallStackEntry = std::pair<Function*, SourceRange>;
+struct CallStackHash {
+  std::size_t operator()(const CallStackEntry& cs) const {
+    return std::hash<void*>()(cs.first) ^
+        std::hash<void*>()(&*cs.second.source()) ^
+        std::hash<size_t>()(cs.second.start()) ^
+        std::hash<size_t>()(cs.second.end());
+  }
+};
+
 struct TORCH_API CallStack : public c10::intrusive_ptr_target {
  private:
   c10::optional<CallStackPtr> caller_;
-  std::unordered_map<Function*, CallStackPtr> callees_;
+
+  std::unordered_map<CallStackEntry, CallStackPtr, CallStackHash> callees_;
   Function* fn_;
+  SourceRange source_range_;
   CallStackPtr intrusive_from_this();
 
  public:
   // Constructor for the root callstack node.
-  CallStack(Function* fn);
+  CallStack(Function* fn, SourceRange source_range);
 
   // Constructor for an inner callstack node.
-  CallStack(CallStackPtr caller, Function* fn);
+  CallStack(CallStackPtr caller, Function* fn, SourceRange source_range);
 
   // Return callstack for the caller.
   // Essentially, move one level up in the trie.
@@ -77,10 +92,10 @@ struct TORCH_API CallStack : public c10::intrusive_ptr_target {
 
   // Insert new callee to the callstack.
   // Essentially, find existing or insert new node into the trie.
-  CallStackPtr insertCallee(Function* fn);
+  CallStackPtr insertCallStackEntry(Function* fn, SourceRange source_range);
 
-  // Return callstack as a vector.
-  std::vector<Function*> asVector();
+  // Flatten callstack to a vector of [Function, SourceRange] pairs.
+  std::vector<CallStackEntry> asVector();
 };
 
 } // namespace jit

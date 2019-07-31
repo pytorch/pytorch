@@ -17,8 +17,6 @@
 #include <ATen/LegacyTHFunctionsCUDA.h>
 
 #include <THC/THCGeneral.h>
-#include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.hpp>
 #include <THC/THCApply.cuh>
 #include <THC/THCDeviceUtils.cuh>
 
@@ -43,21 +41,7 @@
  * register spilling problem.
  */
 
-THCGenerator* THCRandom_getGenerator(THCState* state);
-
 namespace {
-// Increment should be at least the number of curand() random numbers used in
-// each thread. It is the user's responsibility to make sure that the increment for philox is never
-// smaller than the number of curand() calls. Increment value > the number of curand() calls
-// won't harm but anything less would mean that you would be reusing random values from
-// previous calls.
-// e.g. In many kernels below, we use distributions that utilize curand4 call in the kernel.
-//      Hence, increment value should be at least 4 for those kernels.
-std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
-  auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
-  uint64_t offset = gen_->state.philox_seed_offset.fetch_add(increment);
-  return std::make_pair(gen_->state.initial_seed, offset);
-}
 
 // launch bounds used for kernels utilizing TensorIterator
 const uint32_t block_size_bound = 256;
@@ -143,7 +127,7 @@ template<typename scalar_t,
          typename dist_t,
          typename transform_t>
 void distribution_nullary_kernel(at::TensorIterator& iter,
-                                 at::Generator* gen,
+                                 at::CUDAGenerator* gen,
                                  const dist_t& dist_func,
                                  const transform_t transform_func) {
   static_assert(unroll_factor >= 1, "unroll_factor must be >= 1.");
@@ -156,7 +140,12 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   auto counter_offset = std::get<0>(execution_policy);
   auto grid = std::get<1>(execution_policy);
   auto block = std::get<2>(execution_policy);
-  auto seeds = next_philox_seed(gen, counter_offset);
+  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
+  }
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
@@ -174,7 +163,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
     int stride0 = strides[0];
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
       numel,
-      seeds,
+      rng_engine_inputs,
       dist_func,
       [=]__device__(int idx, accscalar_t rand) {
         scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
@@ -185,7 +174,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
     auto offset_calc = at::native::make_offset_calculator<1>(iter);
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
       numel,
-      seeds,
+      rng_engine_inputs,
       dist_func,
       [=]__device__(int idx, accscalar_t rand) {
         auto offsets = offset_calc.get(idx);
@@ -338,39 +327,50 @@ void dirichlet_scalar_cuda_kernel(
 
 } // namespace
 
-namespace at {
-namespace detail {
+namespace at { namespace native {
 
-Generator* getDefaultCUDAGenerator() {
-  globalContext().lazyInitCUDA();
-  return globalContext().generator_registry[static_cast<int>(DeviceType::CUDA)].get(); 
-}
-
-} // namespace detail
-
-namespace native {
-
-Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
+Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_engine_inputs(20);
+  }
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "poisson_cuda", [&] {
-    poisson_cuda_kernel<scalar_t>(ret, lambda, next_philox_seed(gen, 20));
+    poisson_cuda_kernel<scalar_t>(ret, lambda, rng_engine_inputs);
   });
   return ret;
 }
 
-Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
+Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen_) {
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_engine_inputs(10);
+  }
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "gamma_cuda", [&] {
-     gamma_cuda_kernel<scalar_t>(ret, alpha, next_philox_seed(gen, 10));
+     gamma_cuda_kernel<scalar_t>(ret, alpha, rng_engine_inputs);
    });
   return ret;
 }
 
-Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen) {
+Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen_) {
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_engine_inputs(10);
+  }
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "dirichlet", [&] {
     Tensor gamma = at::empty(alpha.sizes(), alpha.options());
-    gamma_cuda_kernel<scalar_t>(gamma, alpha, next_philox_seed(gen, 10));
+    gamma_cuda_kernel<scalar_t>(gamma, alpha, rng_engine_inputs);
     dirichlet_scalar_cuda_kernel<scalar_t>(ret, gamma);
   });
   return ret;
@@ -392,22 +392,28 @@ Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& 
   return ret;
 }
 
-Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
+Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen_) {
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_engine_inputs(10);
+  }
   auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
   AT_DISPATCH_ALL_TYPES_AND(
     at::ScalarType::Half, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
       using self_t = scalar_t;
-      auto seeds = next_philox_seed(gen, 10);
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
         using p_t = scalar_t;
-        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, seeds);
+        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, rng_engine_inputs);
       });
    });
   return self;
 }
 
 void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
@@ -446,7 +452,7 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
 }
 
 void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "random_cuda", [&] {
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       // define lambda to mod with range and add base
@@ -478,7 +484,7 @@ void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Gene
 }
 
 void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "normal_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto mean = static_cast<accscalar_t>(mean_);
@@ -502,7 +508,7 @@ void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generat
 }
 
 void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cauchy_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto median = static_cast<accscalar_t>(median_);
@@ -532,7 +538,7 @@ void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Gen
 }
 
 void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   // Note that HIP doesn't support std::nextafter in device code.
   auto nextafter_1_0_float = std::nextafter(1.0f, 0.0f);
   auto nextafter_1_0_double = std::nextafter(1.0, 0.0);
@@ -576,7 +582,7 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
 }
 
 void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "geometric_cuda", [&] {
     if (std::is_same<scalar_t, double>::value) {
       // define lambda for geometric transformation
@@ -602,7 +608,7 @@ void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator* gen_) {
 }
 
 void log_normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log_normal_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto mean = static_cast<accscalar_t>(mean_);
@@ -630,7 +636,7 @@ void log_normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Gen
 }
 
 void bernoulli_scalar_cuda_kernel(TensorIterator& iter, double p_, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
       if (std::is_same<scalar_t, double>::value) {
       // define lambda for bernoulli transformation
@@ -656,14 +662,14 @@ void bernoulli_scalar_cuda_kernel(TensorIterator& iter, double p_, Generator* ge
 
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
-  uniform_kernel_cuda(*iter, from, to, gen);
+  uniform_kernel_cuda(iter, from, to, gen);
   return self;
 }
 
 Tensor& random_cuda_(Tensor& self, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uint64_t range;
-  auto iter_scalar_type = iter->dtype();
+  auto iter_scalar_type = iter.dtype();
   if (isFloatingType(iter_scalar_type)) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter_scalar_type, "random_cuda_range_calc", [&] {
       range = static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
@@ -673,7 +679,7 @@ Tensor& random_cuda_(Tensor& self, Generator* gen) {
       range = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
     });
   }
-  random_kernel_cuda(*iter, range, 0, gen);
+  random_kernel_cuda(iter, range, 0, gen);
   return self;
 }
 
@@ -681,7 +687,7 @@ Tensor& clamped_random_cuda_(Tensor& self, int64_t from, int64_t to, Generator* 
   TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
   auto iter = TensorIterator::nullary_op(self);
   uint64_t range = to - from;
-  random_kernel_cuda(*iter, range, from, gen);
+  random_kernel_cuda(iter, range, from, gen);
   return self;
 }
 
@@ -692,7 +698,7 @@ Tensor& capped_random_cuda_(Tensor& self, int64_t to, Generator* gen) {
 Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
-  normal_kernel_cuda(*iter, mean, std, gen);
+  normal_kernel_cuda(iter, mean, std, gen);
   return self;
 }
 
@@ -705,64 +711,74 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generato
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
   auto mean_tensor = at::full({1}, mean, output.options());
-  at::native::legacy::cuda::_th_addcmul_out(output, mean_tensor, output, std, 1);
+  // NB: addcmul_out copies the tensor to be added into the output.
+  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
+  // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
+  // The third argument is not a constant reference and hence the samples in output are overwritten.
+  // Consequently, the computation performed is mean_tensor + mean_tensor * std instead of mean_tensor + output * std
+  output.mul_(std).add_(mean_tensor);
   return output;
 }
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  at::native::legacy::cuda::_th_addcmul_out(output, mean, output, std, 1);
+  // NB: addcmul_out copies the tensor to be added into the output.
+  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
+  // The previous function here was addcmul_out(output, mean, output, std, 1);
+  // The third argument is not a constant reference and hence the samples in output are overwritten.
+  // Consequently, the computation performed is mean + mean * std instead of mean + output * std
+  output.mul_(std).add_(mean);
   return output;
 }
 
 Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {
-  Tensor ret = at::empty(mean.sizes(), mean.options());
+  Tensor ret = at::empty_like(mean);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty(std.sizes(), std.options());
+  Tensor ret = at::empty_like(std);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty(mean.sizes(), mean.options());
+  Tensor ret = at::empty_like(mean);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor& cauchy_cuda_(Tensor& self, double median, double sigma, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
-  cauchy_kernel_cuda(*iter, median, sigma, gen);
+  cauchy_kernel_cuda(iter, median, sigma, gen);
   return self;
 }
 
 Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
-  exponential_kernel_cuda(*iter, lambda, gen);
+  exponential_kernel_cuda(iter, lambda, gen);
   return self;
 }
 
 Tensor& geometric_cuda_(Tensor& self, double p, Generator* gen) {
   TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
-  geometric_kernel_cuda(*iter, p, gen);
+  geometric_kernel_cuda(iter, p, gen);
   return self;
 }
 
 Tensor& log_normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
-  log_normal_kernel_cuda(*iter, mean, std, gen);
+  log_normal_kernel_cuda(iter, mean, std, gen);
   return self;
 }
 
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
-  bernoulli_scalar_cuda_kernel(*iter, p, gen);
+  bernoulli_scalar_cuda_kernel(iter, p, gen);
   return self;
 }
 

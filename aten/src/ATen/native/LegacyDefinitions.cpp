@@ -2,8 +2,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
 
-#include <ATen/native/mkldnn/TensorShape.h>
-
 namespace at { namespace native {
 
 // Methods
@@ -43,6 +41,14 @@ Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
     return legacy::cpu::_th_masked_select(self, mask);
   } else {
     return legacy::cpu::_th_masked_select_bool(self, mask);
+  }
+}
+
+Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
+  if (mask.dtype() == at::ScalarType::Bool) {
+    return legacy::cpu::_th_masked_select_bool_out(result, self, mask);
+  } else {
+    return legacy::cpu::_th_masked_select_out(result, self, mask);
   }
 }
 

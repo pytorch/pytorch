@@ -86,18 +86,27 @@ CallStackPtr CallStack::intrusive_from_this() {
   return c10::intrusive_ptr<CallStack>::reclaim(this);
 }
 
-CallStack::CallStack(Function* fn) : fn_(fn) {}
+CallStack::CallStack(Function* fn, SourceRange source_range)
+    : fn_(fn), source_range_(source_range) {}
 
-CallStack::CallStack(CallStackPtr caller, Function* fn) : fn_(fn) {
+CallStack::CallStack(
+    CallStackPtr caller,
+    Function* fn,
+    SourceRange source_range)
+    : fn_(fn), source_range_(source_range) {
   caller_ = std::move(caller);
 }
 
-CallStackPtr CallStack::insertCallee(Function* fn) {
-  if (callees_.count(fn)) {
-    return callees_.at(fn);
+CallStackPtr CallStack::insertCallStackEntry(
+    Function* fn,
+    SourceRange source_range) {
+  auto ent = std::make_pair(fn, source_range);
+  if (callees_.count(ent)) {
+    return callees_.at(ent);
   }
-  auto subscope = c10::make_intrusive<CallStack>(intrusive_from_this(), fn);
-  callees_[fn] = subscope;
+  auto subscope =
+      c10::make_intrusive<CallStack>(intrusive_from_this(), fn, source_range);
+  callees_[ent] = subscope;
   return subscope;
 }
 
@@ -105,15 +114,14 @@ c10::optional<CallStackPtr> CallStack::caller() const {
   return caller_;
 }
 
-std::vector<Function*> CallStack::asVector() {
-  std::vector<Function*> r;
+std::vector<CallStackEntry> CallStack::asVector() {
+  std::vector<CallStackEntry> r;
   c10::optional<CallStackPtr> current = intrusive_from_this();
   while (current) {
-    r.push_back((*current)->fn_);
+    r.push_back(std::make_pair((*current)->fn_, (*current)->source_range_));
     current = (*current)->caller_;
   }
-  return std::vector<Function*>(r.rbegin(), r.rend());
+  return std::vector<CallStackEntry>(r.rbegin(), r.rend());
 }
-
 } // namespace jit
 } // namespace torch

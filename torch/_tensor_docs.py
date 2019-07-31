@@ -399,6 +399,12 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('as_strided', r"""
+as_strided(size, stride, storage_offset=0) -> Tensor
+
+See :func:`torch.as_strided`
+""")
+
 add_docstr_all('atan',
                r"""
 atan() -> Tensor
@@ -479,6 +485,20 @@ add_docstr_all('bincount',
 bincount(weights=None, minlength=0) -> Tensor
 
 See :func:`torch.bincount`
+""")
+
+add_docstr_all('bitwise_not',
+               r"""
+bitwise_not() -> Tensor
+
+See :func:`torch.bitwise_not`
+""")
+
+add_docstr_all('bitwise_not_',
+               r"""
+bitwise_not_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_not`
 """)
 
 add_docstr_all('bmm',
@@ -714,6 +734,46 @@ add_docstr_all('diagonal',
 diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 
 See :func:`torch.diagonal`
+""")
+
+add_docstr_all('fill_diagonal_',
+               r"""
+fill_diagonal_(fill_value, wrap=False) -> Tensor
+
+Fill the main diagonal of a tensor that has at least 2-dimensions.
+When dims>2, all dimensions of input must be of equal length.
+This function modifies the input tensor in-place, and returns the input tensor.
+
+Arguments:
+    fill_value (Scalar): the fill value
+    wrap (bool): the diagonal 'wrapped' after N columns for tall matrices.
+
+Example::
+
+    >>> a = torch.zeros(3, 3)
+    >>> a.fill_diagonal_(5)
+    tensor([[5., 0., 0.],
+            [0., 5., 0.],
+            [0., 0., 5.]])
+    >>> b = torch.zeros(7, 3)
+    >>> b.fill_diagonal_(5)
+    tensor([[5., 0., 0.],
+            [0., 5., 0.],
+            [0., 0., 5.],
+            [0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.]])
+    >>> c = torch.zeros(7, 3)
+    >>> c.fill_diagonal_(5, wrap=True)
+    tensor([[5., 0., 0.],
+            [0., 5., 0.],
+            [0., 0., 5.],
+            [0., 0., 0.],
+            [5., 0., 0.],
+            [0., 5., 0.],
+            [0., 0., 5.]])
+
 """)
 
 add_docstr_all('digamma',
@@ -978,13 +1038,6 @@ add_docstr_all('ge_',
 ge_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.ge`
-""")
-
-add_docstr_all('gels',
-               r"""
-gels(A) -> Tensor
-
-See :func:`torch.gels`
 """)
 
 add_docstr_all('geometric_',
@@ -1257,6 +1310,11 @@ is_contiguous() -> bool
 Returns True if :attr:`self` tensor is contiguous in memory in C order.
 """)
 
+add_docstr_all('is_pinned',
+               r"""
+Returns true if this tensor resides in pinned memory.
+""")
+
 add_docstr_all('is_floating_point',
                r"""
 is_floating_point() -> bool
@@ -1404,6 +1462,13 @@ add_docstr_all('logsumexp',
 logsumexp(dim, keepdim=False) -> Tensor
 
 See :func:`torch.logsumexp`
+""")
+
+add_docstr_all('lstsq',
+               r"""
+lstsq(A) -> (Tensor, Tensor)
+
+See :func:`torch.lstsq`
 """)
 
 add_docstr_all('lt',
@@ -2506,6 +2571,12 @@ add_docstr_all('char',
 char() -> Tensor
 
 ``self.char()`` is equivalent to ``self.to(torch.int8)``. See :func:`to`.
+""")
+
+add_docstr_all('bfloat16',
+               r"""
+bfloat16() -> Tensor
+``self.bfloat16()`` is equivalent to ``self.to(torch.bfloat16)``. See :func:`to`.
 """)
 
 add_docstr_all('double',

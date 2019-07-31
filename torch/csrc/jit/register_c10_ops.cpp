@@ -19,13 +19,13 @@ IValue wrap(IValue&& ivalue) {
   if (ivalue.isTensor()) {
     return wrap_tensor(std::move(ivalue).toTensor());
   } else if (ivalue.isTensorList()) {
-    c10::ListPtr<at::Tensor> list = std::move(ivalue).toTensorList();
+    c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = wrap_tensor(list.extract(i));
     }
     return std::move(list);
   } else if (ivalue.isGenericList()) {
-    c10::impl::GenericListPtr list = std::move(ivalue).toGenericList();
+    c10::impl::GenericList list = std::move(ivalue).toGenericList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = wrap(list.extract(i));
     }

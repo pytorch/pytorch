@@ -175,18 +175,18 @@ struct Value {
   size_t unique() const {
     return unique_;
   }
-  bool hasUniqueName() const {
+  bool hasDebugName() const {
     return !unique_name_.empty();
   }
   static bool isValidName(const std::string& name);
-  TORCH_API Value* setUniqueName(const std::string& name);
-  std::string uniqueName() const {
-    if (hasUniqueName()) {
+  TORCH_API Value* setDebugName(const std::string& name);
+  std::string debugName() const {
+    if (hasDebugName()) {
       return unique_name_;
     }
     return std::to_string(unique());
   }
-  TORCH_API std::string uniqueNameBase() const;
+  TORCH_API std::string debugNameBase() const;
   Node* node() {
     return node_;
   }
@@ -316,6 +316,8 @@ struct TORCH_API Node {
   c10::optional<CallStackPtr> callstack() const {
     return callstack_;
   }
+  void insertCallStackEntry(Function *f, SourceRange sr);
+  void appendCallStackOf(Node *other);
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
   // We can't return a std::vector<Node*>& because there's no
@@ -888,12 +890,12 @@ struct Block {
 
   Value* addInput(std::string name = "") {
     Value* v = input_->addOutput();
-    v->setUniqueName(std::move(name));
+    v->setDebugName(std::move(name));
     return v;
   }
   Value* insertInput(size_t i, std::string name = "") {
     Value* v = input_->insertOutput(i);
-    v->setUniqueName(std::move(name));
+    v->setDebugName(std::move(name));
     return v;
   }
   void eraseInput(size_t i) {
@@ -972,7 +974,6 @@ struct Graph {
   std::unordered_map<std::string, Value*> unique_names_;
 
   ScopePtr current_scope_;
-  c10::optional<CallStackPtr> callstack_;
 
   Block* const block_;
   // when insertNode() is called, the node is inserted before this node
@@ -1021,7 +1022,7 @@ struct Graph {
   const Node* return_node() const {
     return block_->return_node();
   }
-  const std::unordered_map<std::string, Value*>& uniqueNames() const {
+  const std::unordered_map<std::string, Value*>& debugNames() const {
     return unique_names_;
   }
 
@@ -1036,25 +1037,6 @@ struct Graph {
   }
   void set_current_scope(ScopePtr scope) {
     current_scope_ = std::move(scope);
-  }
-
-  void push_callee(Function* fn) {
-    if (callstack_) {
-      callstack_ = (*callstack_)->insertCallee(fn);
-    } else {
-      callstack_ = c10::make_intrusive<CallStack>(fn);
-    }
-  }
-  void pop_callee() {
-    if (callstack_) {
-      callstack_ = (*callstack_)->caller();
-    }
-  }
-  c10::optional<CallStackPtr> callstack() {
-    return callstack_;
-  }
-  void set_callstack(CallStackPtr callstack) {
-    callstack_ = std::move(callstack);
   }
 
   Value* addInput(std::string name = "") {
@@ -1087,8 +1069,8 @@ struct Graph {
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
       at::ArrayRef<Value*> values,
-      c10::OptNameList field_names = c10::nullopt,
-      c10::optional<std::string> unqualName = c10::nullopt);
+      c10::optional<c10::QualifiedName> qualname = c10::nullopt,
+      std::shared_ptr<FunctionSchema> schema=nullptr);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(
       Value* tup,
@@ -1104,7 +1086,6 @@ struct Graph {
       const TypePtr& value_type,
       at::ArrayRef<Value*> keys,
       at::ArrayRef<Value*> values);
-  TORCH_API Node* createDictIndex(Value* dict, Value* index);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
   TORCH_API Node* createObject(const ClassTypePtr& type);
@@ -1120,7 +1101,7 @@ struct Graph {
   TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
 
   TORCH_API Value* insertFunctionCall(
-      std::shared_ptr<Function> callee,
+      Function* callee,
       script::MatchedSchema& matched);
   TORCH_API Value* insertMethodCall(
       std::string method_name,
@@ -1340,13 +1321,33 @@ struct TORCH_API PythonOp : public Node {
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
-// unpack_outputs - if true, and the callee returns a single tuple value, then
-// insert a tuple unpack node
-//                  and return the resulting values
-TORCH_API std::vector<Value*> inlineCallTo(
+
+/** Insert graph \p CALLEE into graph \p G using \p INPUTS as input values.
+ * The insertion happens at the current insertion point.
+ * Optionally, one can also pass \p NODE_MAP to get a map between \p CALLEE
+ * nodes and their cloned copies in \p G.
+ */
+TORCH_API std::vector<Value*> insertGraph(
+    Graph& g,
+    Graph& callee,
+    ArrayRef<Value*> inputs);
+TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs,
-    bool unpack_outputs = false);
+    std::unordered_map<Node*, Node*>& node_map);
+
+/** Insert function \p CALLEE after node \p TO_REPLACE, remove the node and
+ * replace all its uses with corresponding outputs of the inserted function.
+ * This asserts that the number of outputs of the original node and the
+ * graph are the same.
+ */
+TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
+
+/** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
+ * tuple unpack node and return the resulting values.
+ */
+TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
+
 } // namespace jit
 } // namespace torch

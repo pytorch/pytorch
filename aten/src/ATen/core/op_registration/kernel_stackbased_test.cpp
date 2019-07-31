@@ -41,7 +41,7 @@ void decrementKernel(Stack* stack, KernelCache* cache) {
 
 void expectCallsIncrement(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema("_test::my_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
   auto result = callOp(*op, dummyTensor(type_id), 5);
   EXPECT_EQ(1, result.size());
@@ -50,7 +50,7 @@ void expectCallsIncrement(TensorTypeId type_id) {
 
 void expectCallsDecrement(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema("_test::my_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
   auto result = callOp(*op, dummyTensor(type_id), 5);
   EXPECT_EQ(1, result.size());
@@ -112,7 +112,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArg
   auto registrar = RegisterOperators()
       .op("_test::no_tensor_args() -> ()", RegisterOperators::options().catchAllKernel(&kernelWithoutInputs, &noCache));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
 
   called = false;
@@ -131,7 +131,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensor
   auto registrar = RegisterOperators()
       .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().catchAllKernel(&kernelWithoutTensorInputs, &noCache));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, 3);
@@ -165,7 +165,7 @@ void increment_sequence_kernel(Stack* stack, KernelCache* cache) {
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernelWithCache_whenCalled_thenCacheIsHandledCorrectly) {
   auto registrar = RegisterOperators().op("_test::increment_sequence(Tensor dummy) -> int", RegisterOperators::options().kernel(TensorType1(), &increment_sequence_kernel, &make_cache));
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::increment_sequence", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::increment_sequence", ""});
   ASSERT_TRUE(op.has_value());
 
   // expect first time calling returns a 4 (4 is the initial value in the cache)

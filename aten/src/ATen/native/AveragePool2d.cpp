@@ -26,7 +26,8 @@ static void avg_pool2d_out_frame(
           int dH,
           int padW,
           int padH,
-          bool count_include_pad)
+          bool count_include_pad,
+          c10::optional<int64_t> divisor_override)
 {
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
@@ -60,10 +61,15 @@ static void avg_pool2d_out_frame(
             scalar_t sum = 0;
 
             int divide_factor;
-            if(count_include_pad)
-              divide_factor = pool_size;
-            else
-              divide_factor = (hend - hstart) * (wend - wstart);
+            if (divisor_override.has_value()) {
+              divide_factor = divisor_override.value();
+            } else {
+              if(count_include_pad) {
+                divide_factor = pool_size;
+              } else {
+                divide_factor = (hend - hstart) * (wend - wstart);
+              }
+            }
 
             int64_t kx, ky;
 
@@ -88,20 +94,23 @@ void avg_pool2d_out_cpu_template(
           IntArrayRef stride, 
           IntArrayRef padding,
           bool ceil_mode,
-          bool count_include_pad)
+          bool count_include_pad,
+          c10::optional<int64_t> divisor_override)
 {
-  // #20866 [JIT] stride.empty() is passed through
-  // #20866 [LIBTORCH] IntegrationTest.MNIST: padding.size() == 1
-  TORCH_INTERNAL_ASSERT(kernel_size.size() == 2 &&
-                        (stride.empty() || stride.size() == 2) &&
-                        (padding.size() == 1 || padding.size() == 2),
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+              (stride.empty() || stride.size() == 2) &&
+              (padding.size() == 1 || padding.size() == 2),
     "avg_pool2d: all IntArrayRef sizes must be 2");
 
   TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
     "non-empty 2D or 3D (batch mode) tensor expected for input");
 
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
+    "divisor must be not zero");
+
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
@@ -136,7 +145,7 @@ void avg_pool2d_out_cpu_template(
 
   Tensor input = input_.contiguous();
 
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
     "avg_pool2d_out_frame",
     [&] {
       scalar_t *input_data = input.data<scalar_t>();
@@ -152,7 +161,8 @@ void avg_pool2d_out_cpu_template(
         kW, kH,
         dW, dH,
         padW, padH,
-        count_include_pad);
+        count_include_pad,
+        divisor_override);
     }
   );
 }
@@ -173,7 +183,8 @@ static void avg_pool2d_backward_out_frame(
           int dH,
           int padW,
           int padH,
-          bool count_include_pad)
+          bool count_include_pad,
+          c10::optional<int64_t> divisor_override)
 {
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
@@ -208,10 +219,15 @@ static void avg_pool2d_backward_out_frame(
             scalar_t z = *ptr_gradOutput++;
 
             int divide_factor;
-            if(count_include_pad)
-              divide_factor = pool_size;
-            else
-              divide_factor = (hend - hstart) * (wend - wstart);
+            if (divisor_override.has_value()) {
+              divide_factor = divisor_override.value();
+            } else {
+              if(count_include_pad) {
+                divide_factor = pool_size;
+              } else {
+                divide_factor = (hend - hstart) * (wend - wstart);
+              }
+            }
 
             int64_t kx, ky;
             for(ky = hstart ; ky < hend; ky++)
@@ -234,13 +250,13 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
-  // #20866 [JIT] stride.empty() is passed through
-  // #20866 [LIBTORCH] IntegrationTest.MNIST: padding.size() == 1
-  TORCH_INTERNAL_ASSERT(kernel_size.size() == 2 &&
-                        (stride.empty() || stride.size() == 2) &&
-                        (padding.size() == 1 || padding.size() == 2),
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
+              (stride.empty() || stride.size() == 2) &&
+              (padding.size() == 1 || padding.size() == 2),
     "avg_pool2d: all IntArrayRef sizes must be 2");
 
   const int64_t ndim = input.ndimension();
@@ -248,8 +264,10 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   TORCH_CHECK((ndim == 3 || ndim == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
+
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
@@ -282,7 +300,7 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   gradInput.zero_();
   TORCH_CHECK(gradInput.is_contiguous(), "gradInput must be contiguous");
 
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
     "avg_pool2d_backward_out_frame",
     [&] {
        scalar_t *gradInput_data = gradInput.data<scalar_t>();
@@ -298,7 +316,8 @@ Tensor& avg_pool2d_backward_out_cpu_template(
          kW, kH,
          dW, dH,
          padW, padH,
-         count_include_pad);
+         count_include_pad,
+         divisor_override);
     }
   );
 
@@ -314,7 +333,8 @@ Tensor& avg_pool2d_out_cpu(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   avg_pool2d_out_cpu_template(
    output,
@@ -323,7 +343,8 @@ Tensor& avg_pool2d_out_cpu(
    stride,
    padding,
    ceil_mode,
-   count_include_pad);
+   count_include_pad,
+   divisor_override);
   return output;
 }
 
@@ -333,7 +354,8 @@ Tensor avg_pool2d_cpu(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   Tensor output = at::empty({0}, input.options());
   avg_pool2d_out_cpu_template(
@@ -343,7 +365,8 @@ Tensor avg_pool2d_cpu(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return output;
 }
 
@@ -355,7 +378,8 @@ Tensor& avg_pool2d_backward_out_cpu(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   avg_pool2d_backward_out_cpu_template(
     gradInput,
@@ -365,7 +389,8 @@ Tensor& avg_pool2d_backward_out_cpu(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return gradInput;
 }
 
@@ -376,7 +401,8 @@ Tensor avg_pool2d_backward_cpu(
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad)
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
 {
   auto gradInput = at::zeros_like(input);
   avg_pool2d_backward_out_cpu_template(
@@ -387,7 +413,8 @@ Tensor avg_pool2d_backward_cpu(
     stride,
     padding,
     ceil_mode,
-    count_include_pad);
+    count_include_pad,
+    divisor_override);
   return gradInput;
 }
 

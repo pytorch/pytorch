@@ -15,7 +15,7 @@ torch.dtype
 .. class:: torch.dtype
 
 A :class:`torch.dtype` is an object that represents the data type of a
-:class:`torch.Tensor`. PyTorch has eight different data types:
+:class:`torch.Tensor`. PyTorch has nine different data types:
 
 ========================   ===========================================   ===========================
 Data type                  dtype                                         Tensor types
@@ -28,6 +28,7 @@ Data type                  dtype                                         Tensor 
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            ``torch.*.ShortTensor``
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              ``torch.*.IntTensor``
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             ``torch.*.LongTensor``
+Boolean                    ``torch.bool``                                ``torch.*.BoolTensor``
 ========================   ===========================================   ===========================
 
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
@@ -43,10 +44,11 @@ torch.device
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
 
-The :class:`torch.device` contains a device type (``'cpu'`` or ``'cuda'``) and optional device ordinal for the
-device type.  If the device ordinal is not present, this represents the current device for the device type;
-e.g. a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is the result of
-:func:`torch.cuda.current_device()`.
+The :class:`torch.device` contains a device type (``'cpu'`` or ``'cuda'``) and optional device
+ordinal for the device type. If the device ordinal is not present, this object will always represent
+the current device for the device type, even after :func:`torch.cuda.set_device()` is called; e.g.,
+a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is
+the result of :func:`torch.cuda.current_device()`.
 
 A :class:`torch.Tensor`'s device can be accessed via the :attr:`Tensor.device` property.
 
