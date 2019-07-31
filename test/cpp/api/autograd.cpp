@@ -5,11 +5,11 @@
 #include <torch/utils.h>
 #include <test/cpp/api/support.h>
 
-using namespace torch;
+using namespace torch::autograd;
 
 #define ASSERT_VARIABLE_EQ(a,b) ASSERT_TRUE(torch::allclose((a),(b)))
 
-std::string graph_desc(std::shared_ptr<autograd::Node> node) {
+std::string graph_desc(std::shared_ptr<Node> node) {
   if (!node) {
     return "None";
   }
@@ -22,7 +22,7 @@ std::string graph_desc(std::shared_ptr<autograd::Node> node) {
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
-  struct MyFunction : public torch::autograd::Function<MyFunction> {
+  struct MyFunction : public Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
       ctx->saved_data["mul"] = mul;
       ctx->save_for_backward({var1, var2});
@@ -50,7 +50,7 @@ TEST(CustomAutogradTest, CustomFunction) {
 }
 
 TEST(CustomAutogradTest, FunctionReturnsInput) {
-  struct MyFunction : public torch::autograd::Function<MyFunction> {
+  struct MyFunction : public Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable var1) {
       return {var1};
     }
@@ -67,7 +67,7 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
 
 TEST(CustomAutogradTest, NoGradCustomFunction) {
   // Custom Function should respect grad mode
- struct MyOp : public torch::autograd::Function<MyOp> {
+ struct MyOp : public Function<MyOp> {
    static variable_list forward(AutogradContext *ctx, Variable x) {
      return {x+1};
    }
@@ -86,7 +86,7 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
 }
 
 TEST(CustomAutogradTest, MarkNonDifferentiable) {
-  struct MyFunction : public torch::autograd::Function<MyFunction> {
+  struct MyFunction : public Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable v) {
       Variable output = v > 0;
       ctx->mark_non_differentiable({output});
@@ -106,7 +106,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiable) {
 }
 
 TEST(CustomAutogradTest, ReturnLeafInplace) {
-  struct Inplace : public torch::autograd::Function<Inplace> {
+  struct Inplace : public Function<Inplace> {
     static variable_list forward(AutogradContext *ctx, Variable a, Variable b) {
       ctx->mark_dirty({a});
       return {a.add_(b), b+2};

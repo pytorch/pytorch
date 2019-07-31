@@ -15,7 +15,7 @@ TORCH_API variable_list _wrap_outputs(
   const at::ArrayRef<Variable> raw_outputs,
   const std::shared_ptr<Node> &cdata);
 
-// To use custom autograd operations implement a CFunction subclass with
+// To use custom autograd operations implement a Function subclass with
 // static backward and forward functions
 //
 // forward() can take as many arguments as you want and should return a
@@ -27,27 +27,27 @@ TORCH_API variable_list _wrap_outputs(
 //
 // backward() should take an AutogradContext* and a variable list containing as
 // many Variables as there were outputs from forward as arguments. It should
-//  return as many Variables as there were inputs with each of them containing
+// return as many Variables as there were inputs with each of them containing
 // the gradient w.r.t. its corresponding input. Variables saved in forward can
 // be accessed with ctx->get_saved_variables() and other saved data can be
-// accessed from ctx->save.
+// accessed from ctx->saved_data.
 //
 // For example:
 // class MyFunction : public Function<MyFunction> {
 //   public:
 //   static variable_list forward(AutogradContext *ctx, int n, Variable var) {
 //      // Save data for backward in context
-//      ctx->save["n"] = n;
+//      ctx->saved_data["n"] = n;
 //      var.mul_(2);
 //      // Mark var as modified by inplace operation
 //      ctx->mark_dirty({var});
-//      return std::vector<Variable>({var});
+//      return {var};
 //   }
 //
 //   static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
 //      // Use data saved in forward
-//      auto n = ctx->save["n"].toInt();
-//      return std::vector<Variable>({grad_output[0]*n});
+//      auto n = ctx->saved_data["n"].toInt();
+//      return {grad_output[0]*n};
 //   }
 // };
 //
@@ -96,9 +96,10 @@ private:
   variable_list to_save_;
 
   // The CppNode in the autograd graph that owns this AutogradContext. We need a
-  // weak_ptr to avoid a refcycle.
+  // weak_ptr to avoid a refcycle. Since grad_fn_ owns this AutogradContext, it
+  // will always be alive when we want to use it.
   std::weak_ptr<Node> grad_fn_;
-  bool has_freed_buffers;
+  bool has_freed_buffers_;
 
   void save_variables();
 
@@ -117,8 +118,9 @@ struct TORCH_API VariableInfo {
   bool requires_grad;
 };
 
-// Node representing the operation implemented by the user defined Function
-// Calls to 'apply' are forward to the implementation of backward by the user.
+// CppNode<T> is the Node in the autograd graph that represents the user defined
+// backward function for Function<T>. Calls to CppNode::apply are forward to
+// T::backward().
 template <class T>
 struct CppNode : public Node {
 
@@ -273,7 +275,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 template<class T>
 void CppNode<T>::release_variables() {
   ctx_.saved_variables_.clear();
-  ctx_.has_freed_buffers = true;
+  ctx_.has_freed_buffers_ = true;
 }
 
 template<class T>

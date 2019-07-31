@@ -118,7 +118,7 @@ void AutogradContext::save_variables() {
 }
 
 variable_list AutogradContext::get_saved_variables() const {
-  TORCH_CHECK(!has_freed_buffers, ERR_BACKWARD_TWICE);
+  TORCH_CHECK(!has_freed_buffers_, ERR_BACKWARD_TWICE);
   variable_list saved;
   saved.reserve(saved_variables_.size());
   auto ptr = grad_fn_.lock();
