@@ -180,8 +180,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 // a depthwise multiplier)
 auto ConvParams::is_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
-  return input.is_cuda() &&
-         !transposed &&
+  return !transposed &&
          input.ndimension() == 4 &&
          input.size(1) == groups &&
          groups > 1 && // no point if there is only a single group
@@ -215,7 +214,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         } else if (ch >= 64) {
           if (w >= 14) {
-            return true;  
+            return true;
           }
         } else if ((ch >= 32) && (w >=28)) {
           return true;
@@ -288,7 +287,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         } else if (w >= 56) {
           return true;
-        } 
+        }
       } else if (bs >= 1) {
         if ((ch >= 512) && (w >=112)) {
           return true;
@@ -549,7 +548,7 @@ at::Tensor _convolution(
         output = at::cudnn_convolution(
             input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
-        
+
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
             input, weight, bias,
