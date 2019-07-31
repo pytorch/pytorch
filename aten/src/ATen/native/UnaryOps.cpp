@@ -36,6 +36,26 @@
 namespace at {
 namespace native {
 
+Tensor abs(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::abs_out(result, self);
+}
+
+Tensor& abs_(Tensor& self) {
+  return at::abs_out(self, self);
+}
+
+Tensor& abs_out(Tensor& result, const Tensor& self) {
+  checkBackend("abs", result, self.type().backend());
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_internal_overlap=*/true);
+  abs_stub(iter.device_type(), iter);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
+}
+
 Tensor bitwise_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options());
   return at::bitwise_not_out(result, self);
@@ -167,7 +187,6 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return result;                                              \
   }
 
-IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)

@@ -65,7 +65,6 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
   }
 
 
-IMPLEMENT_UNARY_OP_PREQUEL(abs)
 IMPLEMENT_UNARY_OP_PREQUEL(acos)
 IMPLEMENT_UNARY_OP_PREQUEL(asin)
 IMPLEMENT_UNARY_OP_PREQUEL(atan)

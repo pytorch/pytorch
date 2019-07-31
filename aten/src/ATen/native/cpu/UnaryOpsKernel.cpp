@@ -43,12 +43,16 @@ static void sigmoid_kernel(TensorIterator& iter) {
 }
 
 static void abs_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cpu", [&]() {
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t { return std::abs(a); },
-        [=](Vec256<scalar_t> a) { return a.abs(); });
-  });
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(iter, [](bool a) { return a; });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return std::abs(a); },
+          [=](Vec256<scalar_t> a) { return a.abs(); });
+    });
+  }
 }
 
 static void bitwise_not_kernel(TensorIterator& iter) {
