@@ -228,7 +228,7 @@ class ManualConvLinearQATModel(torch.nn.Module):
 class SubModForFusion(torch.nn.Module):
     def __init__(self):
         super(SubModForFusion, self).__init__()
-        self.conv = torch.nn.Conv2d(20, 20, 1)
+        self.conv = torch.nn.Conv2d(20, 20, 1, bias=None)
         self.bn = torch.nn.BatchNorm2d(20)
 
     def forward(self, x):
@@ -239,9 +239,9 @@ class SubModForFusion(torch.nn.Module):
 class ModForFusion(torch.nn.Module):
     def __init__(self):
         super(ModForFusion, self).__init__()
-        self.conv1 = torch.nn.Conv2d(10, 20, 5)
+        self.conv1 = torch.nn.Conv2d(10, 20, 5, bias=None)
         self.bn1 = torch.nn.BatchNorm2d(20)
-        self.relu1 = torch.nn.ReLU()
+        self.relu1 = torch.nn.ReLU(inplace=False)
         self.sub1 = SubModForFusion()
         self.sub2 = SubModForFusion()
 

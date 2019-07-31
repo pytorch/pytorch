@@ -43,7 +43,7 @@ class ConvBn2d(Conv2d):
                  # num_features: out_channels
                  eps=1e-05, momentum=0.1,
                  # affine: True
-                 # tracking_running_stats: True
+                 # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
                  activation_fake_quant=None,
@@ -205,7 +205,7 @@ class ConvBnReLU2d(ConvBn2d):
                  # num_features: out_channels
                  eps=1e-05, momentum=0.1,
                  # affine: True
-                 # tracking_running_stats: True
+                 # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
                  activation_fake_quant=None,

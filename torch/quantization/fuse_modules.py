@@ -24,7 +24,7 @@ def fuse_conv_bn(conv, bn):
         assert conv.bias is None, 'Only support fusing Conv2d that does not have bias'
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
-        assert bn.tracking_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
+        assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
         return torch.nn._intrinsic.ConvBn2d(conv, bn)
     else:
         return torch.nn.utils.fuse_conv_bn_eval(conv, bn)
