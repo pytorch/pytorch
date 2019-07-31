@@ -45,7 +45,7 @@ else:
 
 PRECISION = 1e-4
 EPSILON = 1e-6
-TTT = 1e-5
+TTT = 1e-6
 
 @contextlib.contextmanager
 def backward_engine(engine):
@@ -3711,7 +3711,7 @@ def gradgradcheck_method_precision_override(test_name):
     return override
 
 GRADCHECK_EPS_OVERRIDE = {
-    'test_cdist': 1e-5,
+    'test_cdist': 1e-6,
 }
 
 GRADCHECK_PRECISION_OVERRIDE = {
@@ -3724,7 +3724,7 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
     atol = PRECISION if test_name not in GRADCHECK_PRECISION_OVERRIDE else GRADCHECK_PRECISION_OVERRIDE[test_name]
 
     if "test_cdist" in test_name:
-        eps = 1e-5
+        eps = 1e-6
         atol = 1e-4
 
     printDebug = False
