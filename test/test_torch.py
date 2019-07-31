@@ -7777,20 +7777,6 @@ class _TestTorchMixin(object):
         self.assertRaisesRegex(RuntimeError, "must have the same device",
                                lambda: torch.rand(1, device="cpu").atan2(torch.rand(1, device="cuda")))
 
-    def test_atan2_diff_sizes(self):
-        self.assertRaisesRegex(RuntimeError, "sizes do not match",
-                               lambda: torch.rand(1).atan2(torch.rand(2)))
-        self.assertRaisesRegex(RuntimeError, "sizes do not match",
-                               lambda: torch.rand(2).atan2(torch.rand(1)))
-        self.assertRaisesRegex(RuntimeError, "sizes do not match",
-                               lambda: torch.atan2(torch.rand(1), torch.rand(1), out=torch.rand(2)))
-        self.assertRaisesRegex(RuntimeError, "sizes do not match",
-                               lambda: torch.atan2(torch.rand(1), torch.rand(2), out=torch.rand(1)))
-        self.assertRaisesRegex(RuntimeError, "sizes do not match",
-                               lambda: torch.atan2(torch.rand(2), torch.rand(1), out=torch.rand(1)))
-        self.assertRaisesRegex(RuntimeError, "sizes do not match",
-                               lambda: torch.atan2(torch.rand(2), torch.rand(2), out=torch.rand(1)))
-
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):

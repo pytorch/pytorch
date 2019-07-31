@@ -159,7 +159,6 @@ Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(device_res == device1, "out and input1 must have the same device. out: ", device_res, " input1: ", device1);
   auto device2 = other.type().device_type();
   TORCH_CHECK(device1 == device2, "input1 and input2 must have the same device. input1: ", device1, " input2: ", device2);
-  TORCH_CHECK(result.sizes() == self.sizes() && self.sizes() == other.sizes() , "sizes do not match");
   auto iter = TensorIterator::binary_op(result, self, other);
   atan2_stub(iter.device_type(), iter);
   return result;
