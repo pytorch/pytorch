@@ -271,7 +271,9 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
       "can't assign Variable as its own grad");
 
   auto& grad = ((THPVariable*)py_grad)->cdata;
-  bool gradIsSparse = var.dtype() == grad.dtype() && toSparse(tensorTypeIdToBackend(var.type_id())) == tensorTypeIdToBackend(grad.type_id());
+  bool gradIsSparse = (var.dtype() == grad.dtype() &&
+                       var.device().type() == grad.device().type() &&
+                       layout_from_backend(tensorTypeIdToBackend(grad.type_id())) == kSparse);
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
       "assigned grad has data of a different type");
   if (var.is_cuda()) {
@@ -330,7 +332,7 @@ PyObject *THPVariable_get_names(THPVariable *self)
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple) throw python_error();
 
-  if (!self->cdata.is_named()) {
+  if (!self->cdata.has_names()) {
     for (size_t i = 0; i < size; ++i) {
       PyTuple_SET_ITEM(tuple.get(), i, Py_None);
     }
