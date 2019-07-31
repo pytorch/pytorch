@@ -2246,7 +2246,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_cpu_0", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2273,7 +2273,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_cpu_1", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2300,7 +2300,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_cpu_2", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2327,7 +2327,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_cpu_3", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2354,7 +2354,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_cpu_15", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2381,7 +2381,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_cpu_25", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2408,7 +2408,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_cpu_inf", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2435,7 +2435,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_gpu_0", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2462,7 +2462,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_gpu_1", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2489,7 +2489,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_gpu_2", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2516,7 +2516,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_gpu_3", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2543,7 +2543,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_gpu_15", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2570,7 +2570,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_gpu_25", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -2597,7 +2597,7 @@ class TestAutograd(TestCase):
                         return torch.cdist(a, b, p)
 
                     f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist_cuda_" + str(p), "cdist", f,
+                    run_functional_checks(self, "test_cdist_gpu_inf", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((S, S))
@@ -3722,6 +3722,10 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
                                  input_variables, run_gradgradcheck=True):
     eps = EPSILON if test_name not in GRADCHECK_EPS_OVERRIDE else GRADCHECK_EPS_OVERRIDE[test_name]
     atol = PRECISION if test_name not in GRADCHECK_PRECISION_OVERRIDE else GRADCHECK_PRECISION_OVERRIDE[test_name]
+
+    if "test_cdist" in test_name:
+        eps = 1e-5
+        atol = 1e-4
 
     printDebug = False
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=eps, atol=atol, printDebug=printDebug))
