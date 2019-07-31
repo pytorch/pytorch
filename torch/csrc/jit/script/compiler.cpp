@@ -3113,7 +3113,8 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    ErrorReport::CallStack call(self ? method.qualname().qualifiedName() : method.qualname().name());
+    ErrorReport::CallStack call(
+        self ? method.qualname().qualifiedName() : method.qualname().name());
     to_ir(def, _resolver, self, method);
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
