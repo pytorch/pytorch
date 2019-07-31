@@ -1317,13 +1317,19 @@ TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
 
 /** Insert graph \p CALLEE into graph \p G using \p INPUTS as input values.
- *
  * The insertion happens at the current insertion point.
+ * Optionally, one can also pass \p NODE_MAP to get a map between \p CALLEE
+ * nodes and their cloned copies in \p G.
  */
 TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs);
+TORCH_API std::vector<Value*> insertGraph(
+    Graph& g,
+    Graph& callee,
+    ArrayRef<Value*> inputs,
+    std::unordered_map<Node*, Node*>& node_map);
 
 /** Insert graph \p CALLEE after node \p TO_REPLACE, remove the node and
  * replace all its uses with corresponding outputs of the inserted graph. The
