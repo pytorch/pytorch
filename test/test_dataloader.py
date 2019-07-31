@@ -422,6 +422,9 @@ class WorkerSpecificIterableDataset(IterableDataset):
         assert worker_info is not None
         return iter(range(self.sizes_for_all_workers[worker_info.id]))
 
+    def __len__(self):
+        return sum(self.sizes_for_all_workers)
+
 
 # Inspired by https://stackoverflow.com/a/26703365
 # If all workers will call `sync_once`, they will be blocked until all workers
@@ -961,8 +964,8 @@ class TestDataLoader(TestCase):
             # non-batched should not convert ints into tensors
             self.assertIsInstance(d, torch._six.int_classes)
             self.assertEqual(d, i)
-        with self.assertRaisesRegex(TypeError, "Cannot determine the DataLoader length of a IterableDataset"):
-            len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
+        # DataLoader should match len of the iterable-style dataset (if implemented)
+        self.assertEqual(len(dataloader), len(dataset))
 
         # [no auto-batching] multiprocessing loading
         num_workers = 3
@@ -978,8 +981,8 @@ class TestDataLoader(TestCase):
             # non-batched should not convert ints into tensors
             self.assertIsInstance(a, torch._six.int_classes)
             self.assertEqual(a, b)
-        with self.assertRaisesRegex(TypeError, "Cannot determine the DataLoader length of a IterableDataset"):
-            len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
+        # DataLoader should match len of the iterable-style dataset (if implemented)
+        self.assertEqual(len(dataloader), len(dataset))
 
         # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
