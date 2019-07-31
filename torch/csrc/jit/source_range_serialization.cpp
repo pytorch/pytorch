@@ -81,7 +81,7 @@ c10::IValue SourceRangeSerializer::serialize_source(
 SourceRangePickler::SourceRangePickler()
     : srs(new SourceRangeSerializer()) {}
 
-std::string SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
+std::vector<char> SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
   std::vector<c10::IValue> ivalues;
   for (const auto& range : ranges) {
     std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
@@ -89,7 +89,8 @@ std::string SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
     ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
   std::vector<at::Tensor> table;
-  auto result = jit::pickle(ivalues, &table);
+  auto ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
+  auto result = jit::pickle(ivalue, &table);
   TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
   return result;
 }
@@ -107,7 +108,7 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  auto ivalues = jit::unpickle(data.get(), size);
+  auto ivalues = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {

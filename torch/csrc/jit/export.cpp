@@ -778,7 +778,7 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
-  auto data = pickle(ivalues, &tensor_table_);
+  auto data = pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table_);
   writer_.writeRecord(name, data.data(), data.size());
 }
 

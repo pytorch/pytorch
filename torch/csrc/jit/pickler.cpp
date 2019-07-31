@@ -99,13 +99,13 @@ void Pickler::pushTensorData(const at::Tensor& tensor) {
   // first dump size
   auto numel = tensor.numel();
   auto numel_ptr = reinterpret_cast<const char*>(&numel);
-  out_.write(numel_ptr, sizeof(numel));
+  writer_(numel_ptr, sizeof(numel));
 
   uint64_t record_size;
   at::Tensor storage_tensor;
   std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
   auto storage_byte_ptr = reinterpret_cast<const char*>(storage_tensor.storage().data());
-  out_.write(storage_byte_ptr, record_size);
+  writer_(storage_byte_ptr, record_size);
 }
 
 void Pickler::pushMetadata() {
@@ -280,7 +280,7 @@ void Pickler::pushString(const std::string& string) {
 }
 
 void Pickler::pushBytes(const std::string& string) {
-  out_.write(string.data(), string.size());
+  writer_(string.data(), string.size());
 }
 
 void Pickler::pushGlobal(
@@ -500,7 +500,11 @@ std::vector<IValue> Unpickler::parse_ivalue_list() {
     // TODO [unpickler refactor]
     return value.toGenericListRef().vec();
   }
-  return value.toTuple()->elements();
+  // TODO: return the value itself, don't unwrap it
+  if (value.isTuple()) {
+    return value.toTuple()->elements();
+  }
+  return {value};
 }
 
 double Unpickler::readFloat() {
@@ -531,7 +535,8 @@ void Unpickler::run() {
       "Only Pickle protocol 2 is supported, found protocol = ",
       protocol);
 
-  while (!in_.eof()) {
+  // TODO: fix this infinite loop if there is no STOP
+  while (true) {
     OpCode opcode = readInstruction();
     if (opcode == OpCode::STOP) {
       return;
@@ -777,13 +782,8 @@ OpCode Unpickler::readInstruction() {
 
 // Read a number of bytes from the input stream
 std::string Unpickler::readBytes(size_t length) {
-  std::string bytes;
-  bytes.resize(length);
-  // C++11 guarantees contiguous strings and string[0] is
-  // defined for 0-length strings, so this is safe
-  in_.read(&bytes[0], bytes.size());
-  TORCH_CHECK(in_.good(), "Overran buffer while reading bytes");
-  return bytes;
+  const char* data = reader_(length);
+  return std::string(data, length);
 }
 
 // Pop all the list items off of the stack and append them to the list at

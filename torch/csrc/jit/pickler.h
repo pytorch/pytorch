@@ -108,8 +108,10 @@ class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
-  Pickler(std::ostream& out, std::vector<at::Tensor>* tensor_table = nullptr)
-      : out_(out), tensor_table_(tensor_table) {}
+  Pickler(
+      std::function<void(const char*, size_t)> writer,
+      std::vector<at::Tensor>* tensor_table = nullptr)
+      : writer_(writer), tensor_table_(tensor_table) {}
 
   // Push protocol onto the stack
   void start();
@@ -169,11 +171,11 @@ class Pickler {
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
-    out_.write(begin, sizeof(T));
+    writer_(begin, sizeof(T));
   }
 
   // Stream to write binary data to
-  std::ostream& out_;
+  std::function<void(const char*, size_t)> writer_;
 
   // Stack of opcodes/data
   std::vector<char> stack_;
@@ -212,10 +214,12 @@ class Unpickler {
 
  public:
   Unpickler(
-      std::istream& in,
+      std::function<const char*(size_t)> reader,
+      std::function<bool()> bounds_checker,
       const std::vector<at::Tensor>* tensor_table,
       ClassResolver class_resolver)
-      : in_(in),
+      : reader_(reader),
+        bounds_checker_(bounds_checker),
         tensor_table_(tensor_table),
         class_resolver_(std::move(class_resolver)) {}
 
@@ -227,10 +231,9 @@ class Unpickler {
   template <typename T>
   T read() {
     T item;
-    in_.read(reinterpret_cast<char*>(&item), sizeof(item));
-    TORCH_CHECK(
-        in_.good(),
-        "Error reading from stream, goodbit was not set after reading");
+    size_t len = sizeof(item);
+    const char* data = reader_(len);
+    std::copy(data, data + len, reinterpret_cast<char*>(&item));
     return item;
   }
 
@@ -244,8 +247,12 @@ class Unpickler {
   void setInput(size_t memo_id);
   void run();
 
-  // Binary input stream
-  std::istream& in_;
+  // Returns a pointer to the number of bytes requested. This should state-fully
+  // remember how many bytes have been read
+  std::function<const char*(size_t)> reader_;
+
+  // Check if the stream has gone past its size
+  std::function<bool()> bounds_checker_;
 
   std::vector<IValue> stack_;
 
@@ -271,7 +278,7 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // if the cls has __getstate__/__setstate__
 // assert they have the right schema and return true,
 // otherwise return false
-bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);/// Serialize an object in a format compatible with Python's pickle module.
+bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
 } // namespace jit
 } // namespace torch

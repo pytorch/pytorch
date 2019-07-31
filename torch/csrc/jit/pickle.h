@@ -28,9 +28,20 @@ namespace jit {
 ///   print(values)
 ///
 /// \endrst
-TORCH_API std::string pickle(
-    const std::vector<IValue>& ivalues,
+TORCH_API std::vector<char> pickle(
+    const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table = nullptr);
+
+TORCH_API void pickle_stream(
+    std::function<void(const char*, size_t)> writer,
+    const IValue& ivalue,
+    std::vector<at::Tensor>* tensor_table = nullptr);
+
+TORCH_API std::vector<IValue> unpickle(
+    std::function<void(const char*, size_t)> reader,
+    std::function<bool()> bounds_chcker,
+    std::vector<at::Tensor>* tensor_table = nullptr,
+    ClassResolver class_resolver = nullptr);
 
 TORCH_API std::vector<IValue> unpickle(
     const char* data,
@@ -38,16 +49,12 @@ TORCH_API std::vector<IValue> unpickle(
     std::vector<at::Tensor>* tensor_table = nullptr,
     ClassResolver class_resolver = nullptr);
 
-TORCH_API std::vector<IValue> unpickle(
-    const void* data,
-    size_t size,
-    std::vector<at::Tensor>* tensor_table = nullptr,
-    ClassResolver class_resolver = nullptr);
 
-TORCH_API std::vector<IValue> unpickle(
-    std::istream& in,
-    std::vector<at::Tensor>* tensor_table = nullptr,
-    ClassResolver class_resolver = nullptr);
+
+// TORCH_API std::vector<IValue> unpickle(
+//     std::istream& in,
+//     std::vector<at::Tensor>* tensor_table = nullptr,
+//     ClassResolver class_resolver = nullptr);
 
 } // namespace jit
 } // namespace torch

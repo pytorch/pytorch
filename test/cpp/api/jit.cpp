@@ -115,17 +115,14 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
 }
 
 TEST(TorchScriptTest, TestPickle) {
-  std::string filename("data.pkl");
   torch::IValue float_value(2.3);
-  std::string data = torch::jit::pickle({float_value});
-  std::ofstream out(filename);
-  out << data;
-  out.flush();
 
-  std::ifstream in(filename, std::ios::binary);
-  std::vector<torch::IValue> ivalues = torch::jit::unpickle(in);
+  // TODO: when tensors are stored in the pickle, delete this
+  std::vector<at::Tensor> tensor_table;
+  auto data = torch::jit::pickle(float_value, &tensor_table);
 
-  // std::remove(filename.c_str());
+  std::vector<torch::IValue> ivalues =
+      torch::jit::unpickle(data.data(), data.size());
 
   double diff = ivalues.at(0).toDouble() - float_value.toDouble();
   double eps = 0.0001;

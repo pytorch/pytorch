@@ -161,7 +161,7 @@ std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::strin
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
   return unpickle(
-      attributes_ptr.get(),
+      reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
       &tensor_table_,
       [&](const c10::QualifiedName& qn) {
