@@ -1910,6 +1910,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
         self.assertEqual(caffe2_out[0].shape, x.shape)
 
+    # The order of returned indices from Multinomial is undefined, so randomly generated inputs
+    # in Caffe2BackendTestEmbed doesn't work with this op.
+    @skipIfEmbed
     def test_multinomial(self):
         class Multinomial(torch.nn.Module):
             def forward(self, weight):
