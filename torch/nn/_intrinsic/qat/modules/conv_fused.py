@@ -37,13 +37,14 @@ class ConvBn2d(Conv2d):
                  # Conv2d args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
+                 # bias: None, only support Conv with no bias
                  padding_mode='zeros',
                  # BatchNorm2d args
                  # num_features: out_channels
                  eps=1e-05, momentum=0.1,
                  # affine: True
                  # tracking_running_stats: True
-                 # args for this module
+                 # Args for this module
                  freeze_bn=False,
                  activation_fake_quant=None,
                  weight_fake_quant=None):
@@ -163,7 +164,7 @@ class ConvBn2d(Conv2d):
                          False,
                          qconfig.activation,
                          qconfig.weight)
-        assert qat_convbn.bias is None, 'QAT ConvBn should no bias'
+        assert qat_convbn.bias is None, 'QAT ConvBn should not have bias'
         qat_convbn.weight = conv.weight
         qat_convbn.gamma = bn.weight
         qat_convbn.beta = bn.bias
@@ -198,13 +199,14 @@ class ConvBnReLU2d(ConvBn2d):
                  # Conv2d args
                  in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
+                 # bias: None, only support Conv with no bias
                  padding_mode='zeros',
                  # BatchNorm2d args
                  # num_features: out_channels
                  eps=1e-05, momentum=0.1,
                  # affine: True
                  # tracking_running_stats: True
-                 # args for this module
+                 # Args for this module
                  freeze_bn=False,
                  activation_fake_quant=None,
                  weight_fake_quant=None):

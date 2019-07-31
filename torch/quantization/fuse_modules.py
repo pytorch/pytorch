@@ -21,7 +21,7 @@ def fuse_conv_bn(conv, bn):
         "Conv and BN both must be in the same mode (train or eval)."
 
     if conv.training:
-        assert conv.bias is None, 'Only support fusing Conv2d that has no bias'
+        assert conv.bias is None, 'Only support fusing Conv2d that does not have bias'
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.tracking_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
