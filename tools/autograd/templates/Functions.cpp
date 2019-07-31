@@ -1810,40 +1810,40 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
   auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
     return unsqueeze_multiple(grad * det, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
   };
-  
+
   if (self.dim() == 2) {
-    if ((det == 0).item<uint8_t>()) {
+    if (det.item<double>() == 0) {
       return singular_case_backward(grad, self, det);
     } else {
       return nonsingular_case_backward(grad, self, det);
     }
   } else {
     auto nonzero_det_indices = at::where(det);
+
+    if (nonzero_det_indices[0].size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
+      return nonsingular_case_backward(grad, self, det);
+    }
+
     auto zero_det_indices = at::where(det == 0);
 
     if (zero_det_indices[0].size(0) == det.numel()) {  // all determinants are zero (singular)
       return singular_case_backward(grad, self, det);
     }
 
-    if (nonzero_det_indices[0].size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
-      return nonsingular_case_backward(grad, self, det);
-    }
-
     Tensor grad_det = at::empty_like(self);
-    if (nonzero_det_indices[0].size(0) > 0) {  // invertible case
-      auto indexed_grad = grad.index(nonzero_det_indices);
-      auto indexed_det = det.index(nonzero_det_indices);
-      auto indexed_self = self.index(nonzero_det_indices);
-      grad_det.index_put_(/*indices=*/nonzero_det_indices,
-                          /*value=*/nonsingular_case_backward(indexed_grad, indexed_self, indexed_det));
-    }
-    if (zero_det_indices[0].size(0) > 0) {  // non-invertible case, uses SVD
-      auto indexed_grad = grad.index(zero_det_indices);
-      auto indexed_det = det.index(zero_det_indices);
-      auto indexed_self = self.index(zero_det_indices);
-      grad_det.index_put_(/*indices=*/zero_det_indices,
-                          /*value=*/singular_case_backward(indexed_grad, indexed_self, indexed_det));
-    }
+
+    // invertible case
+    grad_det.index_put_(/*indices=*/nonzero_det_indices,
+                        /*value=*/nonsingular_case_backward(grad.index(nonzero_det_indices),
+                                                            self.index(nonzero_det_indices),
+                                                            det.index(nonzero_det_indices)));
+
+    // non-invertible case, uses SVD
+    grad_det.index_put_(/*indices=*/zero_det_indices,
+                        /*value=*/singular_case_backward(grad.index(zero_det_indices),
+                                                         self.index(zero_det_indices),
+                                                         det.index(zero_det_indices)));
+
     return grad_det;
   }
 }
@@ -1862,36 +1862,36 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
   };
 
   if (self.dim() == 2) {
-    if ((logdet != -INFINITY).item<uint8_t>()) {
+    if (logdet.item<double>() != -INFINITY) {
       return nonsingular_case_backward(grad, self);
     } else {
       return singular_case_backward(grad, self);
     }
   } else {
     auto finite_logdet_indices = at::where(logdet != -INFINITY);
-    auto neginf_logdet_indices = at::where(logdet == -INFINITY);
 
     if (finite_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad, self);
     }
+
+    auto neginf_logdet_indices = at::where(logdet == -INFINITY);
 
     if (neginf_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad, self);
     }
 
     Tensor grad_logdet = at::empty_like(self);
-    if (finite_logdet_indices[0].size(0) > 0) {  // invertible case
-      auto indexed_grad = grad.index(finite_logdet_indices);
-      auto indexed_self = self.index(finite_logdet_indices);
-      grad_logdet.index_put_(/*indices=*/finite_logdet_indices,
-                          /*value=*/nonsingular_case_backward(indexed_grad, indexed_self));
-    }
-    if (neginf_logdet_indices[0].size(0) > 0) {  // non-invertible case, uses SVD
-      auto indexed_grad = grad.index(neginf_logdet_indices);
-      auto indexed_self = self.index(neginf_logdet_indices);
-      grad_logdet.index_put_(/*indices=*/neginf_logdet_indices,
-                          /*value=*/singular_case_backward(indexed_grad, indexed_self));
-    }
+
+    // invertible case
+    grad_logdet.index_put_(/*indices=*/finite_logdet_indices,
+                           /*value=*/nonsingular_case_backward(grad.index(finite_logdet_indices),
+                                                               self.index(finite_logdet_indices)));
+
+    // non-invertible case, uses SVD
+    grad_logdet.index_put_(/*indices=*/neginf_logdet_indices,
+                           /*value=*/singular_case_backward(grad.index(neginf_logdet_indices),
+                                                            self.index(neginf_logdet_indices)));
+
     return grad_logdet;
   }
 }
@@ -1914,36 +1914,36 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
   };
 
   if (self.dim() == 2) {
-    if ((signdet == 0).item<uint8_t>()) {
+    if (signdet.item<double>() == 0) {
       return singular_case_backward(grad_logabsdet, self);
     } else {
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
     auto nonzero_signdet_indices = at::where(signdet);
+
+    if (nonzero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
+      return nonsingular_case_backward(grad_logabsdet, self);
+    }
+
     auto zero_signdet_indices = at::where(signdet == 0);
 
     if (zero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad_logabsdet, self);
     }
 
-    if (nonzero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
-      return nonsingular_case_backward(grad_logabsdet, self);
-    }
-
     Tensor grad_slogdet = at::empty_like(self);
-    if (nonzero_signdet_indices[0].size(0) > 0) {  // invertible case
-      auto indexed_grad = grad_logabsdet.index(nonzero_signdet_indices);
-      auto indexed_self = self.index(nonzero_signdet_indices);
-      grad_slogdet.index_put_(/*indices=*/nonzero_signdet_indices,
-                          /*value=*/nonsingular_case_backward(indexed_grad, indexed_self));
-    }
-    if (zero_signdet_indices[0].size(0) > 0) {  // non-invertible case, uses SVD
-      auto indexed_grad = grad_logabsdet.index(zero_signdet_indices);
-      auto indexed_self = self.index(zero_signdet_indices);
-      grad_slogdet.index_put_(/*indices=*/zero_signdet_indices,
-                          /*value=*/singular_case_backward(indexed_grad, indexed_self));
-    }
+
+    // invertible case
+    grad_slogdet.index_put_(/*indices=*/nonzero_signdet_indices,
+                            /*value=*/nonsingular_case_backward(grad_logabsdet.index(nonzero_signdet_indices),
+                                                                self.index(nonzero_signdet_indices)));
+
+    // non-invertible case, uses SVD
+    grad_slogdet.index_put_(/*indices=*/zero_signdet_indices,
+                            /*value=*/singular_case_backward(grad_logabsdet.index(zero_signdet_indices),
+                                                             self.index(zero_signdet_indices)));
+
     return grad_slogdet;
   }
 }
