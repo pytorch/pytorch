@@ -13530,6 +13530,15 @@ a")
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, 'variable number'):
             torch.jit.script(fn)
 
+        def other(*args):
+            print(args)
+
+        def fn():
+            return other()
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, 'variable number'):
+            torch.jit.script(fn)
+
     def test_inferred_error_msg(self):
         """
         Test that when we get a type mismatch on a function where we inferred
