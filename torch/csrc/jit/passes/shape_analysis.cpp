@@ -210,6 +210,11 @@ class ShapePropagator {
     return scalarTypeFromJitType(type);
   }
 
+  // Promotes result types for arithmetic operations using new type promotion logic.
+  // See tensor_attributes.rst for details.
+  // This function handles the dimmed and zero-dim case, not the `wrapped-number`
+  // case. Wrapped number is handled separately because jit explicitly matches
+  // on the `Scalar other` signature.
   c10::ScalarType getPromotedTypeForArithmeticOp(Node *node) {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
@@ -225,7 +230,7 @@ class ShapePropagator {
             dimmed = c10::promoteTypes(dimmed, dtt->scalarType());
           }
         }
-      } else {
+      } else if (!isFloatingType(dimmed)) {
         auto inputDtype = typeToScalarType(node->inputs()[i]->type());
         if (zerodim == c10::ScalarType::Undefined) {
           zerodim = inputDtype;
@@ -234,18 +239,26 @@ class ShapePropagator {
         }
       }
     }
+    // if a tensor with dimensions is already of the highest category, don't
+    // need to check zero-dim tensors.
     if (isFloatingType(dimmed)) {
       return dimmed;
     }
+    // int_tensor * zero_dim_floating -> floating_tensor
     if (isIntegralType(dimmed) && isFloatingType(zerodim) ) {
       return zerodim;
     }
+    // bool_tensor * non_bool_scalar -> non_bool_tensor
     if (c10::ScalarType::Bool == dimmed && c10::ScalarType::Undefined != zerodim) {
       return zerodim;
     }
+    // types of dimensioned tensors generally take precedence over zero-dim
+    // tensors if not promoting due to category. e.g.:
+    // int_tensor * long -> int_tensor
     if (c10::ScalarType::Undefined != dimmed) {
       return dimmed;
     }
+    // no dimmed tensors. e.g. zero_dim_tensor + zero_dim_tensor.
     return zerodim;
   }
 
