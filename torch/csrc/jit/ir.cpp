@@ -1576,10 +1576,47 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 }
 
 std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Graph& callee) {
+  WithInsertPoint guard(to_replace);
+  auto new_outputs =
+      insertGraph(*to_replace->owningGraph(), callee, to_replace->inputs());
+  const auto& old_outputs = to_replace->outputs();
+
+  AT_ASSERT(new_outputs.size() == old_outputs.size());
+  for (size_t i = 0; i < old_outputs.size(); ++i) {
+    if (old_outputs[i]->hasDebugName()) {
+      new_outputs[i]->setDebugName(old_outputs[i]->debugName());
+    }
+    old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
+  }
+  to_replace->destroy();
+
+  return new_outputs;
+}
+
+std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
+  std::vector<Value*> new_outputs;
+  if (outputs.size() != 1 || outputs.at(0)->type()->kind() != TupleType::Kind) {
+    return outputs;
+  }
+
+  auto tup = outputs[0];
+  for (Value* v : createTupleUnpack(tup)) {
+    new_outputs.emplace_back(v);
+  }
+  // if this was a peephole tuple unpack we can just get rid of
+  // the tuple construct here and prevent needing DCE
+  if (tup->node()->kind() == prim::TupleConstruct && !tup->node()->hasUses()) {
+    tup->node()->destroy();
+  }
+  return new_outputs;
+}
+
+std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs,
-    bool unpack_outputs) {
+    ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
@@ -1596,21 +1633,6 @@ std::vector<Value*> inlineCallTo(
   std::vector<Value*> outputs;
   for (auto* output : callee.outputs()) {
     outputs.push_back(value_map_func(output));
-  }
-
-  if (unpack_outputs && outputs.size() == 1 &&
-      callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
-    auto tup = outputs[0];
-    outputs.clear();
-    for (Value* v : createTupleUnpack(tup)) {
-      outputs.emplace_back(v);
-    }
-    // if this was a peephole tuple unpack we can just get rid of
-    // the tuple construct here and prevent needing DCE
-    if (tup->node()->kind() == prim::TupleConstruct &&
-        !tup->node()->hasUses()) {
-      tup->node()->destroy();
-    }
   }
 
   return outputs;

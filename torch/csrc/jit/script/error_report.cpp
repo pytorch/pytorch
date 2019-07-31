@@ -33,7 +33,7 @@ void ErrorReport::CallStack::pop_function() {
   calls.pop_back();
 }
 
-C10_EXPORT const char* ErrorReport::what() const noexcept {
+const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
   msg << "\n" << ss.str();
   if (context) {
