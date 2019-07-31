@@ -14,7 +14,6 @@ class ReLU(NNReLU):
     Please see https://pytorch.org/docs/stable/nn.html#torch.nn.ReLU
     for more documentation on ReLU.
 
-
     Args:
         inplace: (Currently not supported) can optionally do the operation in-place.
 
@@ -33,7 +32,6 @@ class ReLU(NNReLU):
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(inplace)
         assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
-
 
     def forward(self, input):
         return F.relu(input)

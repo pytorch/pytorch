@@ -47,6 +47,9 @@ class CAFFE2_API Context {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
   }
+  bool isPinnedPtr(void* data) {
+    return detail::getCUDAHooks().isPinnedPtr(data);
+  }
   bool hasOpenMP() const;
   bool hasMKL() const;
   bool hasLAPACK() const;
