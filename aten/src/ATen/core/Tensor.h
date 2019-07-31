@@ -262,7 +262,7 @@ class CAFFE2_API Tensor {
 
 #ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
-  bool is_named() const;
+  bool has_names() const;
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;

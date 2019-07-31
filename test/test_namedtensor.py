@@ -74,6 +74,17 @@ class TestNamedTensor(TestCase):
     def test_empty(self):
         self._test_factory(torch.empty, 'cpu')
 
+    def test_has_names(self):
+        unnamed = torch.empty(2, 3)
+        none_named = torch.empty(2, 3, names=(None, None))
+        partially_named = torch.empty(2, 3, names=('N', None))
+        fully_named = torch.empty(2, 3, names=('N', 'C'))
+
+        self.assertFalse(unnamed.has_names())
+        self.assertFalse(none_named.has_names())
+        self.assertTrue(partially_named.has_names())
+        self.assertTrue(fully_named.has_names())
+
     def test_copy_transpose(self):
         # This type of copy is special-cased and therefore needs its own test
         def _test(self_names, other_names, expected_names):
