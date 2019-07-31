@@ -92,6 +92,10 @@ struct QualifiedName {
     return name_;
   }
 
+  const std::vector<std::string>& atoms() const {
+    return atoms_;
+  }
+
   bool operator==(const QualifiedName& other) const {
     return this->qualifiedName_ == other.qualifiedName_;
   }

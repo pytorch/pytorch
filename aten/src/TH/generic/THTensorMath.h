@@ -81,6 +81,9 @@ TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor
 TH_API void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value);
 TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src);
 
+TH_API void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension);
+TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);
+
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 TH_API void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
@@ -127,8 +130,6 @@ TH_API void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t 
 TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim);
 TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
 TH_API void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim);
-TH_API void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension);
-TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);
 TH_API accreal THTensor_(trace)(THTensor *t);
 
 TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);

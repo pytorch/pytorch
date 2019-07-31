@@ -16,12 +16,18 @@ void pickle_stream(
   if (tensor_table == nullptr) {
     // No tensor table provided, so tensors will be stored directly in the blob.
     // Add torch.save metadata so these tensors can be de-serialized later
-    pickler.pushMetadata();
+    pickler.torchSaveStart();
   }
 
-  pickler.start();
-  pickler.addIValue(ivalue);
-  pickler.finish();
+  pickler.protocol();
+  pickler.pushIValue(ivalue);
+  pickler.stop();
+
+  if (tensor_table == nullptr) {
+    // No tensor table provided, so tensors will be stored directly in the blob.
+    // Add torch.save metadata so these tensors can be de-serialized later
+    pickler.torchSaveStop();
+  }
 }
 
 std::vector<char> pickle(

@@ -71,8 +71,12 @@ c10::IValue SourceRangeSerializer::serialize_source(
   if (serialized_sources.count(s)) {
     return serialized_sources.at(s);
   }
-  std::vector<c10::IValue> elements{
-      s->text(), s->filename(), (int64_t)s->starting_line_no()};
+  std::vector<c10::IValue> elements;
+  if (s == nullptr) {
+    elements = {"", "", 0};
+  } else {
+    elements = {s->text(), s->filename(), (int64_t)s->starting_line_no()};
+  }
   auto serialized = c10::ivalue::Tuple::create(std::move(elements));
   serialized_sources[s] = serialized;
   return serialized;
@@ -94,6 +98,7 @@ std::vector<char> SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
   TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
   return result;
 }
+
 
 ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
     at::DataPtr&& data,
@@ -123,7 +128,7 @@ c10::optional<SourceRange> ConcreteSourceRangeUnpickler::
     findSourceRangeThatGenerated(const SourceRange& range) {
   unpickle();
 
-  auto query = TaggedRange(range.start(), SourceRange{""});
+  auto query = TaggedRange(range.start(), SourceRange{});
   auto entry = std::upper_bound(
       unpickled_records->begin(),
       unpickled_records->end(),

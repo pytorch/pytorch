@@ -9,6 +9,4 @@ TH_API void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a);
 TH_API void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau);
 TH_API void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, const char *side, const char *trans);
 
-TH_API void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor *pivots);
-
 #endif

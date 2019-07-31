@@ -92,6 +92,11 @@ def type_argument_translations(arg):
     elif re.match(r'std::array', t):
         raise RuntimeError("Please use array notation, e.g. bool[3] and not std::array."
                            "See [temp translations] for details.")
+    # Enables Dimname[x] by translating to DimnameList[x]. See [temp translations]
+    elif re.match(r'Dimname\[(\d+)\]', t):
+        match = re.match(r'Dimname\[(\d+)\]', t)
+        t = 'DimnameList'
+        size = int(match.group(1))
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':

@@ -195,22 +195,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_view
-  cname: newView
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  device_guard: False
-  return: THTensor*
-  arguments:
-    - THTensor* self
-    - arg: IntArrayRefSize size
-      long_args: True
-]]
-[[
   name: _th_resize_as_
   cname: resizeAs
   cpu_half: True
@@ -1810,6 +1794,8 @@
 [[
   name: _th_cumsum
   cname: cumsum
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:
@@ -1822,6 +1808,8 @@
 [[
   name: _th_cumprod
   cname: cumprod
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:
@@ -2456,25 +2444,6 @@
       default: N
 ]]
 [[
-  name: _th_btrisolve
-  cname: btrisolve
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  scalar_check: false
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THTensor* LU_data
-    - THIntegerTensor* LU_pivots
-]]
-[[
   name: _th_random_
   backends:
     - CPU
@@ -2713,23 +2682,6 @@
     - double p
 ]]
 
-# In theory, this could be a part of the above declaration. But in
-# practice this leads to all sorts of problems with ambiguous overloads.
-# So we add it here with a separate name.
-[[
-  name: _th_alias
-  return: THTensor*
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  options:
-    - cname: newWithTensor
-      arguments:
-        - THTensor* self
-]]
 [[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
