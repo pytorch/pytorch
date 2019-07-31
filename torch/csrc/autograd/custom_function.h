@@ -95,6 +95,8 @@ private:
   std::vector<torch::autograd::SavedVariable> saved_variables_;
   variable_list to_save_;
 
+  // The CppNode in the autograd graph that owns this AutogradContext. We need a
+  // weak_ptr to avoid a refcycle.
   std::weak_ptr<Node> grad_fn_;
   bool has_freed_buffers;
 
@@ -191,6 +193,10 @@ variable_list Function<T>::apply(Args&&... args) {
     if (is_executable) {
       node->output_info_.emplace_back(output);
     }
+  }
+
+  if (is_executable) {
+    node->save_variables_to_ctx();
   }
 
   return wrapped_outputs;
