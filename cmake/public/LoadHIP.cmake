@@ -66,6 +66,13 @@ ELSE()
   SET(HIPRAND_PATH $ENV{HIPRAND_PATH})
 ENDIF()
 
+# ROCRAND_PATH
+IF(NOT DEFINED ENV{ROCRAND_PATH})
+  SET(ROCRAND_PATH ${ROCM_PATH}/rocrand)
+ELSE()
+  SET(ROCRAND_PATH $ENV{ROCRAND_PATH})
+ENDIF()
+
 # MIOPEN_PATH
 IF(NOT DEFINED ENV{MIOPEN_PATH})
   SET(MIOPEN_PATH ${ROCM_PATH}/miopen)
@@ -111,12 +118,14 @@ IF(HIP_FOUND)
   set(CMAKE_HCC_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
   ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
 
+  set(rocrand_DIR ${ROCRAND_PATH}/lib/cmake/rocrand)
   set(hiprand_DIR ${HIPRAND_PATH}/lib/cmake/hiprand)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(miopen_DIR ${MIOPEN_PATH}/lib/cmake/miopen)
   set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
 
+  find_package_and_print_version(rocrand REQUIRED) 
   find_package_and_print_version(hiprand REQUIRED)
   find_package_and_print_version(rocblas REQUIRED)
   find_package_and_print_version(miopen REQUIRED)
