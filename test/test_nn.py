@@ -4366,6 +4366,23 @@ class TestNN(NNTestCase):
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out.data, expected)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_parallel_apply_passes_exception(self):
+        # we define and instantiate a module that will throw a KeyError
+        class TestModule(nn.Module):
+
+            def forward(self, *args):
+                return {}['wonderful']
+
+        l1 = TestModule().to("cuda", torch.float)
+        # and check that parallel_apply passes on the exception
+        # (we can use a single device twice for this test)
+        with self.assertRaisesRegex(KeyError,
+                                    'Caught KeyError in replica \\d '
+                                    'on device 0.\nOriginal Traceback'
+                                    '[\\s\\S]+wonderful'):
+            dp.parallel_apply(modules=(l1, l1), inputs=(None, None))
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
@@ -5271,6 +5288,15 @@ class TestNN(NNTestCase):
         m = nn.ConvTranspose3d(2, 2, 2)
         i = torch.rand(1, 2, 1, 1, 1)
         out = m(i, output_size=(1, 2, 2, 2, 2))
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_ConvTranspose2d_half_cublas_gemm(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            inputs = torch.randn(1, 1, 16, 16, device='cuda', dtype=torch.half)
+            deconv = nn.ConvTranspose2d(
+                1, 1, 3, stride=2, padding=1, output_padding=1).cuda().half()
+            output = deconv(inputs)
+            output.mean().backward()
 
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions
