@@ -23,17 +23,15 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
   return MemOverlap::TOO_HARD;
 }
 
-void assert_no_internal_overlap(const Tensor& t, const std::string& op) {
-  assert_no_internal_overlap(t.unsafeGetTensorImpl(), op);
+void assert_no_internal_overlap(const Tensor& t) {
+  assert_no_internal_overlap(t.unsafeGetTensorImpl());
 }
 
-void assert_no_internal_overlap(TensorImpl* t, const std::string& op) {
-  if (has_internal_overlap(t) == MemOverlap::YES) {
-    AT_ERROR(
-        op, ": unsupported operation: more than one element of the written-to "
-        "tensor refers to a single memory location. Please clone() the tensor "
-        "before calling ", op);
-  }
+void assert_no_internal_overlap(TensorImpl* t) {
+  TORCH_CHECK(has_internal_overlap(t) != MemOverlap::YES,
+    "unsupported operation: more than one element of the written-to tensor "
+    "refers to a single memory location. Please clone() the tensor before "
+    "performing the operation.");
 }
 
 }

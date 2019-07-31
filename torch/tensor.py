@@ -231,11 +231,6 @@ class Tensor(torch._C._TensorBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def is_pinned(self):
-        r"""Returns true if this tensor resides in pinned memory"""
-        storage = self.storage()
-        return storage.is_pinned() if storage else False
-
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
 
@@ -271,6 +266,12 @@ class Tensor(torch._C._TensorBase):
             return LU, pivots, infos
         else:
             return LU, pivots
+
+    def gels(self, A):
+        r"""See :func:`torch.lstsq`"""
+        warnings.warn("torch.gels is deprecated in favour of torch.lstsq and will be "
+                      "removed in the next release. Please use torch.lstsq instead.", stacklevel=2)
+        return super(Tensor, self).lstsq(A)
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
