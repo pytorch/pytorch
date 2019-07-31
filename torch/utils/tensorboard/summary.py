@@ -460,7 +460,7 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
     return np.stack((tp, fp, tn, fn, precision, recall))
 
 
-def _get_tensor_summary(name, display_name, description, tensor, content_type, json_config):
+def _get_tensor_summary(name, display_name, description, tensor, content_type, components, json_config, collections):
     """Creates a tensor summary with summary metadata.
 
     Args:
@@ -473,6 +473,8 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
         is supported.
       tensor: Tensor to display in summary.
       content_type: Type of content inside the Tensor.
+      components: Bitmask representing present parts (vertices, colors, etc.) that
+        belong to the summary.
       json_config: A string, JSON-serialized dictionary of ThreeJS classes
         configuration.
 
@@ -483,13 +485,14 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
     from tensorboard.plugins.mesh import metadata
 
     tensor = torch.as_tensor(tensor)
-
+    shape = [dim if dim is not None else -1 for dim in tensor.shape]
     tensor_metadata = metadata.create_summary_metadata(
-        name,
-        display_name,
-        content_type,
-        tensor.shape,
-        description,
+        name=name,
+        display_name=display_name,
+        content_type=content_type,
+        components=components,
+        shape=shape,
+        description=description,
         json_config=json_config)
 
     tensor = TensorProto(dtype='DT_FLOAT',
@@ -518,7 +521,7 @@ def _get_json_config(config_dict):
 
 
 # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/mesh/summary.py
-def mesh(tag, vertices, colors, faces, config_dict, display_name=None, description=None):
+def mesh(tag, vertices, colors, faces, config_dict, display_name=None, description=None, collections=None):
     """Outputs a merged `Summary` protocol buffer with a mesh/point cloud.
 
       Args:
@@ -534,25 +537,29 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
         description: A longform readable description of the summary data. Markdown
           is supported.
         config_dict: Dictionary with ThreeJS classes names and configuration.
-
+        collections: Which TensorFlow graph collections to add the summary op to.
+          Defaults to `['summaries']`. Can usually be ignored.
       Returns:
         Merged summary for mesh/point cloud representation.
       """
     from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
+    from tensorboard.plugins.mesh import metadata
 
     json_config = _get_json_config(config_dict)
 
     summaries = []
-    tensors = [
-        (vertices, MeshPluginData.VERTEX),
-        (faces, MeshPluginData.FACE),
-        (colors, MeshPluginData.COLOR)
-    ]
 
-    for tensor, content_type in tensors:
-        if tensor is None:
-            continue
+    tensors = [
+        metadata.MeshTensor(vertices, MeshPluginData.VERTEX, np.float32),
+        metadata.MeshTensor(faces, MeshPluginData.FACE, np.int32),
+        metadata.MeshTensor(colors, MeshPluginData.COLOR, np.uint8)
+    ]
+    tensors = [tensor for tensor in tensors if tensor.data is not None]
+
+    components = metadata.get_components_bitmask([tensor.content_type for tensor in tensors])
+    for tensor in tensors:
         summaries.append(
-            _get_tensor_summary(tag, display_name, description, tensor, content_type, json_config))
+            _get_tensor_summary(tag, display_name, description, tensor.data, tensor.content_type, components,
+                                json_config=json_config, collections=collections))
 
     return Summary(value=summaries)
