@@ -31,6 +31,8 @@ from .transformer import TransformerEncoder, TransformerDecoder, \
     TransformerEncoderLayer, TransformerDecoderLayer, Transformer
 from .flatten import Flatten
 
+from ._generated import Add
+
 __all__ = [
     'Module', 'Identity', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
     'ConvTranspose2d', 'ConvTranspose3d', 'Threshold', 'ReLU', 'Hardtanh', 'ReLU6',
@@ -53,10 +55,7 @@ __all__ = [
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
     'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder',
     'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
-    'Flatten'
+    'Flatten',
+    # Wrapped modules
+    'Add'
 ]
-
-# Generated modules -- use torch/quantization/tools/make_modules to regenerate.
-from ._generated import Add
-
-__all__ += ['Add']
