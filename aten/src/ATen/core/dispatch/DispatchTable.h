@@ -241,9 +241,6 @@ private:
     return kernels_.map<const DispatchTableEntry&>(
       [&] (const detail::KernelTable_& table) -> const DispatchTableEntry& {
         // We have a dispatch table. Find the correct kernel for the inputs and return it.
-
-        TORCH_INTERNAL_ASSERT(dispatch_strategy_.is_valid_, "Operator ", operator_name_, " has an invalid dispatch key but kernels registered.");
-
         TensorTypeId dispatch_key = getDispatchKey();
         auto found = table.lookup(dispatch_key);
 
