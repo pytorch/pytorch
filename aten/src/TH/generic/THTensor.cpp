@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 #include <new>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
@@ -66,17 +67,7 @@ THTensor *THTensor_(new)(void)
 /* Pointer-copy init */
 THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
-  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId()
-  ).release();
-  THTensor_(setStorageNd)(self,
-                          THTensor_getStoragePtr(tensor),
-                          tensor->storage_offset(),
-                          tensor->dim(),
-                          THTensor_getSizePtr(tensor),
-                          THTensor_getStridePtr(tensor));
-  return self;
+  return at::native::alias(THTensor_wrap(tensor)).unsafeReleaseTensorImpl();
 }
 
 /* Storage init */
@@ -190,22 +181,6 @@ THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimensi
 {
   THTensor *self = THTensor_(newWithTensor)(tensor);
   THTensor_(transpose)(self, NULL, dimension1_, dimension2_);
-  return self;
-}
-
-THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size)
-{
-  ptrdiff_t numel = THTensor_(nElement)(tensor);
-  THTensor *self = THTensor_(new)();
-  auto inferred_size = at::infer_size(size, numel);
-  auto stride = THTensor_compute_stride(tensor->sizes(),
-                                        tensor->strides(),
-                                        inferred_size);
-  THArgCheck(stride.has_value(), 2, "view size is "
-    "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Use .reshape(...) instead.");
-  auto stride_value = *stride;
-  THTensor_setStorage(self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, stride_value);
   return self;
 }
 
