@@ -332,7 +332,7 @@ PyObject *THPVariable_get_names(THPVariable *self)
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple) throw python_error();
 
-  if (!self->cdata.is_named()) {
+  if (!self->cdata.has_names()) {
     for (size_t i = 0; i < size; ++i) {
       PyTuple_SET_ITEM(tuple.get(), i, Py_None);
     }
