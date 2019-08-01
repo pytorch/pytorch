@@ -2,12 +2,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 import torch.nn.quantized as nnq
-from torch.quantization import default_qconfig, default_qat_qconfig, \
+from torch.quantization import default_qat_qconfig, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
-    TwoLayerLinearModel, SkipQuantModel, QuantStubModel, \
+    SkipQuantModel, QuantStubModel, \
     ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
 
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
@@ -252,7 +252,6 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         network
         """
         model = ManualLinearQATModel()
-        model.qconfig = default_qat_qconfig
 
         model = prepare_qat(model)
         self.checkObservers(model)
@@ -262,7 +261,6 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
     def test_conv_linear(self):
         model = ManualConvLinearQATModel()
-        model.qconfig = default_qat_qconfig
 
         model = prepare_qat(model)
         self.checkObservers(model)
@@ -279,7 +277,6 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         checkQuantized(model)
 
         model = ManualConvLinearQATModel()
-        model.qconfig = default_qat_qconfig
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 

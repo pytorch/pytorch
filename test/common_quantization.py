@@ -300,7 +300,7 @@ class ManualConvLinearQATModel(torch.nn.Module):
     """
     def __init__(self):
         super(ManualConvLinearQATModel, self).__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = default_qat_qconfig
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.conv = torch.nn.Conv2d(3, 5, kernel_size=3).to(dtype=torch.float)
