@@ -155,13 +155,13 @@ struct TORCH_API CompilationUnit {
       // of invalidating their methods. NamedTuples are fine though, since they
       // don't have methods.
       TORCH_CHECK(
-          0 == classDict_.count(*classType->qualified_name_obj()),
+          0 == classDict_.count(*classType->name()),
           "class '",
-          classType->qualname(),
+          classType->name()->qualifiedName(),
           "' already defined.");
     }
     classes_.push_back(std::move(namedType));
-    classDict_[*classes_.back()->qualified_name_obj()] = classes_.size() - 1;
+    classDict_[*classes_.back()->name()] = classes_.size() - 1;
   };
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
@@ -174,7 +174,7 @@ struct TORCH_API CompilationUnit {
 
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
+      if (cls->name()->qualifiedName() == name.qualifiedName()) {
         return cls->expect<TupleType>();
       }
     }
