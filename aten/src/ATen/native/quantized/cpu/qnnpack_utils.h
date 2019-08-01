@@ -4,8 +4,6 @@
 #include <qnnpack.h>
 #ifdef C10_MOBILE
 #include "caffe2/utils/threadpool/ThreadPool.h"
-#else
-#include <thread>
 #endif
 
 struct QnnpackOperatorDeleter {
