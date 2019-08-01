@@ -334,11 +334,6 @@ def compiled_with_cxx11_abi():
     return _C._GLIBCXX_USE_CXX11_ABI
 
 
-def _compiled_with_BUILD_NAMEDTENSOR():
-    r"""Returns whether PyTorch was built with BUILD_NAMEDTENSOR=1"""
-    return _C._BUILD_NAMEDTENSOR
-
-
 # Import the ops "namespace"
 from torch._ops import ops  # noqa: F401
 
