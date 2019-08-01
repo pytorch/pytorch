@@ -7822,11 +7822,6 @@ class _TestTorchMixin(object):
             _test_atan2_with_size((3, 3), device)
             _test_atan2_with_size((5, 5), device)
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_atan2_diff_devices(self):
-        self.assertRaisesRegex(RuntimeError, "must have the same device",
-                               lambda: torch.rand(1, device="cpu").atan2(torch.rand(1, device="cuda")))
-
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):

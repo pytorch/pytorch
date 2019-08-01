@@ -152,13 +152,7 @@ Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub(other, self, alpha);
 }
 
-
 Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto device_res = result.type().device_type();
-  auto device1 = self.type().device_type();
-  TORCH_CHECK(device_res == device1, "out and input1 must have the same device. out: ", device_res, " input1: ", device1);
-  auto device2 = other.type().device_type();
-  TORCH_CHECK(device1 == device2, "input1 and input2 must have the same device. input1: ", device1, " input2: ", device2);
   auto iter = TensorIterator::binary_op(result, self, other);
   atan2_stub(iter.device_type(), iter);
   return result;
@@ -172,7 +166,6 @@ Tensor atan2(const Tensor& self, const Tensor& other) {
 Tensor& atan2_(Tensor& self, const Tensor& other) {
   return native::atan2_out(self, self, other);
 }
-
 
 // These are still needed because we don't have C++ conversions from number
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
