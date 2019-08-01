@@ -127,3 +127,24 @@ TEST(CustomAutogradTest, ReturnLeafInplace) {
   q.sum().backward();
   ASSERT_VARIABLE_EQ(y.grad(), torch::ones({5,5}));
 }
+
+TEST(CustomAutogradTest, SaveEmptyForBackward) {
+  struct MyFunction : public Function<MyFunction> {
+    static variable_list forward(AutogradContext *ctx, Variable input) {
+      ctx->save_for_backward({Variable(), input, Variable()});
+      return {input*input};
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      auto saved = ctx->get_saved_variables();
+      EXPECT_FALSE(saved[0].defined());
+      EXPECT_FALSE(saved[2].defined());
+      return {saved[1] * 2 * grad_output[0]};
+    }
+  };
+
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  auto y = MyFunction::apply(x)[0];
+  y.sum().backward();
+  ASSERT_VARIABLE_EQ(x.grad(), 2*x);
+}
