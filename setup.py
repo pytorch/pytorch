@@ -879,7 +879,7 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries',
             'Topic :: Software Development :: Libraries :: Python Modules',
         ],
-        license='BSD',
+        license='BSD-3',
         keywords='pytorch machine learning',
     )
     if EMIT_BUILD_WARNING:
