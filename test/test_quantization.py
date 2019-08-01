@@ -320,6 +320,32 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         checkQuantized(model)
 
 
+class WrappedModuleTest(QuantizationTestCase):
+    class DummyObserver(torch.quantization.Observer):
+        SCALE = 42.0
+        ZERO_POINT = 24
+        def calculate_qparams(self):
+            return 42.0, 24
+
+    def test_add(self):
+        from torch.nn import Add as NNAdd
+        from torch.nn.quantized import Add as NNQAdd
+
+        mod = NNAdd()
+        qmod = NNQAdd()
+
+        self.assertTrue(hasattr(qmod, 'from_float'), "No 'from_float'")
+        self.assertTrue(hasattr(qmod, 'scale'), "No 'scale'")
+        self.assertTrue(hasattr(qmod, 'zero_point'), "No 'zero_point'")
+
+        mod.observer = self.DummyObserver()
+        new_qmod = qmod.from_float(mod)
+
+        self.assertEqual(new_qmod.scale, self.DummyObserver.SCALE)
+        self.assertEqual(new_qmod.zero_point, self.DummyObserver.ZERO_POINT)
+
+
+
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
         import torch.nn._intrinsic.modules.fused as torch_fused
