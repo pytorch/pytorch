@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include <iostream>
+
 using at::Tensor;
 
 namespace torch { namespace autograd {
@@ -19,10 +21,13 @@ namespace torch { namespace autograd {
 AccumulateGrad::AccumulateGrad(Variable variable_)
     : Node(/*sequence_nr=*/UINT64_MAX)
     , variable(std::move(variable_)) {
+  leaf_accumulator = true; // it's not allowed to access base class members in a derived class's initializer list.
   add_input_metadata(variable);
 }
 
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
+  std::cout << "AccumulateGrad::apply" << std::endl;
+
   // XXX: this method is not thread-safe!
   check_input_variables("AccumulateGrad", grads, 1, 0);
 

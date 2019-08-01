@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/amp/amp.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -399,6 +400,43 @@ auto Engine::thread_on_exception(NodeTask& task, std::exception& e) -> void {
   }
 }
 
+static void maybe_scale(variable_list& inputs) {
+  // The autograd-shielded in-place mul_ below could be a problem if:
+  // the user passes a reference to the _same_ gradient for _several_ different outputs OR
+  // the user is setting up for a double-backward with force-fed gradients (here called "inputs") that themselves require grad.
+  // Both issues could be resolved by making the mul below out-of-place and autograd-exposed.
+  if(amp::is_enabled()) {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    for(int i = 0; i < inputs.size(); i++)
+      inputs[i].mul_(amp::get_loss_scale());
+  }
+}
+
+// Do we want to take inputs by value or reference?
+static variable_list maybe_unscale(bool is_leaf_accumulator, variable_list inputs) {
+  // We can't be sure someone else isn't referencing this gradient.  Play it safe for now, using out-of-place ops even
+  // if we aren't setting up for a double-backward.
+  if(is_leaf_accumulator && amp::is_enabled())
+  {
+    for(int i = 0; i < inputs.size(); i++)
+      inputs[i] = inputs[i]/amp::get_loss_scale();
+  }
+  // If we can be sure no one else is referencing this gradient, we can do the following:
+  // if(GradMode::is_enabled())
+  //   if(is_leaf_accumulator && amp::is_enabled())
+  //   {
+  //     for(int i = 0; i < inputs.size(); i++)
+  //       inputs[i] = inputs[i]/amp::get_loss_scale();
+  //   }
+  //   else
+  //   {
+  //     at::AutoNonVariableTypeMode non_var_type_mode(true);
+  //     for(auto& input : inputs)
+  //       input.div_(amp::get_loss_scale());
+  //   }
+  return inputs;
+}
+
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
   for (const auto& hook : fn.pre_hooks()) {
     inputs = (*hook)(inputs);
@@ -430,6 +468,10 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
   }
   for (size_t i = 0; i < grads.size(); i++) {
     const auto& edge = edges[i];
+    std::cout << "validate_outputs loop " << i 
+              << ", edge.is_valid() = " << edge.is_valid()
+              << ", output.defined() = " << grads[i].defined() << std::endl;
+              // << ", grads[i] = " << grads[i] << std::endl;
     if (!edge.is_valid()) continue;
 
     const auto& metadata = edge.function->input_metadata(edge.input_nr);
@@ -471,7 +513,9 @@ static variable_list call_function(NodeTask& task) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
   checkpoint_valid = task.base_->can_checkpoint() && prev_checkpoint_valid_state;
   auto& fn = *task.fn_;
-  auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs_)));
+  // let the compiler do copy elision/move construction
+  auto inputs = call_pre_hooks(fn, maybe_unscale(fn.is_leaf_accumulator(),
+                                                 InputBuffer::variables(std::move(task.inputs_))));
 
   if(!task.base_->keep_graph_) {
     fn.will_release_variables();
@@ -525,6 +569,7 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
         task.base_->captured_vars_[capture.output_idx_] = task.inputs_[capture.input_idx_];
       }
     }
+    std::cout << "fn_info.needed_ = " << fn_info.needed_ << std::endl;
     if (!fn_info.needed_) return;
   }
 
@@ -640,6 +685,8 @@ struct ClearCallbacks {
   std::mutex& callbacks_lock_;
 };
 
+// outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges)
+// "inputs" in python_engine.cpp gives "outputs" here.
 auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
@@ -651,6 +698,8 @@ auto Engine::execute(const edge_list& roots,
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
+
+  maybe_scale(const_cast<variable_list&>(inputs));
 
   // Callbacks are only valid for the duration of this run and should always be cleared
   // Lock post_callbacks_lock_ before clearing final_callbacks_
@@ -664,6 +713,7 @@ auto Engine::execute(const edge_list& roots,
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
   if (!outputs.empty()) {
+    std::cout << "init_to_execute" << std::endl;
     graph_task.init_to_execute(*graph_root, outputs);
   }
   ready_queue(at::kCPU).push(NodeTask(&graph_task, std::move(graph_root), InputBuffer(0)));
@@ -718,7 +768,8 @@ auto Engine::execute(const edge_list& roots,
     cb_lock.lock();
   }
 
-  return graph_task.captured_vars_;
+  // Do we want to pass captured_vars_ by value, reference, or rvalue reference?
+  return maybe_unscale(true, graph_task.captured_vars_);
 }
 
 // note that when python is present, this base engine will be overriden
