@@ -143,10 +143,8 @@ TEST(PowTest, DoubleTensorPowAllScalars) {
   tensor_pow_scalar(doubles, doubles);
 }
 
-template<typename Vals, typename Pows>
+template<typename T, typename Vals, typename Pows>
 void scalar_pow_tensor(const Vals vals, const Pows pows) {
-  using T = typename Vals::value_type;
-
   const auto pow_tensor = torch::tensor(pows);
 
   for (const auto val : vals) {
@@ -154,9 +152,9 @@ void scalar_pow_tensor(const Vals vals, const Pows pows) {
 
     int i = 0;
     for (const auto pow : pows) {
-      const auto exp = static_cast<long>(std::pow(static_cast<long double>(val), static_cast<long double>(pow)));
+      const auto exp = static_cast<T>(std::pow(static_cast<long double>(val), static_cast<long double>(pow)));
 
-      const auto act_pow = actual_pow[i].template item<long>();
+      const auto act_pow = actual_pow[i].template item<T>();
 
       if ((!std::isnan(act_pow) || !std::isnan(exp)) && act_pow != exp) {
         std::cout << val << " pow " << pow << " = exp " << exp << " act " << act_pow << std::endl;
@@ -169,17 +167,31 @@ void scalar_pow_tensor(const Vals vals, const Pows pows) {
 }
 
 TEST(PowTest, IntScalarPowAllTensors) {
-  scalar_pow_tensor(ints, ints);
-  scalar_pow_tensor(ints, longs);
-  scalar_pow_tensor(ints, floats);
-  scalar_pow_tensor(ints, doubles);
+  scalar_pow_tensor<long>(ints, ints);
+  scalar_pow_tensor<long>(ints, longs);
+  scalar_pow_tensor<long>(ints, floats);
+  scalar_pow_tensor<long>(ints, doubles);
 }
 
 TEST(PowTest, LongScalarPowAllTensors) {
-  scalar_pow_tensor(longs, ints);
-  scalar_pow_tensor(longs, longs);
-  scalar_pow_tensor(longs, floats);
-  scalar_pow_tensor(longs, doubles);
+  scalar_pow_tensor<long>(longs, ints);
+  scalar_pow_tensor<long>(longs, longs);
+  scalar_pow_tensor<long>(longs, floats);
+  scalar_pow_tensor<long>(longs, doubles);
+}
+
+TEST(PowTest, FloatScalarPowAllTensors) {
+  scalar_pow_tensor<double>(floats, ints);
+  scalar_pow_tensor<double>(floats, longs);
+  scalar_pow_tensor<double>(floats, floats);
+  scalar_pow_tensor<double>(floats, doubles);
+}
+
+TEST(PowTest, DoubleScalarPowAllTensors) {
+  scalar_pow_tensor<double>(doubles, ints);
+  scalar_pow_tensor<double>(doubles, longs);
+  scalar_pow_tensor<double>(doubles, floats);
+  scalar_pow_tensor<double>(doubles, doubles);
 }
 
 template<typename Vals, typename Pows>

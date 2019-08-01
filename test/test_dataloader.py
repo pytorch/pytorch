@@ -54,9 +54,21 @@ load_tests = load_tests
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
 
+
 if not NO_MULTIPROCESSING_SPAWN:
+    # We want to use `spawn` if able because some of our tests check that the
+    # data loader terminiates gracefully. To prevent hanging in the testing
+    # process, such data loaders are run in a separate subprocess.
+    #
+    # We also want to test the `pin_memory=True` configuration, thus `spawn` is
+    # required to launch such processes and they initialize the CUDA context.
+    #
+    # Mixing different start method is a recipe for disaster (e.g., using a fork
+    # `mp.Event` with a spawn `mp.Process` segfaults). So we set this globally
+    # to avoid bugs.
+    #
     # Get a multiprocessing context because some test / third party library will
-    # set start_method when imported, and setting again triggers RuntimeError.
+    # set start_method when imported, and setting again triggers `RuntimeError`.
     mp = mp.get_context(method='spawn')
 
 
@@ -69,6 +81,11 @@ if not NO_MULTIPROCESSING_SPAWN:
 #
 # https://github.com/python/cpython/blob/e8113f51a8bdf33188ee30a1c038a298329e7bfa/Lib/test/_test_multiprocessing.py#L73
 JOIN_TIMEOUT = 60.0  # seconds
+
+
+supported_multiprocessing_contexts = [None]
+if torch.multiprocessing._supports_context:
+    supported_multiprocessing_contexts += list(torch.multiprocessing.get_all_start_methods())
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -114,6 +131,18 @@ class TestDatasetRandomSplit(TestCase):
         data_loader = DataLoader(dataset)
         for batch in data_loader:
             pass
+
+
+class CUDACountingDataset(Dataset):
+    def __init__(self, n):
+        super(CUDACountingDataset, self).__init__()
+        self.n = n
+
+    def __getitem__(self, i):
+        return torch.as_tensor(i, device='cuda')
+
+    def __len__(self):
+        return self.n
 
 
 class CountingDataset(Dataset):
@@ -268,7 +297,8 @@ def print_traces_of_all_threads(pid):
     time.sleep(5)
 
 
-# Stores the first encountered exception in .exception.
+# The following `ErrorTrackingProcess` stores the first encountered exception in
+# its `.exception` attribute.
 # Inspired by https://stackoverflow.com/a/33599967
 class ErrorTrackingProcess(mp.Process):
 
@@ -734,14 +764,15 @@ class TestDataLoader(TestCase):
             self.assertTrue(target.is_pinned())
 
     def test_multiple_dataloaders(self):
-        loader1_it = iter(DataLoader(self.dataset, num_workers=1))
-        loader2_it = iter(DataLoader(self.dataset, num_workers=2))
-        next(loader1_it)
-        next(loader1_it)
-        next(loader2_it)
-        next(loader2_it)
-        next(loader1_it)
-        next(loader2_it)
+        for multiprocessing_context in supported_multiprocessing_contexts:
+            loader1_it = iter(DataLoader(self.dataset, num_workers=1))
+            loader2_it = iter(DataLoader(self.dataset, num_workers=2, multiprocessing_context=multiprocessing_context))
+            next(loader1_it)
+            next(loader1_it)
+            next(loader2_it)
+            next(loader2_it)
+            next(loader1_it)
+            next(loader2_it)
 
     @unittest.skip("temporarily disable until flaky failures are fixed")
     def test_segfault(self):
@@ -762,6 +793,9 @@ class TestDataLoader(TestCase):
 
     def test_timeout(self):
         if TEST_CUDA and not NO_MULTIPROCESSING_SPAWN:
+            # This test runs in a subprocess, which can only initialize CUDA with spawn.
+            # _test_timeout_pin_memory with pin_memory=True initializes CUDA when the iterator is
+            # constructed.
             targets = (_test_timeout, _test_timeout_pin_memory)
         else:
             targets = (_test_timeout,)
@@ -783,6 +817,18 @@ class TestDataLoader(TestCase):
             DataLoader(self.dataset, num_workers=-1)
         with self.assertRaisesRegex(ValueError, "timeout option should be non-negative"):
             DataLoader(self.dataset, timeout=-1)
+
+        if torch.multiprocessing._supports_context:
+            valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
+            with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
+                DataLoader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
+            with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
+                DataLoader(self.dataset, num_workers=1, multiprocessing_context='bad')
+            with self.assertRaisesRegex(ValueError, "multiprocessing_context option should be a valid context "):
+                DataLoader(self.dataset, num_workers=1, multiprocessing_context=object())
+        else:
+            with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):
+                DataLoader(self.dataset, num_workers=1, multiprocessing_context='fork')
 
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
@@ -975,6 +1021,28 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
+    def test_multiprocessing_contexts(self):
+        reference = [
+            torch.arange(3),
+            torch.arange(3, 6),
+            torch.arange(6, 9),
+            torch.arange(9, 11),
+        ]
+        counting_ds_n = 11
+        dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
+        for ctx in supported_multiprocessing_contexts:
+            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS:  # windows doesn't support sharing cuda tensor
+                dl_cls = CUDACountingDataset
+            else:
+                ds_cls = CountingDataset
+            self.assertEqual(
+                reference, list(DataLoader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
+            if ctx is not None:
+                # test ctx object
+                ctx = mp.get_context(ctx)
+                self.assertEqual(
+                    reference, list(DataLoader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
+
     def test_worker_seed(self):
         num_workers = 6
         batch_size = 1
@@ -1020,25 +1088,6 @@ class TestDataLoader(TestCase):
 
     def test_shuffle_batch_workers(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
-
-    def _test_batch_sampler(self, **kwargs):
-        # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
-        batches = []
-        for i in range(0, 100, 5):
-            batches.append(tuple(range(i, i + 2)))
-            batches.append(tuple(range(i + 2, i + 5)))
-
-        dl = DataLoader(self.dataset, batch_sampler=batches, **kwargs)
-        self.assertEqual(len(dl), 40)
-        for i, (input, _target) in enumerate(dl):
-            if i % 2 == 0:
-                offset = i * 5 // 2
-                self.assertEqual(len(input), 2)
-                self.assertEqual(input, self.data[offset:offset + 2])
-            else:
-                offset = i * 5 // 2
-                self.assertEqual(len(input), 3)
-                self.assertEqual(input, self.data[offset:offset + 3])
 
     def test_RandomSampler(self):
 
@@ -1113,11 +1162,30 @@ class TestDataLoader(TestCase):
 
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
+    def _test_batch_sampler(self, **kwargs):
+        # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
+        batches = []
+        for i in range(0, 20, 5):
+            batches.append(tuple(range(i, i + 2)))
+            batches.append(tuple(range(i + 2, i + 5)))
+
+        dl = DataLoader(self.dataset, batch_sampler=batches, **kwargs)
+        self.assertEqual(len(dl), 8)
+        for i, (input, _target) in enumerate(dl):
+            if i % 2 == 0:
+                offset = i * 5 // 2
+                self.assertEqual(len(input), 2)
+                self.assertEqual(input, self.data[offset:offset + 2])
+            else:
+                offset = i * 5 // 2
+                self.assertEqual(len(input), 3)
+                self.assertEqual(input, self.data[offset:offset + 3])
+
     def test_batch_sampler(self):
         self._test_batch_sampler()
         self._test_batch_sampler(num_workers=4)
+        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+            self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
@@ -1145,8 +1213,6 @@ class TestDataLoader(TestCase):
     def test_error(self):
         self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
     def test_error_workers(self):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
@@ -1195,7 +1261,8 @@ class TestDataLoader(TestCase):
             # processes still exit in both cases.
 
             if pin_memory and (not TEST_CUDA or NO_MULTIPROCESSING_SPAWN or IS_WINDOWS):
-                # Can't use CUDA without spawn
+                # This test runs in a subprocess, which can only initialize CUDA with spawn.
+                # DataLoader with pin_memory=True initializes CUDA when its iterator is constructed.
                 # For windows, pin_memory sometimes causes CUDA oom.
                 continue
 
