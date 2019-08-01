@@ -1007,7 +1007,7 @@ def _try_compile_fn(fn, loc):
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
     qualified_name = _qualified_name(fn)
-    return _compile_function(fn, qualified_name=qualified_name, _rcb=rcb)
+    return _compile_function(fn, qualified_name=qualified_name, _frames_up=1, _rcb=rcb)
 
 
 @contextlib.contextmanager
@@ -1060,11 +1060,11 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     _add_script_class(obj, qualified_name)
 
 
-def _compile_function(fn, qualified_name, _rcb=None, _frames_up=1):
+def _compile_function(fn, qualified_name, _frames_up, _rcb=None):
     ast = get_jit_def(fn)
     if _rcb is None:
         closure_rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
-        stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 2)
+        stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
 
         def _rcb(name):
             # since type comments aren't captured in the function's closures,
@@ -1178,7 +1178,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
-        return _compile_function(fn=obj, qualified_name=qualified_name, _rcb=_rcb)
+        return _compile_function(fn=obj, qualified_name=qualified_name, _frames_up=_frames_up + 1, _rcb=_rcb)
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
