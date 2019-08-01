@@ -13553,6 +13553,7 @@ a")
 
             @torch.jit.export
             def __setstate__(self, state):
+                # type: (Tuple[Tensor])
                 self.tensor = state[0]
 
             def forward(self, x):

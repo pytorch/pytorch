@@ -937,7 +937,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   auto set_type = set_schema.arguments().at(1).type();
 
   TORCH_CHECK(
-      get_type->isSubtypeOf(set_type),
+      set_type->isSubtypeOf(get_type),
       "'__getstate__'s return type (",
       get_type->python_str(),
       ") does not match '__setstate__'s argument type (",

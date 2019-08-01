@@ -59,7 +59,7 @@ size_t ClassType::addAttribute(
   }
   size_t slot = attributeNames_.size();
   attributeNames_.push_back(name);
-  attributeTypes_.push_back(type);
+  attributeTypes_.push_back(unshapedType(type));
   if (is_parameter) {
     TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
   }
