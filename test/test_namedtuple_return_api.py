@@ -25,7 +25,7 @@ class TestNamedTupleAPI(unittest.TestCase):
         for f in yaml.load(file.read()):
             f = f['func']
             ret = f.split('->')[1].strip()
-            name = regex.findall(f)[0]
+            name = regex.findall(f)[0][0]
             if name in all_operators_with_namedtuple_return:
                 operators_found.add(name)
                 continue
