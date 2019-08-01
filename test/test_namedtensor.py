@@ -8,7 +8,7 @@ import sys
 
 
 skipIfNamedTensorDisabled = \
-    unittest.skipIf(not torch._compiled_with_BUILD_NAMEDTENSOR(),
+    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
