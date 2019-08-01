@@ -25,9 +25,9 @@ class _BaseWrapperModule(Module):
         if __FLOAT_MODULE is None:
             raise NotImplementedError("I don't know what to do with "
                                       + type(mod))
-        assert (hasattr(mod, 'observer')),\
+        assert (hasattr(mod, 'observer')), \
             "Input float module must have observer attached"
-        assert (type(mod) == cls.__FLOAT_MODULE),\
+        assert (type(mod) == cls.__FLOAT_MODULE), \
             "nnq." + cls.__name__ + ".from_float only works for " \
             + cls.__FLOAT_MODULE.__name__
         scale, zero_point = mod.observer.calculate_qparams()[:2]
