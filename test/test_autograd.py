@@ -2472,140 +2472,145 @@ class TestAutograd(TestCase):
         _test_cdist_for_size((2, 3, 5))
         _test_cdist_for_size((1, 2, 3))
 
-    # def test_cdist_gpu_2(self):
-    #     def _test_cdist_for_size(sizes):
-    #         devices = [] if not torch.cuda.is_available() else ['cuda']
-    #         for p in [2]:
-    #             for device in devices:
-    #                 x = torch.randn(sizes, device=device, dtype=torch.double)
-    #                 y = torch.randn(sizes, device=device, dtype=torch.double)
-    #
-    #                 x = x - (((x - y) < TTT).double() * 2 * TTT)
-    #                 x.requires_grad = True
-    #                 y.requires_grad = True
-    #
-    #                 f_args_variable = (x, y)
-    #
-    #                 def f(a, b):
-    #                     return torch.cdist(a, b, p)
-    #
-    #                 f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-    #                 run_functional_checks(self, "test_cdist_gpu_2", "cdist", f,
-    #                                       True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-    #
-    #     _test_cdist_for_size((S, S))
-    #     _test_cdist_for_size((S, S, S))
-    #     _test_cdist_for_size((3, 5))
-    #     _test_cdist_for_size((2, 3, 5))
-    #     _test_cdist_for_size((1, 2, 3))
-    #
-    # def test_cdist_gpu_3(self):
-    #     def _test_cdist_for_size(sizes):
-    #         devices = [] if not torch.cuda.is_available() else ['cuda']
-    #         for p in [3]:
-    #             for device in devices:
-    #                 x = torch.randn(sizes, device=device, dtype=torch.double)
-    #                 y = torch.randn(sizes, device=device, dtype=torch.double)
-    #
-    #                 x = x - (((x - y) < TTT).double() * 2 * TTT)
-    #                 x.requires_grad = True
-    #                 y.requires_grad = True
-    #
-    #                 f_args_variable = (x, y)
-    #
-    #                 def f(a, b):
-    #                     return torch.cdist(a, b, p)
-    #
-    #                 f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-    #                 run_functional_checks(self, "test_cdist_gpu_3", "cdist", f,
-    #                                       True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-    #
-    #     _test_cdist_for_size((S, S))
-    #     _test_cdist_for_size((S, S, S))
-    #     _test_cdist_for_size((3, 5))
-    #     _test_cdist_for_size((2, 3, 5))
-    #     _test_cdist_for_size((1, 2, 3))
-    #
-    # def test_cdist_gpu_15(self):
-    #     def _test_cdist_for_size(sizes):
-    #         devices = [] if not torch.cuda.is_available() else ['cuda']
-    #         for p in [1.5]:
-    #             for device in devices:
-    #                 x = torch.randn(sizes, device=device, dtype=torch.double)
-    #                 y = torch.randn(sizes, device=device, dtype=torch.double)
-    #
-    #                 x = x - (((x - y) < TTT).double() * 2 * TTT)
-    #                 x.requires_grad = True
-    #                 y.requires_grad = True
-    #
-    #                 f_args_variable = (x, y)
-    #
-    #                 def f(a, b):
-    #                     return torch.cdist(a, b, p)
-    #
-    #                 f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-    #                 run_functional_checks(self, "test_cdist_gpu_15", "cdist", f,
-    #                                       True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-    #
-    #     _test_cdist_for_size((S, S))
-    #     _test_cdist_for_size((S, S, S))
-    #     _test_cdist_for_size((3, 5))
-    #     _test_cdist_for_size((2, 3, 5))
-    #     _test_cdist_for_size((1, 2, 3))
-    #
-    # def test_cdist_gpu_25(self):
-    #     def _test_cdist_for_size(sizes):
-    #         devices = [] if not torch.cuda.is_available() else ['cuda']
-    #         for p in [2.5]:
-    #             for device in devices:
-    #                 x = torch.randn(sizes, device=device, dtype=torch.double)
-    #                 y = torch.randn(sizes, device=device, dtype=torch.double)
-    #
-    #                 x = x - (((x - y) < TTT).double() * 2 * TTT)
-    #                 x.requires_grad = True
-    #                 y.requires_grad = True
-    #
-    #                 f_args_variable = (x, y)
-    #
-    #                 def f(a, b):
-    #                     return torch.cdist(a, b, p)
-    #
-    #                 f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-    #                 run_functional_checks(self, "test_cdist_gpu_25", "cdist", f,
-    #                                       True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-    #
-    #     _test_cdist_for_size((S, S))
-    #     _test_cdist_for_size((S, S, S))
-    #     _test_cdist_for_size((3, 5))
-    #     _test_cdist_for_size((2, 3, 5))
-    #     _test_cdist_for_size((1, 2, 3))
-    #
-    # def test_cdist_gpu_inf(self):
-    #     def _test_cdist_for_size(sizes):
-    #         devices = [] if not torch.cuda.is_available() else ['cuda']
-    #         for p in [float('inf')]:
-    #             for device in devices:
-    #                 x = torch.randn(sizes, device=device, dtype=torch.double)
-    #                 y = torch.randn(sizes, device=device, dtype=torch.double)
-    #
-    #                 x = x - (((x - y) < TTT).double() * 2 * TTT)
-    #                 x.requires_grad = True
-    #                 y.requires_grad = True
-    #
-    #                 f_args_variable = (x, y)
-    #
-    #                 def f(a, b):
-    #                     return torch.cdist(a, b, p)
-    #
-    #                 f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-    #                 run_functional_checks(self, "test_cdist_gpu_inf", "cdist", f,
-    #                                       True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
-    #
-    #     _test_cdist_for_size((S, S))
-    #     _test_cdist_for_size((S, S, S))
-    #     _test_cdist_for_size((3, 5))
-    #     _test_cdist_for_size((2, 3, 5))
-    #     _test_cdist_for_size((1, 2, 3))
+    def test_cdist_gpu_2(self):
+        def _test_cdist_for_size(sizes):
+            devices = [] if not torch.cuda.is_available() else ['cuda']
+            for p in [2]:
+                for device in devices:
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
+
+                    eee = 1e-6
+                    x = x - (((x - y) < eee).double() * 2 * eee)
+                    x.requires_grad = True
+                    y.requires_grad = True
+
+                    f_args_variable = (x, y)
+
+                    def f(a, b):
+                        return torch.cdist(a, b, p)
+
+                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                    run_functional_checks(self, "test_cdist_gpu_2", "cdist", f,
+                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
+
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
+
+    def test_cdist_gpu_3(self):
+        def _test_cdist_for_size(sizes):
+            devices = [] if not torch.cuda.is_available() else ['cuda']
+            for p in [3]:
+                for device in devices:
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
+
+                    eee = 1e-6
+                    x = x - (((x - y) < eee).double() * 2 * eee)
+                    x.requires_grad = True
+                    y.requires_grad = True
+
+                    f_args_variable = (x, y)
+
+                    def f(a, b):
+                        return torch.cdist(a, b, p)
+
+                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                    run_functional_checks(self, "test_cdist_gpu_3", "cdist", f,
+                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
+
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
+
+    def test_cdist_gpu_15(self):
+        def _test_cdist_for_size(sizes):
+            devices = [] if not torch.cuda.is_available() else ['cuda']
+            for p in [1.5]:
+                for device in devices:
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
+
+                    eee = 1e-6
+                    x = x - (((x - y) < eee).double() * 2 * eee)
+                    x.requires_grad = True
+                    y.requires_grad = True
+
+                    f_args_variable = (x, y)
+
+                    def f(a, b):
+                        return torch.cdist(a, b, p)
+
+                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                    run_functional_checks(self, "test_cdist_gpu_15", "cdist", f,
+                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
+
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
+
+    def test_cdist_gpu_25(self):
+        def _test_cdist_for_size(sizes):
+            devices = [] if not torch.cuda.is_available() else ['cuda']
+            for p in [2.5]:
+                for device in devices:
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
+
+                    eee = 1e-6
+                    x = x - (((x - y) < eee).double() * 2 * eee)
+                    x.requires_grad = True
+                    y.requires_grad = True
+
+                    f_args_variable = (x, y)
+
+                    def f(a, b):
+                        return torch.cdist(a, b, p)
+
+                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                    run_functional_checks(self, "test_cdist_gpu_25", "cdist", f,
+                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
+
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
+
+    def test_cdist_gpu_inf(self):
+        def _test_cdist_for_size(sizes):
+            devices = [] if not torch.cuda.is_available() else ['cuda']
+            for p in [float('inf')]:
+                for device in devices:
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
+
+                    eee = 1e-6
+                    x = x - (((x - y) < eee).double() * 2 * eee)
+                    x.requires_grad = True
+                    y.requires_grad = True
+
+                    f_args_variable = (x, y)
+
+                    def f(a, b):
+                        return torch.cdist(a, b, p)
+
+                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                    run_functional_checks(self, "test_cdist_gpu_inf", "cdist", f,
+                                          True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
+
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
 
     def test_var_mean_differentiable(self):
