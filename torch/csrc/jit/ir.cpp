@@ -1595,18 +1595,21 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 
 std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   WithInsertPoint guard(to_replace);
-  std::unordered_map<Node*, Node*> node_map;
+  std::unordered_map<Value*, Value*> value_map;
   auto new_outputs = insertGraph(
       *to_replace->owningGraph(),
       *(callee->graph()),
       to_replace->inputs(),
-      node_map);
+      value_map);
 
-  for (const auto& kv : node_map) {
-    Node* orig_node = kv.first;
-    Node* new_node = kv.second;
-    new_node->insertCallStackEntry(callee, to_replace->sourceRange());
-    new_node->appendCallStackOf(orig_node);
+  std::unordered_set<Node*> updated_nodes;
+  for (const auto& kv : value_map) {
+    Node* orig_node = kv.first->node();
+    Node* new_node = kv.second->node();
+    if (updated_nodes.insert(new_node).second) {
+      new_node->insertCallStackEntry(callee, to_replace->sourceRange());
+      new_node->appendCallStackOf(orig_node);
+    }
   }
 
   const auto& old_outputs = to_replace->outputs();
@@ -1645,8 +1648,7 @@ std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs,
-    std::unordered_map<Node*, Node*>& node_map) {
-  std::unordered_map<Value*, Value*> value_map;
+    std::unordered_map<Value*, Value*>& value_map) {
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -1654,8 +1656,6 @@ std::vector<Value*> insertGraph(
   }
   for (auto* node : callee.nodes()) {
     auto* new_node = g.insertNode(g.createClone(node, value_map_func));
-    node_map[node] = new_node;
-
     for (size_t i = 0; i < node->outputs().size(); ++i) {
       value_map[node->outputs()[i]] = new_node->outputs()[i];
     }
@@ -1673,8 +1673,8 @@ std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs) {
-  std::unordered_map<Node*, Node*> node_map;
-  return insertGraph(g, callee, inputs, node_map);
+  std::unordered_map<Value*, Value*> value_map;
+  return insertGraph(g, callee, inputs, value_map);
 }
 
 void ProfileOp::cloneFrom(Node* other_) {

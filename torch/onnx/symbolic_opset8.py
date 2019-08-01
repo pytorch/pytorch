@@ -98,12 +98,10 @@ def _comparison_operator(g, input, other, op_name):
 
 # NOTE: For symbolics {gt, lt, bmm, matmul, prelu, mm, addmm, view, flatten},
 #       integer input type not supported in opset8. Cast to float if possible.
-@wrap_logical_op_with_cast_to('Byte')
 def gt(g, input, other):
     return _comparison_operator(g, input, other, "Greater")
 
 
-@wrap_logical_op_with_cast_to('Byte')
 def lt(g, input, other):
     return _comparison_operator(g, input, other, "Less")
 
