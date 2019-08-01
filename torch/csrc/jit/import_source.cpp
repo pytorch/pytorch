@@ -114,7 +114,7 @@ struct SourceResolver : public Resolver {
       std::shared_ptr<CompilationUnit> cu,
       size_t version,
       const std::vector<at::Tensor>& tensor_table)
-      : cu_(cu) {
+      : cu_(std::move(cu)) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
@@ -260,7 +260,7 @@ struct SourceImporter {
               }
             } break;
             case TK_DEF: {
-              methods.push_back(Def(statement));
+              methods.emplace_back(Def(statement));
               resolvers.push_back(resolver_);
             } break;
             default: {
@@ -409,7 +409,7 @@ void import_functions(
     const std::vector<at::Tensor>& tensor_table,
     const Self* self,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(cu, src, tensor_table, import_callback);
+  SourceImporter importer(std::move(cu), src, tensor_table, import_callback);
   importer.importFunctions(prefix, self);
 }
 

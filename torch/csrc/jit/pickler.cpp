@@ -52,7 +52,7 @@ const char* getClassName(PicklerClass cls) {
   }
 }
 
-static void postSetStateValidate(IValue v) {
+static void postSetStateValidate(const IValue& v) {
   auto obj = v.toObject();
   const auto& objType = obj->type();
   for (size_t i = 0; i < objType->numAttributes(); i++) {

@@ -16,6 +16,11 @@ static ModulePtr create_module_object(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle = false) {
+  // If the name is unqualified, prepend a `__torch__`, similar to what Python
+  // does with `__main__` for top-level code.
+  if (class_name.prefix().empty()) {
+    class_name = c10::QualifiedName("__torch__", class_name.name());
+  }
   if (shouldMangle && cu->get_class(class_name) != nullptr) {
     class_name = cu->mangle(class_name);
   }

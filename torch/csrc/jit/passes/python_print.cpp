@@ -1351,7 +1351,7 @@ void LEGACY_PythonPrint(
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(
-      tensor_table, class_table, enforce_importable, /*isMethod=*/true);
+      tensor_table, class_table, enforce_importable, /*is_method=*/true);
   pp.LEGACY_printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }
