@@ -829,7 +829,7 @@ def gels(input, A, out=None):
 
 
 def align_tensors(*tensors):
-    if not torch._compiled_with_BUILD_NAMEDTENSOR():
+    if not torch._C._BUILD_NAMEDTENSOR:
         raise RuntimeError('NYI: torch.align_tensors is experimental and a part '
                            'of our named tensors project.')
     return torch._C._VariableFunctions.align_tensors(tensors)
