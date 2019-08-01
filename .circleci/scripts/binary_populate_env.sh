@@ -52,7 +52,7 @@ fi
 
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-if [[ "$(uname)" == 'Darwin' ]]; then
+if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu100" ]]; then
   export PYTORCH_BUILD_VERSION="1.2.0.dev$DATE"
 else
   export PYTORCH_BUILD_VERSION="1.2.0.dev$DATE+$DESIRED_CUDA"
