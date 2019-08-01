@@ -289,10 +289,20 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                     max_error = atol + rtol * n.abs()
                     close = actual_error <= max_error
 
+                    data1 = []
+                    t1 = tupled_inputs[0].view(-1)
+                    for inx in range(t1.numel()):
+                        data1.append(t1[inx].item())
+                    data2 = []
+                    t2 = tupled_inputs[1].view(-1)
+                    for inx in range(t2.numel()):
+                        data2.append(t2[inx].item())
+
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
                                      'actual_error:%s\nmax_error:%s\nclose:%s\n'
                                      'output:%s\ntupled_inputs:%s\n'
-                                     'numerical:%s\nanalytical:%s\n' % (i, j, actual_error, max_error, close, o, tupled_inputs, n, a))
+                                     'data1:%s\ndata2:%s\n'
+                                     'numerical:%s\nanalytical:%s\n' % (i, j, actual_error, max_error, close, o, tupled_inputs, tuple(data1), tuple(data2), n, a))
                 #else:
                 #    if printDebug:
                 #        print("=================CDIST=======================")
