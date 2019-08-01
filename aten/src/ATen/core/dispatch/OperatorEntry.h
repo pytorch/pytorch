@@ -35,10 +35,16 @@ public:
     });
   }
 
+  void* lookupUnboxedAutogradKernel() const {
+    return currentUnboxedAutogradKernel_;
+  }
+
   void prepareForDeregistration();
 
   RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel);
   RegistrationHandleRAII registerCatchallKernel(DispatchTableEntry kernel);
+
+  RegistrationHandleRAII registerUnboxedAutogradKernel(void* kernel_func);
 
   const OperatorOptions& options() {
     return options_;
@@ -47,6 +53,7 @@ public:
 private:
   void deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel);
   void deregisterCatchallKernel_(std::list<DispatchTableEntry>::iterator kernel);
+  void deregisterUnboxedAutogradKernel_(std::list<void*>::iterator kernel);
 
   FunctionSchema schema_;
 
@@ -87,6 +94,22 @@ private:
   > kernels_;
   std::mutex kernelsMutex_; // protects kernels_
 
+  // unboxedAutogradKernels_ stores all autograd kernels registered for this op.
+  // An autograd kernel has the same signature as the main op kernel and
+  // internally re-dispatches to call the actual kernel.
+  // Autograd kernels are unboxed currently. We are planning to move this
+  // towards a system where ops register autograd wrappers (i.e. functions that
+  // do some wrapping code and get a pointer to the actual kernel) instead of
+  // autograd functions.
+  // This is a vector because, similar to kernels_, multiple libraries could
+  // be loaded that register autograd kernels for the same op. The list is
+  // ordered by registration time descendingly, i.e. newer registrations are
+  // before older registrations and the list head is the autograd kernel
+  // which is currently used.
+  std::list<void*> unboxedAutogradKernels_;
+  std::mutex unboxedAutogradKernelsMutex_;
+  std::atomic<void*> currentUnboxedAutogradKernel_;
+
   // Some metadata about the operator
   OperatorOptions options_;
 
@@ -94,6 +117,7 @@ private:
   // contains the front element from the kernels list for a given dispatch key.
   void updateDispatchTable_(TensorTypeId dispatch_key);
   void updateCatchallDispatchTable_();
+  void updateCurrentUnboxedAutogradKernel_();
 };
 
 }

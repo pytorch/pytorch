@@ -142,6 +142,8 @@ public:
    */
   RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
 
+  RegistrationHandleRAII registerUnboxedAutogradKernel(const OperatorHandle& op, void* unboxed_autograd_kernel);
+
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
@@ -151,6 +153,9 @@ public:
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
   OpKernel lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
+
+  template<class Result, class... Args>
+  Result callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const;
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -226,6 +231,16 @@ inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispat
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(dispatchKey);
   return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
+}
+
+template<class Result, class... Args>
+inline Result Dispatcher::callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const {
+  void* unboxed_autograd_kernel = op.operatorIterator_->op.lookupUnboxedAutogradKernel();
+  TORCH_CHECK(nullptr != unboxed_autograd_kernel, "Tried to call Dispatcher::callUnboxedAutogradKernel() for an operator that doesn't have an autograd kernel.");
+
+  using OpSignature = Result (Args...);
+  OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_autograd_kernel);
+  return (*kernel)(std::forward<Args>(args)...);
 }
 
 } // namespace c10

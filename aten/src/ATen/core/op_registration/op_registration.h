@@ -276,6 +276,14 @@ public:
       return std::move(*this);
     }
 
+    template<class Result, class... Args>
+    Options&& impl_unboxedAutogradKernel(Result (*kernel)(Args...)) && {
+      // TODO Infer and check schema
+      TORCH_CHECK(!unboxedAutogradKernel_.has_value(), "You can only call impl_unboxedAutogradKernel() once per operator registration.");
+      unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
+      return std::move(*this);
+    }
+
   private:
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
@@ -332,6 +340,7 @@ public:
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
+    optional<void*> unboxedAutogradKernel_;
     friend class RegisterOperators;
   };
 
@@ -449,8 +458,8 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const std::string& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options);
   void registerOp_(FunctionSchema&& schema, Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options);
-  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options, c10::optional<void*> unboxedAutogradKernel);
+  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options, c10::optional<void*> unboxedAutogradKernel);
   static OperatorOptions makeOperatorOptions_(const Options& options);
 
   class OperatorRegistrar;

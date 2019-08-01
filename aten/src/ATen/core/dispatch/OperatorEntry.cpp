@@ -112,6 +112,35 @@ void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::ite
   updateCatchallDispatchTable_();
 }
 
+RegistrationHandleRAII OperatorEntry::registerUnboxedAutogradKernel(void* kernel_func) {
+  std::unique_lock<std::mutex> lock(unboxedAutogradKernelsMutex_);
+
+  unboxedAutogradKernels_.push_front(kernel_func);
+  std::list<void*>::iterator inserted = unboxedAutogradKernels_.begin();
+
+  updateCurrentUnboxedAutogradKernel_();
+
+  return RegistrationHandleRAII([this, inserted] {
+    // list iterators stay valid even if the list changes,
+    // so we can use the iterator to deregister the kernel from the list
+    deregisterUnboxedAutogradKernel_(inserted);
+  });
+}
+
+void OperatorEntry::deregisterUnboxedAutogradKernel_(std::list<void*>::iterator kernel) {
+  std::unique_lock<std::mutex> lock(unboxedAutogradKernelsMutex_);
+
+  unboxedAutogradKernels_.erase(kernel);
+
+  updateCurrentUnboxedAutogradKernel_();
+}
+
+void OperatorEntry::updateCurrentUnboxedAutogradKernel_() {
+  // precondition: unboxedAutogradKernelsMutex_ is locked
+
+  currentUnboxedAutogradKernel_ = unboxedAutogradKernels_.front();
+}
+
 void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
   // precondition: kernelsMutex_ is locked
 
