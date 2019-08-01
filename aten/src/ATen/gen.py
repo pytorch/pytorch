@@ -157,6 +157,7 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
+    'c10_function_registrations': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -273,11 +274,12 @@ def generate_storage_type_and_tensor(backend, density, declarations):
         env['Generator'] = 'CPUGenerator'
         env['allocator'] = 'getCPUAllocator()'
 
-    declarations, definitions, registrations, th_declarations, th_definitions = function_wrapper.create_derived(
+    declarations, definitions, registrations, c10_registrations, th_declarations, th_definitions = function_wrapper.create_derived(
         env, declarations)
     env['type_derived_method_declarations'] = declarations
     env['type_derived_method_definitions'] = definitions
     env['function_registrations'] = registrations
+    env['c10_function_registrations'] = c10_registrations
     env['legacy_th_declarations'] = th_declarations
     env['legacy_th_definitions'] = th_definitions
 

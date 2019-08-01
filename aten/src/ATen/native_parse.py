@@ -412,6 +412,7 @@ def run(paths):
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['named_guard'] = func.get('named_guard', True)
+                declaration['exclude_from_c10_dispatcher'] = func.get('exclude_from_c10_dispatcher', False)
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
