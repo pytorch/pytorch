@@ -51,10 +51,10 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
     def setUp(self):
-        self.calib_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
-        self.train_data = [(torch.rand(20, 5, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long)) for _ in range(20)]
-        self.img_data = [(torch.rand(20, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (20,), dtype=torch.long))
-                         for _ in range(20)]
+        self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
+        self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
+        self.img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                         for _ in range(2)]
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -191,8 +191,8 @@ class ManualLinearQATModel(torch.nn.Module):
         self.qconfig = default_qconfig
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
-        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
-        self.fc2 = torch.nn.Linear(5, 10).to(dtype=torch.float)
+        self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(1, 10).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.quant(x)
@@ -209,17 +209,14 @@ class ManualConvLinearQATModel(torch.nn.Module):
         self.qconfig = default_qconfig
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
-        self.conv = torch.nn.Conv2d(3, 5, kernel_size=3).to(dtype=torch.float)
-        self.fc1 = torch.nn.Linear(320, 10).to(dtype=torch.float)
+        self.conv = torch.nn.Conv2d(3, 1, kernel_size=3).to(dtype=torch.float)
+        self.fc1 = torch.nn.Linear(64, 10).to(dtype=torch.float)
         self.fc2 = torch.nn.Linear(10, 10).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.quant(x)
         x = self.conv(x)
-        # TODO: we can remove these after view is supported
-        x = self.dequant(x)
-        x = x.view(-1, 320).contiguous()
-        x = self.quant(x)
+        x = x.view(-1, 64).contiguous()
         x = self.fc1(x)
         x = self.fc2(x)
         return self.dequant(x)
