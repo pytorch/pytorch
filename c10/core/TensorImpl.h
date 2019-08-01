@@ -1615,8 +1615,17 @@ protected:
   // should pack this into a bitfield.
   TensorTypeId type_id_;
   bool is_contiguous_ = true;
-  bool is_channels_last_contiguous_ = false;
+
+  // Tensor is stored in the channels last memory format, when dimensions
+  // order is NCHW and C-strides < W-strides < H-strides < N-strides
+  // (If size of any dimension is equal to 1, this dimension strides value
+  // is not taken into account).
   bool is_channels_last_ = false;
+
+  // Channels last contiguous tensor is channel last tensor which occupies
+  // contiguous memory block.
+  bool is_channels_last_contiguous_ = false;
+
   bool is_wrapped_number_ = false;
 
   // NOTE [ Metadata Change for a Detached Tensor ]
