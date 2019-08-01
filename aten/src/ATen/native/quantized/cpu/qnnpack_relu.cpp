@@ -66,8 +66,9 @@ class QNNPACKRelu final : public torch::OperatorKernel {
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK Relu operator");
 
+    pthreadpool_t threadpool = ThreadPoolMobile::qnnpack_threadpool();
     const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, nullptr /* thread pool */);
+        qnnp_run_operator(qnnpack_operator, threadpool);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == qnnp_status_success,
