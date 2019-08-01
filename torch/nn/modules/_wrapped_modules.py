@@ -10,9 +10,10 @@ r"""Base class for all wrapper modules."""
 class _BaseWrapperModule(Module):
     def __init__(self):
         super(_BaseWrapperModule, self).__init__()
+        self.operation = None
 
     def forward(self, *args):
-        return torch.operation(*args)
+        return self.operation(*args)
 
 r"""Add module wraps torch.add."""
 class Add(_BaseWrapperModule):

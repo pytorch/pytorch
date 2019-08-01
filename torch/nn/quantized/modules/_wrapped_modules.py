@@ -14,6 +14,7 @@ class _BaseWrapperModule(Module):
         super(_BaseWrapperModule, self).__init__()
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
         self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
+        self.operation = None
 
     def forward(self, *args):
         return self.operation(*args, scale=self.scale,
