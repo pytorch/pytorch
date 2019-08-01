@@ -1,6 +1,4 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include "caffe2/utils/threadpool/ThreadPool.h"
-#include <vector>
 
 #ifdef C10_MOBILE
 std::unique_ptr<caffe2::ThreadPool> ThreadPoolMobile::thread_pool_ = nullptr;
