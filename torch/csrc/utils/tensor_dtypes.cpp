@@ -62,7 +62,7 @@ void initializeDtypes() {
 #define DEFINE_SCALAR_TYPE(_1, n, _2) at::ScalarType::n,
 
   at::ScalarType all_scalar_types[] = {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_SCALAR_TYPE)};
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_STUBS(DEFINE_SCALAR_TYPE)};
 
   for (at::ScalarType scalarType : all_scalar_types) {
     std::string primary_name, legacy_name;
