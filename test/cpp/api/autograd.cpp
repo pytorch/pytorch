@@ -287,7 +287,7 @@ TEST(CustomAutogradTest, TooManyGrads) {
   };
 }
 
-TEST(CustomAutogeradTest, DepNoGrad) {
+TEST(CustomAutogradTest, DepNoGrad) {
   struct F1 : public Function<F1> {
     static variable_list forward(AutogradContext *ctx, Variable input) {
       auto out = torch::randn(input.sizes());
@@ -356,9 +356,7 @@ TEST(CustomAutogradTest, Reentrant) {
   ASSERT_VARIABLE_EQ(x.grad(), y_data);
 }
 
-// TODO Figure out how much many nested reentrant calls it takes to fail
-// if threads aren't switched.
-TEST(CustomAutogradest, DISABLED_DeepReentrant) {
+TEST(CustomAutogradTest, DeepReentrant) {
   struct DeepReenter : public Function<DeepReenter> {
     static variable_list forward(AutogradContext *ctx, Variable x) {
       {
@@ -381,11 +379,11 @@ TEST(CustomAutogradest, DISABLED_DeepReentrant) {
   };
 
   // This should not stack overflow
-  auto v = torch::tensor(10000, torch::requires_grad());
+  auto v = torch::tensor(8193, torch::requires_grad());
   DeepReenter::apply(v)[0].sum().backward();
 }
 
-TEST(CustomAutograd, ReentrantPriority) {
+TEST(CustomAutogradTest, ReentrantPriority) {
   static std::vector<int> order;
 
   struct MyFunction : public Function<MyFunction> {
