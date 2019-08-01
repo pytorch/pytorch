@@ -111,8 +111,13 @@ void AutogradContext::save_variables() {
   auto ptr = grad_fn_.lock();
 
   for (const auto& var : to_save_) {
-    bool is_output = var.grad_fn().get() == ptr.get();
-    saved_variables_.emplace_back(var, is_output);
+    // Allow empty variables to be saved
+    if (var.defined()) {
+      bool is_output = var.grad_fn().get() == ptr.get();
+      saved_variables_.emplace_back(var, is_output);
+    } else {
+      saved_variables_.emplace_back();
+    }
   }
   to_save_.clear();
 }
