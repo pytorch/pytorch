@@ -1,8 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 from ...modules.module import Module
 from ...modules.linear import Linear as NNLinear
-# from ...qat.modules.linear import Linear as QATLinear
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -20,8 +20,8 @@ class Quantize(Module):
         >>> qm = Quantize(scale, zero_point, dtype)
         >>> qt = qm(t)
         >>> print(qt)
-        >>> tensor([[ 1., -1.],
->         [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
+        tensor([[ 1., -1.],
+                [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
     """
 
     def __init__(self, out_scale, out_zero_point, out_dtype):
@@ -51,8 +51,8 @@ class DeQuantize(Module):
         >>> dqm = DeQuantize()
         >>> dequantized = dqm(quantized_input)
         >>> print(dequantized)
-        >>> tensor([[ 1., -1.],
-            [ 1., -1.]], dtype=torch.float32)
+        tensor([[ 1., -1.],
+                [ 1., -1.]], dtype=torch.float32)
     """
 
     def __init__(self):
@@ -67,26 +67,26 @@ class DeQuantize(Module):
 
 class Linear(NNLinear):
     r"""
-    A quantized linear module with quantized tensor as inputs
-    and outputs.
-    We adopt the same interface as `torch.nn.Linear`, please see https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
-    for documentation.
+    A quantized linear module with quantized tensor as inputs and outputs.
+    We adopt the same interface as `torch.nn.Linear`, please see
+    https://pytorch.org/docs/stable/nn.html#torch.nn.Linear for documentation.
 
-    Similar to `torch.nn.Linear`, attributes will be randomly initialized at
-        module creation time and will be overwritten later
+    Similar to :class:`~torch.nn.Linear`, attributes will be randomly
+    initialized at module creation time and will be overwritten later
 
     Attributes:
-        weight: the non-learnable quantized weights of the
-                module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
-        bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
+        weight (Tensor): the non-learnable quantized weights of the module of
+                         shape :math:`(\text{out\_features}, \text{in\_features})`.
+        bias (Tensor): the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
-        out_scale: `scale` parameter of output Quantized Tensor, type: double
-        out_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
+        scale: `scale` parameter of output Quantized Tensor, type: double
+        zero_point: `zero_point` parameter for output Quantized Tensor, type: long
 
     Examples::
 
         >>> m = nn.quantized.Linear(20, 30)
         >>> input = torch.randn(128, 20)
+        >>> input = torch.quantize_linear(input, 1.0, 0, torch.quint8)
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])
@@ -152,8 +152,9 @@ class Linear(NNLinear):
     def from_float(mod):
         r"""Create a quantized module from a float module or qparams_dict
 
-            Args: `mod` a float module, either produced by torch.quantization utilities
-            or directly from user
+        Args:
+            mod (Module): a float module, either produced by torch.quantization
+                          utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
