@@ -15,7 +15,7 @@ void abs_kernel_cuda(TensorIterator& iter) {
       gpu_kernel(iter, []GPU_LAMBDA(bool a) { return a; });
       break;
     case ScalarType::Half:
-      gpu_kernel(iter, []GPU_LAMBDA(at::Half a) -> half {
+      gpu_kernel(iter, []GPU_LAMBDA(at::Half a) -> at::Half {
         at::Half nega = -a;
         return a >= nega ? a : nega;
       });

@@ -58,7 +58,6 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__  uint8_t mul(uint8_t a, uint8_t b) { return a * b; }
   static inline __host__ __device__  uint8_t sub(uint8_t a, uint8_t b) { return a - b; }
   static inline __host__ __device__  uint8_t div(uint8_t a, uint8_t b) { return a / b; }
-  static inline __host__ __device__  uint8_t abs(uint8_t a) { return a; }
   static inline __host__ __device__  uint8_t pow(uint8_t a, uint8_t b) { return powi<uint8_t>(a, b); }
   static inline __host__ __device__  bool isnan(uint8_t a) { return false; }
   static inline __host__ __device__  bool isinf(uint8_t a) { return false; }
@@ -82,7 +81,6 @@ struct THCNumerics<bool> {
   static inline __host__ __device__ bool sub(bool a, bool b) { return a - b; }
   static inline __host__ __device__ bool div(bool a, bool b) { return a / b; }
   static inline __host__ __device__ bool neg(bool a) { return !a; }
-  static inline __host__ __device__ bool abs(bool a) { return a; }
   static inline __host__ __device__ bool isnan(bool a) { return false; }
   static inline __host__ __device__ bool isinf(bool a) { return false; }
 };
@@ -107,7 +105,6 @@ struct THCNumerics<int8_t> {
   static inline __host__ __device__  int8_t mul(int8_t a, int8_t b) { return a * b; }
   static inline __host__ __device__  int8_t sub(int8_t a, int8_t b) { return a - b; }
   static inline __host__ __device__  int8_t div(int8_t a, int8_t b) { return a / b; }
-  static inline __host__ __device__  int8_t abs(int8_t a) { return ::abs((int)a); }
   static inline __host__ __device__  int8_t pow(int8_t a, int8_t b) { return powi<int8_t>(a, b); }
   static inline __host__ __device__  bool isnan(int8_t a) { return false; }
   static inline __host__ __device__  bool isinf(int8_t a) { return false; }
@@ -133,7 +130,6 @@ struct THCNumerics<int16_t> {
   static inline __host__ __device__  int16_t mul(int16_t a, int16_t b) { return a * b; }
   static inline __host__ __device__  int16_t sub(int16_t a, int16_t b) { return a - b; }
   static inline __host__ __device__  int16_t div(int16_t a, int16_t b) { return a / b; }
-  static inline __host__ __device__  int16_t abs(int16_t a) { return ::abs((int)a); }
   static inline __host__ __device__  int16_t pow(int16_t a, int16_t b) { return powi<int16_t>(a, b); }
   static inline __host__ __device__  bool isnan(int16_t a) { return false; }
   static inline __host__ __device__  bool isinf(int16_t a) { return false; }
@@ -159,7 +155,6 @@ struct THCNumerics<int32_t> {
   static inline __host__ __device__  int32_t mul(int32_t a, int32_t b) { return a * b; }
   static inline __host__ __device__  int32_t sub(int32_t a, int32_t b) { return a - b; }
   static inline __host__ __device__  int32_t div(int32_t a, int32_t b) { return a / b; }
-  static inline __host__ __device__  int32_t abs(int32_t a) { return ::abs(a); }
   static inline __host__ __device__  int32_t pow(int32_t a, int32_t b) { return powi<int32_t>(a, b); }
   static inline __host__ __device__  bool isnan(int32_t a) { return false; }
   static inline __host__ __device__  bool isinf(int32_t a) { return false; }
@@ -186,7 +181,6 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__  int64_t mul(int64_t a, int64_t b) { return a * b; }
   static inline __host__ __device__  int64_t sub(int64_t a, int64_t b) { return a - b; }
   static inline __host__ __device__  int64_t div(int64_t a, int64_t b) { return a / b; };
-  static inline __host__ __device__  int64_t abs(int64_t a) { return labs(a); }
   static inline __host__ __device__  int64_t pow(int64_t a, int64_t b) { return powi<int64_t>(a, b); }
   static inline __host__ __device__  bool isnan(int64_t a) { return false; }
   static inline __host__ __device__  bool isinf(int64_t a) { return false; }
@@ -234,7 +228,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half erf(at::Half a) { return ::erf(a); }
   static inline __host__ __device__ at::Half erfc(at::Half a) { return ::erfc(a); }
   static inline __host__ __device__ at::Half erfinv(at::Half a) { return ::erfinv(a); }
-  static inline __host__ __device__ at::Half abs(at::Half a) { return std::abs(a); }
   static inline __host__ __device__ at::Half round(at::Half a) { return ::nearbyint(a); }
 
   static inline __host__ __device__ at::Half frac(at::Half a) {
@@ -321,7 +314,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
   static inline __host__ __device__  float erf  (float a) { return   erff(a); }
   static inline __host__ __device__  float erfc (float a) { return  erfcf(a); }
-  static inline __host__ __device__  float abs  (float a) { return  fabsf(a); }
   static inline __host__ __device__  float round(float a) { return nearbyintf(a); }
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
@@ -381,7 +373,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }
   static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double erfc (double a) { return  ::erfc(a); }
-  static inline __host__ __device__  double abs  (double a) { return   fabs(a); }
   static inline __host__ __device__  double round(double a) { return ::nearbyint(a); }
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
@@ -415,4 +406,4 @@ __host__ __device__ T scalar_cast(U u) {
   return ScalarConvert<U, T>::to(u);
 }
 
-#endif // THC_NUMERICS_INC
+#endif // THC_NUMERICS_INC

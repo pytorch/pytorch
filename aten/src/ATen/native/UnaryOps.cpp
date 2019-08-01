@@ -46,7 +46,6 @@ Tensor& abs_(Tensor& self) {
 }
 
 Tensor& abs_out(Tensor& result, const Tensor& self) {
-  checkBackend("abs", result, self.type().backend());
   auto iter = TensorIterator::unary_op(result, self,
     /*check_internal_overlap=*/true);
   abs_stub(iter.device_type(), iter);
