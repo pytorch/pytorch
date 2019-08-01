@@ -281,7 +281,7 @@ public:
       static_assert(guts::is_function_type<FuncType>::value, "Wrong argument type for impl_unboxedAutogradKernel");
 
       // TODO Infer and check schema
-      TORCH_CHECK(!unboxedAutogradKernel_.has_value(), "You can only call impl_unboxedAutogradKernel() once per operator registration.");
+      TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");
       unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
       return std::move(*this);
     }
@@ -342,7 +342,7 @@ public:
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
-    optional<void*> unboxedAutogradKernel_;
+    void* unboxedAutogradKernel_; // can be nullptr, not all kernels have this
     friend class RegisterOperators;
   };
 
