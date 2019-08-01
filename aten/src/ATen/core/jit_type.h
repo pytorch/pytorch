@@ -467,6 +467,8 @@ struct CAFFE2_API VaryingShape {
     return size_;
   }
 
+  const std::vector<c10::optional<int64_t>>& sizes() const { return dims_; }
+
   VaryingShape merge(const VaryingShape& other) const;
 
   c10::optional<std::vector<int64_t>> concrete_sizes() const
@@ -789,8 +791,12 @@ struct CAFFE2_API DictType : public Type {
     }
   }
 
+  // aligned with the format in FunctionSchema
   std::string str() const override {
-    return python_str();
+    std::stringstream ss;
+    ss << "Dict(" << getKeyType()->str() << ", "
+       << getValueType()->str() << ")";
+    return ss.str();
   }
 
   std::string python_str() const override {
@@ -1086,7 +1092,8 @@ struct CAFFE2_API StringType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "string";
+    // we only use "str" (not "string") in both FunctionSchema and script
+    return python_str();
   }
   std::string python_str() const override {
     return "str";

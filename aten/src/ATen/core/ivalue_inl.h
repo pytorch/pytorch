@@ -451,7 +451,7 @@ std::unordered_map<K, V> generic_to(
     _fake_type<std::unordered_map<K, V>>) {
   std::unordered_map<K, V> specialized_dict;
 
-  for (auto item : std::move(ivalue).toGenericDict()) {
+  for (const auto& item : std::move(ivalue).toGenericDict()) {
     specialized_dict[item.key().to<K>()] = item.value().to<V>();
   }
 
