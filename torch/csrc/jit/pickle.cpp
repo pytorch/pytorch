@@ -11,7 +11,7 @@ void pickle_stream(
     std::function<void(const char*, size_t)> writer,
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table) {
-  Pickler pickler(writer, tensor_table);
+  Pickler pickler(std::move(writer), tensor_table);
 
   if (tensor_table == nullptr) {
     // No tensor table provided, so tensors will be stored directly in the blob.
