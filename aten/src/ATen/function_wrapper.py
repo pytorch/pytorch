@@ -142,6 +142,17 @@ inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
     return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
 }
 """)
+# C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
+# inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
+#     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+#     if (is_variable()) {
+#         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${return_type}, ${formals_types}>(op, ${method_actuals});
+#     } else {
+#         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<${return_type}, ${formals_types}>(${method_actuals});
+#     }
+# }
+# """)
+C10_TENSOR_METHOD_DEFINITION = TENSOR_METHOD_DEFINITION
 # add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals_with_defaults});
@@ -155,6 +166,16 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
     return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+}
+""")
+C10_FUNCTION_DEFINITION = CodeTemplate("""\
+static inline ${return_type} ${api_name}(${formals}) {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+    if (${inferred_is_variable}) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op ${native_actuals_with_comma_prefix});
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, backendToTensorTypeId(${inferred_backend})).callUnboxed<${formals_types_with_return}>(${native_actuals});
+    }
 }
 """)
 # add a native declaration for a native function
@@ -1047,6 +1068,14 @@ def create_generic(top_env, declarations):
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
         option['native_actuals'] = [f['name'] for f in option['formals_list']]
+        if len(option['native_actuals']) == 0:
+            option['native_actuals_with_comma_prefix'] = ''
+        else:
+            option['native_actuals_with_comma_prefix'] = ', ' + ', '.join(option['native_actuals'])
+
+        option['formals_types_with_return'] = [option['return_type']]
+        if len(option['formals_types']) > 0:
+            option['formals_types_with_return'].extend(option['formals_types'])
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
@@ -1066,9 +1095,14 @@ def create_generic(top_env, declarations):
 
         def gen_tensor_method(option):
             # type: (Any) -> FunctionCode
-            return FunctionCode(
-                declaration=TENSOR_METHOD_DECLARATION.substitute(option),
-                definition=TENSOR_METHOD_DEFINITION.substitute(option))
+            if option['exclude_from_c10_dispatcher']:
+                return FunctionCode(
+                    declaration=TENSOR_METHOD_DECLARATION.substitute(option),
+                    definition=TENSOR_METHOD_DEFINITION.substitute(option))
+            else:
+                return FunctionCode(
+                    declaration=TENSOR_METHOD_DECLARATION.substitute(option),
+                    definition=C10_TENSOR_METHOD_DEFINITION.substitute(option))
 
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
@@ -1087,7 +1121,10 @@ def create_generic(top_env, declarations):
             if is_factory_method:
                 fn_definition = FACTORY_DEFINITION.substitute(option)
             else:
-                fn_definition = FUNCTION_DEFINITION.substitute(option)
+                if option['exclude_from_c10_dispatcher']:
+                    fn_definition = FUNCTION_DEFINITION.substitute(option)
+                else:
+                    fn_definition = C10_FUNCTION_DEFINITION.substitute(option)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
@@ -1120,6 +1157,10 @@ def create_generic(top_env, declarations):
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
         option['native_actuals'] = [f['name'] for f in formals]
+        if len(option['native_actuals']) == 0:
+            option['native_actuals_with_comma_prefix'] = ''
+        else:
+            option['native_actuals_with_comma_prefix'] = ', ' + ', '.join(option['native_actuals'])
 
         option['const_mark'] = '' if option['inplace'] else ' const'
 
