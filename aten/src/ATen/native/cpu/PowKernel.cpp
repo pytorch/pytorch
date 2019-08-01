@@ -44,16 +44,16 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
           [](scalar_t self) -> scalar_t { return std::sqrt((long double)self); },
           [](Vec self) -> Vec { return self.sqrt(); }
         );
-      // } else if (exp == 2) {
-      //   cpu_kernel_vec(iter,
-      //     [](scalar_t self) -> scalar_t { return self * self; },
-      //     [](Vec self) -> Vec { return self * self; }
-      //   );
-      // } else if (exp == 3) {
-      //   cpu_kernel_vec(iter,
-      //     [](scalar_t self) -> scalar_t { return self * self * self; },
-      //     [](Vec self) -> Vec { return self * self * self; }
-      //   );
+      } else if (exp == 2) {
+        cpu_kernel_vec(iter,
+          [](scalar_t self) -> scalar_t { return self * self; },
+          [](Vec self) -> Vec { return self * self; }
+        );
+      } else if (exp == 3) {
+        cpu_kernel_vec(iter,
+          [](scalar_t self) -> scalar_t { return self * self * self; },
+          [](Vec self) -> Vec { return self * self * self; }
+        );
       } else if (exp == -0.5) {
         cpu_kernel_vec(iter,
           [](scalar_t self) -> scalar_t { return 1.0 / std::sqrt((long double)self); },
@@ -64,11 +64,11 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
           [](scalar_t self) -> scalar_t { return 1.0 / self; },
           [](Vec self) -> Vec { return self.reciprocal(); }
         );
-      // } else if (exp == -2) {
-      //   cpu_kernel_vec(iter,
-      //     [](scalar_t self) -> scalar_t { return 1.0 / (self * self); },
-      //     [](Vec self) -> Vec { return (self * self).reciprocal(); }
-      //   );
+      } else if (exp == -2) {
+        cpu_kernel_vec(iter,
+          [](scalar_t self) -> scalar_t { return 1.0 / (self * self); },
+          [](Vec self) -> Vec { return (self * self).reciprocal(); }
+        );
       } else {
         cpu_kernel_vec(iter,
           [=](scalar_t self) -> scalar_t { return std::pow((long double)self, exp); },
