@@ -191,9 +191,152 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   }
 }
 
+at::Tensor ScriptModuleDeserializer::loadTensor(
+    const torch::TensorDef& tensor_proto,
+    std::unordered_map<std::string, at::Storage>& storageMap) {
+  std::vector<int64_t> dims(
+      tensor_proto.dims().begin(), tensor_proto.dims().end());
+  std::vector<int64_t> strides(
+      tensor_proto.strides().begin(), tensor_proto.strides().end());
+  auto type = at::typeMetaToScalarType(
+      caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
+  if (tensor_proto.is_quantized()) {
+    type = toQIntType(type);
+  }
+  const std::string& record_key = tensor_proto.data().key();
+  AT_ASSERT(tensor_proto.has_device() && !tensor_proto.device().empty());
+  at::Device device(tensor_proto.device());
+  if (device_.has_value()) {
+    // override the device, if user provides map_location
+    device = device_.value();
+  }
+
+  auto storage_it = storageMap.find(record_key);
+  if (storage_it == storageMap.end()) {
+    at::DataPtr storage_ptr;
+    uint64_t record_size;
+    std::tie(storage_ptr, record_size) = reader_->getRecord(record_key);
+    auto cpu_storage = at::Storage(
+        at::CPU(type).typeMeta(),
+        record_size / at::CPU(type).typeMeta().itemsize(),
+        std::move(storage_ptr),
+        /*allocator=*/nullptr,
+        /*resizable=*/false); // NB: we didn't set any allocator for the tensor
+    if (device.type() == at::DeviceType::CPU) {
+      storage_it =
+          storageMap.insert(std::make_pair(record_key, cpu_storage)).first;
+    } else if (device.type() == at::DeviceType::CUDA) {
+      at::Tensor cpu_tensor =
+          at::empty({0}, at::CPU(type).options()).set_(cpu_storage);
+      at::Storage cuda_storage =
+          cpu_tensor.to(device, cpu_tensor.scalar_type()).storage();
+      storage_it =
+          storageMap.insert(std::make_pair(record_key, cuda_storage)).first;
+    } else {
+      AT_ERROR(
+          "supported devices include CPU and CUDA, however got ",
+          at::DeviceTypeName(device.type(), false));
+    }
+  }
+  if (storage_it->second.device().type() != device.type() ||
+      (device.has_index() &&
+       storage_it->second.device().index() != device.index())) {
+    std::stringstream oss;
+    oss << "storage previously was specified with device "
+        << storage_it->second.device() << "but now is specified with device "
+        << device << std::endl;
+    AT_ERROR(oss.str());
+  }
+
+  at::Tensor result;
+
+  if (device.type() == at::DeviceType::CPU) {
+    if (tensor_proto.is_quantized()) {
+      result = at::_empty_affine_quantized(
+          {0},
+          type,
+          tensor_proto.scale(),
+          tensor_proto.zero_point())
+          .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    }
+    else {
+      result =
+          at::empty({0}, at::CPU(type).options())
+              .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    }
+  } else if (device.type() == at::DeviceType::CUDA) {
+    result =
+        at::empty(
+            {0}, c10::TensorOptions(type).device(storage_it->second.device()))
+            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+  }
+  AT_ASSERT(result.defined());
+
+  result = autograd::make_variable(result, tensor_proto.requires_grad());
+
+  return result;
+}
+
+void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
+  if (imported_libs_.count(qualifier)) {
+    return;
+  }
+  imported_libs_.insert(qualifier);
+  std::function<void(const std::string&)> import_callback =
+      [this](const std::string& qualifier) { importCallback(qualifier); };
+  const std::string path =
+      ImportExportHelpers::qualifierToPath(qualifier, proto_version_);
+  at::DataPtr data;
+  size_t size;
+  std::tie(data, size) = reader_->getRecord(path);
+
+  at::DataPtr debug_data;
+  size_t debug_size;
+  std::tie(debug_data, debug_size) = reader_->getRecord(path + ".debug_pkl");
+
+  auto gen_ranges =
+      std::make_shared<ConcreteSourceRangeUnpickler>(std::move(debug_data), debug_size);
+
+  auto src = std::make_shared<Source>(
+      std::string(static_cast<const char*>(data.get()), size),
+      path,
+      1,
+      gen_ranges);
+
+  script::import_libs(
+      compilation_unit_, qualifier, src, tensor_table_, import_callback);
+}
+
+void ScriptModuleDeserializer::moduleSetState(
+    const script::Module& module,
+    IValue state) {
+  auto setstate = module.find_method("__setstate__");
+
+  TORCH_CHECK(
+      setstate,
+      "Cannot call '__setstate__' method because"
+      " it does not exist");
+
+  // TODO: once modules are first class in the interpreter and methods are not
+  // lowered, change this to `module->run_method("__setstate__", {state});`
+  if (setstate->num_inputs() == 1) {
+    setstate->run({module.module_object()});
+  } else if (setstate->num_inputs() == 2) {
+    setstate->run({module.module_object(), state});
+  } else {
+    AT_ERROR("Unexpected schema on '__setstate__'");
+  }
+}
+
 script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     const torch::ModuleDef& module_def) {
-  moduleStack_.emplace_back(module_def.name());
+  // HACK: The current model exporter can create module_defs with invalid Python
+  // identifiers as names (they contain `.`)
+  const auto atoms = c10::QualifiedName(module_def.name()).atoms();
+  const size_t numPushed = atoms.size();
+  for (const auto& atom : atoms) {
+    moduleStack_.emplace_back(atom);
+  }
   auto module = script::Module(moduleStack_, compilation_unit_);
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
@@ -280,131 +423,10 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     }
   }
 
-  moduleStack_.pop_back();
+  for (size_t i = 0; i < numPushed; i++) {
+    moduleStack_.pop_back();
+  }
   return module;
-}
-
-at::Tensor ScriptModuleDeserializer::loadTensor(
-    const torch::TensorDef& tensor_proto,
-    std::unordered_map<std::string, at::Storage>& storageMap) {
-  std::vector<int64_t> dims(
-      tensor_proto.dims().begin(), tensor_proto.dims().end());
-  std::vector<int64_t> strides(
-      tensor_proto.strides().begin(), tensor_proto.strides().end());
-  auto type = at::typeMetaToScalarType(
-      caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
-  const std::string& record_key = tensor_proto.data().key();
-  AT_ASSERT(tensor_proto.has_device() && !tensor_proto.device().empty());
-  at::Device device(tensor_proto.device());
-  if (device_.has_value()) {
-    // override the device, if user provides map_location
-    device = device_.value();
-  }
-
-  auto storage_it = storageMap.find(record_key);
-  if (storage_it == storageMap.end()) {
-    at::DataPtr storage_ptr;
-    uint64_t record_size;
-    std::tie(storage_ptr, record_size) = reader_->getRecord(record_key);
-    auto cpu_storage = at::Storage(
-        at::CPU(type).typeMeta(),
-        record_size / at::CPU(type).typeMeta().itemsize(),
-        std::move(storage_ptr),
-        /*allocator=*/nullptr,
-        /*resizable=*/false); // NB: we didn't set any allocator for the tensor
-    if (device.type() == at::DeviceType::CPU) {
-      storage_it =
-          storageMap.insert(std::make_pair(record_key, cpu_storage)).first;
-    } else if (device.type() == at::DeviceType::CUDA) {
-      at::Tensor cpu_tensor =
-          at::empty({0}, at::CPU(type).options()).set_(cpu_storage);
-      at::Storage cuda_storage =
-          cpu_tensor.to(device, cpu_tensor.scalar_type()).storage();
-      storage_it =
-          storageMap.insert(std::make_pair(record_key, cuda_storage)).first;
-    } else {
-      AT_ERROR(
-          "supported devices include CPU and CUDA, however got ",
-          at::DeviceTypeName(device.type(), false));
-    }
-  }
-  if (storage_it->second.device().type() != device.type() ||
-      (device.has_index() &&
-       storage_it->second.device().index() != device.index())) {
-    std::stringstream oss;
-    oss << "storage previously was specified with device "
-        << storage_it->second.device() << "but now is specified with device "
-        << device << std::endl;
-    AT_ERROR(oss.str());
-  }
-
-  at::Tensor result;
-  if (device.type() == at::DeviceType::CPU) {
-    result =
-        at::empty({0}, at::CPU(type).options())
-            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
-  } else if (device.type() == at::DeviceType::CUDA) {
-    result =
-        at::empty(
-            {0}, c10::TensorOptions(type).device(storage_it->second.device()))
-            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
-  }
-  AT_ASSERT(result.defined());
-
-  result = autograd::make_variable(result, tensor_proto.requires_grad());
-
-  return result;
-}
-
-void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
-  if (imported_libs_.count(qualifier)) {
-    return;
-  }
-  imported_libs_.insert(qualifier);
-  std::function<void(const std::string&)> import_callback =
-      [this](const std::string& qualifier) { importCallback(qualifier); };
-  const std::string path =
-      ImportExportHelpers::qualifierToPath(qualifier, proto_version_);
-  at::DataPtr data;
-  size_t size;
-  std::tie(data, size) = reader_->getRecord(path);
-
-  at::DataPtr debug_data;
-  size_t debug_size;
-  std::tie(debug_data, debug_size) = reader_->getRecord(path + ".debug_pkl");
-
-  auto gen_ranges =
-      std::make_shared<ConcreteSourceRangeUnpickler>(std::move(debug_data), debug_size);
-
-  auto src = std::make_shared<Source>(
-      std::string(static_cast<const char*>(data.get()), size),
-      path,
-      1,
-      gen_ranges);
-
-  script::import_libs(
-      compilation_unit_, qualifier, src, tensor_table_, import_callback);
-}
-
-void ScriptModuleDeserializer::moduleSetState(
-    const script::Module& module,
-    IValue state) {
-  auto setstate = module.find_method("__setstate__");
-
-  TORCH_CHECK(
-      setstate,
-      "Cannot call '__setstate__' method because"
-      " it does not exist");
-
-  // TODO: once modules are first class in the interpreter and methods are not
-  // lowered, change this to `module->run_method("__setstate__", {state});`
-  if (setstate->num_inputs() == 1) {
-    setstate->run({module.module_object()});
-  } else if (setstate->num_inputs() == 2) {
-    setstate->run({module.module_object(), state});
-  } else {
-    AT_ERROR("Unexpected schema on '__setstate__'");
-  }
 }
 } // namespace
 

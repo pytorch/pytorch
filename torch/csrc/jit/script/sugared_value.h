@@ -362,9 +362,7 @@ using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
-  MagicMethod(
-      std::string desugared_name,
-      SugaredValuePtr base)
+  MagicMethod(std::string desugared_name, SugaredValuePtr base)
       : base_value_(std::move(base)),
         desugared_name_(std::move(desugared_name)) {}
 
@@ -443,7 +441,7 @@ struct TORCH_API IsInstanceValue : SugaredValue {
 
 // matched against for special handling of range expressions
 struct TORCH_API RangeValue : SugaredValue {
-  RangeValue(const SourceRange& loc, Function&m, std::vector<Value*> inputs);
+  RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> inputs);
   std::string kind() const override {
     return "range";
   }
@@ -463,7 +461,7 @@ struct TORCH_API RangeValue : SugaredValue {
 
 // matched against for special handling of iterables like zip(), enumerate()
 struct TORCH_API IterableValue : SugaredValue {
-  IterableValue(Symbol symbol): symbol_(symbol) {}
+  IterableValue(Symbol symbol) : symbol_(symbol) {}
   std::string kind() const override {
     return "iterable";
   }
@@ -481,7 +479,8 @@ struct TORCH_API IterableValue : SugaredValue {
 // max_trip_count and set the value table for loop targets
 struct TORCH_API IterableTree : SugaredValue {
   IterableTree() = default;
-  IterableTree(const std::vector<SugaredValuePtr> children): children_(std::move(children)) {}
+  IterableTree(const std::vector<SugaredValuePtr> children)
+      : children_(std::move(children)) {}
   std::string kind() const override {
     return "iterabletree";
   }

@@ -21,6 +21,10 @@ message TensorDef {
   // device field stores the canonical device string, and it follows the
   // format below: `(cpu|cuda)[:<device-index>]`, e.g., 'cuda:0'
   optional string device = 7;
+
+  optional bool is_quantized = 8;
+  optional double scale = 9;
+  optional int64 zero_point = 10;
 }
 
 message AttributeDef {

@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <atomic>
@@ -157,71 +156,6 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
       std::back_inserter(spec.inputBroadcastGroups()));
 }
 
-// This function moves _grad_sum_to_size nodes along the computation graph
-// of the fusion group to the outputs and then records the shape inputs
-// in order for summation to be applied after the kernel.
-// Note that the correctness relies on the invariant that
-// _grad_sum_to_size is only applied to gradient nodes created by autodiff.
-// This is important because it ensures that in the mul and div nodes only
-// one argument (in the case of div the numerator) has a summed value.
-// If two arguments to mul had one, we would be in trouble, but thanks
-// to the chain rule, we're OK.
-// Note that this means that one kernel output may lead to several fusion
-// group outputs when several outputs had the same calculation except
-// for the final _grad_sum_to_size. This is also the reason why
-// we need to deduplicate kernel outputs at the end of this function.
-void processGradSumToSize(KernelSpec& spec) {
-  auto graph = spec.graph();
-
-  std::vector<int64_t> outputGradSumToSizes(graph->outputs().size(), -1);
-
-  // these are expressions that might occur during autotdiff operating
-  // on the gradient (matmul would likely be, too but we don't fuse it)
-  // note that for mul, we know (from the chain rule) that only one
-  // factor will be stemming from a calculation involving gradients so
-  // we know that we can move _grad_sum_to_size across it
-  // Scan the graph. We will delete nodes. We want later (in the graph)
-  // _grad_sum_to_size nodes to have priority over earlier ones. Thus
-  // we scan backwards.
-  for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend(); it++) {
-    auto* node = *it;
-    if (node->kind() != aten::_grad_sum_to_size) {
-      continue;
-    }
-    bool success = trackSingleGradSumToSizeToOutputs(
-        node->output(), &outputGradSumToSizes);
-    AT_ASSERT(success); // check that we didn't hit anything unknown
-
-    // remove the GradSumToSize node, a new node outside the fusion graph
-    // will be inserted below
-    node->output()->replaceAllUsesWith(node->inputs()[0]);
-    it.destroyCurrent();
-  }
-
-  // By removing the _grad_sum_to_size notes, we might end up with
-  // duplicate outputs, e.g. when having the autodiff backwards of
-  // x + y + z of something with x, y, z, those will have different
-  // _grad_sum_to_sizes but of the same kernel output.
-
-  // for each fusion group output, record the corresponding kernel
-  // output and possibly a _grad_sum_to_size for that output
-  auto& outputMapAndSizes = spec.outputMapAndSizes();
-  AT_ASSERT(outputMapAndSizes.empty());
-  std::unordered_map<const Value*, int64_t> reduced_output_indices;
-  int64_t newo = 0;
-  for (auto osize : outputGradSumToSizes) {
-    auto it = reduced_output_indices.find(graph->outputs()[newo]);
-    if (it == reduced_output_indices.end()) {
-      reduced_output_indices.emplace(graph->outputs()[newo], newo);
-      outputMapAndSizes.emplace_back(newo, osize);
-      newo++;
-    } else {
-      graph->eraseOutput(newo);
-      outputMapAndSizes.emplace_back(it->second, osize);
-    }
-  }
-}
-
 // Performs "upfront" compilation where storage is known but shapes are not.
 // Currently identifies how to expand all tensors so that all intermediate
 // tensors are the same shape, simplifying code generation.
@@ -234,7 +168,6 @@ void processGradSumToSize(KernelSpec& spec) {
 static void upfrontCompilation(KernelSpec& spec) {
   setInputBroadcastGroups(spec);
   setInputChunkDescriptors(spec);
-  processGradSumToSize(spec);
 }
 
 int64_t registerFusion(const Node* fusion_group) {

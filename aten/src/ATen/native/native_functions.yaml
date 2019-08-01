@@ -35,6 +35,10 @@
 - func: set_data(Tensor(a!) self, Tensor new_data) -> void
   variants: method
 
+- func: set_names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -504,6 +508,7 @@
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
   device_guard: False
+  named_guard: False
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
@@ -1388,6 +1393,7 @@
     SparseCPU: mul
     SparseCUDA: mul
     MkldnnCPU: mkldnn_mul
+  named_guard: False
 
 
 - func: mul_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -1398,6 +1404,7 @@
     SparseCPU: mul_
     SparseCUDA: mul_
     MkldnnCPU: mkldnn_mul_
+  named_guard: False
 
 - func: mul(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1406,6 +1413,7 @@
     SparseCPU: mul_out
     SparseCUDA: mul_out
     MkldnnCPU: mkldnn_mul_out
+  named_guard: False
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul(Tensor self, Scalar other) -> Tensor
@@ -1537,8 +1545,11 @@
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
+- func: is_pinned(Tensor self) -> bool
+  variants: method
+
 - func: pin_memory(Tensor self) -> Tensor
-  variants: function, method
+  variants: method
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
   variants: function, method
@@ -1979,11 +1990,21 @@
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: sum(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: sum(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
@@ -2022,11 +2043,22 @@
 
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: prod(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: prod(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
 
 - func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False
@@ -2352,8 +2384,8 @@
 - func: clone(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_clone
-    CUDA: legacy::cuda::_th_clone
+    CPU: clone
+    CUDA: clone
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
@@ -2362,8 +2394,8 @@
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_resize_as_
-    CUDA: legacy::cuda::_th_resize_as_
+    CPU: resize_as_cpu_
+    CUDA: resize_as_cuda_
     SparseCPU: resize_as_sparse_
     SparseCUDA: resize_as_sparse_
 
@@ -2944,7 +2976,7 @@
   dispatch:
     CPU: legacy::cpu::_th_set_
     CUDA: legacy::cuda::_th_set_
-    QuantizedCPU: set_storage_cpu
+    QuantizedCPU: set_storage
 
 - func: set_(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
@@ -3722,12 +3754,12 @@
     CPU: legacy::cpu::_th_addcdiv
     CUDA: legacy::cuda::_th_addcdiv
 
-- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
+- func: lstsq(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   dispatch:
     CPU: legacy::cpu::_th_gels_out
     CUDA: legacy::cuda::_th_gels_out
 
-- func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
+- func: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_gels
@@ -4211,9 +4243,6 @@
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_alias
-    CUDA: legacy::cuda::_th_alias
 
 - func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
@@ -4784,6 +4813,7 @@
     CPU: adaptive_avg_pool2d_out_cpu
     CUDA: adaptive_avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_out
+    QuantizedCPU: quantized_adaptive_avg_pool2d_out
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   python_module: nn
@@ -4797,6 +4827,7 @@
   dispatch:
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
+    QuantizedCPU: quantized_adaptive_avg_pool2d
 
 - func: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn

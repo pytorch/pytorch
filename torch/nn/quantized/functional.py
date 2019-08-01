@@ -70,8 +70,8 @@ def conv2d(input, weight, bias,
     padding = _pair(padding)
     dilation = _pair(dilation)
 
-    prepacked_weight = ops.quantized.fbgemm_conv_prepack(
-        weight.permute([0, 2, 3, 1]), groups)
+    prepacked_weight = ops.quantized.fbgemm_conv_prepack(weight.permute([0, 2, 3, 1]), stride, padding, dilation, groups)
+
     return ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
                                        prepacked_weight, bias,
                                        stride, padding, dilation,
@@ -90,3 +90,6 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
         stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
+
+# TODO(zaf): Add documentation
+adaptive_avg_pool2d = torch.nn.functional.adaptive_avg_pool2d

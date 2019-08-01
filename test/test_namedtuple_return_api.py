@@ -11,7 +11,7 @@ path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
-    'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'gels',
+    'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
     'triangular_solve'
 }
 
@@ -61,7 +61,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
             op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
-            op(operators=['gels'], input=(a,), names=('solution', 'QR'), hasout=True),
+            op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
         ]
 
         for op in operators:
