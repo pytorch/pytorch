@@ -96,7 +96,7 @@ optional<DimnameList> internal_get_names(TensorImpl* impl) {
   }
 }
 
-bool internal_is_named(TensorImpl* impl) {
+bool internal_has_names(TensorImpl* impl) {
   const auto* named_tensor_meta = get_named_tensor_meta(impl);
   return named_tensor_meta != nullptr && named_tensor_meta->has_names();
 }

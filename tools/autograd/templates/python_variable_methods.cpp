@@ -146,6 +146,16 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef BUILD_NAMEDTENSOR
+static PyObject * THPVariable_has_names(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(self.has_names());
+  END_HANDLE_TH_ERRORS
+}
+#endif
+
 static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -763,6 +773,9 @@ PyMethodDef variable_methods[] = {
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
   {"data_ptr", (PyCFunction)THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
+#ifdef BUILD_NAMEDTENSOR
+  {"has_names", (PyCFunction)THPVariable_has_names, METH_NOARGS, NULL},
+#endif
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},

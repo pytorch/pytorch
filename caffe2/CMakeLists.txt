@@ -366,7 +366,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/export.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
@@ -430,7 +429,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
@@ -457,14 +455,19 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
-    ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
-  if (NOT WIN32 AND NOT INTERN_BUILD_MOBILE)
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+  if (NOT INTERN_BUILD_MOBILE)
+    list(APPEND TORCH_SRCS 
+      ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+      ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
-  endif ()
+    if (NOT WIN32)
+      list(APPEND TORCH_SRCS 
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
+    endif()
+  endif()
 
   if (USE_CUDA)
     if (NOT USE_ROCM)
