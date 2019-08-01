@@ -13491,6 +13491,18 @@ a")
 
         self.assertTrue('forward' in dir(M()))
 
+    @unittest.skipIf(PY2, "kwarg expansion requires Python 3")
+    def test_kwarg_expansion_error(self):
+        @torch.jit.ignore
+        def something_else(h, i):
+            pass
+
+        def fn(x):
+            something_else(**x)
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
+            torch.jit.script(fn)
+
     def test_inferred_error_msg(self):
         """
         Test that when we get a type mismatch on a function where we inferred
@@ -13674,6 +13686,22 @@ class TestRecursiveScript(JitTestCase):
         FileCheck().check_not("a_python_fn").run(graph)
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
+
+    def test_error_stack_class(self):
+        class X(object):
+            def bad_fn(self):
+                import pdb  # noqa
+
+        def fn(x):
+            return X(10)
+
+        try:
+            torch.jit.script(fn)
+        except Exception as e:
+            checker = FileCheck()
+            checker.check("import statements")
+            checker.check("is being compiled since it was called from")
+            checker.run(str(e))
 
     def test_module_basic(self):
         class Other(torch.nn.Module):
