@@ -314,6 +314,7 @@ script::Module ScriptModuleDeserializer::convertModule(
   }
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
+    std::cout << "Loading " << param_def.name() << "\n";
     at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
     if (param_def.is_buffer()) {
       module.register_buffer(param_def.name(), tensor);
