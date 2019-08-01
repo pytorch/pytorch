@@ -33,6 +33,11 @@ void ErrorReport::CallStack::pop_function() {
   calls.pop_back();
 }
 
+void ErrorReport::CallStack::clear() {
+  calls.clear();
+  pending_range = nullptr;
+}
+
 const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
   msg << "\n" << ss.str();

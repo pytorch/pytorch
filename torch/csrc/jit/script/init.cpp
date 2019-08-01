@@ -564,6 +564,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<SourceRange>())
       .def("what", &ErrorReport::what);
 
+  // See https://github.com/pytorch/pytorch/pull/23458
+  m.def("_clear_compilation_stack_DELETEME", ErrorReport::CallStack::clear);
+
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
       m, "CompilationUnit")
       .def(py::init<>())

@@ -1006,7 +1006,8 @@ def _try_compile_fn(fn, loc):
     # extract the necessary info from the closed over variables on the function
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
-    return torch.jit.script(fn, _rcb=rcb)
+    qualified_name = _qualified_name(fn)
+    return _compile_function(fn, qualified_name=qualified_name, _frames_up=1, _rcb=rcb)
 
 
 @contextlib.contextmanager
@@ -1057,6 +1058,26 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     _jit_script_class_compile(qualified_name, ast, rcb)
     _add_script_class(obj, qualified_name)
+
+
+def _compile_function(fn, qualified_name, _frames_up, _rcb=None):
+    ast = get_jit_def(fn)
+    if _rcb is None:
+        closure_rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
+        stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+
+        def _rcb(name):
+            # since type comments aren't captured in the function's closures,
+            # we still need to try to the rcb based on stack frames if the
+            # closure rcb fails
+            result = closure_rcb(name)
+            if result:
+                return result
+            return stack_rcb(name)
+    script_fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(fn))
+    # Forward docstrings
+    script_fn.__doc__ = fn.__doc__
+    return script_fn
 
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
@@ -1136,6 +1157,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     if optimize is not None:
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
+    torch._C._clear_compilation_stack_DELETEME()
     if isinstance(obj, torch.nn.Module):
         return _convert_to_script_module(obj)
 
@@ -1156,23 +1178,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
-        ast = get_jit_def(obj)
-        if _rcb is None:
-            closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
-            stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-
-            def _rcb(name):
-                # since type comments aren't captured in the function's closures,
-                # we still need to try to the rcb based on stack frames if the
-                # closure rcb fails
-                result = closure_rcb(name)
-                if result:
-                    return result
-                return stack_rcb(name)
-        fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
-        # Forward docstrings
-        fn.__doc__ = obj.__doc__
-        return fn
+        return _compile_function(fn=obj, qualified_name=qualified_name, _frames_up=_frames_up + 1, _rcb=_rcb)
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
