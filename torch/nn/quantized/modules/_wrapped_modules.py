@@ -36,6 +36,7 @@ class _BaseWrapperModule(Module):
         mod.zero_point = torch.tensor(zero_point, dtype=torch.long)
         return mod
 
+
 r"""Add module wraps torch.ops.quantized.add."""
 class Add(_BaseWrapperModule):
     __FLOAT_MODULE = torch.nn.modules.Add

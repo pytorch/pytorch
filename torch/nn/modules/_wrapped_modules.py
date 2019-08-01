@@ -15,8 +15,9 @@ class _BaseWrapperModule(Module):
     def forward(self, *args):
         return self.operation(*args)
 
+
 r"""Add module wraps torch.add."""
 class Add(_BaseWrapperModule):
     def __init__(self):
         super(Add, self).__init__()
-        self.operation = torch.ops.quantized.add
+        self.operation = torch.add
