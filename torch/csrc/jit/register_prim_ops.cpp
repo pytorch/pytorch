@@ -2657,15 +2657,6 @@ RegisterOperators reg2({
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 
     DEFINE_UNARY_OP(aten::neg, -a, int, float),
-    DEFINE_UNARY_INT_OP(aten::invert, ~a, int),
-    Operator(
-        "aten::invert(Tensor x) -> Tensor",
-        [](Stack& stack) {
-          at::Tensor x;
-          pop(stack, x);
-          push(stack, 1 - x);
-          return 0;
-        }),
     Operator(
         "aten::__not__(bool self) -> bool",
         [](Stack& stack) {

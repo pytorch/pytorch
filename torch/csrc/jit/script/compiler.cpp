@@ -2523,7 +2523,7 @@ struct to_ir {
         return emitUnaryOp(tree, "__neg__", aten::neg);
       }
       case '~': {
-        return emitUnaryOp(tree, "__invert__", aten::invert);
+        return emitUnaryOp(tree, "__invert__", aten::bitwise_not);
       }
       case TK_AND:
       case TK_OR: {
