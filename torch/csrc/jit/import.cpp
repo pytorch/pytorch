@@ -337,7 +337,8 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
   for (const auto& atom : atoms) {
     moduleStack_.emplace_back(atom);
   }
-  auto module = script::Module(moduleStack_, compilation_unit_);
+  auto module =
+      script::Module(c10::QualifiedName(moduleStack_), compilation_unit_);
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     auto submodule = LEGACY_convertModule(sub_def);
