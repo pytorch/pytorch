@@ -174,6 +174,12 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
+    if (op.schema().name().substr(0, 6) == "aten::") {
+      // Ignore ATen ops for now because they have their own code
+      // to expose them to JIT.
+      // TODO Remove that one and also use the one here
+      return;
+    }
     torch::jit::registerOperator(createOperatorFromC10(op));
   }
 
