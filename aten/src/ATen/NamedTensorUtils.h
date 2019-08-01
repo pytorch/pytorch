@@ -3,13 +3,16 @@
 
 #include <ATen/NamedTensor.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/DimVector.h>
 #include <functional>
 
 namespace at {
 
+using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
+
 inline bool has_names(TensorList tensors) {
   return std::any_of(
-      tensors.begin(), tensors.end(), [](const Tensor& t) { return t.is_named(); });
+      tensors.begin(), tensors.end(), [](const Tensor& t) { return t.has_names(); });
 }
 
 // Sets the names of `tensor` to be `names`.

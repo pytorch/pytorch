@@ -7,6 +7,10 @@
 #  MKLDNN_FOUND          : set to true if mkl-dnn is found.
 #  MKLDNN_INCLUDE_DIR    : path to mkl-dnn include dir.
 #  MKLDNN_LIBRARIES      : list of libraries for mkl-dnn
+#
+# The following variables are used:
+#  MKLDNN_USE_NATIVE_ARCH : Whether native CPU instructions should be used in MKLDNN. This should be turned off for
+#  general packaging to avoid incompatible CPU instructions. Default: OFF.
 
 IF (NOT MKLDNN_FOUND)
 
@@ -118,11 +122,12 @@ ENDIF()
 SET(WITH_TEST FALSE CACHE BOOL "" FORCE)
 SET(WITH_EXAMPLE FALSE CACHE BOOL "" FORCE)
 SET(MKLDNN_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
-IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  # To avoid binary compatibility issue by disabling HostOpts in MKl-DNN
-  SET(ARCH_OPT_FLAGS "-msse4" CACHE STRING "" FORCE)
-ELSE()
-  SET(ARCH_OPT_FLAGS "" CACHE STRING "" FORCE)
+IF(NOT MKLDNN_USE_NATIVE_ARCH)  # Disable HostOpts in MKL-DNN.
+  IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    SET(ARCH_OPT_FLAGS "-msse4" CACHE STRING "" FORCE)
+  ELSE()
+    SET(ARCH_OPT_FLAGS "" CACHE STRING "" FORCE)
+  ENDIF()
 ENDIF()
 ADD_SUBDIRECTORY(${MKLDNN_ROOT})
 IF(NOT TARGET mkldnn)

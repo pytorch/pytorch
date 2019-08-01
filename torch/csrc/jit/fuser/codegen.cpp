@@ -70,7 +70,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
 #define DEFINE_CASE(ctype, name, _) \
   case at::ScalarType::name:        \
     return #ctype;
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_STUBS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
       throw std::runtime_error("unknown scalar type");

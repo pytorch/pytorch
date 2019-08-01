@@ -6,13 +6,14 @@ in `./_utils/worker.py`.
 """
 
 import torch
+import multiprocessing as python_multiprocessing
 import torch.multiprocessing as multiprocessing
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler
 from . import _utils
 from torch._utils import ExceptionWrapper
 import threading
 import itertools
-from torch._six import queue
+from torch._six import queue, string_classes
 
 
 get_worker_info = _utils.worker.get_worker_info
@@ -104,8 +105,8 @@ class DataLoader(object):
                  :ref:`multiprocessing-best-practices` on more details related
                  to multiprocessing in PyTorch.
 
-    .. note:: ``len(dataloader)`` heuristic based on the length of the sampler used.
-              When :attr:`dataset` is a subclass of :class:`~torch.utils.data.IterableDataset`,
+    .. note:: ``len(dataloader)`` heuristic is based on the length of the sampler used.
+              When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
               an infinite sampler is used, whose :meth:`__len__` is not
               implemented, because the actual length depends on both the
               iterable as well as multi-process loading configurations. So one
@@ -119,20 +120,22 @@ class DataLoader(object):
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
                  batch_sampler=None, num_workers=0, collate_fn=None,
                  pin_memory=False, drop_last=False, timeout=0,
-                 worker_init_fn=None):
+                 worker_init_fn=None, multiprocessing_context=None):
         torch._C._log_api_usage_once("python.data_loader")
-        self.dataset = dataset
-        self.num_workers = num_workers
-        self.pin_memory = pin_memory
-        self.timeout = timeout
-        self.worker_init_fn = worker_init_fn
 
-        if self.num_workers < 0:
+        if num_workers < 0:
             raise ValueError('num_workers option should be non-negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
+
+        self.dataset = dataset
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
+        self.timeout = timeout
+        self.worker_init_fn = worker_init_fn
+        self.multiprocessing_context = multiprocessing_context
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
@@ -228,6 +231,38 @@ class DataLoader(object):
 
         self.collate_fn = collate_fn
         self.__initialized = True
+
+    @property
+    def multiprocessing_context(self):
+        return self.__multiprocessing_context
+
+    @multiprocessing_context.setter
+    def multiprocessing_context(self, multiprocessing_context):
+        if multiprocessing_context is not None:
+            if self.num_workers > 0:
+                if not multiprocessing._supports_context:
+                    raise ValueError('multiprocessing_context relies on Python >= 3.4, with '
+                                     'support for different start methods')
+
+                if isinstance(multiprocessing_context, string_classes):
+                    valid_start_methods = multiprocessing.get_all_start_methods()
+                    if multiprocessing_context not in valid_start_methods:
+                        raise ValueError(
+                            ('multiprocessing_context option '
+                             'should specify a valid start method in {}, but got '
+                             'multiprocessing_context={}').format(valid_start_methods, multiprocessing_context))
+                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
+
+                if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
+                    raise ValueError(('multiprocessing_context option should be a valid context '
+                                      'object or a string specifying the start method, but got '
+                                      'multiprocessing_context={}').format(multiprocessing_context))
+            else:
+                raise ValueError(('multiprocessing_context can only be used with '
+                                  'multi-process loading (num_workers > 0), but got '
+                                  'num_workers={}').format(self.num_workers))
+
+        self.__multiprocessing_context = multiprocessing_context
 
     def __setattr__(self, attr, val):
         if self.__initialized and attr in ('batch_size', 'sampler', 'drop_last'):
@@ -602,9 +637,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         assert self.num_workers > 0
 
+        if loader.multiprocessing_context is None:
+            multiprocessing_context = multiprocessing
+        else:
+            multiprocessing_context = loader.multiprocessing_context
+
         self.worker_init_fn = loader.worker_init_fn
         self.worker_queue_idx_cycle = itertools.cycle(range(self.num_workers))
-        self.worker_result_queue = multiprocessing.Queue()
+        self.worker_result_queue = multiprocessing_context.Queue()
         self.worker_pids_set = False
         self.shutdown = False
         self.send_idx = 0  # idx of the next task to be sent to workers
@@ -614,7 +654,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         #                  \ (worker_id, data)   if data is already fetched (out-of-order)
         self.task_info = {}
         self.tasks_outstanding = 0  # always equal to count(v for v in task_info.values() if len(v) == 1)
-        self.workers_done_event = multiprocessing.Event()
+        self.workers_done_event = multiprocessing_context.Event()
 
         self.index_queues = []
         self.workers = []
@@ -624,9 +664,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # (i.e., if kind != Iterable).
         self.workers_status = []
         for i in range(self.num_workers):
-            index_queue = multiprocessing.Queue()
+            index_queue = multiprocessing_context.Queue()
             # index_queue.cancel_join_thread()
-            w = multiprocessing.Process(
+            w = multiprocessing_context.Process(
                 target=_utils.worker._worker_loop,
                 args=(self.dataset_kind, self.dataset, index_queue,
                       self.worker_result_queue, self.workers_done_event,
@@ -809,7 +849,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     def _shutdown_worker(self, worker_id):
         # Mark a worker as having finished its work and dead, e.g., due to
         # exhausting an `IterableDataset`. This should be used only when this
-        # `_DataLoaderIter` is going to continue running.
+        # `_MultiProcessingDataLoaderIter` is going to continue running.
 
         assert self.workers_status[worker_id]
 
@@ -830,7 +870,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self.workers_status[worker_id] = False
 
     def _shutdown_workers(self):
-        # Called when shutting down this `_DataLoaderIter`.
+        # Called when shutting down this `_MultiProcessingDataLoaderIter`.
         # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
         # the logic of this function.
         python_exit_status = _utils.python_exit_status
