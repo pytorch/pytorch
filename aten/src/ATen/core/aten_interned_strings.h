@@ -199,6 +199,7 @@ _(aten, arange) \
 _(aten, argmax) \
 _(aten, argmin) \
 _(aten, as_strided) \
+_(aten, as_tensor) \
 _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
@@ -334,7 +335,6 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, ge) \
-_(aten, gels) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
@@ -415,6 +415,7 @@ _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
+_(aten, lstsq) \
 _(aten, lt) \
 _(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
@@ -527,7 +528,6 @@ _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
 _(aten, prod) \
-_(aten, pstrf) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, rand) \
@@ -767,6 +767,7 @@ _(attr, dimension) \
 _(attr, dims) \
 _(attr, dims_other) \
 _(attr, dims_self) \
+_(attr, divisor_override) \
 _(attr, dropout) \
 _(attr, dropout_seed) \
 _(attr, dropout_state) \

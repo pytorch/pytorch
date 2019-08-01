@@ -24,6 +24,7 @@ void Adagrad::step() {
     }
 
     if (options.weight_decay_ > 0) {
+      NoGradGuard guard;
       p.grad() = p.grad() + options.weight_decay_ * p;
     }
 

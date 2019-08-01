@@ -68,13 +68,11 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   // ```
   var.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
 
-  if (grad_fn) {
-    auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    Edge edge(grad_fn_, grad_fn_->add_input_metadata(var));
-    var.set_gradient_edge(std::move(edge));
-  } else {
-    var.set_requires_grad(requires_grad);
-  }
+  TORCH_CHECK(!grad_fn,
+    "_grad_fn argument to legacy Variable constructor is no longer supported.  "
+    "Instead, please invoke your _grad_fn to produce a variable with it as the "
+    "_grad_fn.");
+  var.set_requires_grad(requires_grad);
 
   if (name) {
     var.set_name(name);

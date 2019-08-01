@@ -170,7 +170,7 @@ class ShapePropagator {
     // prevented it
     std::stringstream ss;
     ss << "unable to create representative value for: " << type_->str()
-       << ". File a bug report.";
+       << ". File a bug report";
     throw std::runtime_error(ss.str());
   }
 
@@ -527,7 +527,14 @@ class ShapePropagator {
         }
         return;
       }
-      case aten::tensor: {
+      case aten::tensor:
+      case aten::as_tensor: {
+        // as_tensor has an overloaded schema and can either have a tensor or
+        // a list as the first input, if the input is a tensor, we delegate
+        // the shape propagation in PropagateTensorShapeOnNode
+        if (node->inputs().at(0)->type()->isSubtypeOf(TensorType::get())) {
+          break;
+        }
         return propagateTorchTensorShape(node);
       }
       case prim::TupleConstruct: {
@@ -952,7 +959,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, 0)->toScalarType(at::kByte)};
+            return {broadcast(*maybe_tensor_types, 0)->toScalarType(at::kBool)};
           }
           return {};
         }};
@@ -982,8 +989,8 @@ class ShapePropagator {
             "aten::adaptive_avg_pool2d(Tensor self, int[] output_size) -> Tensor",
             "aten::adaptive_avg_pool3d(Tensor self, int[] output_size) -> Tensor",
             "aten::avg_pool1d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
-            "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
-            "aten::avg_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
+            "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor",
+            "aten::avg_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor",
             "aten::max_pool1d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
             "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
             "aten::max_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
@@ -1544,6 +1551,33 @@ class ShapePropagator {
           node->matches(
               "aten::as_strided(Tensor self, int[] size, int[] stride, int? storage_offset) -> Tensor")) {
         return reshape_prop(node, attr::size, tensor_types);
+      } else if (node->matches("aten::as_tensor(Tensor data, *, ScalarType? dtype, Device? device) -> Tensor")) {
+        TypePtr input_type = node->inputs().at(0)->type();
+        if (auto type = input_type->cast<DimensionedTensorType>()) {
+          at::ScalarType default_type = type->scalarType();
+          c10::Device default_device = type->device();
+          if (auto dtype_index = node->schema().argumentIndexWithName("dtype")) {
+            auto inp = toIValue(node->inputs().at(*dtype_index));
+            if (inp == c10::nullopt) {
+              return nullptr;
+            }
+            if (!inp->isNone()) {
+              default_type = inp->toScalarType();
+            }
+          }
+          if (auto device_index = node->schema().argumentIndexWithName("device")) {
+            auto inp = toIValue(node->inputs().at(*device_index));
+            if (inp == c10::nullopt) {
+              return nullptr;
+            }
+            if (!inp->isNone()) {
+              default_device = inp->toDevice();
+            }
+          }
+          node->output()->setType(
+            DimensionedTensorType::create(default_type, default_device, type->dim()));
+        }
+        return nullptr;
       } else if (node->matches(
                      "aten::reshape(Tensor self, int[] shape) -> Tensor")) {
         return reshape_prop(node, attr::shape, tensor_types);

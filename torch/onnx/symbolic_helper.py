@@ -122,6 +122,12 @@ def _unpack_list(list_value):
     return list(list_node.inputs())
 
 
+# Check if list_value is output from prim::ListConstruct
+# This is usually called before _unpack_list to ensure the list can be unpacked.
+def _is_packed_list(list_value):
+    return _is_value(list_value) and list_value.node().kind() == "prim::ListConstruct"
+
+
 def parse_args(*arg_descriptors):
     def decorator(fn):
         fn._arg_descriptors = arg_descriptors
@@ -146,6 +152,10 @@ def _scalar(x):
     return x.item()
 
 
+def _is_complete_or_dimensioned_tensor_type(tensor):
+    return tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType"
+
+
 def _if_scalar_type_as(g, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
@@ -156,7 +166,7 @@ def _if_scalar_type_as(g, self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    elif tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType":
+    elif _is_complete_or_dimensioned_tensor_type(tensor):
         ty = tensor.type().scalarType().lower()
         return getattr(self, ty)()
     else:

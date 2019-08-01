@@ -160,7 +160,22 @@ void magmaSvd(
     magma_int_t lda, scalar_t* s, scalar_t* U, magma_int_t ldu,
     scalar_t* VT, magma_int_t ldvt, scalar_t* work, magma_int_t lwork,
     magma_int_t* iwork, magma_int_t* info) {
-  AT_ERROR("svd only takes float or double Tensors")
+  AT_ERROR("svd only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void magmaLuSolve(
+    magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv,
+    scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
+  AT_ERROR("lu_solve only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void magmaLuSolveBatched(
+    magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
+    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info,
+    magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  AT_ERROR("lu_solve only takes float or double Tensors");
 }
 
 template<>
@@ -456,10 +471,41 @@ void magmaSvd<float>(
     magma_int_t* iwork, magma_int_t* info) {
   magma_sgesdd(jobz, m, n, A, lda, s, U, ldu, VT, ldvt, work, lwork, iwork, info);
 }
+
+template<>
+void magmaLuSolve<double>(
+    magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda, magma_int_t* ipiv,
+    double* dB, magma_int_t lddb, magma_int_t* info) {
+  magma_dgetrs_gpu(MagmaNoTrans, n, nrhs, dA, ldda, ipiv, dB, lddb, info);
+}
+
+template<>
+void magmaLuSolve<float>(
+    magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda, magma_int_t* ipiv,
+    float* dB, magma_int_t lddb, magma_int_t* info) {
+  magma_sgetrs_gpu(MagmaNoTrans, n, nrhs, dA, ldda, ipiv, dB, lddb, info);
+}
+
+
+template<>
+void magmaLuSolveBatched<double>(
+    magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
+    double** dB_array, magma_int_t lddb, magma_int_t& info,
+    magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  info = magma_dgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
+}
+
+template<>
+void magmaLuSolveBatched<float>(
+    magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
+    float** dB_array, magma_int_t lddb, magma_int_t& info,
+    magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+ info = magma_sgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
+}
 #endif
 
-#define ALLOCATE_ARRAY(name, type, size, dummy_tensor) \
-  auto storage_##name = pin_memory<type>(size, dummy_tensor); \
+#define ALLOCATE_ARRAY(name, type, size) \
+  auto storage_##name = pin_memory<type>(size); \
   name = static_cast<type*>(storage_##name.data());
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -492,11 +538,11 @@ AT_ERROR("solve: MAGMA library not found in "
     scalar_t** A_array;
     scalar_t** b_array;
 
-    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, b);
-    ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n, b);
-    ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size, b);
-    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
-    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
+    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size);
+    ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n);
+    ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size);
+    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
+    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
 
     // Set up the created arrays
     for (int64_t i = 0; i < batch_size; i++) {
@@ -574,11 +620,11 @@ AT_ERROR("inverse: MAGMA library not found in "
   scalar_t** self_array;
   scalar_t** self_inv_array;
 
-  ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, self);
-  ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n, self);
-  ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size, self);
-  ALLOCATE_ARRAY(self_array, scalar_t*, batch_size, self);
-  ALLOCATE_ARRAY(self_inv_array, scalar_t*, batch_size, self_inv);
+  ALLOCATE_ARRAY(info_array, magma_int_t, batch_size);
+  ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n);
+  ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size);
+  ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
+  ALLOCATE_ARRAY(self_inv_array, scalar_t*, batch_size);
 
   // Set up the created arrays
   for (int64_t i = 0; i < batch_size; i++) {
@@ -693,8 +739,8 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
     scalar_t** A_array;
     scalar_t** b_array;
 
-    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
-    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
+    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
+    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
 
     // Set up the created arrays
     for (int64_t i = 0; i < batch_size; i++) {
@@ -769,8 +815,8 @@ AT_ERROR("cholesky: MAGMA library not found in "
     magma_int_t* info_array;
     scalar_t** self_array;
 
-    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, self);
-    ALLOCATE_ARRAY(self_array, scalar_t*, batch_size, self);
+    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size);
+    ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
 
     // Set up the created arrays
     for (int64_t i = 0; i < batch_size; i++) {
@@ -826,11 +872,10 @@ AT_ERROR("lu: MAGMA library not found in "
 
   if (self.dim() == 2) {
     // If `pivots` is defined, then we have to compute them.
-    // We will use the normal getrf function to compute the LU factorization
-    // and the pivots
-    // We create temporary tensors on the CPU, because tensors on the GPU
-    // cause segfault when passed to magmaLu and magmaLuNoPiv. The data is later
-    // copied to the appropriate tensors.
+    // magmaLu and magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
+    // the partially-pivoted LU decomposition with / without pivots.
+    // The driver routines magma_(d/s)getrf_(nopiv_)gpu accepts a tensor on the CPU for pivots.
+    // The data is later copied back to the appropriate output tensor.
     Tensor info_tmp = at::zeros({}, at::kInt);
     if (get_pivots) {
       Tensor piv_tmp = at::empty({n}, at::kInt);
@@ -846,7 +891,7 @@ AT_ERROR("lu: MAGMA library not found in "
     magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
 
     scalar_t** self_array;
-    ALLOCATE_ARRAY(self_array, scalar_t*, batch_size, self);
+    ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
 
     // Set up the created arrays
     for (int64_t i = 0; i < batch_size; i++) {
@@ -860,7 +905,7 @@ AT_ERROR("lu: MAGMA library not found in "
       auto pivots_data = pivots.data<magma_int_t>();
       auto pivots_matrix_stride = pivots.size(-1);
       magma_int_t** pivots_array;
-      ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size, pivots);
+      ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
       for (int64_t i = 0; i < batch_size; i++) {
         pivots_array[i] = &pivots_data[i * pivots_matrix_stride];
       }
@@ -1008,8 +1053,8 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
 template <typename scalar_t>
 static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular) {
 #ifndef USE_MAGMA
-AT_ERROR("cholesky_solve: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+AT_ERROR("triangular_solve: MAGMA library not found in "
+         "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
   magma_trans_t trans = transpose ? MagmaTrans : MagmaNoTrans;
@@ -1030,8 +1075,8 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
     scalar_t** A_array;
     scalar_t** b_array;
 
-    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
-    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
+    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
+    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
 
     // Set up the created arrays
     for (int64_t i = 0; i < batch_size; i++) {
@@ -1094,6 +1139,8 @@ AT_ERROR("qr: MAGMA library not found in "
   magma_int_t nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
   int64_t batch_size = batchCount(R);
 
+  // magmaGeqrf uses a hybrid CPU-GPU algorithm to compute the elementary reflectors.
+  // The driver routine magma_(d/s)geqrf2_gpu accepts a tensor on the CPU for elementary reflectors.
   Tensor tau = at::empty({k}, Q.options().device(at::kCPU));
   Tensor work = at::empty({(2 * k + magma_roundup(n, 32)) * nb}, R.options());
   scalar_t* tau_data = tau.data<scalar_t>();
@@ -1170,8 +1217,8 @@ std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
     singleCheckErrors(infos[0], "qr_cuda");
   }
 
-  return std::make_tuple(q_working_copy.narrow_copy(-1, 0, n_columns_q),
-                         r_working_copy.narrow_copy(-2, 0, n_columns_q).triu_());
+  return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q),
+                         r_working_copy.narrow(-2, 0, n_columns_q).triu());
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1193,7 +1240,7 @@ AT_ERROR("symeig: MAGMA library not found in "
   magma_vec_t jobz = eigenvectors ? MagmaVec : MagmaNoVec;
 
   scalar_t* wA;
-  ALLOCATE_ARRAY(wA, scalar_t, n * n, self);
+  ALLOCATE_ARRAY(wA, scalar_t, n * n);
 
   magma_int_t info;
   // Run once, first to get the optimum work sizes.
@@ -1210,8 +1257,8 @@ AT_ERROR("symeig: MAGMA library not found in "
   magma_int_t* iwork;
   lwork = magma_int_cast(wkopt, "work_size");
   liwork = magma_int_cast(iwkopt, "iwork_size");
-  ALLOCATE_ARRAY(work, scalar_t, lwork, self);
-  ALLOCATE_ARRAY(iwork, magma_int_t, liwork, self);
+  ALLOCATE_ARRAY(work, scalar_t, lwork);
+  ALLOCATE_ARRAY(iwork, magma_int_t, liwork);
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
@@ -1232,9 +1279,9 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
 
-  // We create temporary tensors on the CPU, because tensors on the GPU
-  // cause segfault when passed to magmaSymeig. The data is later
-  // moved to the appropriate device.
+  // magmaSymeig uses a hybrid CPU-GPU algorithm to compute the eigenvalues and eigenvectors.
+  // The driver routine magma_(d/s)syev_gpu accepts a tensor on the CPU for eigvalenvalues.
+  // The data is later moved to the appropriate device.
   // In the case where self.numel() == 0, we just return an empty tensor of
   // dimensions on the CUDA (to avoid the unnecessary "to(at::kCUDA)")
   auto eigvals_working_copy = self.numel() == 0
@@ -1294,11 +1341,11 @@ AT_ERROR("svd: MAGMA library not found in "
   magma_int_t lwork = -1;
   scalar_t wkopt;
   magma_int_t* iwork;
-  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * k, self);
+  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * k);
   magmaSvd<scalar_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, iwork, &info);
   lwork = magma_int_cast(wkopt, "work_size");
   scalar_t* work;
-  ALLOCATE_ARRAY(work, scalar_t, lwork, self);
+  ALLOCATE_ARRAY(work, scalar_t, lwork);
 
   for (int64_t i = 0; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_stride];
@@ -1369,6 +1416,93 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
     VT_working_copy = same_stride_to(VT_working_copy, self.options()).zero_();
   }
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, int64_t& info) {
+#ifndef USE_MAGMA
+AT_ERROR("lu_solve: MAGMA library not found in "
+         "compilation. Please rebuild with MAGMA.");
+#else
+  auto b_data = b.data<scalar_t>();
+  auto lu_data = lu.data<scalar_t>();
+
+  auto n = lu.size(-2);
+  auto nrhs = b.size(-1);
+
+  int info_tmp = 0;
+  if (b.dim() == 2) {
+    magma_int_t info = 0;
+    Tensor pivots_tmp = pivots.cpu();
+    magmaLuSolve<scalar_t>(n, nrhs, lu_data, n, pivots_tmp.data<magma_int_t>(), b_data, n, &info_tmp);
+    info = info_tmp;
+  } else {
+    auto pivots_data = pivots.data<magma_int_t>();
+
+    auto b_stride = matrixStride(b);
+    auto lu_stride = matrixStride(lu);
+    auto pivots_stride = pivots.size(-1);
+    magma_int_t batch_size = magma_int_cast(batchCount(b), "batchCount");
+
+    magma_int_t** pivots_array;
+    scalar_t** lu_array;
+    scalar_t** b_array;
+
+    ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
+    ALLOCATE_ARRAY(lu_array, scalar_t*, batch_size);
+    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
+
+    for (int64_t i = 0; i < batch_size; i++) {
+      pivots_array[i] = &pivots_data[i * pivots_stride];
+      b_array[i] = &b_data[i * b_stride];
+      lu_array[i] = &lu_data[i * lu_stride];
+    }
+
+    MAGMAQueue magma_queue(b.get_device());
+
+    // Compute as many batches of 65535 possible
+    // The number of "mini"-batches are floor(batch_size / 65535)
+    // and these cover floor(batch_size / 65535) * 65535 matrix solves
+    int64_t mini_batches = batch_size / 65535, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * 65535; mini_idx += 65535) {
+      scalar_t** lu_array_cur = &lu_array[mini_idx];
+      scalar_t** b_array_cur = &b_array[mini_idx];
+      magma_int_t** pivots_array_cur = &pivots_array[mini_idx];
+
+      magmaLuSolveBatched<scalar_t>(
+          n, nrhs, lu_array_cur, n, pivots_array_cur, b_array_cur, n,
+          info_tmp, 65535, magma_queue);
+
+      if (info_tmp != 0) {
+        break;
+      }
+    }
+
+    // Compute whatever is left = batch_size - floor(batch_size / 65535) * 65535
+    // which concisely is equal to batch_size % 65535
+    if (batch_size % 65535 != 0 && info_tmp == 0) {
+      magmaLuSolveBatched<scalar_t>(
+          n, nrhs, &lu_array[mini_idx], n, &pivots_array[mini_idx], &b_array[mini_idx], n,
+          info_tmp, batch_size % 65535, magma_queue);
+    }
+
+    info = info_tmp;
+  }
+#endif
+}
+
+Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  int64_t info = 0;
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto LU_data_working_copy = cloneBatchedColumnMajor(LU_data);
+  auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cuda", [&]{
+    apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, info);
+  });
+  TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
+  return self_working_copy;
 }
 
 }}  // namespace at::native

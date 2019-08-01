@@ -291,7 +291,7 @@ void conv_transpose3d_out_cpu_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
       input.scalar_type(), "conv_transpose3d_out_cpu", [&] {
         // Helpers
         Tensor input_n;

@@ -168,7 +168,7 @@ const static std::unordered_set<std::string> reserved_names = {
 
 struct PythonPrintPass {
   using SourceRangeStack = std::vector<SourceRange>;
-  SourceRangeStack source_range_stack_ = {SourceRange("")};
+  SourceRangeStack source_range_stack_ = {SourceRange()};
 
   struct WithSourceRange {
     explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
@@ -176,7 +176,7 @@ struct PythonPrintPass {
       if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
         stack->push_back(std::move(gen_source.value()));
       } else {
-        stack->push_back(std::move(n->sourceRange()));
+        stack->push_back(n->sourceRange());
       }
     }
 
@@ -650,7 +650,7 @@ struct PythonPrintPass {
       throw script::ErrorReport(stmt.node()->sourceRange())
           << "loop cannot be printed as python "
           << "because it has gone through an optimization "
-          << "that combined while and for loops. File a bug.";
+          << "that combined while and for loops. File a bug";
     }
 
     bool emit_as_for_loop = loop_type == LoopView::For;
@@ -786,7 +786,7 @@ struct PythonPrintPass {
         if (enforce_importable_ && node->inputs().size() != 1) {
           throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
-              << "Normal use of ScriptMethods should enforce this.";
+              << "Normal use of ScriptMethods should enforce this";
         }
         if (node->inputs().size() > 0) {
           indent();
@@ -1006,6 +1006,9 @@ struct PythonPrintPass {
       } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
+      } break;
+      case aten::sorted: {
+        printValueList(stmt, node->inputs(), "sorted(", ")");
       } break;
       case prim::TupleConstruct: {
         if (auto qualname = node->output()

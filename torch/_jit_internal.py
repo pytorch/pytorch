@@ -6,6 +6,7 @@ circular dependency problems
 
 import inspect
 import weakref
+import torch._C
 from torch._six import builtins
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
@@ -60,29 +61,58 @@ def createResolutionCallback(frames_up=0):
     return env
 
 
+def get_closure(fn):
+    """
+    Get a dictionary of closed over variables from a function
+    """
+    captures = {}
+    captures.update(fn.__globals__)
+
+    for index, captured_name in enumerate(fn.__code__.co_freevars):
+        captures[captured_name] = fn.__closure__[index].cell_contents
+
+    return captures
+
+
 def createResolutionCallbackFromClosure(fn):
     """
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
     """
-    var_names = fn.__code__.co_freevars
-
-    # map of captured name -> value
-    free_vars = {}
-
-    for index, name in enumerate(var_names):
-        free_vars[name] = fn.__closure__[index].cell_contents
-    f_globals = fn.__globals__
+    closure = get_closure(fn)
 
     def env(key):
-        if key in free_vars:
-            return free_vars[key]
+        if key in closure:
+            return closure[key]
         elif hasattr(builtins, key):
             return getattr(builtins, key)
-        else:
-            return f_globals.get(key)
+        return None
 
     return env
+
+
+def can_compile_class(cls):
+    # If any of the functions on a type don't have a code object, this type can't
+    # be compiled and is probably a builtin / bound from C
+    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    has_code = [hasattr(fn, '__code__') for fn in fns]
+    return all(has_code)
+
+
+def createResolutionCallbackForClassMethods(cls):
+    """
+    This looks at all the methods defined in a class and pulls their closed-over
+    variables into a dictionary and uses that to resolve variables.
+    """
+    # cls is a type here, so `ismethod` is false since the methods on the type
+    # aren't bound to anything, so Python treats them as regular functions
+    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    captures = {}
+
+    for fn in fns:
+        captures.update(get_closure(fn))
+
+    return lambda key: captures.get(key, None)
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
@@ -357,3 +387,36 @@ class BroadcastingListCls(object):
 BroadcastingList1 = BroadcastingListCls()
 for i in range(2, 7):
     globals()["BroadcastingList{}".format(i)] = BroadcastingList1
+
+# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
+def _qualified_name(obj):
+    # short-circuit in cases where the object already has a known qualified name
+    if isinstance(obj, torch._C.Function):
+        return obj.qualified_name
+
+    name = obj.__name__
+    module_name = obj.__module__
+
+    # The Python docs are very clear that `__module__` can be None, but I can't
+    # figure out when it actually would be.
+    if module_name is None:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "__module__ can't be None.".format(name))
+
+    # if getattr(sys.modules[module_name], name) is not obj:
+    #     raise RuntimeError("Could not get qualified name for class '{}': "
+    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
+
+    # __main__ is a builtin module, so rewrite it to "__torch__".
+    if module_name == "__main__":
+        module_name = "__torch__"
+    else:
+        # Everything else gets a "__torch__" prefix to avoid name collisions
+        # with the names of user values.
+        module_name = "__torch__." + module_name
+
+    if "." in name:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "'{}' is not a valid identifier".format(name, name))
+
+    return module_name + "." + name

@@ -6,11 +6,11 @@ static methods.
 
 import torch
 import random
-import sys
 import os
 from collections import namedtuple
 from torch._six import queue
-from . import signal_handling, MP_STATUS_CHECK_INTERVAL, ExceptionWrapper, IS_WINDOWS
+from torch._utils import ExceptionWrapper
+from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
 
 if IS_WINDOWS:
     import ctypes
@@ -136,7 +136,8 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
 
             fetcher = _DatasetKind.create_fetcher(dataset_kind, dataset, auto_collation, collate_fn, drop_last)
         except Exception:
-            init_exception = ExceptionWrapper(sys.exc_info())
+            init_exception = ExceptionWrapper(
+                where="in DataLoader worker process {}".format(worker_id))
 
         # When using Iterable mode, some worker can exit earlier than others due
         # to the IterableDataset behaving differently for different workers.
@@ -186,7 +187,8 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                         # It is important that we don't store exc_info in a variable.
                         # `ExceptionWrapper` does the correct thing.
                         # See NOTE [ Python Traceback Reference Cycle Problem ]
-                        data = ExceptionWrapper(sys.exc_info())
+                        data = ExceptionWrapper(
+                            where="in DataLoader worker process {}".format(worker_id))
             data_queue.put((idx, data))
             del data, idx, index, r  # save memory
     except KeyboardInterrupt:

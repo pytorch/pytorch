@@ -1,7 +1,7 @@
 # Generates C++ autograd functions for the derivatives of ATen operations
 #
 # This writes two files:
-#  Functions.h/cpp: subclasses of autograd::Function
+#  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
 import os
@@ -94,7 +94,7 @@ def gen_autograd_functions_python(out, autograd_functions, template_path):
 def gen_autograd_functions(out, autograd_functions, template_path, file_basename):
     """Functions.h and Functions.cpp body
 
-    These contain the auto-generated subclasses of torch::autograd::Function
+    These contain the auto-generated subclasses of torch::autograd::Node
     for each every differentiable torch function.
     """
 
@@ -208,7 +208,7 @@ def process_function(func):
 
     env['body'] = body
     if func['name'] in UNTRACEABLE_FUNCTIONS:
-        env['superclass'] = 'Function'
+        env['superclass'] = 'Node'
     else:
         env['superclass'] = 'TraceableFunction'
     return nested_dict(env, func)

@@ -259,39 +259,6 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   c10::raw::intrusive_ptr::decref(work);
 }
 
-void THTensor_(clearUpLoTriangle)(THTensor *a, const char *uplo)
-{
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
-
-  int n = a->size(0);
-
-  /* Build full matrix */
-  scalar_t *p = a->data<scalar_t>();
-  int64_t i, j;
-
-  /* Upper Triangular Case */
-  if (uplo[0] == 'U')
-  {
-    /* Clear lower triangle (excluding diagonals) */
-    for (i=0; i<n; i++) {
-     for (j=i+1; j<n; j++) {
-        p[n*i + j] = 0;
-      }
-    }
-  }
-  /* Lower Triangular Case */
-  else if (uplo[0] == 'L')
-  {
-    /* Clear upper triangle (excluding diagonals) */
-    for (i=0; i<n; i++) {
-      for (j=0; j<i; j++) {
-        p[n*i + j] = 0;
-      }
-    }
-  }
-}
-
 void THTensor_(copyUpLoTriangle)(THTensor *a, const char *uplo)
 {
   THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
@@ -347,54 +314,6 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo)
 
   THTensor_(copyUpLoTriangle)(ra__, uplo);
   THTensor_(freeCopyTo)(ra__, ra_);
-}
-
-/*
- Computes the Cholesky factorization with complete pivoting of a real symmetric
- positive semidefinite matrix.
-
- Args:
- * `ra_`    - result Tensor in which to store the factor U or L from the
-              Cholesky factorization.
- * `rpiv_`  - result IntTensor containing sparse permutation matrix P, encoded
-              as P[rpiv_[k], k] = 1.
- * `a`      - input Tensor; the input matrix to factorize.
- * `uplo`   - string; specifies whether the upper or lower triangular part of
-              the symmetric matrix A is stored. "U"/"L" for upper/lower
-              triangular.
- * `tol`    - double; user defined tolerance, or < 0 for automatic choice.
-              The algorithm terminates when the pivot <= tol.
- */
-void THTensor_(pstrf)(THTensor *ra_, THIntTensor *rpiv_, THTensor *a, const char *uplo, scalar_t tol) {
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
-
-  int n = a->size(0);
-
-  THTensor *ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-  THIntTensor_resize1d(rpiv_, n);
-
-  // Allocate working tensor
-  THTensor *work = THTensor_(newWithSize1d)(2 * n);
-
-  // Run Cholesky factorization
-  int lda = n;
-  int rank, info;
-
-  THLapack_(pstrf)(uplo[0], n, ra__->data<scalar_t>(), lda,
-                   THIntTensor_data(rpiv_), &rank, tol,
-                   work->data<scalar_t>(), &info);
-
-  THLapackCheckWithCleanup("Lapack Error %s : matrix is rank deficient or not positive semidefinite",
-                           THCleanup(
-                               c10::raw::intrusive_ptr::decref(ra__);
-                               c10::raw::intrusive_ptr::decref(work);),
-                           "pstrf", info,"");
-
-  THTensor_(clearUpLoTriangle)(ra__, uplo);
-
-  THTensor_(freeCopyTo)(ra__, ra_);
-  c10::raw::intrusive_ptr::decref(work);
 }
 
 /*
@@ -567,113 +486,6 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
                            "ormqr", info,"");
   THTensor_(freeCopyTo)(ra__, ra_);
   c10::raw::intrusive_ptr::decref(work);
-}
-
-void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor *pivots)
-{
-  TORCH_CHECK(!atf->is_empty() && THTensor_(nDimensionLegacyNoScalars)(atf) == 3, "expected non-empty 3D tensor, got size: ",
-           atf->sizes());
-  TORCH_CHECK(!b->is_empty() && (THTensor_(nDimensionLegacyNoScalars)(b) == 3 ||
-             THTensor_(nDimensionLegacyNoScalars)(b) == 2), "expected non-empty 2D or 3D tensor, got size: ", b->sizes());
-  THArgCheck(THTensor_(size)(atf, 0) ==
-             THTensor_(size)(b, 0), 3, "number of batches must be equal");
-  THArgCheck(THTensor_(size)(atf, 1) ==
-             THTensor_(size)(atf, 2), 3, "A matrices must be square");
-  THArgCheck(THTensor_(size)(atf, 1) ==
-             THTensor_(size)(b, 1), 3, "dimensions of A and b must be equal");
-
-  if (rb_ != b) {
-    THTensor_(resizeAs)(rb_, b);
-    at::Tensor rb__wrap = THTensor_wrap(rb_);
-    at::Tensor b_wrap = THTensor_wrap(b);
-    at::native::copy_(rb__wrap, b_wrap);
-  }
-
-  int64_t num_batches = atf->size(0);
-  int64_t n = atf->size(1);
-  int nrhs = THTensor_nDimensionLegacyAll(rb_) > 2 ? rb_->size(2) : 1;
-
-  int lda, ldb;
-  THTensor *atf_;
-  THTensor *rb__;
-
-  // correct ordering of A
-  if (atf->stride(1) == 1) {
-    // column ordered, what BLAS wants
-    lda = atf->stride(2);
-    atf_ = atf;
-  } else {
-    // not column ordered, need to make it such (requires copy)
-    // it would be nice if we could use the op(A) flags to automatically
-    // transpose A if needed, but this leads to unpredictable behavior if the
-    // user clones A_tf later with a different ordering
-    THTensor *transp_r_ = THTensor_(newTranspose)(atf, 1, 2);
-    atf_ = THTensor_(newClone)(transp_r_);
-    c10::raw::intrusive_ptr::decref(transp_r_);
-    THTensor_(transpose)(atf_, NULL, 1, 2);
-    lda = atf_->stride(2);
-  }
-
-  // correct ordering of B
-  if (rb_->stride(1) == 1) {
-    // column ordered
-    if (THTensor_nDimensionLegacyAll(rb_) == 2 || rb_->size(2) == 1) {
-      ldb = n;
-    } else {
-      ldb = rb_->stride(2);
-    }
-    rb__ = rb_;
-  } else {
-    // make column ordered
-    if (THTensor_nDimensionLegacyAll(rb_) > 2) {
-      THTensor *transp_r_ = THTensor_(newTranspose)(rb_, 1, 2);
-      rb__ = THTensor_(newClone)(transp_r_);
-      c10::raw::intrusive_ptr::decref(transp_r_);
-      THTensor_(transpose)(rb__, NULL, 1, 2);
-      ldb = rb__->stride(2);
-    } else {
-      rb__ = THTensor_(newClone)(rb_);
-      ldb = n;
-    }
-  }
-
-  THTensor *ai = THTensor_(new)();
-  THTensor *rbi = THTensor_(new)();
-  THIntTensor *pivoti = THIntTensor_new();
-
-  if (!THIntTensor_isContiguous(pivots)) {
-      THError("Error: rpivots_ is not contiguous.");
-  }
-
-  for (int64_t batch = 0; batch < num_batches; ++batch) {
-    THTensor_(select)(ai, atf_, 0, batch);
-    THTensor_(select)(rbi, rb__, 0, batch);
-    THIntTensor_select(pivoti, pivots, 0, batch);
-
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    int info;
-    THLapack_(getrs)('N', n, nrhs, ai->data<scalar_t>(), lda,
-                     THIntTensor_data(pivoti), rbi->data<scalar_t>(),
-                     ldb, &info);
-    if (info != 0) {
-      THError("Error: Nonzero info.");
-    }
-#else
-    THError("Unimplemented");
-#endif
-  }
-
-  c10::raw::intrusive_ptr::decref(ai);
-  c10::raw::intrusive_ptr::decref(rbi);
-  THIntTensor_free(pivoti);
-
-  if (atf_ != atf) {
-    c10::raw::intrusive_ptr::decref(atf_);
-  }
-
-  if (rb__ != rb_) {
-    THTensor_(freeCopyTo)(rb__, rb_);
-  }
 }
 
 #endif

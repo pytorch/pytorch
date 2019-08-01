@@ -88,27 +88,45 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     return result.copy_(result_cpu);
   }
 
+#if 0
+  // This if condition should never be true because if n >= 30000 and the tensor has a Half type,
+  // check_supported_max_int_with_precision should have reported an error. This snippet is commented out but left here
+  // for the sake of clarity, because Half in thrust is spotty, and we do not want future change unaware of this.
   if (result.scalar_type() == at::ScalarType::Half) {  // Half in thrust is spotty. Avoid.
     auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
     return result.copy_(randperm_out_cuda(result_float, n, generator));
   }
+#endif
 
   // Generate random values for the keys array
   AT_DISPATCH_ALL_TYPES(
     result.scalar_type(), "randperm_out_cuda", [&] {
       auto keys = at::empty(result.sizes(), result.options()).random_(generator);
-
-      auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
       auto keys_data = thrust::device_ptr<scalar_t>(keys.data<scalar_t>());
+
+      // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
+      // points to a new tensor.
+      Tensor shuffled;
+      thrust::device_ptr<scalar_t> shuffled_data;
+      if (result.is_contiguous()) {
+        shuffled_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
+      } else {
+        shuffled = at::empty(n, result.options());
+        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data<scalar_t>());
+      }
 
       auto state = globalContext().getTHCState();
       THCThrustAllocator thrustAlloc(state);
       auto policy = thrust::cuda::par(thrustAlloc).on(at::cuda::getCurrentCUDAStream());
 
-      thrust::sequence(policy, result_data, result_data + n);
+      thrust::sequence(policy, shuffled_data, shuffled_data + n);
 
       // Use the sorted order of keys to rearrange the result array
-      thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
+      thrust::sort_by_key(policy, keys_data, keys_data + n, shuffled_data);
+
+      if (!result.is_contiguous()) {
+        result.copy_(shuffled);
+      }
     }
   );
 

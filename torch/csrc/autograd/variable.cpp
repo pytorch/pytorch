@@ -34,7 +34,7 @@ Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_gr
       "requires_grad should be false if grad_fn is set");
 }
 
-std::shared_ptr<Function> Variable::grad_accumulator() const {
+std::shared_ptr<Node> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
   if (autograd_meta->grad_fn_) {
     throw std::logic_error(
@@ -86,11 +86,11 @@ void Variable::backward(
 
 void Variable::set_data(const at::Tensor &new_data) const {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
-  // from `new_data` to `var`. It requires that `new_data` has the same derived
-  // type of TensorImpl as `var`.
+  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
+  // tensor type.
   TORCH_CHECK(
-    _has_same_tensorimpl_type(*this, new_data),
-    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
+    _has_compatible_shallow_copy_type(*this, new_data),
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
 
   // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();
@@ -132,7 +132,7 @@ Variable::DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
 }
 
-const std::shared_ptr<Function>& Variable::grad_fn() const {
+const std::shared_ptr<Node>& Variable::grad_fn() const {
   if (is_view()) {
     auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
