@@ -2966,7 +2966,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(chi2._event_shape, torch.Size())
         self.assertEqual(chi2.sample().size(), torch.Size())
         self.assertEqual(chi2.sample((3, 2)).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, chi2.log_prob, self.scalar_sample)
+        self.assertEqual(chi2.log_prob(self.scalar_sample).size(), torch.Size())
         self.assertEqual(chi2.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(chi2.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
