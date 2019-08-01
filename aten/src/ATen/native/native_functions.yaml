@@ -3439,7 +3439,7 @@
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_addcdiv_
+    CPU: addcdiv_cpu_
     CUDA: legacy::cuda::_th_addcdiv_
 
 - func: random_.from(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
@@ -3766,13 +3766,13 @@
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_addcdiv_out
+    CPU: addcdiv_cpu_out
     CUDA: legacy::cuda::_th_addcdiv_out
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_addcdiv
+    CPU: addcdiv_cpu
     CUDA: legacy::cuda::_th_addcdiv
 
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)

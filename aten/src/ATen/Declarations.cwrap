@@ -2423,6 +2423,8 @@
   cname: addcdiv
   variants:
     - function
+  backends:
+      - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2439,6 +2441,8 @@
   name: _th_addcdiv_
   cname: addcdiv
   variants: function
+  backends:
+      - CUDA
   return: argument 0
   arguments:
     - THTensor* self
