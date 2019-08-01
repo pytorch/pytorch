@@ -8,6 +8,7 @@ from collections import namedtuple
 from functools import wraps
 
 import torch
+import torch.distributed as c10d
 
 from common_utils import TestCase
 
@@ -52,6 +53,27 @@ def skip_for_known_issues(func):
         sys.exit(TEST_SKIPS['known_issues'].exit_code)
 
     return wrapper
+
+
+def requires_gloo():
+    return unittest.skipUnless(
+        c10d.is_gloo_available(),
+        "c10d was not compiled with the Gloo backend",
+    )
+
+
+def requires_nccl():
+    return unittest.skipUnless(
+        c10d.is_nccl_available(),
+        "c10d was not compiled with the NCCL backend",
+    )
+
+
+def requires_mpi():
+    return unittest.skipUnless(
+        c10d.is_mpi_available(),
+        "c10d was not compiled with the MPI backend",
+    )
 
 
 TIMEOUT_DEFAULT = 30

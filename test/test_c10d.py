@@ -21,6 +21,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from common_distributed import MultiProcessTestCase, \
+    requires_gloo, requires_nccl, requires_mpi, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues
 from common_utils import TestCase, load_tests, run_tests
 from common_utils import retry_on_address_already_in_use_error
@@ -46,27 +47,6 @@ def gpus_for_rank(world_size):
     for rank in range(world_size):
         gpus_for_rank.append(visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process])
     return gpus_for_rank
-
-
-def requires_gloo():
-    return unittest.skipUnless(
-        c10d.is_gloo_available(),
-        "c10d was not compiled with the Gloo backend",
-    )
-
-
-def requires_nccl():
-    return unittest.skipUnless(
-        c10d.is_nccl_available(),
-        "c10d was not compiled with the NCCL backend",
-    )
-
-
-def requires_mpi():
-    return unittest.skipUnless(
-        c10d.is_mpi_available(),
-        "c10d was not compiled with the MPI backend",
-    )
 
 
 def simple_reduce_tests(rank, world_size):
