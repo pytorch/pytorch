@@ -382,6 +382,10 @@ if TEST_TENSORBOARD:
             mt = {'accuracy': 0.1, 'loss': 10}
             summary.hparams(hp, mt)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
+            hp = {'use_magic': True, 'init_string': "42"}
+            mt = {'accuracy': 0.1, 'loss': 10}
+            summary.hparams(hp, mt)
+
             mt = {'accuracy': torch.zeros(1), 'loss': torch.zeros(1)}
             summary.hparams(hp, mt)
 
