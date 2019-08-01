@@ -541,7 +541,8 @@ def gen_pyi(declarations_path, out):
                 'def {}(self, value: Number,'
                 ' other: Union[Tensor, Number]{})'
                 ' -> Tensor: ...'.format(name, out_suffix))
-    simple_conversions = ['byte', 'char', 'cpu', 'double', 'float', 'half', 'int', 'long', 'short']
+    simple_conversions = ['byte', 'char', 'cpu', 'double', 'float',
+                          'half', 'int', 'long', 'short', 'bool']
     for name in simple_conversions:
         unsorted_tensor_method_hints[name].append('def {}(self) -> Tensor: ...'.format(name))
 
@@ -568,11 +569,11 @@ def gen_pyi(declarations_path, out):
     # TODO: These are deprecated, maybe we shouldn't type hint them
     legacy_class_hints = []
     for c in ('DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-              'ShortStorage', 'CharStorage', 'ByteStorage'):
+              'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage'):
         legacy_class_hints.append('class {}(Storage): ...'.format(c))
 
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-              'ShortTensor', 'CharTensor', 'ByteTensor'):
+              'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor'):
         legacy_class_hints.append('class {}(Tensor): ...'.format(c))
 
     # Generate type signatures for dtype classes
