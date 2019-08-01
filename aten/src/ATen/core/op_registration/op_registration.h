@@ -190,6 +190,24 @@ public:
       return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
     }
 
+    // TODO Remove impl_unboxedOnlyKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(TensorTypeId dispatch_key) && {
+      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+
+      return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
+    }
+
+    // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel() && {
+      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+
+      return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
+    }
+
     /**
      * Use this to register an operator whose kernel is implemented as a lambda.
      * The kernel is only called for inputs matching the given dispatch key.
@@ -281,6 +299,17 @@ public:
       );
     }
 
+    template<class KernelFunctor, class... ConstructorParameters>
+    Options&& kernelFunctorUnboxedOnly(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
+      return std::move(*this).kernel(
+        std::move(dispatch_key),
+        nullptr,
+        detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+        detail::FunctionSchemaInferer<KernelFunctor>()()
+      );
+    }
+
     Options() = default;
 
     // KernelRegistrationConfig accumulates all information from the config
@@ -295,7 +324,7 @@ public:
       {}
 
       c10::optional<TensorTypeId> dispatch_key;
-      KernelFunction* kernel_func;
+      KernelFunction* kernel_func; // can be nullptr, not all kernels have this
       KernelCacheCreatorFunction cache_creator_func;
       void* unboxed_kernel_func; // can be nullptr, not all kernels have this
       std::unique_ptr<FunctionSchema> inferred_function_schema;
