@@ -1617,8 +1617,7 @@ std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs,
-    std::unordered_map<Node*, Node*>& node_map) {
-  std::unordered_map<Value*, Value*> value_map;
+    std::unordered_map<Value*, Value*>& value_map) {
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -1626,8 +1625,6 @@ std::vector<Value*> insertGraph(
   }
   for (auto* node : callee.nodes()) {
     auto* new_node = g.insertNode(g.createClone(node, value_map_func));
-    node_map[node] = new_node;
-
     for (size_t i = 0; i < node->outputs().size(); ++i) {
       value_map[node->outputs()[i]] = new_node->outputs()[i];
     }
@@ -1645,8 +1642,8 @@ std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs) {
-  std::unordered_map<Node*, Node*> node_map;
-  return insertGraph(g, callee, inputs, node_map);
+  std::unordered_map<Value*, Value*> value_map;
+  return insertGraph(g, callee, inputs, value_map);
 }
 
 void ProfileOp::cloneFrom(Node* other_) {

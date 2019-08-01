@@ -1318,8 +1318,8 @@ TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
 
 /** Insert graph \p CALLEE into graph \p G using \p INPUTS as input values.
  * The insertion happens at the current insertion point.
- * Optionally, one can also pass \p NODE_MAP to get a map between \p CALLEE
- * nodes and their cloned copies in \p G.
+ * Optionally, one can also pass \p VALUE_MAP to get a map between \p CALLEE
+ * values and their cloned copies in \p G.
  */
 TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
@@ -1329,7 +1329,7 @@ TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs,
-    std::unordered_map<Node*, Node*>& node_map);
+    std::unordered_map<Value*, Value*>& value_map);
 
 /** Insert graph \p CALLEE after node \p TO_REPLACE, remove the node and
  * replace all its uses with corresponding outputs of the inserted graph. The
