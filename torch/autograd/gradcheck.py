@@ -117,15 +117,22 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
             x_tensor = x_tensor.data
+            debugInfo = []
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
-                x_tensor[x_idx] = orig - eps
+                orig_minus = orig - eps
+                x_tensor[x_idx] = orig_minus
                 outa = fn(input).clone()
-                x_tensor[x_idx] = orig + eps
+                orig_plus = orig + eps
+                x_tensor[x_idx] = orig_plus
                 outb = fn(input).clone()
                 x_tensor[x_idx] = orig
-                r = (outb - outa) / (2 * eps)
+                diff = (outb - outa)
+                r = diff / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
+                debugInfo.append((d_idx, x_idx, orig, eps, orig_minus, outa, orig_plus, outb, diff, r))
+            if printDebug:
+                return debugInfo
 
     return jacobian
 
@@ -277,7 +284,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             return _as_tuple(func(*input))[i]
 
         analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
-        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps, printDebug=printDebug)
+        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
         if not correct_grad_sizes:
             return fail_test('Analytical gradient has incorrect size')
@@ -298,11 +305,14 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                     for inx in range(t2.numel()):
                         data2.append(t2[inx].item())
 
+                    debugInfo = get_numerical_jacobian(fn, tupled_inputs, eps=eps, printDebug=True)
+
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
                                      'actual_error:%s\nmax_error:%s\nclose:%s\n'
                                      'output:%s\ntupled_inputs:%s\n'
                                      'data1:%s\ndata2:%s\n'
-                                     'numerical:%s\nanalytical:%s\n' % (i, j, actual_error, max_error, close, o, tupled_inputs, tuple(data1), tuple(data2), n, a))
+                                     'numerical:%s\nanalytical:%s\n'
+                                     'debugInfo:%s\n' % (i, j, actual_error, max_error, close, o, tupled_inputs, tuple(data1), tuple(data2), n, a, debugInfo))
                 #else:
                 #    if printDebug:
                 #        print("=================CDIST=======================")
