@@ -49,7 +49,7 @@ class Conv2d(_ConvNd):
         >>> output = m(input)
 
     """
-    _FLOAT_MODULE = NNConv2d
+    __FLOAT_MODULE = NNConv2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -149,8 +149,8 @@ class Conv2d(_ConvNd):
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
             weight_observer = mod.weight_fake_quant
         else:
-            assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-                cls._FLOAT_MODULE.__name__
+            assert type(mod) == cls.__FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+                cls.__FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
             weight_observer = mod.qconfig.weight()

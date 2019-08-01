@@ -27,7 +27,7 @@ class {module_name}(Module):
 _qmodule_body = r'''
 r"""{module_name} wraps the {qop_string} function."""
 class {module_name}(Module):
-    _FLOAT_MODULE = torch.nn.modules.{float_op_name}
+    __FLOAT_MODULE = torch.nn.modules.{float_op_name}
 
     def __init__(self):
         super({module_name}, self).__init__()
@@ -42,9 +42,9 @@ class {module_name}(Module):
     def from_float(cls, mod):
         assert (hasattr(mod, 'observer')),\
             "Input float module must have observer attached"
-        assert (type(mod) == cls._FLOAT_MODULE),\
+        assert (type(mod) == cls.__FLOAT_MODULE),\
             "nnq." + cls.__name__ + ".from_float only works for " \
-            + cls._FLOAT_MODULE.__name__
+            + cls.__FLOAT_MODULE.__name__
         scale, zero_point = mod.observer.calculate_qparams()[:2]
         mod = cls()
         mod.scale = torch.tensor(scale, dtype=torch.double)

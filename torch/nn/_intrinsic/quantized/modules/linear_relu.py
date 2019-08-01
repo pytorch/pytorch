@@ -20,7 +20,7 @@ class LinearReLU(Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = NNLinearReLU
+    __FLOAT_MODULE = NNLinearReLU
 
     def __init__(self, in_features, out_features, bias=True):
         super(LinearReLU, self).__init__(in_features, out_features, bias)

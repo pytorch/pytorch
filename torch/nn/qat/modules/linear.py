@@ -21,7 +21,7 @@ class Linear(NNLinear):
         weight: fake quant module for weight
     """
     __constants__ = ['bias', 'in_features', 'out_features']
-    _FLOAT_MODULE = NNLinear
+    __FLOAT_MODULE = NNLinear
 
     def __init__(self, in_features, out_features, bias=True,
                  activation_fake_quant=default_qat_qconfig.activation,
@@ -40,8 +40,8 @@ class Linear(NNLinear):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
+        assert type(mod) == cls.__FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+            cls.__FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert mod.qconfig, 'Input float module must has valid qconfig'
