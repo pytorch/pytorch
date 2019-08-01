@@ -1518,7 +1518,7 @@ if _enabled:
             else:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
-            Module.__init__(self)
+            Module._construct(self)
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
             self._modules = OrderedModuleDict(self._c)
@@ -1565,7 +1565,7 @@ if _enabled:
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
-            return Module.__getattr__(self, attr)
+            return super(ScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
