@@ -132,8 +132,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   auto iter = TensorIterator();
-  assert_no_internal_overlap(self);
-  iter.add_output(self);
+  iter.check_and_add_output(self);
   iter.add_input(src);
   iter.dont_resize_outputs();
   iter.dont_compute_common_dtype();

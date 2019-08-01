@@ -4582,6 +4582,8 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
     def test_copy_many_to_one(self):
+        # Testing in-place copy where it attempt to write from many memory
+        # storage to a single storage would cause RuntimeError to be thrown
         self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
 
     def test_randperm(self):
