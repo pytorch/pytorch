@@ -612,33 +612,11 @@
   options:
     - cname: ltValue
       arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: ltTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_lt_byte
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: ltValueByte
-      arguments:
         - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
-    - cname: ltTensorByte
+    - cname: ltTensor
       arguments:
         - arg: THByteTensor* result
           output: True
@@ -675,33 +653,11 @@
   options:
     - cname: gtValue
       arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: gtTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_gt_byte
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: gtValueByte
-      arguments:
         - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
-    - cname: gtTensorByte
+    - cname: gtTensor
       arguments:
         - arg: THByteTensor* result
           output: True
@@ -738,33 +694,11 @@
   options:
     - cname: leValue
       arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: leTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_le_byte
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: leValueByte
-      arguments:
         - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
-    - cname: leTensorByte
+    - cname: leTensor
       arguments:
         - arg: THByteTensor* result
           output: True
@@ -801,33 +735,11 @@
   options:
     - cname: geValue
       arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: geTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_ge_byte
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: geValueByte
-      arguments:
         - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
-    - cname: geTensorByte
+    - cname: geTensor
       arguments:
         - arg: THByteTensor* result
           output: True
@@ -864,33 +776,11 @@
   options:
     - cname: eqValue
       arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: eqTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_eq_byte
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: eqValueByte
-      arguments:
         - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
-    - cname: eqTensorByte
+    - cname: eqTensor
       arguments:
         - arg: THByteTensor* result
           output: True
@@ -927,33 +817,11 @@
   options:
     - cname: neValue
       arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: neTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_ne_byte
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: neValueByte
-      arguments:
         - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
-    - cname: neTensorByte
+    - cname: neTensor
       arguments:
         - arg: THByteTensor* result
           output: True

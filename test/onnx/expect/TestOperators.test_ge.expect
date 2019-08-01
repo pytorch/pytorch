@@ -13,6 +13,16 @@ graph {
     output: "3"
     op_type: "Not"
   }
+  node {
+    input: "3"
+    output: "4"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 2
+      type: INT
+    }
+  }
   name: "torch-jit-export"
   input {
     name: "0"
@@ -47,10 +57,10 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "4"
     type {
       tensor_type {
-        elem_type: 9
+        elem_type: 2
         shape {
           dim {
             dim_value: 3
