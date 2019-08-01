@@ -1863,8 +1863,8 @@ class TracedModule(ScriptModule):
                 self._buffers[name] = buf
                 check_unique(buf)
 
-        if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
-            raise ValueError("Modules that have hooks assigned can't be compiled")
+        if orig._backward_hooks:
+            raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(self))
 
         for name, submodule in orig._modules.items():
             if isinstance(submodule, ScriptModule):
