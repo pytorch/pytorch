@@ -130,7 +130,22 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
                 diff = (outb - outa)
                 r = diff / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
-                debugInfo.append((d_idx, x_idx, orig, eps, orig_minus, outa, orig_plus, outb, diff, r))
+
+                outa_l = []
+                outb_l = []
+                diff_l = []
+                r_l = []
+                t1 = outa.view(-1)
+                t2 = outb.view(-1)
+                t3 = diff.view(-1)
+                t4 = r.view(-1)
+                for inx in range(outa.numel()):
+                    outa_l.append(t1[inx].item())
+                    outb_l.append(t2[inx].item())
+                    diff_l.append(t3[inx].item())
+                    r_l.append(t4[inx].item())
+
+                debugInfo.append((d_idx, x_idx, orig, eps, orig_minus, outa_l, orig_plus, outb_l, diff_l, r_l))
             if printDebug:
                 return debugInfo
 
