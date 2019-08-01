@@ -379,7 +379,7 @@ class RNN(RNNBase):
 #    on time for the release
 #
 # TODO: remove the overriding implementations for LSTM and GRU when TorchScript
-# support the Union type and Callables.
+# support expressing these two modules generally.
 class LSTM(RNNBase):
     r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
     sequence.
