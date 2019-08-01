@@ -3539,8 +3539,8 @@
 
 - func: ne(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ne_out
-    CUDA: legacy::cuda::_th_ne_out
+    CPU: ne_scalar_out_cpu
+    CUDA: ne_scalar_out_cuda
 
 - func: ne(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3550,8 +3550,8 @@
 
 - func: ne(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ne_out
-    CUDA: legacy::cuda::_th_ne_out
+    CPU: ne_out_cpu
+    CUDA: ne_out_cuda
 
 - func: ne(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3561,8 +3561,8 @@
 
 - func: eq(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_eq_out
-    CUDA: legacy::cuda::_th_eq_out
+    CPU: eq_scalar_out_cpu
+    CUDA: eq_scalar_out_cuda
 
 - func: eq(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3572,8 +3572,8 @@
 
 - func: eq(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_eq_out
-    CUDA: legacy::cuda::_th_eq_out
+    CPU: eq_out_cpu
+    CUDA: eq_out_cuda
 
 - func: eq(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3583,8 +3583,8 @@
 
 - func: ge(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ge_out
-    CUDA: legacy::cuda::_th_ge_out
+    CPU: ge_scalar_out_cpu
+    CUDA: ge_scalar_out_cuda
 
 - func: ge(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3594,8 +3594,8 @@
 
 - func: ge(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ge_out
-    CUDA: legacy::cuda::_th_ge_out
+    CPU: ge_out_cpu
+    CUDA: ge_out_cuda
 
 - func: ge(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3605,8 +3605,8 @@
 
 - func: le(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_le_out
-    CUDA: legacy::cuda::_th_le_out
+    CPU: le_scalar_out_cpu
+    CUDA: le_scalar_out_cuda
 
 - func: le(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3616,8 +3616,8 @@
 
 - func: le(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_le_out
-    CUDA: legacy::cuda::_th_le_out
+    CPU: le_out_cpu
+    CUDA: le_out_cuda
 
 - func: le(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3627,8 +3627,8 @@
 
 - func: gt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_gt_out
-    CUDA: legacy::cuda::_th_gt_out
+    CPU: gt_scalar_out_cpu
+    CUDA: gt_scalar_out_cuda
 
 - func: gt(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3638,8 +3638,8 @@
 
 - func: gt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_gt_out
-    CUDA: legacy::cuda::_th_gt_out
+    CPU: gt_out_cpu
+    CUDA: gt_out_cuda
 
 - func: gt(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3649,8 +3649,8 @@
 
 - func: lt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_lt_out
-    CUDA: legacy::cuda::_th_lt_out
+    CPU: lt_scalar_out_cpu
+    CUDA: lt_scalar_out_cuda
 
 - func: lt(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3660,8 +3660,8 @@
 
 - func: lt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_lt_out
-    CUDA: legacy::cuda::_th_lt_out
+    CPU: lt_out_cpu
+    CUDA: lt_out_cuda
 
 - func: lt(Tensor self, Tensor other) -> Tensor
   variants: method, function
