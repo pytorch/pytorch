@@ -362,13 +362,16 @@ Args:
 
 Example::
 
-    >>> a = torch.rand(1, 2).bool()
+    >>> a = torch.randn(4, 2) < 0
     >>> a
-    tensor([[False, True]], dtype=torch.bool)
+    tensor([[ True,  True],
+            [False,  True],
+            [ True,  True],
+            [False, False]])
     >>> a.any(1)
-    tensor([True], dtype=torch.bool)
+    tensor([ True,  True,  True, False])
     >>> a.any(0)
-    tensor([False,  True], dtype=torch.bool)
+    tensor([True, True])
 """)
 
 add_docstr_all('apply_',
