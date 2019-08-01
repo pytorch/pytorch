@@ -13473,6 +13473,22 @@ a")
         self.checkScript(test_not_in_dict, ({"hello": 1, "world": 2}, ))
         self.checkScript(test_not_in_dict, ({"world": 2}, ))
 
+        @torch.jit.script
+        def test_dict_tensor_key(a, t):
+            # type: (Dict[Tensor, int], Tensor) -> bool
+            if t in a:
+                return True
+            else:
+                return False
+
+        inp1 = torch.tensor(3)
+        inp2 = torch.tensor(5)
+        dict_a = {inp1: 1, inp2: 3}
+        print(test_dict_tensor_key(dict_a, torch.tensor(4)))
+        print(test_dict_tensor_key(dict_a, torch.tensor(3)))
+        print(test_dict_tensor_key(dict_a, inp1))
+        print(test_dict_tensor_key(dict_a, inp2))
+
     def test_in_for_and_comp_expr(self):
         def fn(d):
             # type: (Dict[str, int]) -> List[int]

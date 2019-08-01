@@ -839,6 +839,7 @@ struct CAFFE2_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
+      case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
       default:
         AT_ERROR(
