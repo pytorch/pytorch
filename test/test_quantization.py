@@ -324,6 +324,7 @@ class WrappedModuleTest(QuantizationTestCase):
     class DummyObserver(torch.quantization.Observer):
         SCALE = 42.0
         ZERO_POINT = 24
+
         def calculate_qparams(self):
             return 42.0, 24
 
