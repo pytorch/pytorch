@@ -125,9 +125,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
     // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
     // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
     std::vector<int64_t> out_sizes = input.sizes().vec();
-    TORCH_CHECK(
-        out_sizes.size() >= 2,
-        "The dimension of output tensor should be larger than or equal to 2");
     out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
     auto output = _empty_affine_quantized(

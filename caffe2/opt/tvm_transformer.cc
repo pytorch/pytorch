@@ -203,32 +203,20 @@ NetDef TvmTransformer::applyTvmTransform(
     const std::unordered_set<int>& blacklisted_ops,
     const ShapeInfoMap& shape_hints) {
   auto profiling_based_jit = opts_.profiling_based_jit;
-  auto tvm_supports = [&blacklisted_ops,
-                       &shape_hints,
-                       &profiling_based_jit](
+  auto tvm_supports = [&blacklisted_ops, &shape_hints, &profiling_based_jit](
                           const caffe2::OperatorDef& op) {
     const static std::unordered_set<std::string> supported_ops{
-        "Add",
-        "Sum",
-        "FC",
-        "FCTransposed",
-        "Flatten",
-        "Relu",
-        "Sigmoid",
-        "Softmax",
-        "Split",
-        "EnsureCPUOutput",
-        "Reshape",
-        "ExpandDims",
-        "Concat",
-        "BatchMatMul",
-        "MatMul",
-        "BatchGather",
-        "DotProduct",
-        "Transpose",
-        "Mul",
-        "Tanh",
-        "Logit"};
+        "Add",        "Sum",
+        "FC",         "FCTransposed",
+        "Flatten",    "Relu",
+        "Sigmoid",    "Softmax",
+        "Split",      "EnsureCPUOutput",
+        "Reshape",    "ExpandDims",
+        "Concat",     "BatchMatMul",
+        "MatMul",     "BatchGather",
+        "DotProduct", "Transpose",
+        "Mul",        "Tanh",
+        "Logit",      "Cast"};
 
     try {
       // If the op position is black listed, return false
