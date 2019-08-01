@@ -223,7 +223,7 @@ void TensorIterator::propagate_names_to_outputs() {
     // don't include output tensors that are not also input tensors.
     if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
     // perform name inference
-    if (!op.tensor.is_named()) {
+    if (!op.tensor.has_names()) {
       continue;
     }
     auto tensor_names = *op.tensor.names();
