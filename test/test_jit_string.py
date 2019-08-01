@@ -264,10 +264,10 @@ class TestScript(JitTestCase):
         self.checkScript(test_rpartition, ())
 
         def test_split():
-            # type: () -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str]]
             return (
                 "a a a a a".split(),
                 "a\na\ta a".split(),
+                "a\na\t a a".split(),
                 " a a a a a ".split(" "),
                 "a a a a a ".split(" ", 10),
                 "a a a a a ".split(" ", -1),
@@ -280,10 +280,10 @@ class TestScript(JitTestCase):
         self.checkScript(test_split, ())
 
         def test_rsplit():
-            # type: () -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str]]
             return (
                 "a a a a a".rsplit(),
                 "b\nb\tb b".rsplit(),
+                "b\nb\t b b".rsplit(),
                 " c c c c c ".rsplit(" "),
                 "d d d d d ".rsplit(" ", 10),
                 "e e e e e ".rsplit(" ", -1),
