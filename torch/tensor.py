@@ -231,11 +231,6 @@ class Tensor(torch._C._TensorBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def is_pinned(self):
-        r"""Returns true if this tensor resides in pinned memory"""
-        storage = self.storage()
-        return storage.is_pinned() if storage else False
-
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
 

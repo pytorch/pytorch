@@ -272,7 +272,7 @@ Manywheels are pip packages for linux distros. Note that these manywheels are no
 
 The entrypoint file `builder/manywheel/build_common.sh` is really really complicated because
 
-* This used to handle building for several different python versions at the same time. The loops have been removed, but there's still unneccessary folders and movements here and there.
+* This used to handle building for several different python versions at the same time. The loops have been removed, but there's still unnecessary folders and movements here and there.
     * The script is never used this way anymore. This extra machinery could be removed.
 * This used to handle testing the pip packages too. This is why there’s testing code at the end that messes with python installations and stuff
     * The script is never used this way anymore. This extra machinery could be removed.
@@ -304,7 +304,7 @@ Note that the MacOS Python wheels are still built in conda environments. Some of
 
 Libtorch packages are built in the wheel build scripts: manywheel/build_*.sh for linux and build_wheel.sh for mac. There are several things wrong with this
 
-* It’s confusinig. Most of those scripts deal with python specifics.
+* It’s confusing. Most of those scripts deal with python specifics.
 * The extra conditionals everywhere severely complicate the wheel build scripts
 * The process for building libtorch is different from the official instructions (a plain call to cmake, or a call to a script)
 
@@ -470,7 +470,7 @@ N.B. installing a brand new miniconda is important. This has to do with how cond
     1. if you installed `foo` in `new_env`, then `path/to/conda_root/envs/new_env/bin/foo` will get called, as expected.
     2. But if you forgot to installed `foo` in `new_env` but happened to previously install it in your root conda env (called ‘base’), then unix/linux will still find `path/to/conda_root/bin/foo` . This is dangerous, since `foo` can be a different version than you want; `foo` can even be for an incompatible python version!
 
-Newer conda versions and proper python hygeine can prevent this, but just install a new miniconda to be safe.
+Newer conda versions and proper python hygiene can prevent this, but just install a new miniconda to be safe.
 
 ### Windows
 
