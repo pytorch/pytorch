@@ -12,7 +12,6 @@ pthreadpool_t ThreadPoolMobile::qnnpack_threadpool() {
       thread_pool_ = caffe2::ThreadPool::defaultThreadPool();
     }
     return reinterpret_cast<pthreadpool_t>(thread_pool_.get());
-    return nullptr;
 }
 #else
 pthreadpool_t ThreadPoolMobile::qnnpack_threadpool() {
