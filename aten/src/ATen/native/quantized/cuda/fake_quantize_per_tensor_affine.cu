@@ -1,11 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/NativeFunctions.h>
 #include <cmath>
 
 /* FakeQuantize Op for PerTensorAffine quantization scheme */
-namespace at { namespace native {
-namespace {
+namespace at {
+namespace native{
+
 /* Fake-quantizes the 'inputs' tensor.
 Args:
   X: Forward input tensor.
@@ -24,54 +25,36 @@ Notes:
     beginning of the training.
   - quantization range [quant_min, quant_max]
 */
-class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
- public:
-  at::Tensor operator()(
-      at::Tensor X,
+Tensor fake_quantize_per_tensor_affine_cuda(
+      const Tensor& self,
       double scale,
       int64_t zero_point,
-      int64_t quant_min = 0,
-      int64_t quant_max = 255,
-      int64_t quant_delay = 0,
-      int64_t iter = 0
+      int64_t quant_min,
+      int64_t quant_max
     ) {
-    // Sanity checks.
-    TORCH_CHECK(X.is_cuda());
-    TORCH_CHECK(X.scalar_type() == ScalarType::Float);
-    if (quant_min > quant_max) {
-      throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
-    }
-    if (zero_point < 0) {
-      throw std::invalid_argument("`zero_point` must be a positive integer.");
-    }
-    if (quant_delay < 0) {
-      throw std::invalid_argument("`quant_delay` must be a positive integer.");
-    }
-
-    if (quant_delay != 0 && iter < 0) {
-      throw std::invalid_argument(
-        "`iter` must be >=0 for non-zero `quant_delay`");
-    }
-
-    auto Y = at::empty_like(X);
-
-    if (quant_delay > 0 && iter <= quant_delay) {
-      Y.copy_(X);  // We might want to just return the input here.
-      return Y;
-    }
+    TORCH_CHECK(self.is_cuda());
+    TORCH_CHECK(self.scalar_type() == ScalarType::Float);
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or \
+        equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= quant_min && zero_point <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
+    auto Y = at::empty_like(self);
 
     float inv_scale = 1.0f / scale;
     at::cuda::CUDA_tensor_apply2<float, float>(
-        X,
+        self,
         Y,
         [=] __device__ (
             const float& input_val,
             float& result_val) {
-          result_val = (fminf(quant_max, fmaxf(quant_min, (std::round(input_val * inv_scale + zero_point)))) - zero_point) * scale;
+          result_val =
+            (fminf(quant_max, fmaxf(quant_min,
+              static_cast<int64_t>(
+                std::nearbyint(input_val * inv_scale + zero_point))))
+                - zero_point) * scale;
         });
     return Y;
-  }
-};
+}
 
 /* Backward path to fake-quantize the 'inputs' tensor.
 
@@ -93,71 +76,41 @@ Notes:
     beginning of the training.
   - quantization range [quant_min, quant_max]
 */
-class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
- public:
-  at::Tensor operator()(
-      at::Tensor X,
-      at::Tensor dY,
+Tensor fake_quantize_per_tensor_affine_backward_cuda(
+      const Tensor& dY,
+      const Tensor& X,
       double scale,
       int64_t zero_point,
-      int64_t quant_min = 0,
-      int64_t quant_max = 255,
-      int64_t quant_delay = 0,
-      int64_t iter = 0) {
-    // Sanity checks.
+      int64_t quant_min,
+      int64_t quant_max) {
+    TORCH_CHECK(dY.is_cuda());
+    TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
     TORCH_CHECK(X.is_cuda());
     TORCH_CHECK(X.scalar_type() == ScalarType::Float);
-    if (quant_min > quant_max) {
-      throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
-    }
-    if (zero_point < 0) {
-      throw std::invalid_argument("`zero_point` must be a positive integer.");
-    }
-    if (quant_delay < 0) {
-      throw std::invalid_argument("`quant_delay` must be a positive integer.");
-    }
+    TORCH_CHECK(X.numel() == dY.numel(), "`X` and `dY` are not the same size");
+    TORCH_CHECK(quant_min <= quant_max, "`quant_min` should be less than or \
+        equal to `quant_max`.");
+    TORCH_CHECK(zero_point >= quant_min && zero_point <= quant_max,
+        "`zero_point` must be between `quant_min` and `quant_max`.");
     if (X.numel() <= 0) {
       return X;
     }
-    if (X.numel() != dY.numel()) {
-      throw std::invalid_argument("`X` and `dY` are not the same size");
-    }
 
-    if (quant_delay != 0 && iter < 0) {
-      throw std::invalid_argument(
-        "`iter` must be >=0 for non-zero `quant_delay`");
-    }
-
-    auto dX = at::zeros_like(dY);
-    if (quant_delay > 0 && iter <= quant_delay) {
-      dX.copy_(dY);
-      return dX;
-    }
+    auto dX = dY.clone();
 
     float inv_scale = 1.0f / scale;
-    auto mask = at::empty_like(dY);
-    at::cuda::CUDA_tensor_apply2<float, float>(
+    at::cuda::CUDA_tensor_apply3<float, float, float>(
+        dY,
         X,
-        mask,
+        dX,
         [=] __device__ (
-            const float& input_val,
-            float& result_val) {
-          float Xq = std::round(input_val * inv_scale + zero_point);
-          result_val = float(Xq >= quant_min && Xq <= quant_max);
+            const float& dy,
+            const float& x,
+            float& dx) {
+          int64_t Xq = std::nearbyint(x * inv_scale + zero_point);
+          dx = (Xq >= quant_min && Xq <= quant_max) *  dy;
         });
-    dX = mask * dY;
     return dX;
-  }
-};
+}
 
-static auto registry =
-  c10::RegisterOperators()
-  .op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int quant_min = 0, int quant_max = 255, int quant_delay = 0, int iter = 0) -> Tensor",
-      c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_forward>(CUDATensorId()))
-  .op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int quant_min = 0, int quant_max = 255, int quant_delay = 0, int iter = 0) -> Tensor",
-      c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_backward>(CUDATensorId()));
-
-} // namespace
 }} // namespace at::native

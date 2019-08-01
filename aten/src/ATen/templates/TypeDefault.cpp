@@ -5,7 +5,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 #include <ATen/NativeFunctions.h>
@@ -18,25 +18,6 @@
 #include <ATen/core/ATenDispatch.h>
 
 namespace at {
-
-void TypeDefault::backward(
-    Tensor& self,
-    c10::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) const {
-  AT_ERROR("backward is not implemented for Tensor");
-}
-
-void TypeDefault::set_data(Tensor & self, Tensor new_data) const {
-  AT_ERROR("set_data is not implemented for Tensor");
-}
-
-Type & TypeDefault::toBackend(Backend b) const {
-  return at::globalContext().getNonVariableType(b, ScalarType::Undefined);
-}
-Type & TypeDefault::toScalarType(ScalarType s) const {
-  return at::globalContext().getNonVariableType(backend(),s);
-}
 
 ${type_method_definitions}
 

@@ -35,6 +35,30 @@ skipIfNoCuda = _skipper(lambda: not torch.cuda.is_available(),
 skipIfTravis = _skipper(lambda: os.getenv('TRAVIS'),
                         'Skip In Travis')
 
+# skips tests for all versions below min_opset_version.
+# if exporting the op is only supported after a specific version,
+# add this wrapper to prevent running the test for opset_versions
+# smaller than the currently tested opset_version
+def skipIfUnsupportedMinOpsetVersion(min_opset_version):
+    def skip_dec(func):
+        def wrapper(self):
+            if self.opset_version < min_opset_version:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
+# skips tests for opset_versions listed in unsupported_opset_versions.
+# if the caffe2 test cannot be run for a specific version, add this wrapper
+# (for example, an op was modified but the change is not supported in caffe2)
+def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
+    def skip_dec(func):
+        def wrapper(self):
+            if self.opset_version in unsupported_opset_versions:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
 
 def flatten(x):
     return tuple(function._iter_filter(lambda o: isinstance(o, torch.Tensor))(x))

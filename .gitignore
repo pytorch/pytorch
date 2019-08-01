@@ -41,6 +41,8 @@ third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
 torch/__init__.pyi
+torch/nn/functional.pyi
+torch/nn/modules/*.pyi
 torch/csrc/autograd/generated/*
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated

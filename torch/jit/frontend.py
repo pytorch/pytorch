@@ -94,10 +94,7 @@ class FrontendError(Exception):
         self.msg = msg
 
     def __str__(self):
-        result = self.msg
-        if self.source_range is not None:
-            result += '\n' + self.source_range.highlight()
-        return result
+        return self.msg + torch._C.ErrorReport(self.source_range).what()
 
 
 class NotSupportedError(FrontendError):
@@ -114,7 +111,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
         msg = "{} aren't supported".format(feature_name)
-        super(NotSupportedError, self).__init__(source_range, msg)
+        super(UnsupportedNodeError, self).__init__(source_range, msg)
 
 
 class FrontendTypeError(FrontendError):
@@ -188,7 +185,7 @@ class Builder(object):
 def build_class_def(ctx, py_def, methods, self_name):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), methods)
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
 
 
 def build_def(ctx, py_def, type_line, self_name=None):
@@ -339,14 +336,8 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
-        target = stmt.target.id
-        target_range = ctx.make_range(
-            stmt.target.lineno,
-            stmt.target.col_offset,
-            stmt.target.col_offset + len(target)
-        )
         return For(
-            r, [Ident(target_range, target)],
+            r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
 
     @staticmethod
@@ -369,6 +360,15 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("pass"))
         return Pass(r)
 
+    @staticmethod
+    def build_Break(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("break"))
+        return Break(r)
+
+    @staticmethod
+    def build_Continue(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("continue"))
+        return Continue(r)
 
 class ExprBuilder(Builder):
     binop_map = {
@@ -435,6 +435,8 @@ class ExprBuilder(Builder):
         for kw in expr.keywords:
             kw_expr = build_expr(ctx, kw.value)
             # XXX: we could do a better job at figuring out the range for the name here
+            if not kw.arg:
+                raise NotSupportedError(kw_expr.range(), 'keyword-arg expansion is not supported')
             kwargs.append(Attribute(Ident(kw_expr.range(), kw.arg), kw_expr))
         return Apply(func, args, kwargs)
 
@@ -606,6 +608,22 @@ class ExprBuilder(Builder):
         return Const(r, value)
 
     @staticmethod
+    def build_Constant(ctx, expr):
+        val = expr.value
+        if val is None or isinstance(val, bool):
+            # NB: this check has to happen before the int check because bool is
+            # a subclass of int
+            return ExprBuilder.build_NameConstant(ctx, expr)
+        if isinstance(val, (int, float)):
+            return ExprBuilder.build_Num(ctx, expr)
+        elif isinstance(val, str):
+            return ExprBuilder.build_Str(ctx, expr)
+        elif isinstance(val, type(Ellipsis)):
+            return ExprBuilder.build_Ellipsis(ctx, expr)
+        else:
+            raise RuntimeError("Unknown Constant expr type for value: ", expr.value)
+
+    @staticmethod
     def build_Str(ctx, expr):
         value = str(expr.s)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
@@ -642,15 +660,10 @@ class ExprBuilder(Builder):
             raise NotSupportedError(r, "comprehension ifs not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
+        target_expr = build_expr(ctx, stmt.generators[0].target)
 
-        target = stmt.generators[0].target
-        target_range = ctx.make_range(
-            target.lineno,
-            target.col_offset,
-            target.col_offset + len(target.id)
-        )
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
-        return ListComp(r, elt_expr, Ident(target_range, target.id), iter_expr)
+        return ListComp(r, elt_expr, target_expr, iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

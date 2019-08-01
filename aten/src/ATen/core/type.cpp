@@ -5,14 +5,6 @@
 #include <c10/macros/Macros.h>
 namespace c10 {
 
-namespace ivalue {
-Object::~Object() {
-  if (on_delete_) {
-    on_delete_(this);
-  }
-}
-} // namespace ivalue
-
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
     out << toString(value->scalarType()) << "(";
@@ -243,11 +235,15 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto dict_type = type->expect<DictType>();
     const auto dict = ivalue.toGenericDict();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::const_iterator::value_type& item) {
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::iterator::value_type& item) {
           return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
               isSubvalueOf(item.value(), dict_type->getValueType());
         });
   }
+  if (ivalue.isObject()) {
+    return ivalue.toObjectRef().type()->isSubtypeOf(type);
+  }
+
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }
 
@@ -444,12 +440,17 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
 
 // change return types like List[List[t]] into List[List[int]]
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
-  if(!type->hasFreeVariables())
+  if (!type->hasFreeVariables()) {
     return type;
+  }
 
-  if(auto vt = type->cast<VarType>()) {
+  if (auto vt = type->cast<VarType>()) {
     auto it = type_env.find(vt->name());
-    AT_ASSERTM(it != type_env.end(), "schema has unbound type variable '", vt->name(), "' in its return type");
+    AT_ASSERTM(
+        it != type_env.end(),
+        "schema has unbound type variable '",
+        vt->name(),
+        "' in its return type");
     return it->second;
   } else {
     auto new_contained = fmap(type->containedTypes(), [&](TypePtr t) {
@@ -458,7 +459,6 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::strin
     return type->withContained(std::move(new_contained));
   }
 }
-
 
 const char * typeKindToString(TypeKind kind) {
 #define CASE_TYPE(T) case TypeKind::T: return #T;
@@ -470,10 +470,13 @@ const char * typeKindToString(TypeKind kind) {
 }
 
 bool Type::isSubtypeOf(const TypePtr rhs) const {
+  if (*this == *rhs) {
+    return true;
+  }
   if(auto rhs_ = rhs->cast<OptionalType>()) {
     return this->isSubtypeOf(rhs_->getElementType());
   }
-  return *this == *rhs;
+  return false;
 }
 
 std::string ProfiledTensorType::str() const {
@@ -541,7 +544,10 @@ std::string NamedType::basename() const {
   return name_->name();
 }
 
-std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName qualName, std::vector<std::string> field_names, std::vector<TypePtr> field_types) {
+std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
+    c10::QualifiedName qualName,
+    std::vector<std::string> field_names,
+    std::vector<TypePtr> field_types) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
   std::vector<Argument> arguments;
   for (size_t i = 0; i < field_names.size(); ++i) {
@@ -559,9 +565,9 @@ std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(c10
   return schema;
 }
 
-TupleType::TupleType(std::vector<TypePtr> elements_, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema)
+TupleType::TupleType(std::vector<TypePtr> elements, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema)
 : NamedType(TypeKind::TupleType, std::move(name))
-, elements_(std::move(elements_))
+, elements_(std::move(elements))
 , schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {

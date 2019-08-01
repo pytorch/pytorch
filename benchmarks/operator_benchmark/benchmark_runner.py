@@ -30,9 +30,8 @@ def main():
 
     # This option is used to filter test cases to run.
     parser.add_argument(
-        '--operator',
-        help='Run the test cases that contain the provided operator'
-        ' as a substring of their names',
+        '--operators',
+        help='Filter tests based on comma-delimited list of operators to test',
         default=None)
 
     parser.add_argument(
@@ -57,6 +56,13 @@ def main():
     )
 
     parser.add_argument(
+        "--num_runs",
+        help="Run each test for num_runs. Each run executes an operator for number of <--iterations>",
+        type=int,
+        default=1,
+    )
+
+    parser.add_argument(
         "--min_time_per_test",
         help="Set the minimum time (unit: seconds) to run each test",
         type=int,
@@ -71,10 +77,30 @@ def main():
     )
 
     parser.add_argument(
+        "--omp_num_threads",
+        help="Number of OpenMP threads used in PyTorch/Caffe2 runtime",
+        default=None,
+        type=int
+    )
+
+    parser.add_argument(
+        "--mkl_num_threads",
+        help="Number of MKL threads used in PyTorch/Caffe2 runtime",
+        default=None,
+        type=int
+    )
+
+    parser.add_argument(
         "--ai_pep_format",
         help="Print result when running on AI-PEP",
         default=False,
         type=bool
+    )
+
+    parser.add_argument(
+        "--use_jit",
+        help="Run operators with PyTorch JIT mode",
+        action='store_true'
     )
 
     parser.add_argument(
@@ -88,11 +114,15 @@ def main():
         help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
         default="Caffe2,PyTorch")
 
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     if benchmark_utils.is_caffe2_enabled(args.framework):
         workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
         workspace.ClearGlobalNetObserver()
+    if args.omp_num_threads:
+        benchmark_utils.set_omp_threads(args.omp_num_threads)
+    if args.mkl_num_threads:
+        benchmark_utils.set_mkl_threads(args.mkl_num_threads)
 
     benchmark_core.BenchmarkRunner(args).run()
 

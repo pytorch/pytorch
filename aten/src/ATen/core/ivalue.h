@@ -7,12 +7,16 @@
 namespace torch {
 namespace jit {
 struct Function;
+namespace script {
+struct CompilationUnit;
+}
 } // namespace jit
 } // namespace torch
 namespace c10 {
 template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
+struct ClassType;
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -239,6 +243,9 @@ struct CAFFE2_API IValue final {
 
   //TensorList
   IValue(c10::List<at::Tensor> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<at::Tensor> v);
   bool isTensorList() const { return Tag::TensorList == tag; }
   c10::List<at::Tensor> toTensorList() &&;
@@ -246,10 +253,6 @@ struct CAFFE2_API IValue final {
   c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
-  IValue(std::vector<IValue> v);
   IValue(c10::List<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
   c10::List<IValue> toGenericList() &&;
@@ -547,6 +550,20 @@ private:
   bool is_intrusive_ptr;
 };
 
+// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
+// and its owning CU, so that the class type is guaranteed to stay alive as long
+// as we hold this object.
+struct StrongTypePtr {
+  StrongTypePtr(
+      std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+      std::shared_ptr<ClassType> type)
+      : cu_(std::move(cu)), type_(type) {
+    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(type_);
+  }
+  std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
+  std::shared_ptr<ClassType> type_;
+};
 }
 
 #include <ATen/core/ivalue_inl.h>

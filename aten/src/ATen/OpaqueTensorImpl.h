@@ -37,7 +37,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have strides");
   }
 
-  bool is_contiguous(c10::MemoryFormat memory_format=c10::MemoryFormat::Any) const override {
+  bool is_contiguous(c10::MemoryFormat memory_format=c10::MemoryFormat::Contiguous) const override {
     AT_ERROR("opaque tensors do not have is_contiguous");
   }
 
@@ -88,7 +88,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
       type_id(), dtype(), device(), opaque_handle_, sizes_);
-    copy_tensor_data(
+    copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
@@ -104,9 +104,9 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(typeid(*(impl.get())) == typeid(OpaqueTensorImpl<OpaqueHandle>));
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->type_id()));
     auto opaque_impl = static_cast<const OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
-    copy_tensor_data(
+    copy_tensor_metadata(
       /*src_impl=*/opaque_impl,
       /*dest_impl=*/this,
       /*version_counter=*/version_counter(),
@@ -122,17 +122,17 @@ private:
   OpaqueHandle opaque_handle_;
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
    * from one TensorImpl to another TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
    */
-  static void copy_tensor_data(
+  static void copy_tensor_metadata(
       const OpaqueTensorImpl<OpaqueHandle>* src_opaque_impl,
       OpaqueTensorImpl<OpaqueHandle>* dest_opaque_impl,
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) {
-    TensorImpl::copy_tensor_data(src_opaque_impl, dest_opaque_impl, version_counter, allow_tensor_metadata_change);
+    TensorImpl::copy_tensor_metadata(src_opaque_impl, dest_opaque_impl, version_counter, allow_tensor_metadata_change);
 
     // OpaqueTensorImpl-specific fields.
     dest_opaque_impl->opaque_handle_ = src_opaque_impl->opaque_handle_;

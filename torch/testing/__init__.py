@@ -88,7 +88,7 @@ def make_non_contiguous(tensor):
 
 def get_all_dtypes():
     return [torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.float32, torch.float64]
+            torch.float16, torch.float32, torch.float64, torch.bfloat16]
 
 
 def get_all_math_dtypes(device):
@@ -96,10 +96,10 @@ def get_all_math_dtypes(device):
               torch.float32, torch.float64]
 
     # torch.float16 is a math dtype on cuda but not cpu.
-    if device == 'cpu':
-        return dtypes
-    else:
-        return dtypes.append(torch.float16)
+    if device.startswith('cuda'):
+        dtypes.append(torch.float16)
+
+    return dtypes
 
 
 def get_all_device_types():

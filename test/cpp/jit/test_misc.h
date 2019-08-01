@@ -68,6 +68,7 @@
 
 namespace torch {
 namespace jit {
+c10::OperatorOptions aliasAnalysisFromSchema();
 namespace test {
 
 using Var = SymbolicVariable;
@@ -171,9 +172,9 @@ void testTHNNConv() {
 
   // make JIT graph
   auto graph = std::make_shared<Graph>();
-  auto ksz_val = graph->insertConstant(IValue(kernel_size));
-  auto kst_val = graph->insertConstant(IValue(stride));
-  auto pad_val = graph->insertConstant(IValue(padding));
+  auto ksz_val = graph->insertConstant(c10::impl::toList(kernel_size));
+  auto kst_val = graph->insertConstant(c10::impl::toList(stride));
+  auto pad_val = graph->insertConstant(c10::impl::toList(padding));
 
   auto inputg = graph->addInput("self");
   auto weightg = graph->addInput("weight");
@@ -387,6 +388,54 @@ void testCustomFusion() {
   AT_ASSERT(hits == 2);
 }
 
+void testCustomFusionNestedBlocks() {
+  auto g = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+
+  // test CustomFusion in nested blocks;
+  auto a = SymbolicVariable::asNewInput(*g, type);
+  auto b = SymbolicVariable::asNewInput(*g, type);
+  auto c = SymbolicVariable::asNewInput(*g, type);
+ 
+  auto r =
+      g->appendNode(g->create(prim::If, {c.value()}));
+  auto then_block = r->addBlock();
+  auto else_block = r->addBlock();
+  {
+    WithInsertPoint guard(then_block);
+    auto d = c * a;
+    auto t = d * b;
+    then_block->registerOutput(t.value());
+  }
+  {
+    WithInsertPoint guard(else_block);
+    auto d = c + a;
+    auto t = d + b;
+    else_block->registerOutput(t.value());
+  }
+  g->registerOutput((Var(r->output()) + c).value());
+
+  CustomFuseGraph(
+      g,
+      [](Node* n) { return n->kind() == aten::mul; },
+      Symbol::fromQualString("prim::FusionGroup"));
+  
+  // Could be done in more efficient ways, but this is only a test.
+  std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b, Symbol s) {
+      for (auto node : b->nodes()) {
+          if (node->kind() == s) 
+              return true;
+          for (auto nested_b : node->blocks())
+              if (dfs(nested_b, s))
+                  return true;
+      }
+      return false;
+  };
+
+  AT_ASSERT(dfs(g->block(), Symbol::fromQualString("prim::FusionGroup")));
+}
+
 static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.
@@ -442,13 +491,12 @@ void testEvalModeForLoadedModule() {
   if (isSandcastle())
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
-  std::shared_ptr<torch::jit::script::Module> module =
-      torch::jit::load(module_path);
-  AT_ASSERT(module->get_module("dropout")->is_training());
-  module->eval();
-  AT_ASSERT(!module->get_module("dropout")->is_training());
-  module->train();
-  AT_ASSERT(module->get_module("dropout")->is_training());
+  torch::jit::script::Module module = torch::jit::load(module_path);
+  AT_ASSERT(module.get_module("dropout").is_training());
+  module.eval();
+  AT_ASSERT(!module.get_module("dropout").is_training());
+  module.train();
+  AT_ASSERT(module.get_module("dropout").is_training());
 }
 
 // test a few features that are not directly used in schemas yet
@@ -807,7 +855,8 @@ void testNoneSchemaMatch() {
               push(stack, IValue());
               return 0;
             };
-          }),
+          },
+          aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
           [](const Node* node) {
@@ -820,7 +869,8 @@ void testNoneSchemaMatch() {
               }
               return 0;
             };
-          }),
+          },
+          aliasAnalysisFromSchema()),
   });
 
   // Constant propagation will run test_none and produce a None,
@@ -840,36 +890,36 @@ void testNoneSchemaMatch() {
 }
 
 void testModuleDefine() {
-  auto m = std::make_shared<script::Module>();
-  m->register_parameter("foo", torch::ones({}), false);
-  m->define(R"(
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
     def add_it(self, x, b : int = 4):
       return self.foo + x + b
   )");
-  auto result = m->run_method("add_it", torch::ones({}));
-  AT_ASSERT(result.toTensor().item<float>() == 6)
+  auto result = m.run_method("add_it", torch::ones({}));
+  AT_ASSERT(result.toTensor().item<float>() == 6);
 }
 
 void testModuleConversion() {
-  auto m = std::make_shared<script::Module>();
+  script::Module m("test");
   {
     // test cuda to cpu for params and buffers
-    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
-    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+    m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m.register_buffer("bar", torch::ones({}, at::kCUDA));
 
-    m->to(at::kCUDA);
-    m->to(at::kCPU);
-    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
-    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
+    m.to(at::kCUDA);
+    m.to(at::kCPU);
+    AT_ASSERT(m.get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m.get_buffer("bar").device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
-    m->register_parameter("foo", torch::ones({}), false);
-    m->register_buffer("bar", torch::ones({}));
+    m.register_parameter("foo", torch::ones({}), false);
+    m.register_buffer("bar", torch::ones({}));
 
-    m->to(at::kCUDA);
-    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
-    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
+    m.to(at::kCUDA);
+    AT_ASSERT(m.get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m.get_buffer("bar").device().is_cuda());
   }
 }
 
@@ -909,17 +959,7 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-std::vector<std::size_t> values_to_value_ids(
-    const std::vector<Value*>& values) {
-  std::vector<std::size_t> result;
-  for (auto v : values) {
-    result.push_back(v->unique());
-  }
-  return result;
-};
-
 void testInsertAndEliminateRedundantGuards() {
-
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y
@@ -1005,8 +1045,7 @@ void testInsertBailOuts() {
   std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
 
   for (auto blo : bailouts) {
-    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
-    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::BailoutTemplate);
   }
 }
 
@@ -1052,6 +1091,14 @@ void testProfiler() {
   auto tanh_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
   checkShape(*tanh_n, eltwise);
+}
+
+void testInsertConstant() {
+  Graph g;
+  ASSERT_THROWS_WITH(
+      insertConstant(
+          g, IValue(), TensorType::get(), c10::nullopt, c10::nullopt),
+      "Expected OptionalType");
 }
 
 } // namespace test

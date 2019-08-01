@@ -5,6 +5,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 #include <vector>
 
 namespace at {
@@ -13,20 +14,28 @@ class Tensor;
 namespace c10 {
 struct IValue;
 template<class T> class List;
-template<class T> List<T> make_list();
-template<class T> List<T> make_list(ArrayRef<T> values);
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 
 namespace detail {
 
 template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
   using list_type = std::vector<StorageT>;
+
+  explicit ListImpl(list_type list_, optional<TypePtr> elementType_)
+  : list(std::move(list_))
+  , elementType(std::move(elementType_)) {
+    TORCH_INTERNAL_ASSERT(!elementType.has_value() || nullptr != elementType->get(), "Element type must not be nullptr");
+  }
+
   list_type list;
 
+  // TODO Right now, this is optional, but we want to make it mandatory for all lists to know their types
+  optional<TypePtr> elementType;
+
   intrusive_ptr<ListImpl> copy() const {
-    auto result = make_intrusive<ListImpl>();
-    result->list = list;
-    return result;
+    return make_intrusive<ListImpl>(list, elementType);
   }
 };
 }
@@ -173,6 +182,7 @@ template<class T> List<IValue> toGenericList(List<T> list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
 template<class T> List<T> toList(std::vector<T> list);
 template<class T> const std::vector<T>& toVector(const List<T>& list);
+struct deprecatedUntypedList final {};
 }
 template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 
@@ -182,7 +192,7 @@ template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
  * This is a pointer type. After a copy, both Lists
  * will share the same storage:
  *
- * > List<int> a = make_list<string>();
+ * > List<int> a;
  * > List<int> b = a;
  * > b.push_back("three");
  * > ASSERT("three" == a.get(0));
@@ -226,15 +236,30 @@ public:
   /**
    * Constructs an empty list.
    */
-  friend List make_list<T>();
+  explicit List();
 
   /**
-   * Constructs a list with some initial values
+   * Constructs a list with some initial values.
+   * Example:
+   *   List<int> a({2, 3, 4});
    */
-  friend List make_list<T>(ArrayRef<T>);
+  explicit List(std::initializer_list<T> initial_values);
+  explicit List(ArrayRef<T> initial_values);
 
-  // please use make_list instead.
-  List() = delete;
+  /**
+   * Create a generic list with runtime type information.
+   * This only works for c10::impl::GenericList and is not part of the public API
+   * but only supposed to be used internally by PyTorch.
+   */
+  explicit List(TypePtr elementType);
+
+  /**
+   * Creates an untyped list, i.e. a List that doesn't know its type and
+   * doesn't do type checking.
+   * Please don't use this if you can avoid it. We want to get rid of untyped
+   * lists.
+   */
+  explicit List(impl::deprecatedUntypedList);
 
   List(const List&) = default;
   List& operator=(const List&) = default;
@@ -350,6 +375,12 @@ public:
   void push_back(T&& value) const;
 
   /**
+   * Appends the given list to the end of the container. Uses at most one memory allocation.
+   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   */
+  void append(List<T> lst) const;
+
+  /**
    * Appends the given element value to the end of the container.
    * The new element is constructed with the given arguments.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
@@ -404,6 +435,10 @@ public:
   // TODO Test use_count
   size_t use_count() const;
 
+  // private API for now because the return type will change to TypePtr
+  // instead of optional<TypePtr> once types are mandatory.
+  optional<TypePtr> _elementType() const;
+
 private:
   explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
   friend struct IValue;
@@ -420,26 +455,6 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
 
-inline GenericList make_generic_list() {
-  return make_list<IValue>();
-}
-
-inline GenericList make_generic_list(ArrayRef<IValue> values) {
-  return make_list<IValue>(values);
-}
-
-template<class T>
-List<T> toTypedList(GenericList list) {
-  static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
-  return List<T>(std::move(list.impl_));
-}
-
-template<class T>
-GenericList toGenericList(List<T> list) {
-  static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toGenericList with lists that store their elements as IValues.");
-  return GenericList(std::move(list.impl_));
-}
-
 inline const IValue* ptr_to_first_element(const GenericList& list) {
   return &list.impl_->list[0];
 }
@@ -454,7 +469,7 @@ const std::vector<T>& toVector(const List<T>& list) {
 template<class T>
 List<T> toList(std::vector<T> list) {
   static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toList only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  List<T> result = make_list<T>();
+  List<T> result;
   result.impl_->list = std::move(list);
   return result;
 }

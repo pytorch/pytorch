@@ -98,6 +98,8 @@ namespace script {
   _(TK_ASSERT, "assert", "assert")               \
   _(TK_DOTS, "dots", "...")                      \
   _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_BREAK, "break", "break")                  \
+  _(TK_CONTINUE, "continue", "continue")         \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
   _(TK_IMPORT, "import", "import")               \

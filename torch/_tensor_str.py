@@ -196,7 +196,7 @@ def _tensor_str(self, indent):
         return '[]'
 
     summarize = self.numel() > PRINT_OPTS.threshold
-    if self.dtype is torch.float16:
+    if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
     formatter = _Formatter(get_summarized_data(self) if summarize else self)
     return _tensor_str_with_formatter(self, indent, formatter, summarize)
@@ -239,17 +239,20 @@ def get_summarized_data(self):
 def _str(self):
     prefix = 'tensor('
     indent = len(prefix)
-
     suffixes = []
-    if not torch._C._is_default_type_cuda():
-        if self.device.type == 'cuda':
-            suffixes.append('device=\'' + str(self.device) + '\'')
-    else:
-        if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
-            suffixes.append('device=\'' + str(self.device) + '\'')
 
-    has_default_dtype = self.dtype == torch.get_default_dtype() or self.dtype == torch.int64
+    # Note [Print tensor device]:
+    # A general logic here is we only print device when it doesn't match
+    # the device specified in default tensor type.
+    # Currently torch.set_default_tensor_type() only supports CPU/CUDA, thus
+    # torch._C._get_default_device() only returns either cpu or cuda.
+    # In other cases, we don't have a way to set them as default yet,
+    # and we should always print out device for them.
+    if self.device.type != torch._C._get_default_device()\
+            or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
+        suffixes.append('device=\'' + str(self.device) + '\'')
 
+    has_default_dtype = self.dtype in (torch.get_default_dtype(), torch.int64, torch.bool)
     if self.is_sparse:
         suffixes.append('size=' + str(tuple(self.shape)))
         suffixes.append('nnz=' + str(self._nnz()))
@@ -290,6 +293,7 @@ def _str(self):
         else:
             if not has_default_dtype:
                 suffixes.append('dtype=' + str(self.dtype))
+
             if self.layout != torch.strided:
                 tensor_str = _tensor_str(self.to_dense(), indent)
             else:

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -16,7 +15,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
 
@@ -173,20 +172,15 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> names() const {
-    const auto* meta = get_named_tensor_meta();
-    if (meta == nullptr) {
-      return nullopt;
-    } else {
-      return meta->names();
-    }
+    return impl::internal_get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
     return dim();
   }
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
   }
 
@@ -215,9 +209,6 @@ class CAFFE2_API Tensor {
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
         is_variable());
-  }
-  Type & dispatch_type() const {
-    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
@@ -269,9 +260,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
-  bool is_named() const;
+  bool has_names() const;
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
@@ -354,19 +345,16 @@ class CAFFE2_API Tensor {
     return impl_->grad();
   }
 
-  void set_data(Tensor new_data);
-
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
-  void backward(
-      c10::optional<Tensor> gradient = c10::nullopt,
-      bool keep_graph = false,
-      bool create_graph = false);
-
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
   //example
   //Tensor * add(Tensor & b);
+  void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
+  void set_data(const Tensor & new_data) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & set_names_(c10::optional<DimnameList> names);
+  #endif
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -397,6 +385,8 @@ class CAFFE2_API Tensor {
   Tensor & bernoulli_(double p=0.5, Generator * generator=nullptr);
   Tensor bernoulli(double p, Generator * generator=nullptr) const;
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
+  Tensor bitwise_not() const;
+  Tensor & bitwise_not_();
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
   Tensor & ceil_();
@@ -413,14 +403,13 @@ class CAFFE2_API Tensor {
   Tensor & cos_();
   Tensor cosh() const;
   Tensor & cosh_();
-  Tensor cumsum(int64_t dim, ScalarType dtype) const;
-  Tensor cumsum(int64_t dim) const;
-  Tensor cumprod(int64_t dim, ScalarType dtype) const;
-  Tensor cumprod(int64_t dim) const;
+  Tensor cumsum(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  Tensor cumprod(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor det() const;
   Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;
   Tensor diagonal(int64_t offset=0, int64_t dim1=0, int64_t dim2=1) const;
+  Tensor & fill_diagonal_(Scalar fill_value, bool wrap=false);
   Tensor div(const Tensor & other) const;
   Tensor & div_(const Tensor & other);
   Tensor div(Scalar other) const;
@@ -472,18 +461,14 @@ class CAFFE2_API Tensor {
   Tensor log2() const;
   Tensor & log2_();
   Tensor logdet() const;
-  Tensor log_softmax(int64_t dim, ScalarType dtype) const;
-  Tensor log_softmax(int64_t dim) const;
+  Tensor log_softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor logsumexp(IntArrayRef dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
   std::tuple<Tensor,Tensor> max(int64_t dim, bool keepdim=false) const;
   Tensor max_values(IntArrayRef dim, bool keepdim=false) const;
-  Tensor mean(ScalarType dtype) const;
-  Tensor mean() const;
-  Tensor mean(IntArrayRef dim, bool keepdim, ScalarType dtype) const;
-  Tensor mean(IntArrayRef dim, bool keepdim=false) const;
-  Tensor mean(IntArrayRef dim, ScalarType dtype) const;
+  Tensor mean(c10::optional<ScalarType> dtype=c10::nullopt) const;
+  Tensor mean(IntArrayRef dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim=false) const;
   std::tuple<Tensor,Tensor> min(int64_t dim, bool keepdim=false) const;
   Tensor min_values(IntArrayRef dim, bool keepdim=false) const;
@@ -500,6 +485,7 @@ class CAFFE2_API Tensor {
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntArrayRef dims) const;
   Tensor numpy_T() const;
+  bool is_pinned() const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
   Tensor reciprocal() const;
@@ -521,6 +507,9 @@ class CAFFE2_API Tensor {
   Tensor hardshrink_backward(const Tensor & grad_out, Scalar lambd) const;
   Tensor rsqrt() const;
   Tensor & rsqrt_();
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor select(Dimname dim, int64_t index) const;
+  #endif
   Tensor select(int64_t dim, int64_t index) const;
   Tensor sigmoid() const;
   Tensor & sigmoid_();
@@ -531,11 +520,13 @@ class CAFFE2_API Tensor {
   Tensor detach() const;
   Tensor & detach_();
   int64_t size(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  int64_t size(Dimname dim) const;
+  #endif
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
-  Tensor softmax(int64_t dim, ScalarType dtype) const;
-  Tensor softmax(int64_t dim) const;
+  Tensor softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntArrayRef split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;
@@ -545,21 +536,24 @@ class CAFFE2_API Tensor {
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
-  Tensor sum(ScalarType dtype) const;
-  Tensor sum() const;
-  Tensor sum(IntArrayRef dim, bool keepdim, ScalarType dtype) const;
-  Tensor sum(IntArrayRef dim, bool keepdim=false) const;
-  Tensor sum(IntArrayRef dim, ScalarType dtype) const;
+  #ifdef BUILD_NAMEDTENSOR
+  int64_t stride(Dimname dim) const;
+  #endif
+  Tensor sum(c10::optional<ScalarType> dtype=c10::nullopt) const;
+  Tensor sum(IntArrayRef dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor sum(DimnameList dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor sum_to_size(IntArrayRef size) const;
   Tensor sqrt() const;
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;
   Tensor std(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
-  Tensor prod(ScalarType dtype) const;
-  Tensor prod() const;
-  Tensor prod(int64_t dim, bool keepdim, ScalarType dtype) const;
-  Tensor prod(int64_t dim, bool keepdim=false) const;
-  Tensor prod(int64_t dim, ScalarType dtype) const;
+  Tensor prod(c10::optional<ScalarType> dtype=c10::nullopt) const;
+  Tensor prod(int64_t dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor prod(Dimname dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor t() const;
   Tensor & t_();
   Tensor tan() const;
@@ -738,7 +732,7 @@ class CAFFE2_API Tensor {
   Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
-  std::tuple<Tensor,Tensor> gels(const Tensor & A) const;
+  std::tuple<Tensor,Tensor> lstsq(const Tensor & A) const;
   std::tuple<Tensor,Tensor> triangular_solve(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
   std::tuple<Tensor,Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;
@@ -747,7 +741,6 @@ class CAFFE2_API Tensor {
   Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
   std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
   Tensor cholesky_inverse(bool upper=false) const;
-  std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr(bool some=true) const;
   std::tuple<Tensor,Tensor> geqrf() const;
   Tensor orgqr(const Tensor & input2) const;

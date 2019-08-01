@@ -26,11 +26,11 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
-from .env import NAMEDTENSOR_ENABLED
+from .env import BUILD_NAMEDTENSOR
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -172,7 +172,7 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 """)
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
+grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
@@ -216,7 +216,7 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Function::peek_at_next_sequence_nr());
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 """)
 
 SELECT = CodeTemplate("""\
@@ -280,7 +280,7 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
-    if NAMEDTENSOR_ENABLED:
+    if BUILD_NAMEDTENSOR:
         # Short-term plan: Don't support tracing Dimname.
         # Long-term plan: Add Dimname as a first-class type to the JIT.
         if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
@@ -588,7 +588,7 @@ def emit_body(declaration):
                 if arg['name'] == derivative_var_name:
                     break
             else:
-                assert False
+                raise AssertionError()
 
             return 'grad_fn->should_compute_output({})'.format(edge_off)
 
@@ -609,7 +609,7 @@ def emit_body(declaration):
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
             body = []
-            body.append(DECLARE_GRAD_FN.substitute(op='Function'))
+            body.append(DECLARE_GRAD_FN.substitute(op='Node'))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
                 args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
@@ -739,7 +739,7 @@ def emit_body(declaration):
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable({})'.format(call), []
+            return 'as_variable(std::move({}))'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []

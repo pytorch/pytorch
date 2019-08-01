@@ -8,6 +8,7 @@ type_map = {
         'Float',
         'Double',
         'Half',
+        'BFloat16',
     ],
     'integral': [
         'Byte',
@@ -69,6 +70,15 @@ def process_types_and_backends(option):
     if not option.get('cpu_half', False):
         if 'CPU' in backend_types:
             backend_types['CPU'].discard('Half')
+
+    # special case remove BFloat16 for cpu unless it is explicitly enabled
+    if not option.get('cpu_bfloat16', False):
+        if 'CPU' in backend_types:
+            backend_types['CPU'].discard('BFloat16')
+
+    # TODO: remove this hack once support for a bfloat16 tensor for CUDA is enabled
+    if 'CUDA' in backend_types:
+        backend_types['CUDA'].discard('BFloat16')
 
     # special cases remove bool for cpu and cuda unless it is explicitly enabled
     if not option.get('cpu_bool', False):

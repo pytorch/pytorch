@@ -97,7 +97,7 @@ Tensor per_tensor_affine_qtensor_cpu(const Tensor& self, double scale, int64_t z
   return dst;
 }
 
-Tensor& set_storage_cpu(Tensor& self, Storage storage, int64_t storage_offset, IntArrayRef sizes, IntArrayRef strides) {
+Tensor& set_storage(Tensor& self, Storage storage, int64_t storage_offset, IntArrayRef sizes, IntArrayRef strides) {
   auto* self_ = self.unsafeGetTensorImpl();
   self_->set_storage(storage);
   self_->set_storage_offset(storage_offset);
@@ -113,6 +113,18 @@ QScheme qscheme_quant(const Tensor& self) {
 Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
   get_qtensorimpl(self)->set_quantizer_(quantizer);
   return self;
+}
+
+Tensor quantized_clone(const Tensor& self) {
+  Tensor dst = at::_empty_affine_quantized(
+      self.sizes(),
+      self.options(),
+      self.q_scale(),
+      self.q_zero_point());
+
+  at::native::copy_(dst, self, false);
+
+  return dst;
 }
 
 } // namespace native

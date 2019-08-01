@@ -4,28 +4,14 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
-import weakref
 import inspect
+import weakref
+import torch._C
 from torch._six import builtins
-
-# Tracks standalone weak script functions
-compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Tracks which methods should be converted to strong methods
-weak_script_methods = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Converted modules and their corresponding WeakScriptModuleProxy objects
-weak_modules = weakref.WeakKeyDictionary()  # noqa: T484
-
-# Types that have been declared as weak modules
-weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
-
-COMPILATION_PENDING = object()
-COMPILED = object()
 
 
 def createResolutionCallback(frames_up=0):
@@ -71,51 +57,70 @@ def createResolutionCallback(frames_up=0):
             return f_globals[key]
         elif hasattr(builtins, key):
             return getattr(builtins, key)
-        else:
-            return None
 
     return env
 
 
-def weak_script(fn, _frames_up=0):
+def get_closure(fn):
     """
-    Marks a function as a weak script function. When used in a script function
-    or ScriptModule, the weak script function will be lazily compiled and
-    inlined in the graph. When not used in a script function, the weak script
-    annotation has no effect.
+    Get a dictionary of closed over variables from a function
     """
-    compiled_weak_fns[fn] = {
-        "status": COMPILATION_PENDING,
-        "compiled_fn": None,
-        "rcb": createResolutionCallback(_frames_up + 1)
-    }
-    return fn
+    captures = {}
+    captures.update(fn.__globals__)
+
+    for index, captured_name in enumerate(fn.__code__.co_freevars):
+        captures[captured_name] = fn.__closure__[index].cell_contents
+
+    return captures
 
 
-def weak_module(cls):
-    weak_types[cls] = {
-        "method_stubs": None
-    }
-    return cls
+def createResolutionCallbackFromClosure(fn):
+    """
+    Create a resolutionCallback by introspecting the function instead of
+    looking up the stack for the enclosing scope
+    """
+    closure = get_closure(fn)
+
+    def env(key):
+        if key in closure:
+            return closure[key]
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
+        return None
+
+    return env
 
 
-def weak_script_method(fn):
-    weak_script_methods[fn] = {
-        "rcb": createResolutionCallback(frames_up=2),
-        "original_method": fn
-    }
-    return fn
+def can_compile_class(cls):
+    # If any of the functions on a type don't have a code object, this type can't
+    # be compiled and is probably a builtin / bound from C
+    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    has_code = [hasattr(fn, '__code__') for fn in fns]
+    return all(has_code)
+
+
+def createResolutionCallbackForClassMethods(cls):
+    """
+    This looks at all the methods defined in a class and pulls their closed-over
+    variables into a dictionary and uses that to resolve variables.
+    """
+    # cls is a type here, so `ismethod` is false since the methods on the type
+    # aren't bound to anything, so Python treats them as regular functions
+    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    captures = {}
+
+    for fn in fns:
+        captures.update(get_closure(fn))
+
+    return lambda key: captures.get(key, None)
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
     """
-    Dispatches to either of 2 weak script functions based on a boolean argument.
+    Dispatches to either of 2 script functions based on a boolean argument.
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
-    if compiled_weak_fns.get(if_true) is None or compiled_weak_fns.get(if_false) is None:
-        raise RuntimeError("both functions must be weak script")
-
     def fn(*args, **kwargs):
         dispatch_flag = False
         if arg_name in kwargs:
@@ -382,3 +387,36 @@ class BroadcastingListCls(object):
 BroadcastingList1 = BroadcastingListCls()
 for i in range(2, 7):
     globals()["BroadcastingList{}".format(i)] = BroadcastingList1
+
+# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
+def _qualified_name(obj):
+    # short-circuit in cases where the object already has a known qualified name
+    if isinstance(obj, torch._C.Function):
+        return obj.qualified_name
+
+    name = obj.__name__
+    module_name = obj.__module__
+
+    # The Python docs are very clear that `__module__` can be None, but I can't
+    # figure out when it actually would be.
+    if module_name is None:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "__module__ can't be None.".format(name))
+
+    # if getattr(sys.modules[module_name], name) is not obj:
+    #     raise RuntimeError("Could not get qualified name for class '{}': "
+    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
+
+    # __main__ is a builtin module, so rewrite it to "__torch__".
+    if module_name == "__main__":
+        module_name = "__torch__"
+    else:
+        # Everything else gets a "__torch__" prefix to avoid name collisions
+        # with the names of user values.
+        module_name = "__torch__." + module_name
+
+    if "." in name:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "'{}' is not a valid identifier".format(name, name))
+
+    return module_name + "." + name

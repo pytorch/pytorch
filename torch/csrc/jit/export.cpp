@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/source_range_serialization.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -105,7 +106,9 @@ void validateGraph(
     const std::shared_ptr<Graph>& graph,
     onnx_torch::OperatorExportTypes operator_export_type) {
   validateBlock(graph->block(), operator_export_type);
-  EliminateDeadCode(graph->block());
+  // this is run on an onnx graph which doesn't have side effects.
+  // ignore side effects in dead code elimination.
+  EliminateDeadCode(graph->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 class EncoderBase {
@@ -206,7 +209,7 @@ EncoderBase::EncoderBase(
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(4);
   // TODO: set the producer version using appropriate function call
-  model_proto_.set_producer_version("1.1");
+  model_proto_.set_producer_version("1.2");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -214,7 +217,7 @@ void EncoderBase::EncodeValueInfo(
     onnx::ValueInfoProto* v,
     const Value* n,
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
-  std::string name = n->uniqueName();
+  std::string name = n->debugName();
   v->set_name(name);
   if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
     onnx::TypeProto* t = v->mutable_type();
@@ -285,11 +288,11 @@ void EncoderBase::EncodeBlock(
       if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
-        p_n->add_input(input->uniqueName());
+        p_n->add_input(input->debugName());
       }
     }
     for (auto output : node->outputs()) {
-      p_n->add_output(output->uniqueName());
+      p_n->add_output(output->debugName());
       EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (!node->kind().is_onnx()) {
@@ -545,9 +548,8 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   IValue moduleGetState(const script::Module& module);
-  bool moduleHasValidGetSetState(const script::Module& module);
 
-  void convertClass(const c10::NamedTypePtr& type, torch::ModelDef* model_def);
+  void convertClass(const c10::NamedTypePtr& type);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -606,7 +608,7 @@ void ScriptModuleSerializer::serialize(
 void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   // Convert all the classes that this model depends on
   for (const auto& class_type : class_table_) {
-    convertClass(class_type, model_def);
+    convertClass(class_type);
   }
 
   // Mapping of filename => src. We need this because multiple clases may go in
@@ -651,16 +653,18 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 // python print the class and add to the converted_classes_. Recursively
 // python print all classes that this class depends on.
 void ScriptModuleSerializer::convertClass(
-    const c10::NamedTypePtr& class_type,
-    torch::ModelDef* model_def) {
+    const c10::NamedTypePtr& class_type) {
   if (converted_classes_.contains(class_type)) {
     return;
   }
 
   std::vector<c10::NamedTypePtr> class_deps;
   std::ostringstream class_stream;
+  // TODO: serialize for classes
+  SourceRangeRecords source_ranges;
   PythonPrint(
       class_stream,
+      source_ranges,
       class_type,
       tensor_table_,
       class_deps,
@@ -675,7 +679,7 @@ void ScriptModuleSerializer::convertClass(
       // class isn't in there yet.
       continue;
     }
-    convertClass(c, model_def);
+    convertClass(c);
   }
   // Insert *after* we've traversed the dependencies. This ensures that any
   // given class will appear after its dependencies in the order.
@@ -715,69 +719,6 @@ void ScriptModuleSerializer::convertModel(
   }
 }
 
-bool ScriptModuleSerializer::moduleHasValidGetSetState(
-    const script::Module& module) {
-  // Check that the schemas for __getstate__ and __setstate__ are correct
-  auto getstate = module.module_object()->type()->getMethod("__getstate__");
-  if (getstate == nullptr) {
-    return false;
-  }
-  auto get_schema =
-      module.module_object()->type()->getMethod("__getstate__")->getSchema();
-
-  // Check __getstate__
-  //   __getstate__ is expected to be (self) -> T
-  TORCH_CHECK(
-      get_schema.arguments().size() == 1,
-      "'__getstate__' must have 'self' as its only argument, but found ",
-      get_schema.arguments().size(),
-      " arguments");
-  TORCH_CHECK(
-      get_schema.returns().size() == 1,
-      "'__getstate__' must return 1 value, but found ",
-      get_schema.returns().size());
-
-  // Check __setstate__ if the method exists
-  //   __setstate__ is expected to be (self, T) -> None
-  // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.class_compilation_unit()->find_function("__setstate__");
-  if (setstate == nullptr) {
-    return false;
-  }
-  auto set_schema = setstate->getSchema();
-
-  TORCH_CHECK(
-      set_schema.arguments().size() == 2,
-      "'__setstate__' must have 'self' and the state as its "
-      "only arguments, but found ",
-      set_schema.arguments().size(),
-      " arguments");
-  TORCH_CHECK(
-      set_schema.returns().size() == 1,
-      "'__setstate__' must return None, but found ",
-      set_schema.returns().size(),
-      " return values");
-  TORCH_CHECK(
-      set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
-      "'__setstate__' must return None, but found value of type",
-      set_schema.returns().at(0).type()->python_str());
-
-  // Check that the return type of __getstate__ matches the input to
-  // __setstate__
-  auto get_type = get_schema.returns().at(0).type();
-  auto set_type = set_schema.arguments().at(1).type();
-
-  TORCH_CHECK(
-      set_type->isSubtypeOf(get_type),
-      "'__getstate__'s return type (",
-      get_type->python_str(),
-      " does not match '__setstate__'s argument type (",
-      set_type->python_str(),
-      "))");
-
-  return true;
-}
-
 /// Run module.__getstate__() and return the result
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
   return module.get_method("__getstate__")({});
@@ -805,14 +746,18 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
+  tensor_proto->set_is_quantized(tensor.is_quantized());
+  if (tensor.is_quantized()) {
+    tensor_proto->set_scale(tensor.q_scale());
+    tensor_proto->set_zero_point(tensor.q_zero_point());
+  }
+
   auto* key = tensor.storage().unsafeGetStorageImpl();
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
-    uint64_t record_size;
-    at::Tensor storage_tensor;
-    std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
+    WriteableTensorData data = getWriteableTensorData(tensor);
     std::string name = "tensors/" + std::to_string(tensor_id);
-    writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
+    writer_.writeRecord(name, data.data(), data.sizeInBytes());
     storage_it = storageMap.insert({key, name}).first;
   }
 
@@ -838,13 +783,13 @@ void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
   Pickler pickler(&tensor_table_);
-  pickler.start();
+  pickler.protocol();
   pickler.startTuple();
   for (const IValue& ivalue : ivalues) {
-    pickler.addIValue(ivalue);
+    pickler.pushIValue(ivalue);
   }
   pickler.endTuple();
-  pickler.finish();
+  pickler.stop();
   writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size());
 }
 
@@ -854,11 +799,12 @@ void ScriptModuleSerializer::convertModule(
     const std::string& name,
     torch::ModuleDef* module_def) {
   module_def->set_name(name);
-  module_def->set_optimize(module.is_optimized());
+  module_def->set_optimize(true);
 
   // If __getstate__ and __setstate__ methods are provided, use those for
   // serializing instead of serializing the attributes directly
-  bool user_provided_serialization = moduleHasValidGetSetState(module);
+  bool user_provided_serialization =
+      checkHasValidSetGetState(module.module_object()->type());
   if (user_provided_serialization) {
     // Run the '__getstate__' method on the module and store the result
     pickled_ivalues_.emplace_back(moduleGetState(module));
@@ -903,13 +849,14 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.class_compilation_unit()->get_functions().size() > 0) {
+  if (module.type()->methods().size() > 0) {
     std::ostringstream methods;
+    SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
-        *module.class_compilation_unit(),
-        /*is_method=*/true,
+        source_ranges,
+        module,
         tensor_table_,
         class_table_,
         /*enforce_importable=*/true);
@@ -921,6 +868,19 @@ void ScriptModuleSerializer::convertModule(
     writer_.writeRecord(
         filename.str(), methods_str.c_str(), methods_str.size());
     record->set_key(filename.str());
+
+    // Write out debug records
+    torch::RecordRef* debug_record =
+        module_def->mutable_torchscript_debug_arena();
+
+    SourceRangePickler source_range_pickler;
+    source_range_pickler.pickle(source_ranges);
+    const auto& range_data = source_range_pickler.get_data();
+    std::stringstream debug_filename;
+    debug_filename << "debug/" << module_name.str() << ".pkl";
+    writer_.writeRecord(
+        debug_filename.str(), range_data.data(), range_data.size());
+    debug_record->set_key(debug_filename.str());
   }
 
   for (script::Slot s : module.get_module_slots()) {
