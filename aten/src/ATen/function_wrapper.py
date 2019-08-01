@@ -120,10 +120,10 @@ BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 
 C10_DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op("${schema_string}", torch::RegisterOperators::options().impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>())
+.op("${schema_string}", torch::RegisterOperators::options().impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>().aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 C10_BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op("${schema_string}", torch::RegisterOperators::options().impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(c10::backendToTensorTypeId(Backend::${Backend})))
+.op("${schema_string}", torch::RegisterOperators::options().impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(c10::backendToTensorTypeId(Backend::${Backend})).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 # Generate a file that lists all functions and their schema string. Used for XLA
@@ -142,17 +142,16 @@ inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
     return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
 }
 """)
-# C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-# inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
-#     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
-#     if (is_variable()) {
-#         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${return_type}, ${formals_types}>(op, ${method_actuals});
-#     } else {
-#         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<${return_type}, ${formals_types}>(${method_actuals});
-#     }
-# }
-# """)
-C10_TENSOR_METHOD_DEFINITION = TENSOR_METHOD_DEFINITION
+C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
+inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op, ${method_actuals});
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<${formals_types_with_return}>(${method_actuals});
+    }
+}
+""")
 # add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals_with_defaults});
