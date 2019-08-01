@@ -131,6 +131,151 @@ class MkldnnBatchNorm2d(torch.jit.ScriptModule):
             False,  # cuda_enabled
         )
 
+MKLDNN_RNN_RELU = 0
+MKLDNN_RNN_TANH = 1
+MKLDNN_LSTM = 2
+MKLDNN_GRU = 3
+
+class MkldnnLSTM(torch.jit.ScriptModule):
+    __constants__ = ['input_size', 'hidden_size', 'bias',
+        'mode', 'num_layers', 'bidirectional', 'batch_first']
+
+    def __init__(self, dense_module):
+        super(MkldnnLSTM, self).__init__()
+
+        assert(not dense_module.training)
+        assert(not dense_module.batch_first)
+
+        self.input_size = dense_module.input_size
+        self.hidden_size = dense_module.hidden_size
+        self.bias = dense_module.bias
+        self.mode = MKLDNN_LSTM
+        self.num_layers = dense_module.num_layers
+        self.bidirectional = dense_module.bidirectional
+        self.batch_first = dense_module.batch_first
+
+        self.register_buffer('flatten_weight',
+            torch._C._nn._mkldnn_rnn_flatten_weight(
+                dense_module._flat_weights,
+                self.bias,
+                self.mode,
+                self.hidden_size,
+                self.num_layers,
+                self.bidirectional))
+
+    @torch.jit.script_method
+    def __getstate__(self):
+        return (self.flatten_weight)
+
+    @torch.jit.script_method
+    def __setstate__(self, state):
+        # type: (Tuple[Tensor]) -> None
+        self.flatten_weight = state[0]
+
+    @torch.jit.script_method
+    def forward(self, input, hx=None):
+        # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
+        if hx is None:
+            batch_size = input.size(1)
+            num_directions = 2 if self.bidirectional else 1
+            zeros = torch.zeros(self.num_layers * num_directions,
+                batch_size, self.hidden_size,
+                dtype=input.dtype, device=input.device)
+            hx = (zeros, zeros)
+
+        hx, cx = hx
+
+        input_mkldnn = input if input.is_mkldnn else input.to_mkldnn()
+        hx_mkldnn = hx if hx.is_mkldnn else hx.to_mkldnn()
+        cx_mkldnn = cx if cx.is_mkldnn else cx.to_mkldnn()
+
+        output_mkldnn, hy_mkldnn, cy_mkldnn = torch._C._nn._mkldnn_rnn(
+            input_mkldnn,
+            self.flatten_weight,
+            self.bias,
+            hx_mkldnn,
+            cx_mkldnn,
+            self.mode,
+            self.input_size,
+            self.hidden_size,
+            self.num_layers,
+            self.batch_first,
+            self.bidirectional)
+
+        output = output_mkldnn if input.is_mkldnn else output_mkldnn.to_dense()
+        hy = hy_mkldnn if input.is_mkldnn else hy_mkldnn.to_dense()
+        cy = cy_mkldnn if input.is_mkldnn else cy_mkldnn.to_dense()
+
+        return output, (hy, cy)
+
+
+class MkldnnGRU(torch.jit.ScriptModule):
+    __constants__ = ['input_size', 'hidden_size', 'bias',
+        'mode', 'num_layers', 'bidirectional', 'batch_first']
+
+    def __init__(self, dense_module):
+        super(MkldnnGRU, self).__init__()
+
+        assert(not dense_module.training)
+        assert(not dense_module.batch_first)
+
+        self.input_size = dense_module.input_size
+        self.hidden_size = dense_module.hidden_size
+        self.bias = dense_module.bias
+        self.mode = MKLDNN_GRU
+        self.num_layers = dense_module.num_layers
+        self.bidirectional = dense_module.bidirectional
+        self.batch_first = dense_module.batch_first
+
+        self.register_buffer('flatten_weight',
+            torch._C._nn._mkldnn_rnn_flatten_weight(
+                dense_module._flat_weights,
+                self.bias,
+                self.mode,
+                self.hidden_size,
+                self.num_layers,
+                self.bidirectional))
+
+    @torch.jit.script_method
+    def __getstate__(self):
+        return (self.flatten_weight)
+
+    @torch.jit.script_method
+    def __setstate__(self, state):
+        # type: (Tuple[Tensor]) -> None
+        self.flatten_weight = state[0]
+
+    @torch.jit.script_method
+    def forward(self, input, hx=None):
+        # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        if hx is None:
+            batch_size = input.size(1)
+            num_directions = 2 if self.bidirectional else 1
+            hx = torch.zeros(self.num_layers * num_directions,
+                batch_size, self.hidden_size,
+                dtype=input.dtype, device=input.device)
+
+        input_mkldnn = input if input.is_mkldnn else input.to_mkldnn()
+        hx_mkldnn = hx if hx.is_mkldnn else hx.to_mkldnn()
+
+        output_mkldnn, hy_mkldnn, _ = torch._C._nn._mkldnn_rnn(
+            input_mkldnn,
+            self.flatten_weight,
+            self.bias,
+            hx_mkldnn,
+            hx_mkldnn,
+            self.mode,
+            self.input_size,
+            self.hidden_size,
+            self.num_layers,
+            self.batch_first,
+            self.bidirectional)
+
+        output = output_mkldnn if input.is_mkldnn else output_mkldnn.to_dense()
+        hy = hy_mkldnn if input.is_mkldnn else hy_mkldnn.to_dense()
+
+        return output, hy
+
 
 def to_mkldnn(module):
     def m_fn(m):
@@ -140,6 +285,10 @@ def to_mkldnn(module):
             return MkldnnConv2d(m)
         elif isinstance(m, torch.nn.BatchNorm2d):
             return MkldnnBatchNorm2d(m)
+        elif isinstance(m, torch.nn.LSTM):
+            return MkldnnLSTM(m)
+        elif isinstance(m, torch.nn.GRU):
+            return MkldnnGRU(m)
         else:
             return m
 

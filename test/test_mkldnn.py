@@ -122,6 +122,39 @@ class TestMkldnn(TestCase):
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
+    def test_rnn(self):
+        I = torch.randint(1, 1000, (1,)).item()
+        H = torch.randint(1, 1000, (1,)).item()
+        T = torch.randint(10, 100, (1,)).item()
+        N = torch.randint(1, 100, (1,)).item()
+        x = torch.randn(T, N, I, dtype=torch.float32)
+        for mod in [torch.nn.LSTM, torch.nn.GRU]:
+            for bidirectional in [True, False]:
+                D = 2 if bidirectional else 1
+                for L in [1, 4]:
+                    if mod is torch.nn.LSTM:
+                        hx0 = torch.randn(L * D, N, H, dtype=torch.float32)
+                        cx0 = torch.randn(L * D, N, H, dtype=torch.float32)
+                        h0 = (hx0, cx0)
+                        h1 = (hx0.to_mkldnn(), cx0.to_mkldnn())
+                    else:
+                        h0 = torch.randn(L * D, N, H, dtype=torch.float32)
+                        h1 = h0.to_mkldnn()
+
+                    rnn = mod(I, H, L, bidirectional=bidirectional).float().eval()
+                    mkldnn_rnn = mkldnn_utils.to_mkldnn(copy.deepcopy(rnn))
+                    y0, hn0 = rnn(x, h0)
+                    y1, hn1 = mkldnn_rnn(x.to_mkldnn(), h1)
+
+                    self.assertEqual(y0, y1.to_dense())
+                    if mod is torch.nn.LSTM:
+                        hy0, cy0 = hn0
+                        hy1, cy1 = hn1
+                        self.assertEqual(hy0, hy1.to_dense())
+                        self.assertEqual(cy0, cy1.to_dense())
+                    else:
+                        self.assertEqual(hn0, hn1.to_dense())
+
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         self.assertEqual(torch.relu(x), torch.relu(x.to_mkldnn()).to_dense())

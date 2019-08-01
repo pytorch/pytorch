@@ -1774,6 +1774,18 @@
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
 
+- func: _mkldnn_rnn_flatten_weight(Tensor[] weight_arr, bool has_bias, int mode, int hidden_size, int num_layers, bool bidirectional) -> Tensor
+  variants: function
+  python_module: nn
+  dispatch:
+    CPU: _mkldnn_rnn_flatten_weight
+
+- func: _mkldnn_rnn(Tensor input, Tensor flatten_weight, bool has_bias, Tensor hx, Tensor cx, int mode, int input_size, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> (Tensor, Tensor, Tensor)
+  variants: function
+  python_module: nn
+  dispatch:
+    MkldnnCPU: _mkldnn_rnn
+
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: miopen_batch_norm
