@@ -335,7 +335,6 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, ge) \
-_(aten, gels) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
@@ -416,6 +415,7 @@ _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
+_(aten, lstsq) \
 _(aten, lt) \
 _(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
