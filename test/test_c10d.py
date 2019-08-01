@@ -21,7 +21,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from common_distributed import MultiProcessTestCase, \
-    requires_gloo, requires_nccl, requires_mpi, \
+    requires_gloo, requires_nccl, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues
 from common_utils import TestCase, load_tests, run_tests
 from common_utils import retry_on_address_already_in_use_error
