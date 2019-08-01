@@ -7,6 +7,7 @@ future.
 
 from .adadelta import Adadelta  # noqa: F401
 from .adagrad import Adagrad  # noqa: F401
+from .adagrad_jit import AdagradJit  # noqa: F401
 from .adam import Adam  # noqa: F401
 from .adamw import AdamW  # noqa: F401
 from .sparse_adam import SparseAdam  # noqa: F401

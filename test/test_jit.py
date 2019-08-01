@@ -17819,6 +17819,93 @@ class TestClassType(JitTestCase):
                     self.parent = torch.jit.annotate(Optional[Tree], None)
 
 
+class TestOptimizer(JitTestCase):
+    def test_jit(self):
+        # class M(torch.jit.ScriptModule):
+        #     def __init__(self):
+        #         super(M, self).__init__()
+        #         self.list = torch.jit.Attribute([], List[str])
+
+        #     @torch.jit.script_method
+        #     def forward(self, key):
+        #         # type: (str) -> List[str]
+        #         self.list.append(key)
+        #         self.list.append(key)
+        #         self.list.append(key)
+        #         return self.list
+        # m = M()
+        # print(m.graph)
+        @torch.jit.script
+        class TestScriptClass(object):
+            def __init__(self):
+                self.test = torch.jit.annotate(List[int], [])
+                self.testdict = {'2': 2.0}
+
+            def add_one(self):
+                # type: () -> Dict[str, float]
+                return self.testdict
+
+
+        test = TestScriptClass()
+        print(test.add_one())
+        print(test.add_one())
+        print(test.add_one())
+        print(test.add_one())
+        print(test.add_one())
+        
+
+
+    def test_adagrad_jit(self):
+        # import torch.optim as optim
+        # from torchvision import datasets, transforms
+
+        class Net(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+                self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+                self.conv2_drop = nn.Dropout2d()
+                self.fc1 = nn.Linear(320, 50)
+                self.fc2 = nn.Linear(50, 10)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = F.relu(F.max_pool2d(self.conv1(x), 2))
+                x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+                x = x.view(-1, 320)
+                x = F.relu(self.fc1(x))
+                x = F.dropout(x, training=self.training)
+                x = self.fc2(x)
+                return F.log_softmax(x, dim=1)
+
+
+        model = Net()
+        import pdb; pdb.set_trace()
+
+        # data_loader = torch.utils.data.DataLoader(
+        # datasets.MNIST('../data', train=True, download=True,
+        #             transform=transforms.Compose([
+        #                 transforms.ToTensor(),
+        #                 transforms.Normalize((0.1307,), (0.3081,))
+        #             ])),
+        # batch_size=1, shuffle=True, num_workers=1)
+
+        data = torch.randn(1, 1, 28, 28)
+        target = torch.tensor([9])
+            # for batch_idx, (data, target) in enumerate(data_loader):
+        # optimizer = optim.Adagrad(model.parameters())
+        optimizer = optim.AdagradJit(model.parameters())
+        output = model(data)
+        loss = F.nll_loss(output, target)
+        loss.backward()
+        optimizer.step()
+            # break
+        # optimizer = optim.AdagradJit(model.parameters())
+        # optimizer = optim.Adagrad(model.parameters())
+        # test = torch.jit.script(optimizer)
+
+
+
 class TestLogging(JitTestCase):
     def test_bump_numeric_counter(self):
         class ModuleThatLogs(torch.jit.ScriptModule):
