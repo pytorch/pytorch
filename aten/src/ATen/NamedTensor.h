@@ -54,7 +54,7 @@ namespace impl {
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
 CAFFE2_API optional<DimnameList> internal_get_names(TensorImpl* impl);
-CAFFE2_API bool internal_is_named(TensorImpl* impl);
+CAFFE2_API bool internal_has_names(TensorImpl* impl);
 
 
 } // namespace impl

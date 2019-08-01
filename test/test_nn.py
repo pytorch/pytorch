@@ -4366,6 +4366,23 @@ class TestNN(NNTestCase):
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out.data, expected)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_parallel_apply_passes_exception(self):
+        # we define and instantiate a module that will throw a KeyError
+        class TestModule(nn.Module):
+
+            def forward(self, *args):
+                return {}['wonderful']
+
+        l1 = TestModule().to("cuda", torch.float)
+        # and check that parallel_apply passes on the exception
+        # (we can use a single device twice for this test)
+        with self.assertRaisesRegex(KeyError,
+                                    'Caught KeyError in replica \\d '
+                                    'on device 0.\nOriginal Traceback'
+                                    '[\\s\\S]+wonderful'):
+            dp.parallel_apply(modules=(l1, l1), inputs=(None, None))
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
@@ -5272,6 +5289,15 @@ class TestNN(NNTestCase):
         i = torch.rand(1, 2, 1, 1, 1)
         out = m(i, output_size=(1, 2, 2, 2, 2))
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_ConvTranspose2d_half_cublas_gemm(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            inputs = torch.randn(1, 1, 16, 16, device='cuda', dtype=torch.half)
+            deconv = nn.ConvTranspose2d(
+                1, 1, 3, stride=2, padding=1, output_padding=1).cuda().half()
+            output = deconv(inputs)
+            output.mean().backward()
+
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
@@ -5582,20 +5608,29 @@ class TestNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    def test_CTCLoss_empty_target_cpu(self):
+    def _test_CTCLoss_empty_target(self, device):
         target_lengths = [0, 0, 0]
         input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (0,), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        targets = torch.randint(1, 15, (0,), dtype=torch.long, device=device)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
+        self.assertAlmostEqual(-log_probs.sum(0)[:, 0], loss)
 
         target_lengths = [0, 9, 0]
         input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (9,), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        targets = torch.randint(1, 15, (9,), dtype=torch.long, device=device)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
+        self.assertAlmostEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
+
+    def test_CTCLoss_empty_target_cpu(self):
+        self._test_CTCLoss_empty_target('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_empty_target_cuda(self):
+        self._test_CTCLoss_empty_target('cuda')
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):

@@ -746,6 +746,12 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
+  tensor_proto->set_is_quantized(tensor.is_quantized());
+  if (tensor.is_quantized()) {
+    tensor_proto->set_scale(tensor.q_scale());
+    tensor_proto->set_zero_point(tensor.q_zero_point());
+  }
+
   auto* key = tensor.storage().unsafeGetStorageImpl();
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {

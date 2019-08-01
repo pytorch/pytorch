@@ -59,13 +59,7 @@ extensions = [
 #
 #
 
-katex_options = r'''
-delimiters : [
-   {left: "$$", right: "$$", display: true},
-   {left: "\\(", right: "\\)", display: false},
-   {left: "\\[", right: "\\]", display: true}
-]
-'''
+katex_prerender = True
 
 napoleon_use_ivar = True
 

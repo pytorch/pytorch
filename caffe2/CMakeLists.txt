@@ -366,7 +366,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/export.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
@@ -430,9 +429,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/inline_loop_condition.cpp
@@ -458,14 +455,19 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
-    ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
-  if (NOT WIN32 AND NOT INTERN_BUILD_MOBILE)
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+  if (NOT INTERN_BUILD_MOBILE)
+    list(APPEND TORCH_SRCS 
+      ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+      ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
-  endif ()
+    if (NOT WIN32)
+      list(APPEND TORCH_SRCS 
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
+    endif()
+  endif()
 
   if (USE_CUDA)
     if (NOT USE_ROCM)
@@ -866,23 +868,23 @@ target_compile_options(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 
 
-# Parallelism settings
-#  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+# ATen parallelism settings
+#  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
-set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
-message(STATUS "Using parallel backend: ${PARALLEL_BACKEND}")
-if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
+#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
+set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
+if ("${ATEN_THREADING}" STREQUAL "OMP")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_OPENMP=1")
-elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
+elseif ("${ATEN_THREADING}" STREQUAL "NATIVE")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE=1")
-elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE_TBB")
+elseif ("${ATEN_THREADING}" STREQUAL "TBB")
   if (NOT USE_TBB)
-    message(FATAL_ERROR "Using NATIVE_TBB backend but USE_TBB is off")
+    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
   endif()
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
 else()
-  message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
+  message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
