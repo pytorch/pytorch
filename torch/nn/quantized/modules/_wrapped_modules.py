@@ -8,7 +8,7 @@ from torch.nn.modules import Module
 
 r"""Base class for all quantized wrapper modules."""
 class _BaseWrapperModule(Module):
-    _FLOAT_MODULE = None
+    __FLOAT_MODULE = None
 
     def __init__(self):
         super(_BaseWrapperModule, self).__init__()
