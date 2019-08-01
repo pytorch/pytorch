@@ -3087,6 +3087,14 @@ def foo(x):
         fc = FileCheck().check("add(").check("add_(").check("sub(")
         test_hook(True, hook_return, fc)
 
+        b = torch.tensor(3.0)
+
+        def captured_hook(mod, input, output):
+            return output - b
+
+        fc = FileCheck().check("add(").check("sub(")
+        test_hook(True, captured_hook, fc)
+
         def pre_hook_no_ret(mod, input):
             input[0].add_(3)
 
