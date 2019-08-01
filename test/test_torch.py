@@ -7809,12 +7809,14 @@ class _TestTorchMixin(object):
 
     def test_atan2(self):
         def _test_atan2_with_size(size, device):
-            a = torch.rand(size=size, device=device, dtype=torch.double).view(-1)
-            b = torch.rand(size=size, device=device, dtype=torch.double).view(-1)
+            a = torch.rand(size=size, device=device, dtype=torch.double)
+            b = torch.rand(size=size, device=device, dtype=torch.double)
             actual = a.atan2(b)
-            expected = torch.tensor([math.atan2(a[i].item(), b[i].item()) for i in range(a.numel())],
+            x = a.view(-1)
+            y = b.view(-1)
+            expected = torch.tensor([math.atan2(x[i].item(), y[i].item()) for i in range(x.numel())],
                                     device=device, dtype=torch.double)
-            self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
+            self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
         for device in torch.testing.get_all_device_types():
             _test_atan2_with_size((2, 2), device)
             _test_atan2_with_size((3, 3), device)
