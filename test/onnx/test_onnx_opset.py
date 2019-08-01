@@ -27,7 +27,7 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # check the schema with the onnx checker
     onnx.checker.check_model(model)
 
-    # check target type and attributes 
+    # check target type and attributes
     graph = model.graph
     # ops should contain an object for each node
     # in graph.node, in the right order.
@@ -64,8 +64,7 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 return torch.isnan(x)
 
-        ops = [{"op_name" : "IsNaN"},
-               {"op_name" : "Cast", "attributes" : [{"name" : "to", "i" : 2, "type" : 2}]}]
+        ops = [{"op_name" : "IsNaN"}]
         ops = {9 : ops, 10 : ops}
         x = torch.tensor([1.0, float('nan'), 2.0])
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
@@ -192,7 +191,7 @@ class TestONNXOpset(TestCase):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                return x[1:x.size(0)] 
+                return x[1:x.size(0)]
 
         ops_9 = [{"op_name" : "Constant"},
                  {"op_name" : "Constant"},
