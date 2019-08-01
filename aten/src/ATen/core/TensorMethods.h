@@ -591,6 +591,10 @@ inline Tensor Tensor::numpy_T() const {
     static auto table = globalATenDispatch().getOpTable("aten::numpy_T(Tensor(a) self) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
+inline bool Tensor::is_pinned() const {
+    static auto table = globalATenDispatch().getOpTable("aten::is_pinned(Tensor self) -> bool");
+    return table->getOp<bool (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+}
 inline Tensor Tensor::pin_memory() const {
     static auto table = globalATenDispatch().getOpTable("aten::pin_memory(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
@@ -1769,8 +1773,8 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 
-inline bool Tensor::is_named() const {
-  return impl::internal_is_named(unsafeGetTensorImpl());
+inline bool Tensor::has_names() const {
+  return impl::internal_has_names(unsafeGetTensorImpl());
 }
 #endif
 
@@ -1826,8 +1830,8 @@ inline bool is_quantized(Tensor self) {
     return static_cast<T*>(this->data_ptr());    \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_CAST)
-AT_FORALL_QINTS(DEFINE_CAST)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
+AT_FORALL_QINT_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
 #define DEFINE_ITEM(T, name, _)   \
@@ -1836,7 +1840,7 @@ AT_FORALL_QINTS(DEFINE_CAST)
     return item().to##name();     \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_ITEM)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
 #undef DEFINE_ITEM
 
 } //namespace at

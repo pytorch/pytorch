@@ -226,6 +226,7 @@ class _TestTorchMixin(object):
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
                        'set_names_',  # BUILD_NAMEDTENSOR only
+                       'has_names',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
@@ -6496,6 +6497,59 @@ class _TestTorchMixin(object):
         self._test_det_logdet_slogdet(self, 'cpu')
 
     @staticmethod
+    def _test_det_logdet_slogdet_batched(self, device):
+        from common_utils import (random_symmetric_matrix, random_symmetric_psd_matrix,
+                                  random_symmetric_pd_matrix, random_square_matrix_of_rank)
+
+        # mat_chars denotes matrix characteristics
+        # possible values are: sym, sym_psd, sym_pd, sing, non_sym
+        def run_test(matsize, batchdims, mat_chars):
+            num_matrices = reduce(lambda x, y: x * y, batchdims, 1)
+            list_of_matrices = []
+
+            for idx in range(num_matrices):
+                mat_type = idx % len(mat_chars)
+                if mat_chars[mat_type] == 'sym':
+                    list_of_matrices.append(random_symmetric_matrix(matsize).to(device=device))
+                elif mat_chars[mat_type] == 'sym_psd':
+                    list_of_matrices.append(random_symmetric_psd_matrix(matsize).to(device=device))
+                elif mat_chars[mat_type] == 'sym_pd':
+                    list_of_matrices.append(random_symmetric_pd_matrix(matsize).to(device=device))
+                elif mat_chars[mat_type] == 'sing':
+                    list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize // 2).to(device=device))
+                elif mat_chars[mat_type] == 'non_sing':
+                    list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize).to(device=device))
+            full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))
+            # Scaling adapted from `get_random_mat_scale` in _test_det_logdet_slogdet
+            full_tensor *= (math.factorial(matsize - 1) ** (-1.0 / (2 * matsize)))
+
+            for fn in [torch.det, torch.logdet, torch.slogdet]:
+                expected_value = []
+                actual_value = fn(full_tensor)
+                for full_idx in product(*map(lambda x: list(range(x)), batchdims)):
+                    expected_value.append(fn(full_tensor[full_idx]))
+
+                if fn == torch.slogdet:
+                    sign_value = torch.stack([tup[0] for tup in expected_value], dim=0).reshape(batchdims)
+                    expected_value = torch.stack([tup[1] for tup in expected_value], dim=0).reshape(batchdims)
+                    self.assertEqual(sign_value, actual_value[0], allow_inf=True)
+                    self.assertEqual(expected_value, actual_value[1], allow_inf=True)
+                else:
+                    expected_value = torch.stack(expected_value, dim=0).reshape(batchdims)
+                    self.assertEqual(actual_value, expected_value, allow_inf=True)
+
+        for matsize, batchdims in product([3, 5], [(3,), (5, 3)]):
+            run_test(matsize, batchdims, mat_chars=['sym_pd'])
+            run_test(matsize, batchdims, mat_chars=['sing'])
+            run_test(matsize, batchdims, mat_chars=['non_sing'])
+            run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
+            run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
+
+    @skipIfNoLapack
+    def test_det_logdet_slogdet_batched(self):
+        self._test_det_logdet_slogdet_batched(self, 'cpu')
+
+    @staticmethod
     def _test_fft_ifft_rfft_irfft(self, device='cpu'):
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(torch.randn(*sizes, device=device))
@@ -10935,14 +10989,19 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     self.assertEqual(empty_strided.shape, as_strided.shape)
                     self.assertEqual(empty_strided.stride(), as_strided.stride())
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
-        pinned = x.pin_memory()
-        self.assertTrue(pinned.is_pinned())
-        self.assertEqual(pinned, x)
-        self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
+        if not torch.cuda.is_available():
+            self.assertRaises(RuntimeError, lambda: x.pin_memory())
+        else:
+            pinned = x.pin_memory()
+            self.assertTrue(pinned.is_pinned())
+            self.assertEqual(pinned, x)
+            self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
+            # test that pin_memory on already pinned tensor has no effect
+            self.assertIs(pinned, pinned.pin_memory())
+            self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_pin_memory_from_constructor(self):

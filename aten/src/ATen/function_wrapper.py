@@ -602,7 +602,7 @@ def named_guard(option, tensors, tensorlists):
         return ''
     named_conditions = []
     for tensor in tensors:
-        named_conditions.append('{}.is_named()'.format(tensor))
+        named_conditions.append('{}.has_names()'.format(tensor))
     for tensorlist in tensorlists:
         named_conditions.append('at::has_names({})'.format(tensorlist))
     return ("""\
