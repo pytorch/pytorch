@@ -10,11 +10,11 @@ namespace native {
 namespace {
 
   inline int start_index(int a, int b, int c) {
-    return (int)std::floor((float)(a * c) / b);
+    return (a * c) / b;
   }
 
   inline int end_index(int a, int b, int c) {
-    return (int)std::ceil((double)((a + 1) * c) / b);
+    return (((a + 1) * c) - 1) / b + 1;
   }
 
   template <typename scalar_t>

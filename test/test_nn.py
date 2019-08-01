@@ -3976,6 +3976,20 @@ class TestNN(NNTestCase):
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
+    def test_adaptive_pooling_kernel_size(self):
+        for dim_size in (7, 13, 93, 221, 415, 497):
+            for numel in (2, 3):
+                for pool_type in ('Max', 'Avg'):
+                    cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                    module_cls = getattr(nn, cls_name)
+                    output_size = (dim_size,) * numel
+                    module = module_cls(output_size)
+
+                    input = torch.randn((1,) + output_size).fill_(1.0)
+                    output = module(input)
+                    print(input, output)
+                    self.assertAlmostEqual(input, output)
+
     def test_Conv2d_naive_groups(self):
         self._test_Conv2d_naive_groups()
 
