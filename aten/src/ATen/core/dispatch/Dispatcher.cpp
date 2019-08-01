@@ -75,7 +75,7 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
   return handle;
 }
 
-SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
+SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema&& schema, OperatorOptions options) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 

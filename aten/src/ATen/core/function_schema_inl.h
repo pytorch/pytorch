@@ -1,9 +1,13 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
+#include <ATen/core/function_schema_argument.h>
+
 // note: windows build doesn't find symbols in operator files unless
 // this is a header file
 
 namespace c10 {
+
 
 inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   // eventually this should look almost identical to python arg parser, but
@@ -186,21 +190,102 @@ inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
       is_varret());
 }
 
-inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {
-  return lhs.name == rhs.name && lhs.overload_name == rhs.overload_name;
+inline bool FunctionSchema::is_mutable() const {
+  return std::any_of(
+      arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+        const auto& aliasInfo = arg.alias_info();
+        return aliasInfo && aliasInfo.value().isWrite();
+      });
 }
 
-inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
-  return !operator==(lhs, rhs);
+inline c10::optional<int> FunctionSchema::argumentIndexWithName(const std::string& name) const {
+  for(size_t i = 0; i < arguments().size(); ++i) {
+    if(name == arguments()[i].name())
+      return i;
+  }
+  return c10::nullopt;
+}
+
+inline FunctionSchema FunctionSchema::cloneWithArguments(std::vector<Argument> new_arguments) const {
+  return FunctionSchema(
+      name(),
+      overload_name(),
+      std::move(new_arguments),
+      returns(),
+      is_vararg(),
+      is_varret());
+}
+
+inline bool FunctionSchema::hasAnyAliasInfo() const {
+  for (const auto& arg : arguments_) {
+    if (arg.alias_info().has_value()) {
+      return true;
+    }
+  }
+  for (const auto& ret : returns_) {
+    if (ret.alias_info().has_value()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
+  return lhs.name() == rhs.name()
+      && lhs.overload_name() == rhs.overload_name()
+      && lhs.arguments() == rhs.arguments()
+      && lhs.returns() == rhs.returns()
+      && lhs.is_vararg() == rhs.is_vararg()
+      && lhs.is_varret() == rhs.is_varret();
+}
+
+inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
+  return !(lhs == rhs);
+}
+
+inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
+  bool optional_type = arg.type()->isSubclass(TypeKind::OptionalType);
+  // for adjusting the ? position.
+  // in schema, we have Tensor?(a!) input, and t(a!)?.
+  // however, t?(a!) doesn't work with schema parser.
+  // so we always use Type(alias)? format
+  std::stringstream oss;
+  if (arg.type()->isSubclass(TypeKind::ListType) && arg.N()) {
+    oss << arg.type()->cast<ListType>()->getElementType()->str();
+    oss << "[" << arg.N().value() << "]";
+  } else {
+    oss << arg.type()->str();
+  }
+  if (optional_type) {
+    oss.seekp(oss.str().size() - 1);
+  }
+  if (arg.alias_info()) {
+    oss << arg.alias_info().value();
+  }
+  if (optional_type) {
+    oss << "?";
+  }
+  out << oss.str();
+  if (!arg.name().empty()) {
+    out << " " << arg.name();
+  }
+  if (arg.default_value()) {
+    out << "=";
+    if (arg.type()->kind() == c10::TypeKind::StringType) {
+        // TODO prettify the result, such as using \n to represent \012
+        out << "\'";
+        std::ios_base::fmtflags flags(out.flags());
+        for (unsigned char c : arg.default_value().value().toStringRef()) {
+          out << "\\" << std::oct << std::setfill('0') << std::setw(3)
+            << static_cast<uint64_t>(c);
+        }
+        out.flags(flags);
+        out << "\'";
+    } else {
+      out << arg.default_value().value();
+    }
+  }
+  return out;
 }
 
 } // namespace c10
-
-namespace std {
-  template <>
-  struct hash<::c10::OperatorName> {
-    size_t operator()(const ::c10::OperatorName& x) const {
-      return std::hash<std::string>()(x.name) ^ (~ std::hash<std::string>()(x.overload_name));
-    }
-  };
-}
