@@ -692,7 +692,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "resize_dim is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "resize_dim ", err_msg_tensor_metadata_change_not_allowed);
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -708,7 +708,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_size is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_size ", err_msg_tensor_metadata_change_not_allowed);
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -721,7 +721,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_stride is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_stride ", err_msg_tensor_metadata_change_not_allowed);
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -735,7 +735,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage_offset ", err_msg_tensor_metadata_change_not_allowed);
     storage_offset_ = storage_offset;
   }
 
@@ -747,7 +747,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous ", err_msg_tensor_metadata_change_not_allowed);
     auto new_dim = new_size.size();
 
     sizes_.resize(new_dim);
@@ -767,7 +767,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides ", err_msg_tensor_metadata_change_not_allowed);
     TORCH_CHECK(
         new_size.size() == new_stride.size(),
         "dimensionality of sizes (",
@@ -1370,7 +1370,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_storage(at::Storage storage) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage ", err_msg_tensor_metadata_change_not_allowed);
     storage_ = std::move(storage);
     data_type_ = storage_.dtype();
     device_opt_ = storage_.device();
@@ -1532,6 +1532,12 @@ protected:
   }
 
 protected:
+  // Error message to show when the user tries to change tensor metadata on
+  // Tensor created from .data or .detach().
+  //
+  // See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  static const char * const err_msg_tensor_metadata_change_not_allowed;
+
   Storage storage_;
   // This pointer points to an AutogradMeta struct that stores autograd-specific fields
   // (such as grad_ / grad_fn_ / grad_accumulator_).

@@ -81,6 +81,7 @@ class AliasDb {
 
   // For debugging: print alias db state to stdout
   TORCH_API void dump() const;
+  TORCH_API std::string toString() const;
 
  private:
   // Helper for topologically-safe node moves.
@@ -184,6 +185,7 @@ class AliasDb {
   mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;
   void rebuildWriteCache() const;
+  std::string getElementName(const Element* e) const;
 };
 
 // Used to assert that unschematized operators have an analysis method written

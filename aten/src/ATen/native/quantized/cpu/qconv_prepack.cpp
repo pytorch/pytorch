@@ -85,6 +85,9 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 #else // USE_FBGEMM
   Tensor operator()(
       Tensor, /* weight */
+      torch::List<int64_t>, /* stride */
+      torch::List<int64_t>, /* padding */
+      torch::List<int64_t>, /* dilation */
       int64_t /* groups */
   ) {
     TORCH_CHECK(

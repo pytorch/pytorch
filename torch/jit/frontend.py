@@ -111,7 +111,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
         msg = "{} aren't supported".format(feature_name)
-        super(NotSupportedError, self).__init__(source_range, msg)
+        super(UnsupportedNodeError, self).__init__(source_range, msg)
 
 
 class FrontendTypeError(FrontendError):
@@ -435,6 +435,8 @@ class ExprBuilder(Builder):
         for kw in expr.keywords:
             kw_expr = build_expr(ctx, kw.value)
             # XXX: we could do a better job at figuring out the range for the name here
+            if not kw.arg:
+                raise NotSupportedError(kw_expr.range(), 'keyword-arg expansion is not supported')
             kwargs.append(Attribute(Ident(kw_expr.range(), kw.arg), kw_expr))
         return Apply(func, args, kwargs)
 
