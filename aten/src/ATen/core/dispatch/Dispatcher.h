@@ -1,14 +1,21 @@
 #pragma once
 
-#include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
+#include <ATen/core/dispatch/KernelFunction.h>
+#include <ATen/core/operator_name.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/LeftRight.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/core/TensorTypeId.h>
 #include <mutex>
 #include <list>
 
 namespace c10 {
 
 class CAFFE2_API OperatorHandle;
+class FunctionSchema;
 
 /**
  * This class represents an operator kernel, i.e. an operator *after* it was
@@ -35,26 +42,13 @@ public:
   /**
    * Call the operator kernel with the given arguments.
    */
-  void call(Stack* stack) const {
-    // TODO Make boxed kernels mandatory and remove this check
-    TORCH_CHECK(nullptr != kernel_, "Tried to call OpKernel::call() for a kernel that doesn't have an boxed version.");
-
-    return (*kernel_)(stack, cache_.get());
-  }
+  void call(Stack* stack) const;
 
   template<class Result, class... Args>
-  Result callUnboxed(Args... args) const {
-    // TODO Should we box and call the boxed kernel instead of failing?
-    TORCH_CHECK(nullptr != unboxed_kernel_, "Tried to call OpKernel::callUnboxed() for a kernel that doesn't have an unboxed version.");
-
-    using OpSignature = Result (c10::KernelCache*, Args...);
-    OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_kernel_);
-    return (*kernel)(cache_.get(), std::forward<Args>(args)...);
-  }
+  Result callUnboxed(Args... args) const;
 
 private:
-  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, void* unboxed_kernel)
-  : kernel_(kernel), cache_(cache_creator()), unboxed_kernel_(unboxed_kernel) {}
+  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, void* unboxed_kernel);
   friend class Dispatcher;
 
   KernelFunction* kernel_; // can be nullptr, not all kernels have this
@@ -85,13 +79,7 @@ class SchemaRegistrationHandleRAII;
  */
 class CAFFE2_API Dispatcher final {
 private:
-  struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
-    : op(std::move(schema), std::move(options)), refcount(0) {}
-
-    impl::OperatorEntry op;
-    size_t refcount;
-  };
+  struct OperatorDef;
   friend class OperatorHandle;
 
 public:
@@ -114,7 +102,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
+  SchemaRegistrationHandleRAII registerSchema(FunctionSchema&& schema, OperatorOptions options);
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -190,17 +178,12 @@ public:
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
 
-  const FunctionSchema& schema() const {
-    return operatorIterator_->op.schema();
-  }
+  const FunctionSchema& schema() const;
 
-  const OperatorOptions& options() const {
-    return operatorIterator_->op.options();
-  }
+  const OperatorOptions& options() const;
 
 private:
-  explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
-  : operatorIterator_(std::move(operatorIterator)) {}
+  explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator);
   friend class Dispatcher;
 
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
@@ -208,39 +191,16 @@ private:
 
 class CAFFE2_API SchemaRegistrationHandleRAII final {
 public:
-  const OperatorHandle& opHandle() const {
-    return opHandle_;
-  }
+  const OperatorHandle& opHandle() const;
 
 private:
+  explicit SchemaRegistrationHandleRAII(OperatorHandle opHandle, RegistrationHandleRAII registrationHandle);
   friend class Dispatcher;
-  explicit SchemaRegistrationHandleRAII(OperatorHandle opHandle, RegistrationHandleRAII registrationHandle)
-    : opHandle_(std::move(opHandle)), registrationHandle_(std::move(registrationHandle)) {}
 
   OperatorHandle opHandle_;
   RegistrationHandleRAII registrationHandle_;
 };
 
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
-}
-
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(dispatchKey);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
-}
-
-template<class Result, class... Args>
-inline Result Dispatcher::callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const {
-  void* unboxed_autograd_kernel = op.operatorIterator_->op.lookupUnboxedAutogradKernel();
-  TORCH_CHECK(nullptr != unboxed_autograd_kernel, "Tried to call Dispatcher::callUnboxedAutogradKernel() for an operator that doesn't have an autograd kernel.");
-
-  using OpSignature = Result (Args...);
-  OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_autograd_kernel);
-  return (*kernel)(std::forward<Args>(args)...);
-}
-
 } // namespace c10
+
+#include "Dispatcher_inl.h"
