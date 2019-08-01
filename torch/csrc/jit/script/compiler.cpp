@@ -1715,13 +1715,11 @@ struct to_ir {
             {},
             stmt.range());
       }
-    } else {
+    } else if (
+        const ListTypePtr listType = sliceable->type()->cast<ListType>()) {
       // Otherwise, it should be a list.  Lower this expression into:
       //     list.set_item(get_item(idx).add_(value))
       // similar to how Python handles things.
-      const auto listType = sliceable->type()->cast<ListType>();
-      AT_ASSERT(listType != nullptr);
-
       auto elementType = listType->getElementType();
 
       // Get the idx to augment
@@ -1745,6 +1743,36 @@ struct to_ir {
           getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
       graph->insert(
           aten::_set_item, {listArg, idxArg, augmentedItem}, {}, stmt.range());
+    } else if (
+        const DictTypePtr dictType = sliceable->type()->cast<DictType>()) {
+      auto keyType = dictType->getKeyType();
+
+      // Get the idx to augment
+      const auto subscriptExprs = lhs.subscript_exprs();
+      if (subscriptExprs.size() != 1) {
+        throw ErrorReport(subscriptExprs)
+            << "Sliced expression not yet supported for"
+            << " subscripted list augmented assignment. "
+            << "File a bug if you want this";
+      }
+      const auto idxValue = emitExpr(subscriptExprs[0]);
+
+      const auto dictArg = NamedValue(lhs.value().range(), "dict", sliceable);
+      const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
+      const auto valueArg =
+          NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
+
+      const auto getItem =
+          graph->insert(aten::__getitem__, {dictArg, idxArg}, {}, stmt.range());
+      const auto augmentedItem = graph->insert(
+          getAugOp(stmt, keyType), {getItem, valueArg}, {}, stmt.range());
+      graph->insert(
+          aten::_set_item, {dictArg, idxArg, augmentedItem}, {}, stmt.range());
+
+    } else {
+      throw ErrorReport(lhs) << "Sliced expression not yet supported for"
+                             << " subscripted list assignment. "
+                             << "File a bug if you want this";
     }
   }
 

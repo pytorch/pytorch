@@ -16979,6 +16979,16 @@ class TestDict(JitTestCase):
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
 
+    def test_aug_assign(self):
+        def aug_assign_dict(a):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            a['a'] += 1
+            a['b'] += 12
+            a['c'] += 123
+            return a
+
+        self.checkScript(aug_assign_dict, (self.dict(),))
+
     def test_popitem(self):
         @torch.jit.script
         def popitem(x):
