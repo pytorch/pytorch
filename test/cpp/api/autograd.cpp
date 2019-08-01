@@ -116,7 +116,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
     }
 
     static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
-      Variable &grad_a = grad_output[0], &grad_b = grad_output[1];
+      const Variable &grad_a = grad_output[0], &grad_b = grad_output[1];
       EXPECT_VARIABLE_EQ(grad_a, torch::zeros({5,5}));
       EXPECT_VARIABLE_EQ(grad_b, torch::ones({5,5}));
       return {grad_b};
@@ -210,6 +210,27 @@ TEST(CustomAutogradTest, ReturnDuplicate) {
   auto x = torch::randn({5,5}, torch::requires_grad());
   auto out = DoubleDuplicate::apply(x);
   ASSERT_TRUE(torch::equal(out[0],out[1]));
+}
+
+TEST(CustomAutogradTest, SaveEmptyForBackward) {
+  struct MyFunction : public Function<MyFunction> {
+    static variable_list forward(AutogradContext *ctx, Variable input) {
+      ctx->save_for_backward({Variable(), input, Variable()});
+      return {input*input};
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      auto saved = ctx->get_saved_variables();
+      EXPECT_FALSE(saved[0].defined());
+      EXPECT_FALSE(saved[2].defined());
+      return {saved[1] * 2 * grad_output[0]};
+    }
+  };
+
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  auto y = MyFunction::apply(x)[0];
+  y.sum().backward();
+  ASSERT_VARIABLE_EQ(x.grad(), 2*x);
 }
 
 TEST(CustomAutogradTest, InvalidGradients) {
