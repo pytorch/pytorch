@@ -2439,8 +2439,16 @@ class TestAutograd(TestCase):
             devices = torch.testing.get_all_device_types()
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for device in devices:
-                    f_args_variable = (torch.randn(sizes, device=device, requires_grad=True),
-                                       torch.randn(sizes, device=device, requires_grad=True))
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
+
+                    eps = 1e-6
+                    # to avoid extremum
+                    x = x - (((x - y) < eps).double() * 2 * eps)
+                    x.requires_grad = True
+                    y.requires_grad = True
+
+                    f_args_variable = (x, y)
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
@@ -3567,19 +3575,9 @@ def gradgradcheck_method_precision_override(test_name):
             override = {'atol': override['atol'] * S * S, 'rtol': override['atol'] * S * S}
     return override
 
-GRADCHECK_EPS_OVERRIDE = {
-    'test_cdist': 1e-3,
-}
-
-GRADCHECK_PRECISION_OVERRIDE = {
-    'test_cdist': 1e-4,
-}
-
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    eps = EPSILON if test_name not in GRADCHECK_EPS_OVERRIDE else GRADCHECK_EPS_OVERRIDE[test_name]
-    atol = PRECISION if test_name not in GRADCHECK_PRECISION_OVERRIDE else GRADCHECK_PRECISION_OVERRIDE[test_name]
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=eps, atol=atol))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
