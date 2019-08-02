@@ -2367,7 +2367,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             If set to ``False``, the input and output tensors are aligned by the corner
             points of their corner pixels, and the interpolation uses edge value padding
             for out-of-boundary values, making this operation *independent* of input size
-            when :attr:`scale_factor` is kept the same. This only has effect when :attr:`mode`
+            when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
 
