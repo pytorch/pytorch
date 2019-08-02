@@ -250,7 +250,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cinv, THCNumerics<scalar_t>::cinv,  Real)
 
 #endif
 
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  neg, THCNumerics<scalar_t>::neg,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  abs, THCNumerics<scalar_t>::abs,   Real)
 
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
