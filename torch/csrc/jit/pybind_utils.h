@@ -511,9 +511,9 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
         py::repr(object)));
   }
 }
-THP_API std::unordered_map<std::string, std::function<py::object(void*)>>&
+TORCH_API std::unordered_map<std::string, std::function<py::object(void*)>>&
 getClassConverter();
-THP_API c10::optional<py::object> tryToConvertToCustomClass(
+TORCH_API c10::optional<py::object> tryToConvertToCustomClass(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj);
 
 inline py::object toPyObject(IValue&& ivalue) {
