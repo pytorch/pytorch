@@ -18,19 +18,18 @@ class Conv2d(NNConv2d):
             to align with post training flow
         weight_fake_quant: fake quant module for weight
     """
-
     __FLOAT_MODULE = NNConv2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros',
-                 activation_fake_quant=None,
-                 weight_fake_quant=None):
+                 bias=True, padding_mode='zeros', qconfig=None):
         super(Conv2d, self).__init__(in_channels, out_channels, kernel_size,
                                      stride=stride, padding=padding, dilation=dilation,
                                      groups=groups, bias=bias, padding_mode=padding_mode)
-        self.observer = activation_fake_quant()
-        self.weight_fake_quant = weight_fake_quant()
+        assert qconfig, 'qconfig must be provided for QAT module'
+        self.qconfig = qconfig
+        self.observer = qconfig.activation()
+        self.weight_fake_quant = qconfig.weight()
 
     def forward(self, input):
         return self.observer(
@@ -43,7 +42,7 @@ class Conv2d(NNConv2d):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls.__FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+        assert type(mod) == cls.__FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
             cls.__FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
@@ -52,9 +51,7 @@ class Conv2d(NNConv2d):
         qat_conv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                        stride=mod.stride, padding=mod.padding, dilation=mod.dilation,
                        groups=mod.groups, bias=mod.bias is not None,
-                       padding_mode=mod.padding_mode,
-                       activation_fake_quant=qconfig.activation,
-                       weight_fake_quant=qconfig.weight)
+                       padding_mode=mod.padding_mode, qconfig=qconfig)
         qat_conv.weight = mod.weight
         qat_conv.bias = mod.bias
         return qat_conv

@@ -46,10 +46,11 @@ class ConvBn2d(Conv2d):
                  # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
-                 activation_fake_quant=None,
-                 weight_fake_quant=None):
+                 qconfig=None):
         super(ConvBn2d, self).__init__(in_channels, out_channels, kernel_size,
                                        stride, padding, dilation, groups, False, padding_mode)
+        assert qconfig, 'qconfig must be provided for QAT module'
+        self.qconfig = qconfig
         self.eps = eps
         self.momentum = momentum
         self.freeze_bn = freeze_bn if self.training else True
@@ -61,8 +62,8 @@ class ConvBn2d(Conv2d):
         self.register_buffer('running_mean', torch.zeros(out_channels))
         self.register_buffer('running_var', torch.ones(out_channels))
         self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
-        self.observer = activation_fake_quant()
-        self.weight_fake_quant = weight_fake_quant()
+        self.observer = self.qconfig.activation()
+        self.weight_fake_quant = self.qconfig.weight()
         self.reset_bn_parameters()
 
     def reset_running_stats(self):
@@ -143,13 +144,13 @@ class ConvBn2d(Conv2d):
         return self.observer(self._forward(input))
 
     @classmethod
-    def from_float(cls, mod, qconfig):
+    def from_float(cls, mod, qconfig=None):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls.__FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
+        assert type(mod) == cls.__FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
             cls.__FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
@@ -162,8 +163,7 @@ class ConvBn2d(Conv2d):
                          conv.padding_mode,
                          bn.eps, bn.momentum,
                          False,
-                         qconfig.activation,
-                         qconfig.weight)
+                         qconfig)
         assert qat_convbn.bias is None, 'QAT ConvBn should not have bias'
         qat_convbn.weight = conv.weight
         qat_convbn.gamma = bn.weight
@@ -208,14 +208,13 @@ class ConvBnReLU2d(ConvBn2d):
                  # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
-                 activation_fake_quant=None,
-                 weight_fake_quant=None):
+                 qconfig=None):
         super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
                                            padding, dilation, groups,
                                            padding_mode, eps, momentum,
                                            freeze_bn,
-                                           activation_fake_quant,
-                                           weight_fake_quant)
+                                           qconfig)
+
 
     def forward(self, input):
         return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
@@ -240,13 +239,14 @@ class ConvReLU2d(QATConv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros',
-                 activation_fake_quant=None,
-                 weight_fake_quant=None):
+                 qconfig=None):
         super(ConvReLU2d, self).__init__(in_channels, out_channels, kernel_size,
                                          stride=stride, padding=padding, dilation=dilation,
                                          groups=groups, bias=bias, padding_mode=padding_mode)
-        self.observer = activation_fake_quant()
-        self.weight_fake_quant = weight_fake_quant()
+        assert qconfig, 'qconfig must be provided for QAT module'
+        self.qconfig = qconfig
+        self.observer = self.qconfig.activation()
+        self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
         return self.observer(F.relu(conv2d_forward(input, self.padding_mode,
