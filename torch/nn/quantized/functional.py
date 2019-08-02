@@ -5,7 +5,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-from torch._ops import ops as _ops
 from torch._jit_internal import List as _List
 from torch.nn.modules.utils import _pair
 
@@ -22,7 +21,7 @@ def relu(input, inplace=False):
     """
     if inplace:
         raise NotImplementedError("`inplace` is not implemented in quantized relu")
-    return _ops.quantized.relu(input)
+    return torch.ops.quantized.relu(input)
 
 def linear(input, weight, bias=None, scale=None, zero_point=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
@@ -115,12 +114,12 @@ def conv2d(input, weight, bias,
     padding = _pair(padding)
     dilation = _pair(dilation)
 
-    prepacked_weight = ops.quantized.fbgemm_conv_prepack(
+    prepacked_weight = torch.ops.quantized.fbgemm_conv_prepack(
         weight.permute([0, 2, 3, 1]), stride, padding, dilation, groups)
-    return ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
-                                       prepacked_weight, bias,
-                                       stride, padding, dilation,
-                                       groups, scale, zero_point).permute([0, 3, 1, 2])
+    return torch.ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
+                                             prepacked_weight, bias,
+                                             stride, padding, dilation,
+                                             groups, scale, zero_point).permute([0, 3, 1, 2])
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
