@@ -6,6 +6,7 @@ from itertools import repeat
 import os
 from contextlib import contextmanager
 import threading
+import math
 if sys.version_info[0] == 3:
     import queue
 else:
