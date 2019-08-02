@@ -1,6 +1,9 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir.h>
+#include <c10/util/StringUtil.h>
 #include <cstdlib>
+#include <iomanip>
 #include <sstream>
 
 namespace torch {
@@ -14,13 +17,25 @@ JitLoggingLevels jit_log_level() {
   return log_level;
 }
 
-std::string jit_log_prefix(JitLoggingLevels level, const std::string& in_str) {
+std::string debugValueOrDefault(const Node* n) {
+  return n->outputs().size() > 0 ? n->outputs().at(0)->debugName() : "n/a";
+}
+
+std::string jit_log_prefix(
+    JitLoggingLevels level,
+    const char* fn,
+    int l,
+    const std::string& in_str) {
   std::stringstream in_ss(in_str);
   std::stringstream out_ss(in_str);
   std::string line;
-
   while (std::getline(in_ss, line, '\n')) {
-    out_ss << level << " " << line << std::endl;
+    out_ss << "[";
+    out_ss << level << " ";
+    out_ss << c10::detail::StripBasename(std::string(fn)) << ":";
+    out_ss << std::setfill('0') << std::setw(3) << l;
+    out_ss << "] ";
+    out_ss << line << std::endl;
   }
 
   return out_ss.str();

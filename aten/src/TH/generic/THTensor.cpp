@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 #include <new>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
@@ -66,17 +67,7 @@ THTensor *THTensor_(new)(void)
 /* Pointer-copy init */
 THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
-  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId()
-  ).release();
-  THTensor_(setStorageNd)(self,
-                          THTensor_getStoragePtr(tensor),
-                          tensor->storage_offset(),
-                          tensor->dim(),
-                          THTensor_getSizePtr(tensor),
-                          THTensor_getStridePtr(tensor));
-  return self;
+  return at::native::alias(THTensor_wrap(tensor)).unsafeReleaseTensorImpl();
 }
 
 /* Storage init */
@@ -153,10 +144,11 @@ THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, 
 
 THTensor *THTensor_(newClone)(THTensor *self)
 {
+  // already available in Aten as at::clone()
   THTensor *tensor = THTensor_(new)();
-  THTensor_(resizeAs)(tensor, self);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
+  tensor_wrap.resize_as_(self_wrap);
   at::native::copy_(tensor_wrap, self_wrap, false);
   return tensor;
 }
@@ -193,22 +185,6 @@ THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimensi
   return self;
 }
 
-THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size)
-{
-  ptrdiff_t numel = THTensor_(nElement)(tensor);
-  THTensor *self = THTensor_(new)();
-  auto inferred_size = at::infer_size(size, numel);
-  auto stride = THTensor_compute_stride(tensor->sizes(),
-                                        tensor->strides(),
-                                        inferred_size);
-  THArgCheck(stride.has_value(), 2, "view size is "
-    "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Use .reshape(...) instead.");
-  auto stride_value = *stride;
-  THTensor_setStorage(self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, stride_value);
-  return self;
-}
-
 /* Resize */
 void THTensor_(resize)(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
 {
@@ -217,6 +193,7 @@ void THTensor_(resize)(THTensor *self, at::IntArrayRef size, at::IntArrayRef str
 
 void THTensor_(resizeAs)(THTensor *self, THTensor *src)
 {
+  // already available in Aten as at::resize_as_()
   if(!THTensor_(isSameSizeAs)(self, src))
     THTensor_(resizeNd)(self, src->dim(), THTensor_getSizePtr(src), NULL);
 }

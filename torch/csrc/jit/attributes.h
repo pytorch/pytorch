@@ -123,7 +123,7 @@ struct AttributeError : public std::exception {
     std::stringstream ss;
     if (!defined) {
       ss << "required keyword attribute '" << name.toUnqualString()
-         << "' is undefined.";
+         << "' is undefined";
     } else {
       ss << "required keyword attribute '" << name.toUnqualString()
          << "' has the wrong type";

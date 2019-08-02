@@ -14,7 +14,7 @@ import tempfile
 import torch
 import torch._six
 from torch.utils import cpp_extension
-from common_utils import TEST_WITH_ROCM
+from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
 
 TESTS = [
@@ -98,47 +98,20 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def shell(command, cwd=None):
-    sys.stdout.flush()
-    sys.stderr.flush()
-    # The folloing cool snippet is copied from Py3 core library subprocess.call
-    # only the with
-    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
-    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
-    #      `p.wait()` in a `final` block for the code to be portable.
-    #
-    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
-    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
-    try:
-        return p.wait()
-    except KeyboardInterrupt:
-        # Give `p` a chance to handle KeyboardInterrupt. Without this,
-        # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
-        exit_status = p.wait(timeout=5)
-        if exit_status is not None:
-            return exit_status
-        else:
-            p.kill()
-            raise
-    except:  # noqa E722, copied from python core library
-        p.kill()
-        raise
-    finally:
-        # Always call p.wait() to ensure exit
-        p.wait()
-
-
-def run_test(executable, test_module, test_directory, options):
+def run_test(executable, test_module, test_directory, options, *extra_unittest_args):
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    argv = [test_module + '.py'] + unittest_args
+    argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
 
     command = executable + argv
     return shell(command, test_directory)
+
+
+def test_cuda_primary_ctx(executable, test_module, test_directory, options):
+    return run_test(executable, test_module, test_directory, options, '--subprocess')
 
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
@@ -226,6 +199,7 @@ def test_distributed(executable, test_module, test_directory, options):
 
 
 CUSTOM_HANDLERS = {
+    'cuda_primary_ctx': test_cuda_primary_ctx,
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
 }

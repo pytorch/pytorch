@@ -200,8 +200,8 @@ class Module(object):
             module._apply(fn)
 
         def compute_should_use_set_data(tensor, tensor_applied):
-            if torch._has_same_tensorimpl_type(tensor, tensor_applied):
-                # If the new tensor has the same TensorImpl type as the existing tensor,
+            if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
+                # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
                 # changing the current behavior is a BC-breaking change, and we want it

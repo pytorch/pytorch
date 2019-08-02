@@ -4,16 +4,15 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from .. import functional as F
-from ...modules.module import Module
+from ...modules.activation import ReLU as NNReLU
 
-class ReLU(Module):
+class ReLU(NNReLU):
     r"""Applies quantized rectified linear unit function element-wise:
 
     :math:`\text{ReLU}(x)= \max(x_0, x)`, where :math:`x_0` is the zero point.
 
     Please see https://pytorch.org/docs/stable/nn.html#torch.nn.ReLU
     for more documentation on ReLU.
-
 
     Args:
         inplace: (Currently not supported) can optionally do the operation in-place.
@@ -33,7 +32,6 @@ class ReLU(Module):
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(inplace)
         assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
-
 
     def forward(self, input):
         return F.relu(input)

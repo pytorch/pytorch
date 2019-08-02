@@ -85,6 +85,30 @@ class L1Norm(Regularizer):
         return output_blob
 
 
+class L1NormTrimmed(Regularizer):
+    """
+    The Trimmed Lasso: Sparsity and Robustness. https://arxiv.org/abs/1708.04527
+    """
+    def __init__(self, reg_lambda, k):
+        super(L1NormTrimmed, self).__init__()
+        assert reg_lambda >= 0, "factor ahead of regularization should be 0 or positive"
+        assert isinstance(k, int), "k should be an interger as expected #. after selection"
+        assert k >= 1, "k should be larger than 1"
+
+        self.reg_lambda = reg_lambda
+        self.k = k
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        output_blob = net.NextScopedBlob(param + "_l1_trimmed_regularization")
+        abs = net.Abs(param, [net.NextScopedBlob("abs")])
+        sum_abs = net.SumElements([abs], [net.NextScopedBlob("sum_abs")], average=False)
+        topk, _, _ = net.TopK(abs, [net.NextScopedBlob("topk"), 'id', 'flat_id'], k=self.k)
+        topk_sum = net.SumElements([topk], [net.NextScopedBlob("topk_sum")], average=False)
+        net.Sub([sum_abs, topk_sum], [output_blob])
+        net.Scale([output_blob], [output_blob], scale=self.reg_lambda)
+        return output_blob
+
+
 class L2Norm(Regularizer):
     def __init__(self, reg_lambda):
         super(L2Norm, self).__init__()
@@ -113,6 +137,31 @@ class ElasticNet(Regularizer):
         net.LpNorm([param], [l1_blob], p=1)
         net.Scale([l2_blob], [l2_blob], scale=self.l2)
         net.Scale([l1_blob], [l1_blob], scale=self.l1)
+        net.Add([l1_blob, l2_blob], [output_blob])
+        return output_blob
+
+
+class ElasticNetL1NormTrimmed(Regularizer):
+    def __init__(self, l1, l2, k):
+        super(ElasticNetL1NormTrimmed, self).__init__()
+        self.l1 = l1
+        self.l2 = l2
+        self.k = k
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        output_blob = net.NextScopedBlob(param + "_elastic_net_l1_trimmed_regularization")
+        l2_blob = net.NextScopedBlob(param + "_l2_blob")
+        net.LpNorm([param], [l2_blob], p=2)
+        net.Scale([l2_blob], [l2_blob], scale=self.l2)
+
+        l1_blob = net.NextScopedBlob(param + "_l1_blob")
+        abs = net.Abs(param, [net.NextScopedBlob("abs")])
+        sum_abs = net.SumElements([abs], [net.NextScopedBlob("sum_abs")], average=False)
+        topk, _, _ = net.TopK(abs, [net.NextScopedBlob("topk"), 'id', 'flat_id'], k=self.k)
+        topk_sum = net.SumElements([topk], [net.NextScopedBlob("topk_sum")], average=False)
+        net.Sub([sum_abs, topk_sum], [l1_blob])
+        net.Scale([l1_blob], [l1_blob], scale=self.l1)
+
         net.Add([l1_blob, l2_blob], [output_blob])
         return output_blob
 

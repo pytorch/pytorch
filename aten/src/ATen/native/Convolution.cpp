@@ -550,6 +550,10 @@ at::Tensor _convolution(
             input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
         
+      } else if (params.use_miopen(input)){
+        output = at::miopen_depthwise_convolution(
+            input, weight, bias,
+            padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
           output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
       }

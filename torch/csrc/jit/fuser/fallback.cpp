@@ -13,10 +13,19 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+namespace {
+c10::OperatorOptions aliasAnalysisIsSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
+}
+} // namespace
+
 // Registers fused operators so that fused graphs can properly generate fallback
 // code.
-RegisterOperators reg_fused_operators(
-    {Operator(prim::FusedConcat, [](const Node* node) {
+RegisterOperators reg_fused_operators({Operator(
+    prim::FusedConcat,
+    [](const Node* node) {
       int64_t dim = node->i(attr::dim);
       int64_t num_inputs = node->inputs().size();
       return [dim, num_inputs](Stack& stack) {
@@ -29,7 +38,8 @@ RegisterOperators reg_fused_operators(
         pack(stack, std::move(result));
         return 0;
       };
-    })});
+    },
+    aliasAnalysisIsSpecialCase())});
 
 void runFallback(int64_t key, Stack& stack) {
   auto maybe_spec = retrieve(key);

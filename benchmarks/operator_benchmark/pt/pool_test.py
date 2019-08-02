@@ -29,7 +29,7 @@ pool_1d_configs = op_bench.config_list(
 
 
 pool_1d_ops_list = op_bench.op_list(
-    attr_names=["op_name", "op"],
+    attr_names=["op_name", "op_func"],
     attrs=[
         ["MaxPool1d", nn.MaxPool1d],
         ["AvgPool1d", nn.AvgPool1d],
@@ -38,19 +38,17 @@ pool_1d_ops_list = op_bench.op_list(
 
 
 class Pool1dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, kernel, stride, N, C, L):
+    def init(self, kernel, stride, N, C, L, op_func):
         self.input = torch.rand(N, C, L) 
         self.kernel = kernel
         self.stride = stride
-
-    def set_op(self, op):
-        self.op = op(self.kernel, stride=self.stride)
+        self.op_func = op_func(self.kernel, stride=self.stride)
 
     def forward(self):
-        return self.op(self.input)
+        return self.op_func(self.input)
 
 
-op_bench.generate_pt_tests_from_list(pool_1d_ops_list, pool_1d_configs, Pool1dBenchmark)
+op_bench.generate_pt_tests_from_op_list(pool_1d_ops_list, pool_1d_configs, Pool1dBenchmark)
 
 
 """
@@ -73,7 +71,7 @@ pool_2d_configs = op_bench.config_list(
 
 
 pool_2d_ops_list = op_bench.op_list(
-    attr_names=["op_name", "op"],
+    attr_names=["op_name", "op_func"],
     attrs=[
         ["MaxPool2d", nn.MaxPool2d],
         ["AvgPool2d", nn.AvgPool2d],
@@ -82,19 +80,17 @@ pool_2d_ops_list = op_bench.op_list(
 
 
 class Pool2dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, kernel, stride, N, C, H, W):
+    def init(self, kernel, stride, N, C, H, W, op_func):
         self.input = torch.rand(N, C, H, W) 
         self.kernel = kernel
         self.stride = stride
-
-    def set_op(self, op):
-        self.op = op(self.kernel, stride=self.stride)
+        self.op_func = op_func(self.kernel, stride=self.stride)
 
     def forward(self):
-        return self.op(self.input)
+        return self.op_func(self.input)
 
 
-op_bench.generate_pt_tests_from_list(pool_2d_ops_list, pool_2d_configs, Pool2dBenchmark)
+op_bench.generate_pt_tests_from_op_list(pool_2d_ops_list, pool_2d_configs, Pool2dBenchmark)
 
 
 """
@@ -117,7 +113,7 @@ pool_3d_configs = op_bench.config_list(
 
 
 pool_3d_ops_list = op_bench.op_list(
-    attr_names=["op_name", "op"],
+    attr_names=["op_name", "op_func"],
     attrs=[
         ["MaxPool3d", nn.MaxPool3d],
         ["AvgPool3d", nn.AvgPool3d],
@@ -126,19 +122,17 @@ pool_3d_ops_list = op_bench.op_list(
 
 
 class Pool3dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, kernel, stride, N, C, D, H, W):
+    def init(self, kernel, stride, N, C, D, H, W, op_func):
         self.input = torch.rand(N, C, D, H, W) 
         self.kernel = kernel
         self.stride = stride
-
-    def set_op(self, op):
-        self.op = op(self.kernel, stride=self.stride)
+        self.op_func = op_func(self.kernel, stride=self.stride)
 
     def forward(self):
-        return self.op(self.input)
+        return self.op_func(self.input)
 
 
-op_bench.generate_pt_tests_from_list(pool_3d_ops_list, pool_3d_configs, Pool3dBenchmark)
+op_bench.generate_pt_tests_from_op_list(pool_3d_ops_list, pool_3d_configs, Pool3dBenchmark)
 
 
 if __name__ == "__main__":

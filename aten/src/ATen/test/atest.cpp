@@ -36,7 +36,7 @@ TEST(atest, atest) {
   float b = a.to<float>();
   ASSERT_EQ(b, 4);
 
-  foo = (foo * foo) == (foo.pow(3));
+  foo = ((foo * foo) == (foo.pow(3))).to(kByte);
   foo = 2 + (foo + 1);
   // foo = foo[3];
   auto foo_v = foo.accessor<uint8_t, 2>();

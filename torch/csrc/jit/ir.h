@@ -1080,7 +1080,6 @@ struct Graph {
       const TypePtr& value_type,
       at::ArrayRef<Value*> keys,
       at::ArrayRef<Value*> values);
-  TORCH_API Node* createDictIndex(Value* dict, Value* index);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
   TORCH_API Node* createObject(const ClassTypePtr& type);
@@ -1316,13 +1315,27 @@ struct TORCH_API PythonOp : public Node {
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
-// unpack_outputs - if true, and the callee returns a single tuple value, then
-// insert a tuple unpack node
-//                  and return the resulting values
-TORCH_API std::vector<Value*> inlineCallTo(
+
+/** Insert graph \p CALLEE into graph \p G using \p INPUTS as input values.
+ *
+ * The insertion happens at the current insertion point.
+ */
+TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs,
-    bool unpack_outputs = false);
+    ArrayRef<Value*> inputs);
+
+/** Insert graph \p CALLEE after node \p TO_REPLACE, remove the node and
+ * replace all its uses with corresponding outputs of the inserted graph. The
+ * function asserts that the number of outputs of the original node and the
+ * graph are the same.
+ */
+TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Graph& callee);
+
+/** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
+ * tuple unpack node and return the resulting values.
+ */
+TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
+
 } // namespace jit
 } // namespace torch

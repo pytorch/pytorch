@@ -204,8 +204,7 @@ SourceRange Node::sourceRange() const {
   if (source_range_) {
     return *source_range_;
   }
-  std::stringstream ss;
-  return SourceRange(ss.str());
+  return SourceRange();
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
@@ -885,8 +884,6 @@ bool Node::hasSideEffects() const {
     case prim::Print:
     case prim::RaiseException:
     case prim::SetAttr:
-    case aten::clear:
-    case aten::setdefault:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
@@ -894,16 +891,43 @@ bool Node::hasSideEffects() const {
     case prim::TimePoint:
     case prim::CallFunction:
     case prim::CallMethod:
+    case prim::BailoutTemplate:
       return true;
   }
-  // All other builtin ops are known to be safe.
-  // see [custom operator aliasing]
-  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+
+  auto op = findOperatorFor(this);
+  if (!op) {
+    TORCH_INTERNAL_ASSERT(
+        kind_.is_prim(),
+        "Only prim ops are allowed to not have a registered operator but ",
+        kind_.toDisplayString(),
+        " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
-
-  // Custom ops may have arbitrary side effects
-  return true;
+  if (kind_.is_prim() || kind_.is_aten()) {
+    // TODO This assert is only introduced to check that we don't break the
+    // current code base. Remove this later to allow other ops to use
+    // AliasAnalysisKind::FROM_SCHEMA
+    TORCH_INTERNAL_ASSERT(
+        op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+        kind_.toDisplayString(),
+        " has ",
+        toString(op->aliasAnalysisKind()));
+  }
+  switch (op->aliasAnalysisKind()) {
+    case AliasAnalysisKind::PURE:
+      return false;
+    case AliasAnalysisKind::FROM_SCHEMA:
+      return false;
+    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
+      return false;
+    case AliasAnalysisKind::CONSERVATIVE:
+      return true;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
+  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1358,7 +1382,13 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
-    AT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    TORCH_CHECK(
+        v->type()->isSubtypeOf(elem_type),
+        "Expected a list element that subtypes '",
+        elem_type->python_str(),
+        "' but got an element of type '",
+        v->type()->python_str(),
+        "'");
   }
   n->output()->setType(ListType::create(elem_type));
   return n;
@@ -1388,15 +1418,6 @@ Node* Graph::createDict(
     n->addInput(values[i]);
   }
   n->output()->setType(DictType::create(key_type, value_type));
-  return n;
-}
-
-Node* Graph::createDictIndex(Value* dict, Value* index) {
-  auto dict_type = dict->type()->expect<DictType>();
-  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
-
-  auto n = create(prim::DictIndex, {dict, index});
-  n->output()->setType(dict_type->getValueType());
   return n;
 }
 
@@ -1555,10 +1576,47 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 }
 
 std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Graph& callee) {
+  WithInsertPoint guard(to_replace);
+  auto new_outputs =
+      insertGraph(*to_replace->owningGraph(), callee, to_replace->inputs());
+  const auto& old_outputs = to_replace->outputs();
+
+  AT_ASSERT(new_outputs.size() == old_outputs.size());
+  for (size_t i = 0; i < old_outputs.size(); ++i) {
+    if (old_outputs[i]->hasDebugName()) {
+      new_outputs[i]->setDebugName(old_outputs[i]->debugName());
+    }
+    old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
+  }
+  to_replace->destroy();
+
+  return new_outputs;
+}
+
+std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
+  std::vector<Value*> new_outputs;
+  if (outputs.size() != 1 || outputs.at(0)->type()->kind() != TupleType::Kind) {
+    return outputs;
+  }
+
+  auto tup = outputs[0];
+  for (Value* v : createTupleUnpack(tup)) {
+    new_outputs.emplace_back(v);
+  }
+  // if this was a peephole tuple unpack we can just get rid of
+  // the tuple construct here and prevent needing DCE
+  if (tup->node()->kind() == prim::TupleConstruct && !tup->node()->hasUses()) {
+    tup->node()->destroy();
+  }
+  return new_outputs;
+}
+
+std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs,
-    bool unpack_outputs) {
+    ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
@@ -1575,21 +1633,6 @@ std::vector<Value*> inlineCallTo(
   std::vector<Value*> outputs;
   for (auto* output : callee.outputs()) {
     outputs.push_back(value_map_func(output));
-  }
-
-  if (unpack_outputs && outputs.size() == 1 &&
-      callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
-    auto tup = outputs[0];
-    outputs.clear();
-    for (Value* v : createTupleUnpack(tup)) {
-      outputs.emplace_back(v);
-    }
-    // if this was a peephole tuple unpack we can just get rid of
-    // the tuple construct here and prevent needing DCE
-    if (tup->node()->kind() == prim::TupleConstruct &&
-        !tup->node()->hasUses()) {
-      tup->node()->destroy();
-    }
   }
 
   return outputs;

@@ -16,7 +16,7 @@ inline at::Tensor ${name}(${formals}) {
     return at::${name}(${actuals});
   })();
   at::Tensor result =
-    autograd::make_variable_consuming(std::move(tensor), /*requires_grad=*/${requires_grad});
+    autograd::make_variable(std::move(tensor), /*requires_grad=*/${requires_grad});
   ${post_record_trace}
   return result;
 }

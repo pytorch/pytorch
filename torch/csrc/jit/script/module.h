@@ -108,21 +108,31 @@ struct TORCH_API Method {
 };
 
 struct TORCH_API Module {
-  Module(std::string class_name)
-      : module_value_(create_module_object(std::move(class_name))) {}
+  explicit Module(c10::QualifiedName class_name);
+  Module(
+      c10::QualifiedName,
+      std::shared_ptr<CompilationUnit> cu,
+      bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
 
-  // note this doesn't change the flags of existing methods just ones
-  // added afterward.
+  const c10::QualifiedName& name() const {
+    return *module_object()->type()->qualified_name_obj();
+  }
+
   void set_optimized(bool o) {
-    class_compilation_unit()->set_optimized(o);
+    AT_WARN(
+        "Module::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
   }
 
   bool is_optimized() const {
-    return class_compilation_unit()->is_optimized();
+    AT_WARN(
+        "Module::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -197,7 +207,7 @@ struct TORCH_API Module {
 
   const std::vector<Method> get_methods() const {
     return fmap(
-        class_compilation_unit()->get_functions(),
+        type()->methods(),
         [&](Function* func) {
           return Method(module_object(), func);
         });
@@ -222,9 +232,12 @@ struct TORCH_API Module {
     }
     return c10::nullopt;
   }
-  c10::optional<Method> find_method(const std::string& name) const {
-    if (const auto fn = class_compilation_unit()->find_function(name)) {
-      return Method(module_object(), fn);
+  c10::optional<Method> find_method(const std::string& basename) const {
+    for (Function* fn : type()->methods()) {
+      if (fn->name() == basename) {
+        return Method(module_object(), fn);
+      }
+
     }
     return c10::nullopt;
   }
@@ -306,7 +319,7 @@ struct TORCH_API Module {
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    if (class_compilation_unit()->find_function(name)) {
+    if (find_method(name)) {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
@@ -315,14 +328,8 @@ struct TORCH_API Module {
     return c10::nullopt;
   }
 
-  ModulePtr module_object() const {
-    if (!module_value_) {
-      // User has created a Model without assigning it to something already
-      // loaded. This is done in tests, and when using the .define method.
-      module_value_ = create_module_object("__main__");
-    }
-    return module_value_;
-  }
+  ModulePtr module_object() const;
+
   ClassTypePtr type() const {
     return module_object()->type();
   }
@@ -353,8 +360,12 @@ struct TORCH_API Module {
  private:
   void clone_method(
       const Module& orig,
-      const std::string& name,
+      const Function& method,
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
+
+  c10::QualifiedName getNameForMethod(std::string basename) const {
+    return QualifiedName(name(), basename);
+  }
   static const char* toString(EntityType t) {
     switch (t) {
       case EntityType::MODULE:
@@ -421,16 +432,6 @@ struct TORCH_API Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
-  static void clearMethods(c10::ivalue::Object* self) {
-    self->compilation_unit()->drop_all_functions();
-  }
-  static ModulePtr create_module_object(std::string class_name) {
-    auto cu = std::make_shared<CompilationUnit>();
-    auto cls = ClassType::create(
-        QualifiedName(std::move(class_name)), cu, /*is_module=*/true);
-    return c10::ivalue::Object::create(
-        c10::StrongTypePtr(std::move(cu), std::move(cls)), 0, clearMethods);
-  }
   // mutable be we lazily initialize in module_object.
   mutable ModulePtr module_value_;
 };

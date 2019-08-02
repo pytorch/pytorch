@@ -112,6 +112,7 @@ public:
 
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
+    fixSizeOneDimStride(dim, size, stride);
     MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
@@ -125,6 +126,18 @@ struct ConvolutionDescriptor
     MIOPEN_CHECK(miopenInitConvolutionDescriptor(mut_desc(), c_mode, pad[0], pad[1], stride[0], stride[1], upscale[0], upscale[1]));
     MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
   }
+};
+
+
+struct RNNDescriptor
+  : public Descriptor<miopenRNNDescriptor,
+                      &miopenCreateRNNDescriptor,
+                      &miopenDestroyRNNDescriptor>
+{
+    void set(int64_t hidden_size, int64_t num_layers, miopenRNNInputMode_t input_mode, miopenRNNDirectionMode_t direction, miopenRNNMode_t rnn_mode,
+              miopenRNNBiasMode_t bias_mode, miopenRNNAlgo_t algorithm, miopenDataType_t datatype) {
+      MIOPEN_CHECK(miopenSetRNNDescriptor(mut_desc(), hidden_size, num_layers, input_mode, direction, rnn_mode, bias_mode, algorithm, datatype));
+    }
 };
 
 union Constant
