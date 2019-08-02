@@ -1737,6 +1737,7 @@
     CPU: relu_
     CUDA: relu_
     MkldnnCPU: mkldnn_relu_
+    QuantizedCPU: quantized_relu
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
