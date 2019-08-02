@@ -82,6 +82,18 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
+    def test_repr(self):
+        named_tensor = torch.zeros(2, 3).set_names_(['N', 'C'])
+        expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]], names=('N', 'C'))"
+        self.assertEqual(repr(named_tensor), expected)
+
+        unnamed_tensor = torch.zeros(2, 3)
+        expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]])"
+        self.assertEqual(repr(unnamed_tensor), expected)
+
+        none_named_tensor = torch.zeros(2, 3).set_names_([None, None])
+        self.assertEqual(repr(none_named_tensor), expected)
+
     def test_copy_transpose(self):
         # This type of copy is special-cased and therefore needs its own test
         def _test(self_names, other_names, expected_names):
