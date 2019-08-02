@@ -59,20 +59,12 @@ inline TensorOptions Tensor::options() const {
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 inline void Tensor::backward(const Tensor & gradient, bool keep_graph, bool create_graph) const {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::backward", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<void, const Tensor &, const Tensor &, bool, bool>(op, *this, gradient, keep_graph, create_graph);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<void, const Tensor &, const Tensor &, bool, bool>(*this, gradient, keep_graph, create_graph);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void");
+    return table->getOp<void (const Tensor &, const Tensor &, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, gradient, keep_graph, create_graph);
 }
 inline void Tensor::set_data(const Tensor & new_data) const {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::set_data", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<void, const Tensor &, const Tensor &>(op, *this, new_data);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<void, const Tensor &, const Tensor &>(*this, new_data);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::set_data(Tensor(a!) self, Tensor new_data) -> void");
+    return table->getOp<void (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, new_data);
 }
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor & Tensor::set_names_(c10::optional<DimnameList> names) {
@@ -93,12 +85,8 @@ inline Tensor Tensor::abs() const {
     }
 }
 inline Tensor & Tensor::abs_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::abs_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::abs_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::acos() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::acos", ""}).value();
@@ -109,12 +97,8 @@ inline Tensor Tensor::acos() const {
     }
 }
 inline Tensor & Tensor::acos_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::acos_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::acos_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::add(const Tensor & other, Scalar alpha) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::add", "Tensor"}).value();
@@ -245,12 +229,8 @@ inline Tensor Tensor::asin() const {
     }
 }
 inline Tensor & Tensor::asin_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::asin_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::asin_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::atan() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::atan", ""}).value();
@@ -261,12 +241,8 @@ inline Tensor Tensor::atan() const {
     }
 }
 inline Tensor & Tensor::atan_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::atan_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::atan_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::baddbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::baddbmm", ""}).value();
@@ -301,12 +277,8 @@ inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
     return table->getOp<Tensor (const Tensor &, double, Generator *)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, p, generator);
 }
 inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bincount", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, int64_t>(op, *this, weights, minlength);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, const Tensor &, int64_t>(*this, weights, minlength);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, weights, minlength);
 }
 inline Tensor Tensor::bitwise_not() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bitwise_not", ""}).value();
@@ -317,12 +289,8 @@ inline Tensor Tensor::bitwise_not() const {
     }
 }
 inline Tensor & Tensor::bitwise_not_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bitwise_not_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_not_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::bmm(const Tensor & mat2) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bmm", ""}).value();
@@ -341,12 +309,8 @@ inline Tensor Tensor::ceil() const {
     }
 }
 inline Tensor & Tensor::ceil_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::ceil_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::ceil_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline std::vector<Tensor> Tensor::chunk(int64_t chunks, int64_t dim) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::chunk", ""}).value();
@@ -425,12 +389,8 @@ inline Tensor Tensor::cos() const {
     }
 }
 inline Tensor & Tensor::cos_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cos_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::cos_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::cosh() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cosh", ""}).value();
@@ -441,12 +401,8 @@ inline Tensor Tensor::cosh() const {
     }
 }
 inline Tensor & Tensor::cosh_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cosh_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::cosh_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const {
     static auto table = globalATenDispatch().getOpTable("aten::cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
@@ -553,12 +509,8 @@ inline Tensor Tensor::erf() const {
     }
 }
 inline Tensor & Tensor::erf_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erf_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::erf_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::erfc() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfc", ""}).value();
@@ -569,12 +521,8 @@ inline Tensor Tensor::erfc() const {
     }
 }
 inline Tensor & Tensor::erfc_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfc_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::erfc_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::exp() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::exp", ""}).value();
@@ -585,12 +533,8 @@ inline Tensor Tensor::exp() const {
     }
 }
 inline Tensor & Tensor::exp_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::exp_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::exp_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::expm1() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::expm1", ""}).value();
@@ -601,12 +545,8 @@ inline Tensor Tensor::expm1() const {
     }
 }
 inline Tensor & Tensor::expm1_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::expm1_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::expm1_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::expand(IntArrayRef size, bool implicit) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::expand", ""}).value();
@@ -657,12 +597,8 @@ inline Tensor Tensor::floor() const {
     }
 }
 inline Tensor & Tensor::floor_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::floor_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::floor_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::frac() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::frac", ""}).value();
@@ -673,12 +609,8 @@ inline Tensor Tensor::frac() const {
     }
 }
 inline Tensor & Tensor::frac_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::frac_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::frac_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::ger(const Tensor & vec2) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::ger", ""}).value();
@@ -721,12 +653,8 @@ inline Tensor Tensor::irfft(int64_t signal_ndim, bool normalized, bool onesided,
     }
 }
 inline Tensor Tensor::index(TensorList indices) const {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::index", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, TensorList>(op, *this, indices);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, TensorList>(*this, indices);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::index(Tensor self, Tensor?[] indices) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, TensorList)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, indices);
 }
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::index_copy_", ""}).value();
@@ -745,20 +673,12 @@ inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor
     }
 }
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::index_put_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, TensorList, const Tensor &, bool>(op, *this, indices, values, accumulate);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &, TensorList, const Tensor &, bool>(*this, indices, values, accumulate);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, TensorList, const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::index_put", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, TensorList, const Tensor &, bool>(op, *this, indices, values, accumulate);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, TensorList, const Tensor &, bool>(*this, indices, values, accumulate);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, TensorList, const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::inverse() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::inverse", ""}).value();
@@ -841,12 +761,8 @@ inline Tensor Tensor::log() const {
     }
 }
 inline Tensor & Tensor::log_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::log_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::log10() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log10", ""}).value();
@@ -857,12 +773,8 @@ inline Tensor Tensor::log10() const {
     }
 }
 inline Tensor & Tensor::log10_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log10_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::log10_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::log1p() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log1p", ""}).value();
@@ -873,12 +785,8 @@ inline Tensor Tensor::log1p() const {
     }
 }
 inline Tensor & Tensor::log1p_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log1p_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::log1p_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::log2() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log2", ""}).value();
@@ -889,12 +797,8 @@ inline Tensor Tensor::log2() const {
     }
 }
 inline Tensor & Tensor::log2_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log2_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::log2_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::logdet() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::logdet", ""}).value();
@@ -1117,12 +1021,8 @@ inline Tensor Tensor::reciprocal() const {
     }
 }
 inline Tensor & Tensor::reciprocal_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::reciprocal_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::reciprocal_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::neg() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::neg", ""}).value();
@@ -1133,12 +1033,8 @@ inline Tensor Tensor::neg() const {
     }
 }
 inline Tensor & Tensor::neg_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::neg_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::neg_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::repeat", ""}).value();
@@ -1189,12 +1085,8 @@ inline Tensor Tensor::round() const {
     }
 }
 inline Tensor & Tensor::round_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::round_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::round_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::relu() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::relu", ""}).value();
@@ -1205,12 +1097,8 @@ inline Tensor Tensor::relu() const {
     }
 }
 inline Tensor & Tensor::relu_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::relu_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::relu_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::prelu(const Tensor & weight) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::prelu", ""}).value();
@@ -1253,12 +1141,8 @@ inline Tensor Tensor::rsqrt() const {
     }
 }
 inline Tensor & Tensor::rsqrt_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::rsqrt_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::rsqrt_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::select(Dimname dim, int64_t index) const {
@@ -1287,12 +1171,8 @@ inline Tensor Tensor::sigmoid() const {
     }
 }
 inline Tensor & Tensor::sigmoid_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sigmoid_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::sigmoid_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::sin() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sin", ""}).value();
@@ -1303,12 +1183,8 @@ inline Tensor Tensor::sin() const {
     }
 }
 inline Tensor & Tensor::sin_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sin_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::sin_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::sinh() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sinh", ""}).value();
@@ -1319,12 +1195,8 @@ inline Tensor Tensor::sinh() const {
     }
 }
 inline Tensor & Tensor::sinh_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sinh_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::sinh_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::detach() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::detach", ""}).value();
@@ -1335,12 +1207,8 @@ inline Tensor Tensor::detach() const {
     }
 }
 inline Tensor & Tensor::detach_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::detach_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::detach_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline int64_t Tensor::size(int64_t dim) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::size", "int"}).value();
@@ -1421,12 +1289,8 @@ inline Tensor Tensor::squeeze(int64_t dim) const {
     }
 }
 inline Tensor & Tensor::squeeze_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::squeeze_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::squeeze_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor & Tensor::squeeze_(int64_t dim) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::squeeze_", "dim"}).value();
@@ -1445,12 +1309,8 @@ inline Tensor Tensor::sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar 
     }
 }
 inline Tensor Tensor::stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const Tensor & window, bool normalized, bool onesided) const {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::stft", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const Tensor &, bool, bool>(op, *this, n_fft, hop_length, win_length, window, normalized, onesided);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const Tensor &, bool, bool>(*this, n_fft, hop_length, win_length, window, normalized, onesided);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool onesided=True) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const Tensor &, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, n_fft, hop_length, win_length, window, normalized, onesided);
 }
 inline int64_t Tensor::stride(int64_t dim) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::stride", "int"}).value();
@@ -1501,12 +1361,8 @@ inline Tensor Tensor::sqrt() const {
     }
 }
 inline Tensor & Tensor::sqrt_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sqrt_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::sqrt_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::std(bool unbiased) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::std", ""}).value();
@@ -1547,12 +1403,8 @@ inline Tensor Tensor::t() const {
     }
 }
 inline Tensor & Tensor::t_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::t_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::t_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::tan() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::tan", ""}).value();
@@ -1563,12 +1415,8 @@ inline Tensor Tensor::tan() const {
     }
 }
 inline Tensor & Tensor::tan_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::tan_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::tan_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::tanh() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::tanh", ""}).value();
@@ -1579,12 +1427,8 @@ inline Tensor Tensor::tanh() const {
     }
 }
 inline Tensor & Tensor::tanh_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::tanh_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::tanh_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::transpose", ""}).value();
@@ -1635,12 +1479,8 @@ inline Tensor Tensor::trunc() const {
     }
 }
 inline Tensor & Tensor::trunc_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::trunc_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::trunc_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::type_as(const Tensor & other) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::type_as", ""}).value();
@@ -1747,12 +1587,8 @@ inline Tensor Tensor::pow(Scalar exponent) const {
     }
 }
 inline Tensor & Tensor::zero_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::zero_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::zero_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sub", "Tensor"}).value();
@@ -2051,12 +1887,8 @@ inline Tensor & Tensor::set_(const Tensor & source) {
     }
 }
 inline Tensor & Tensor::set_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::set_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::set_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor & Tensor::set_quantizer_(ConstQuantizerPtr quantizer) {
     static auto table = globalATenDispatch().getOpTable("aten::set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)");
@@ -2487,12 +2319,8 @@ inline Tensor & Tensor::__irshift__(const Tensor & other) {
     }
 }
 inline Tensor & Tensor::lgamma_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lgamma_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::lgamma_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor & Tensor::atan2_(const Tensor & other) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::atan2_", ""}).value();
@@ -2519,12 +2347,8 @@ inline Tensor & Tensor::triu_(int64_t diagonal) {
     }
 }
 inline Tensor & Tensor::digamma_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::digamma_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::digamma_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor & Tensor::polygamma_(int64_t n) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::polygamma_", ""}).value();
@@ -2535,12 +2359,8 @@ inline Tensor & Tensor::polygamma_(int64_t n) {
     }
 }
 inline Tensor & Tensor::erfinv_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfinv_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::renorm_", ""}).value();
@@ -2583,12 +2403,8 @@ inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) {
     }
 }
 inline Tensor & Tensor::sign_() {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sign_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &>(op, *this);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &>(*this);
-    }
+    static auto table = globalATenDispatch().getOpTable("aten::sign_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor & Tensor::fmod_(Scalar other) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::fmod_", "Scalar"}).value();
