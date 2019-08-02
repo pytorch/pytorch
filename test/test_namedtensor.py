@@ -350,6 +350,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('clamp_min', -2),
             fn_method_and_inplace('clamp_max', 2),
             method('cauchy_'),
+            method('clone'),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
             fn_method_and_inplace('digamma'),
@@ -409,6 +410,9 @@ class TestNamedTensor(TestCase):
 
             # views
             method('narrow', 0, 0, 1),
+
+            # creation functions
+            fn('empty_like')
         ]
         tests = flatten(tests)
 
