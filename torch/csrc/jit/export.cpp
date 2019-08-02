@@ -879,7 +879,8 @@ void ScriptModuleSerializer::convertModule(
     std::stringstream debug_filename;
     debug_filename << "debug/" << module_name.str() << ".pkl";
     writer_.writeRecord(
-        debug_filename.str(), range_data.data(), range_data.size());
+        debug_filename.str(), range_data.data(), range_data.size(),
+        /*compress=*/true);
     debug_record->set_key(debug_filename.str());
   }
 
