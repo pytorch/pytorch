@@ -28,5 +28,7 @@ _all__ = [
     # QConfig
     'QConfig', 'default_qconfig',
     # QAT utilities
-    'default_qat_qconfig', 'prepare_qat', 'quantize_qat'
+    'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
+    # module transformations
+    'fuse_modules',
 ]

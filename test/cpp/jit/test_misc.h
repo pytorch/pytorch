@@ -400,9 +400,9 @@ void testCustomFusionNestedBlocks() {
   auto a = SymbolicVariable::asNewInput(*g, type);
   auto b = SymbolicVariable::asNewInput(*g, type);
   auto c = SymbolicVariable::asNewInput(*g, type);
- 
   auto r =
       g->appendNode(g->create(prim::If, {c.value()}));
+
   auto then_block = r->addBlock();
   auto else_block = r->addBlock();
   {
@@ -423,11 +423,11 @@ void testCustomFusionNestedBlocks() {
       g,
       [](Node* n) { return n->kind() == aten::mul; },
       Symbol::fromQualString("prim::FusionGroup"));
-  
+
   // Could be done in more efficient ways, but this is only a test.
   std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b, Symbol s) {
       for (auto node : b->nodes()) {
-          if (node->kind() == s) 
+          if (node->kind() == s)
               return true;
           for (auto nested_b : node->blocks())
               if (dfs(nested_b, s))
@@ -824,32 +824,58 @@ void testRecordFunction() {
 class TestThreadLocalDebugInfo
   : public at::ThreadLocalDebugInfoBase {
  public:
-  virtual std::string getString(const char*) override {
-    return "42";
+  int getModelId() const {
+    return model_id_;
   }
 
-  virtual int getInt(const char*) override {
-    return 42;
+  void setModelId(int model_id) {
+    model_id_ = model_id;
   }
+
+ private:
+  int model_id_ = 0;
 };
 
 void testThreadLocalDebugInfo() {
   auto checkDebugInfo = [](){
-    TORCH_CHECK(at::getThreadLocalDebugInfo() != nullptr);
-    TORCH_CHECK(
-        at::getThreadLocalDebugInfo()->getString("") == "42");
-    TORCH_CHECK(at::getThreadLocalDebugInfo()->getInt("") == 42);
+    auto debug_info = at::getThreadLocalDebugInfo();
+    TORCH_CHECK(debug_info != nullptr);
+    auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(
+        debug_info.get());
+    TORCH_CHECK(test_debug_info != nullptr);
+    TORCH_CHECK(test_debug_info->getModelId() == 42);
   };
+
   TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
-  at::setThreadLocalDebugInfo(
-      std::make_shared<TestThreadLocalDebugInfo>());
+  auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
+  debug_info->setModelId(42);
+  at::setThreadLocalDebugInfo(debug_info);
+
   checkDebugInfo();
+
+  // check that thread local debug info is propagated through fork calls
   std::atomic<bool> done {false};
   at::launch([checkDebugInfo, &done](){
     checkDebugInfo();
     done = true;
   });
   while (!done) {}
+  checkDebugInfo();
+
+  // check that thread local debug info is propagated through backward pass
+  autograd::profiler::pushCallback(
+      [&checkDebugInfo](const autograd::profiler::RecordFunction& fn) {
+        checkDebugInfo();
+      },
+      [](const autograd::profiler::RecordFunction&) {});
+  {
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    auto t2 = t.pow(2);
+    t2.backward();
+  }
+  autograd::profiler::popCallback();
+
   checkDebugInfo();
   at::setThreadLocalDebugInfo(nullptr);
   TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);

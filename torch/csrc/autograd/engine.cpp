@@ -10,6 +10,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/ThreadLocalDebugInfo.h>
 #include <c10/util/Exception.h>
 
 #include <atomic>
@@ -178,6 +179,7 @@ struct GraphTask {
   // exec_info_ is safe to read without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
   std::vector<Variable> captured_vars_;
+  std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_;
 
   void init_to_execute(Node& graph_root, const edge_list& outputs);
 
@@ -480,7 +482,8 @@ static variable_list call_function(NodeTask& task) {
   const auto has_post_hooks = !fn.post_hooks().empty();
   variable_list outputs;
 
-  if(has_post_hooks){
+  auto prev_info = at::setThreadLocalDebugInfo(task.base_->debug_info_);
+  if (has_post_hooks) {
     // In functions/accumulate_grad.cpp, there is some logic to check the conditions under which
     // the incoming gradient can be stolen directly (which elides a deep copy) instead of cloned.
     // One of these conditions is that the incoming gradient's refcount must be 1 (nothing else
@@ -495,9 +498,10 @@ static variable_list call_function(NodeTask& task) {
     // If you change the logic here, make sure it's compatible with accumulate_grad.cpp.
     auto inputs_copy = inputs;
     outputs = fn(std::move(inputs_copy));
-  }else{
+  } else {
     outputs = fn(std::move(inputs));
   }
+  at::setThreadLocalDebugInfo(prev_info);
 
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
     std::ostringstream ss;
@@ -657,6 +661,7 @@ auto Engine::execute(const edge_list& roots,
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
   GraphTask graph_task(keep_graph, create_graph, worker_device == NO_DEVICE ? 0 : total_depth+1);
+  graph_task.debug_info_ = at::getThreadLocalDebugInfo();
   // Lock mutex while GraphTask is being set up
   std::unique_lock<std::mutex> lock(graph_task.mutex_);
 

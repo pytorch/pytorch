@@ -10,9 +10,11 @@ std::shared_ptr<ThreadLocalDebugInfoBase> getThreadLocalDebugInfo() {
   return debug_info;
 }
 
-void setThreadLocalDebugInfo(
+std::shared_ptr<ThreadLocalDebugInfoBase> setThreadLocalDebugInfo(
     std::shared_ptr<ThreadLocalDebugInfoBase> info) {
-  debug_info = info;
+  auto ret = std::move(debug_info);
+  debug_info = std::move(info);
+  return ret;
 }
 
 } // namespace at

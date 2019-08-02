@@ -14,6 +14,10 @@ c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
 
 // a range of a shared string 'file_' with
 C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
+  // This is an empty SourceRange, used as a sentinel value.
+  if (!source_) {
+    return;
+  }
   const std::string& str = source_->text();
   if (size() == str.size()) {
     // this is just the entire file, not a subset, so print it out.
@@ -66,11 +70,9 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   if (!str.empty() && str.back() != '\n')
     out << "\n";
   // Retrieve original SourceRange, if present.
-  if (source_) {
-    if (auto orig_source_range = findSourceRangeThatGenerated()) {
-      out << "Compiled from code ";
-      orig_source_range->highlight(out);
-    }
+  if (auto orig_source_range = findSourceRangeThatGenerated()) {
+    out << "Compiled from code ";
+    orig_source_range->highlight(out);
   }
 }
 
