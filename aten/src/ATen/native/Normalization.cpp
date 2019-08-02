@@ -372,7 +372,7 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
     return std::tuple_cat(
              at::cudnn_batch_norm(
-               input.contiguous(), weight.contiguous(),
+               input.contiguous(input.suggest_memory_format()), weight.contiguous(),
                bias.contiguous(),
                running_mean.defined() ? running_mean.contiguous() : running_mean,
                running_var.defined() ? running_var.contiguous() : running_var,
@@ -415,6 +415,8 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   if (impl_index == 0) {
     return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
   } else if (impl_index == 1) {
+    // TODO: _batch_norm_impl_index_backward is only used in JIT. cudnn NHWC
+    // format conversion is done inside cudnn_batch_norm_backward instead
     return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
   } else if (impl_index == 2) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);

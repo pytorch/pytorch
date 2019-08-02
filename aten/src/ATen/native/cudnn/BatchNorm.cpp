@@ -74,7 +74,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});
   // TODO: is weight required to be contiguous?
-  checkAllContiguous(c, {input, weight, bias, running_mean, running_var});
+  checkAllContiguous(c, {weight, bias, running_mean, running_var});
+  // TODO: TensorArg check should start handle memory format
+  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()));
+
   checkDimRange(c, input, 2, 6 /* exclusive */);
   auto num_features = input->size(1);
   for (auto t : {weight, bias, running_mean, running_var}) {
@@ -94,7 +97,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
   }
 
-  auto output_t = at::empty(input->sizes(), input->options());
+  auto output_t = at::empty_like(*input, input->options(), input->suggest_memory_format());
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getCudnnHandle();
@@ -153,8 +156,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& save_mean_t, const Tensor& save_var_t,
     double epsilon)
 {
+  // TODO: Is it worth it to have a contiguous call or maybe we should go with
+  // whatever format is given here.
   TensorArg input{ input_t, "input", 1 },
-            grad_output{ grad_output_t, "grad_output", 2 },
+            grad_output{ grad_output_t.contiguous(input_t.suggest_memory_format()), "grad_output", 2 },
             weight{ weight_t, "weight", 3 },
             save_mean{ save_mean_t, "save_mean", 4 },
             save_var{ save_var_t, "save_var", 5 };
@@ -171,7 +176,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   checkAllSameType(c, {input, grad_output});
   checkAllSameType(c, {weight, save_mean, save_var});
   // TODO: is weight required to be contiguous?
-  checkAllContiguous(c, {input, grad_output, save_mean, save_var});
+  checkAllContiguous(c, {save_mean, save_var});
+  // TODO: TensorArg check should start handle memory format
+  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()));
+  TORCH_CHECK(grad_output->is_contiguous(grad_output->suggest_memory_format()));
   checkDimRange(c, input, 2, 6 /* exclusive */);
   checkSameSize(c, input, grad_output);
   auto num_features = input->size(1);
@@ -190,7 +198,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     mode = CUDNN_BATCHNORM_SPATIAL;
   }
 
-  auto grad_input_t  = at::empty(input->sizes(), input->options());
+  auto grad_input_t  = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());
   auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
 
@@ -198,6 +206,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   auto dataType = getCudnnDataType(*input);
 
   TensorDescriptor idesc{ *input, 4 };  // input, output, grad_output descriptor
+  TensorDescriptor odesc{ *grad_output, 4 };  // input, output, grad_output descriptor
   TensorDescriptor wdesc{ expandScale(*weight, input->dim()), 4 };  // descriptor for weight, bias, save_mean, etc.
 
   Constant one(dataType, 1);
@@ -206,7 +215,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   AT_CUDNN_CHECK(cudnnBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
     idesc.desc(), input->data_ptr(),
-    idesc.desc(), grad_output->data_ptr(),
+    odesc.desc(), grad_output->data_ptr(),
     idesc.desc(), grad_input_t.data_ptr(),
     wdesc.desc(), weight->data_ptr(),
     grad_weight_t.data_ptr(),
