@@ -131,9 +131,6 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
       ideal_discount_data, discount_.numel());
   // ideal dcg = \sum gain_i * ideal_discount_i
   double idcg = (gain_vec * ideal_discount_vec).sum();
-  if (idcg < 1e-5) {
-    idcg = 1e-5;
-  }
 
   ComputeDiscounts(rank_idx_data, N);
   auto* discount_data = discount_.template mutable_data<float>();
@@ -156,17 +153,25 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
         CWISE_SIGM(
             -CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N)))
            .rowwise()
-           .sum() /
-      idcg;
+           .sum();
   if (use_ndcg_as_loss_) {
-    loss = 1 - dcg / idcg;
+    // DCG loss function
+    loss = (idcg - dcg);
   } else {
     loss = -(lambda_mat *
              CWISE_LOG_SIGM(
                  CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N),
                  100))
-                .sum() /
-        idcg;
+                .sum();
+  }
+
+  // if use_idcg_normalization_ is true, the loss function is normalized by idcg
+  // (e.g. NDCG), else un-normalized loss function (e.g. DCG)
+  // Note that normalization is mathematically correct if idcg is guaranteed to
+  // be positive!
+  if (use_idcg_normalization_) {
+    dy_vec /= std::max(idcg, 1e-5);
+    loss /= std::max(idcg, 1e-5);
   }
   return loss;
 }
