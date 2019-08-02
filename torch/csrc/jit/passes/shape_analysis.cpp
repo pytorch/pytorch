@@ -1059,7 +1059,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, at::kByte)};
+            return {broadcast(*maybe_tensor_types, at::kBool)};
           }
           return {};
         }};
