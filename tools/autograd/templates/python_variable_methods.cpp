@@ -314,14 +314,14 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
 static Tensor dispatch_invert(const Tensor & self) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  return 1 - self;
+  return self.bitwise_not();
 }
 
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.scalar_type() != at::kByte) {
-    throw TypeError("~ (operator.invert) is only implemented on byte tensors");
+  if (!isIntegralType(self_.scalar_type()) && self_.scalar_type() != at::kBool) {
+    throw TypeError("~ (operator.invert) is only implemented on integer and Boolean-type tensors");
   }
   return THPVariable_Wrap(dispatch_invert(self_));
   END_HANDLE_TH_ERRORS

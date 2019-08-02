@@ -3062,6 +3062,84 @@ def foo(x):
                 o2 = cu.f()
             self.assertEqual(o1, o2)
 
+    def test_tracing_hooks(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+
+            def forward(self, x):
+                return x + x
+
+        def test_hook(is_post_hook, hook, fc):
+            n = Net()
+            if is_post_hook:
+                n.register_forward_hook(hook)
+            else:
+                n.register_forward_pre_hook(hook)
+
+            module = torch.jit.trace(n, (torch.tensor(1.0),))
+
+            eager_input = torch.tensor(1.0)
+            eager_out = n(eager_input)
+
+            fc.run(module.forward.graph)
+            input = torch.tensor(1.0)
+            output = module(input)
+
+            self.assertEqual(input, eager_input)
+            self.assertEqual(output, eager_out)
+
+        def hook_no_return(mod, input, output):
+            input[0].add_(1)
+            output.sub_(1)
+
+        fc = FileCheck().check("add(").check("add_(").check("sub_(")
+        test_hook(True, hook_no_return, fc)
+
+        def hook_return(mod, input, output):
+            input[0].add_(1)
+            return output - 3
+
+        fc = FileCheck().check("add(").check("add_(").check("sub(")
+        test_hook(True, hook_return, fc)
+
+        b = torch.tensor(3.0)
+
+        def captured_hook(mod, input, output):
+            return output - b
+
+        fc = FileCheck().check("add(").check("sub(")
+        test_hook(True, captured_hook, fc)
+
+        def pre_hook_no_ret(mod, input):
+            input[0].add_(3)
+
+        fc = FileCheck().check("add_(").check("add(")
+        test_hook(False, pre_hook_no_ret, fc)
+
+        def pre_hook_ret(mod, input):
+            return input[0] - 4
+
+        fc = FileCheck().check("sub(").check("add(")
+        test_hook(False, pre_hook_ret, fc)
+
+    def test_tracing_backward_hook_error(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+
+            def forward(self, x):
+                return x + x
+
+        n = Net()
+
+        def backward_hook(module, grad_input, grad_output):
+            pass
+
+        n.register_backward_hook(backward_hook)
+        with self.assertRaisesRegex(Exception, "backward hooks assigned"):
+            torch.jit.trace(n, (torch.tensor(1.0),))
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -12819,6 +12897,40 @@ a")
 
         self.assertEqual(eager_out, script_out)
 
+    def test_nn_GRU(self):
+        from torch.nn.utils.rnn import PackedSequence
+        seq_input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+        tensor_input = torch.randn(5, 5, 5)
+
+        class SeqLengthGRU(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SeqLengthGRU, self).__init__()
+                self.x = torch.nn.GRU(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (PackedSequence) -> Tuple[PackedSequence, Tensor]
+                return self.x(input)
+
+        class TensorGRU(torch.jit.ScriptModule):
+            def __init__(self):
+                super(TensorGRU, self).__init__()
+                self.x = torch.nn.GRU(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return self.x(input)
+
+        seq_eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (seq_input,))[0]
+        seq_script_out = self.runAndSaveRNG(lambda x: SeqLengthGRU()(x), (seq_input,))[0]
+        tensor_eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (tensor_input,))[0]
+        tensor_script_out = self.runAndSaveRNG(lambda x: TensorGRU()(x), (tensor_input,))[0]
+
+        self.assertEqual(seq_eager_out, seq_script_out)
+        self.assertEqual(tensor_eager_out, tensor_script_out)
+
+
     def test_torchscript_multi_head_attn(self):
         @torch.jit.script
         def jit_multihead_attn_forward(query,                   # type: Tensor
@@ -14532,6 +14644,11 @@ EXCLUDE_TYPE_CHECK = {
     'test_slogdet_pos_det',
     'test_slogdet_symmetric',
     'test_slogdet_symmetric_pd',
+    'test_slogdet_batched_1x1_neg_det',
+    'test_slogdet_batched_pos_det',
+    'test_slogdet_batched_symmetric',
+    'test_slogdet_batched_symmetric_pd',
+    'test_slogdet_batched_distinct_singular_values'
 }
 
 # known to be failing in script
