@@ -240,7 +240,6 @@ def add_torch_libs():
         "torch/csrc/jit/passes/remove_inplace_ops.cpp",
         "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
         "torch/csrc/jit/python_arg_flatten.cpp",
-        "torch/csrc/jit/pybind_utils.cpp",
         "torch/csrc/jit/python_interpreter.cpp",
         "torch/csrc/jit/python_ir.cpp",
         "torch/csrc/jit/python_tracer.cpp",
