@@ -258,6 +258,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 5, 10, 10)
         self.run_test(model, x)
 
+    def test_multinomial(self):
+        class Multinomial(torch.nn.Module):
+            def forward(self, weight):
+                return torch.multinomial(weight, 3, replacement=True)
+
+        class MultinomialNoReplacement(torch.nn.Module):
+            def forward(self, weight):
+                return torch.multinomial(weight, 1)
+
+        weight = torch.tensor([[0, 10, 0, 0], [0, 0, 100, 0]], dtype=torch.float)
+        self.run_test(Multinomial(), (weight,))
+        self.run_test(MultinomialNoReplacement(), (weight,))
+
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
             def forward(self, input):
