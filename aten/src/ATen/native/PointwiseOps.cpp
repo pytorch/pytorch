@@ -80,7 +80,7 @@ Tensor& addcdiv_out(
   iter.add_input(tensor1);
   iter.add_input(tensor2);
   iter.build();
-  addcdiv_stub(kCPU, iter, value);
+  addcdiv_stub(iter.device_type(), iter, value);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
