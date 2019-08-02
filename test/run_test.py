@@ -42,6 +42,7 @@ TESTS = [
     'nn_quantized',
     'numba_integration',
     'optim',
+    'qat',
     'quantization',
     'quantized_conv',
     'quantized',
