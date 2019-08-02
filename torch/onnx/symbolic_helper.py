@@ -39,11 +39,18 @@ from functools import wraps
 # TensorType - This is a Tensor, but we don't know anything about its
 #               properties (e.g. scalar type, # dims, shapes).
 #               Appears as `Tensor` in graph print-outs.
+# ProfiledTensorType <: TensorType - Denotes a Tensor for which we know the
+#                                       concrete sizes in addition to the information
+#                                       contained in TensorTyper. This adds a sizes()
+#                                       method which can be used to retrieve the
+#                                       concrete sizes.
+# @deprecated
 # DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
 #                             type and number of dimensions, but not the concrete
 #                             shapes. For example, appears as 'Float(*, *)' in
 #                             graph print-outs. Useful accessor methods include
 #                             dim() and scalarType()
+# @deprecated
 # CompleteTensorType <: DimensionedTensorType - Denotes a Tensor for which we know the
 #                                               concrete sizes in addition to the information
 #                                               contained in TensorTyper. This adds a sizes()
@@ -166,11 +173,13 @@ def _if_scalar_type_as(g, self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    elif _is_complete_or_dimensioned_tensor_type(tensor):
-        ty = tensor.type().scalarType().lower()
+
+    scalar_type = tensor.type().scalarType()
+    if scalar_type:
+        ty = scalar_type.lower()
         return getattr(self, ty)()
-    else:
-        return self
+
+    return self
 
 
 def _is_value(x):
