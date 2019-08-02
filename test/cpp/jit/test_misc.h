@@ -831,6 +831,8 @@ class TestThreadLocalDebugInfo
     model_id_ = model_id;
   }
 
+  virtual ~TestThreadLocalDebugInfo() {}
+
  private:
   int model_id_ = 0;
 };

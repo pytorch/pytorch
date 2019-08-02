@@ -1,7 +1,7 @@
 #if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE || AT_PARALLEL_NATIVE_TBB
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
-#include "ATen/ThreadLocalDebugInfo.h"
+#include <ATen/ThreadLocalDebugInfo.h>
 
 #include <atomic>
 
