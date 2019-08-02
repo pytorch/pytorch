@@ -2457,7 +2457,7 @@ class TestAutograd(TestCase):
                     x.requires_grad = True
                     y.requires_grad = True
 
-                    f_args_variable = (x, y)
+                    f_args_variable = (x.double(), y.double())
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
@@ -2485,7 +2485,7 @@ class TestAutograd(TestCase):
                     x.requires_grad = True
                     y.requires_grad = True
 
-                    f_args_variable = (x, y)
+                    f_args_variable = (x.double(), y.double())
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
@@ -2513,7 +2513,7 @@ class TestAutograd(TestCase):
                     x.requires_grad = True
                     y.requires_grad = True
 
-                    f_args_variable = (x, y)
+                    f_args_variable = (x.double(), y.double())
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
@@ -2541,7 +2541,7 @@ class TestAutograd(TestCase):
                     x.requires_grad = True
                     y.requires_grad = True
 
-                    f_args_variable = (x, y)
+                    f_args_variable = (x.double(), y.double())
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
@@ -2569,7 +2569,7 @@ class TestAutograd(TestCase):
                     x.requires_grad = True
                     y.requires_grad = True
 
-                    f_args_variable = (x, y)
+                    f_args_variable = (x.double(), y.double())
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
@@ -2597,7 +2597,7 @@ class TestAutograd(TestCase):
                     x.requires_grad = True
                     y.requires_grad = True
 
-                    f_args_variable = (x, y)
+                    f_args_variable = (x.double(), y.double())
 
                     def f(a, b):
                         return torch.cdist(a, b, p)
