@@ -35,7 +35,7 @@ class RpcAgent {
   // threading model conform to ``RequestCallback``'s requirement.
   RpcAgent(std::string workerName, RequestCallback cb);
 
-  virtual ~RpcAgent() noexcept(false);
+  virtual ~RpcAgent();
 
   // Send a message to the ``RpcAgent`` of name ``to`` and returns a
   // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
@@ -46,16 +46,6 @@ class RpcAgent {
   // ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const std::string& to, Message&& message) = 0;
-
-  // This is a temporary solution to gracefully stop the listening loop.
-  // ProcessGroupAgent does this by sending a SHUTDOWN message to the
-  // (rank + 1) % world_size peer, which means we cannot create
-  // ProcessGroupAgent with world_size == 1. We can drop this in the future when
-  // we find a way to gracefully exit the blocking recvAnysource call.
-  //
-  // NB: this cannot be put into the destructor because we should not call
-  // virtual methods in destructor.
-  virtual void shutdown() = 0;
 
  protected:
   const std::string workerName_;

@@ -45,8 +45,6 @@ void Message::swap(Message& rhs) noexcept {
   std::swap(id_, rhs.id_);
 }
 
-Message::~Message() = default;
-
 const std::vector<char>& Message::meta() const {
   return meta_;
 }
@@ -60,13 +58,13 @@ const MessageType& Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageType::BUILTIN_OP == type_
-      || MessageType::PYTHON_UDF_OP == type_;
+  return MessageType::SCRIPT_CALL == type_
+      || MessageType::PYTHON_CALL == type_;
 }
 
 bool Message::isResponse() const {
-  return MessageType::BUILTIN_RET == type_
-      || MessageType::PYTHON_UDF_RET == type_;
+  return MessageType::SCRIPT_RET == type_
+      || MessageType::PYTHON_RET == type_;
 }
 
 bool Message::isShutdown() const {

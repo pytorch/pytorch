@@ -9,10 +9,10 @@ namespace distributed {
 namespace rpc {
 
 enum MessageType {
-  BUILTIN_OP = 0,
-  BUILTIN_RET,
-  PYTHON_UDF_OP,
-  PYTHON_UDF_RET,
+  SCRIPT_CALL = 0,
+  SCRIPT_RET,
+  PYTHON_CALL,
+  PYTHON_RET,
   SHUTDOWN,
   UNKNOWN
 };
@@ -33,8 +33,8 @@ enum MessageType {
 //                  request and response. Other implementation can ignore it
 //                  if they have their own ways to do matching.
 //
-// Layers above ``RpcAgent`` only converts BuiltinOp, BuiltinRet, PythonUdfOp,
-// and PythonUdfRet into a Message, and it is up to the RpcAgent
+// Layers above ``RpcAgent`` only converts ScriptCall, ScriptRet, PythonCall,
+// and PythonRet into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
 class TORCH_API Message final {
  public:
@@ -55,7 +55,6 @@ class TORCH_API Message final {
   Message& operator=(Message const& rhs) &;
   Message& operator=(Message&& rhs) &;
   void swap(Message& rhs) noexcept;
-  ~Message();
 
   const std::vector<char>& meta() const;
   const std::vector<torch::Tensor>& tensors() const;

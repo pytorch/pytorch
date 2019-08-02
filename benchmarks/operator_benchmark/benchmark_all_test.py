@@ -9,9 +9,6 @@ from pt import ( # noqa
     gather_test, linear_test, matmul_test, pool_test, # noqa
     softmax_test, split_test, unary_test # noqa
 )
-from c2 import ( # noqa
-    add_test, matmul_test # noqa
-)
 
 
 if __name__ == "__main__":

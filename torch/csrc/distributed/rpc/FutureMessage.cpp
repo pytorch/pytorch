@@ -4,9 +4,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-void FutureMessage::wait() {
+const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   finished_cv_.wait(lock, [this]{return completed_.load();});
+  return message_;
 }
 
 void FutureMessage::markCompleted(Message message) {

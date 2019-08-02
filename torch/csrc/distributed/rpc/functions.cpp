@@ -7,11 +7,11 @@ namespace rpc {
 void processRequestBlocking(
     std::string from, Message&& request, RpcAgent& agent) {
   switch (request.type()) {
-    case MessageType::BUILTIN_OP: {
-      BuiltinOp op = BuiltinOp::fromMessage(request);
-      op.op()->getOperation()(op.stack());
-      auto ret = op.stack();
-      auto response = BuiltinRet(std::move(ret)).toMessage();
+    case MessageType::SCRIPT_CALL: {
+      ScriptCall op = ScriptCall::fromMessage(request);
+      auto stack = op.stack();
+      op.op()->getOperation()(stack);
+      auto response = ScriptRet(std::move(stack)).toMessage();
       response.setId(request.id());
       agent.send(std::move(from), std::move(response));
       break;

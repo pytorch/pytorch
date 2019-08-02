@@ -6,8 +6,8 @@ namespace rpc {
 
 py::object to_py_obj(const Message& message) {
   switch (message.type()) {
-    case MessageType::BUILTIN_RET: {
-      BuiltinRet ret = BuiltinRet::fromMessage(message);
+    case MessageType::SCRIPT_RET: {
+      ScriptRet ret = ScriptRet::fromMessage(message);
       Stack stack = ret.values();
       return torch::jit::createPyObjectForStack(std::move(stack));
     }
@@ -30,7 +30,9 @@ std::shared_ptr<FutureMessage> py_rpc(
       try {
         Stack stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
-        return agent.send(dstName, BuiltinOp(op, std::move(stack)).toMessage());
+
+        return agent.send(
+            dstName, ScriptCall(op, std::move(stack)).toMessage());
       } catch (std::runtime_error) {}
     }
   }

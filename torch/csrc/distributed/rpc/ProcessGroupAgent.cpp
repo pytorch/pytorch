@@ -77,17 +77,12 @@ ProcessGroupAgent::ProcessGroupAgent(
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
-ProcessGroupAgent::~ProcessGroupAgent() noexcept(false) {
-  TORCH_CHECK(stop_, "Cannot destroy ProcessGroupAgent before shutdown.");
-}
-
-void ProcessGroupAgent::shutdown() {
-  // cannot put this into the destructor, as it is not safe to call virtual
-  // functions in constructor and destructor.
+ProcessGroupAgent::~ProcessGroupAgent() {
+  //TORCH_CHECK(stop_, "Cannot destroy ProcessGroupAgent before shutdown.");
 
   // Every process i sends a SHUTDOWN message to process i + 1. This is
   // necessary for now because:
-  // 1. There is no abort API for ProcessGrouprecv::Anysource yet. We have to
+  // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
   //    feed it a message or kill the thread.
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).

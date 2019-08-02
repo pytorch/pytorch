@@ -23,19 +23,18 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
     auto packed_weights_p = pack_ptr.w.get();
 
     // output channels
-    int output_channels = packed_weights_p->numCols();
-    // R*S*C/G
-    int KDim_pre_group =
-        packed_weights_p->numRows() / packed_weights_p->numGroups();
+    int output_channels = packed_weights_p->outputChannels();
+    int input_channels = packed_weights_p->inputChannels();
+    int groups = packed_weights_p->groups();
     // R (kernel height)
     int kernel_h = pack_ptr.kernel[0];
     // S (kernel width)
     int kernel_w = pack_ptr.kernel[1];
 
-    int C_per_G = KDim_pre_group / kernel_h / kernel_w;
+    int C_per_G = input_channels / groups;
 
     // Tensor for unpacked weights
-    // Unpacked format would be KRS
+    // Unpacked format would be KRS(C/G)
     auto unpacked_weights = _empty_affine_quantized(
         {output_channels, kernel_h, kernel_w, C_per_G},
         device(kCPU).dtype(kQInt8),
@@ -44,8 +43,6 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
     int8_t* unpacked_weights_p =
         reinterpret_cast<int8_t*>(unpacked_weights.data<c10::qint8>());
 
-    // packed_weights_p->printPackedMatrix("packed weights inside fbgemm_unpack
-    // (QConvUnpackWeightInt8): ");
     packed_weights_p->unpack(unpacked_weights_p);
 
     return unpacked_weights;
@@ -64,7 +61,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_conv_unpack(Tensor packed_weights)"
-      " -> Tensor unpacked_weights",
+    " -> Tensor unpacked_weights",
     c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8>(
         CPUTensorId()));
 

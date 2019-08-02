@@ -29,18 +29,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(dist_module).cast<py::module>();
 
-  auto rpcAgent = shared_ptr_class_<RpcAgent>(module, "RpcAgent")
-      .def("shutdown",
-           &RpcAgent::shutdown,
-           py::call_guard<py::gil_scoped_release>());
+  auto rpcAgent = shared_ptr_class_<RpcAgent>(module, "RpcAgent");
 
   auto futureMessage = shared_ptr_class_<FutureMessage>(module, "FutureMessage")
       .def("wait",
-          &FutureMessage::wait,
-          py::call_guard<py::gil_scoped_release>())
-      .def("get",
           [&](FutureMessage& fut) {
-            return to_py_obj(fut.message());
+            return to_py_obj(fut.wait());
           },
           py::call_guard<py::gil_scoped_release>());
 
@@ -49,10 +43,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           module, "ProcessGroupAgent", rpcAgent)
           .def(py::init<std::string,
                         std::unordered_map<std::string, int>,
-                        std::shared_ptr<::c10d::ProcessGroup>>())
-          .def("shutdown",
-               &ProcessGroupAgent::shutdown,
-               py::call_guard<py::gil_scoped_release>());
+                        std::shared_ptr<::c10d::ProcessGroup>>());
 
   module.def("invoke_rpc", [](
       RpcAgent& agent,

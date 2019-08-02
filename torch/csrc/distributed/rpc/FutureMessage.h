@@ -3,7 +3,6 @@
 #include <torch/csrc/distributed/rpc/Message.h>
 #include <torch/csrc/distributed/rpc/rpc_headers.h>
 
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -13,7 +12,7 @@ struct TORCH_API FutureMessage final {
  public:
   using Callback = std::function<void(const Message&)>;
 
-  void wait();
+  const Message& wait();
   void markCompleted(Message message);
   void markCompleted();
   const Message& message();

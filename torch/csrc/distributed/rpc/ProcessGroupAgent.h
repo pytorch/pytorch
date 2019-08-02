@@ -30,15 +30,13 @@ class ProcessGroupAgent : public RpcAgent {
                     std::unordered_map<std::string, int> nameMap,
                     std::shared_ptr<c10d::ProcessGroup> pg);
 
-  ~ProcessGroupAgent() noexcept(false) override;
+  ~ProcessGroupAgent() override;
 
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
   std::shared_ptr<FutureMessage> send(
       const std::string& to, Message&& message) override;
-
-  void shutdown() override;
 
  private:
   // put SendWork into a queue and notify the sendLoop thread

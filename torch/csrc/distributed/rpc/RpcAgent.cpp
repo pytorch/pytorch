@@ -7,7 +7,7 @@ namespace rpc {
 RpcAgent::RpcAgent(std::string workerName, RequestCallback cb)
     : workerName_(std::move(workerName)), cb_(std::move(cb)) {}
 
-RpcAgent::~RpcAgent() noexcept(false) {} // NOLINT
+RpcAgent::~RpcAgent() = default;
 
 }
 }

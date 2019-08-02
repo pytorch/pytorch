@@ -1,18 +1,16 @@
-#include <torch/csrc/distributed/rpc/BuiltinRet.h>
+#include <torch/csrc/distributed/rpc/ScriptRet.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-BuiltinRet::BuiltinRet(std::vector<at::IValue>&& values) : values_(values) {}
+ScriptRet::ScriptRet(std::vector<at::IValue>&& values) : values_(values) {}
 
-BuiltinRet::~BuiltinRet() = default;
-
-std::vector<at::IValue>& BuiltinRet::values() {
+const std::vector<at::IValue>& ScriptRet::values() {
   return values_;
 }
 
-Message BuiltinRet::toMessage() {
+Message ScriptRet::toMessage() {
   std::vector<torch::Tensor> tensor_table;
   Pickler pickler(&tensor_table);
 
@@ -27,15 +25,15 @@ Message BuiltinRet::toMessage() {
   auto meta = pickler.stack();
   return Message(std::move(meta),
                  std::move(tensor_table),
-                 MessageType::BUILTIN_RET);
+                 MessageType::SCRIPT_RET);
 }
 
-BuiltinRet BuiltinRet::fromMessage(const Message& message) {
+ScriptRet ScriptRet::fromMessage(const Message& message) {
   auto meta = static_cast<const void*>(message.meta().data());
   auto meta_size = message.meta().size();
   Unpickler unpickler(meta, meta_size, &message.tensors(), nullptr);
 
-  return BuiltinRet(unpickler.parse_ivalue_list());
+  return ScriptRet(unpickler.parse_ivalue_list());
 }
 
 } // namespace rpc
