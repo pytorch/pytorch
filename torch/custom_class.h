@@ -44,7 +44,7 @@ template <class Sig>
 using args_t = typename args<Sig>::type;
 } // namespace detail
 template <class... Types>
-detail::types<void, Types...> init() {}
+detail::types<void, Types...> init() { return detail::types<void, Types...>{}; }
 
 // To bind custom classes into Torchscript, use an API very similar to Pybind's.
 // Currently exposes one class `torch::jit::class_<T>` and 2 methods.
