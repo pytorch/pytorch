@@ -13397,7 +13397,7 @@ a")
     def test_dtype_attr(self):
         class Foo(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(Foo, self).__init__()
                 self.dtype = torch.zeros([]).dtype
 
             def forward(self):
