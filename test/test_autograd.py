@@ -2434,6 +2434,7 @@ class TestAutograd(TestCase):
                               lambda y, x: torch.trapz(y, x),
                               True, f_args_variable, f_args_tensor)
 
+    @skipIfRocm
     def test_cdist(self):
         def _test_cdist_for_size(sizes):
             devices = torch.testing.get_all_device_types()
