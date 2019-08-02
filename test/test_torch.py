@@ -2465,7 +2465,7 @@ class _TestTorchMixin(object):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_non_neg_int_tensor_pow_non_neg_floats(self):
-        ints = [0, 1, 23, 4567, 2000000000]
+        ints = [0, 1, 23, 4567]
         floats = [0.0, 1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
 
         tensor = torch.tensor(ints, dtype=torch.int)

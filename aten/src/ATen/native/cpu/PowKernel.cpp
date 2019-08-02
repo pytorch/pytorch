@@ -78,19 +78,19 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
-      auto exp = exp_scalar.to<double>(); // because of correctness
+      auto exp = exp_scalar.to<double>();
       if (exp == 0.5) {
         cpu_kernel(iter,
           [](scalar_t self) -> scalar_t { return std::sqrt(self); }
         );
-      // } else if (exp == 2) {
-      //   cpu_kernel(iter,
-      //     [](scalar_t self) -> scalar_t { return self * self; }
-      //   );
-      // } else if (exp == 3) {
-      //   cpu_kernel(iter,
-      //     [](scalar_t self) -> scalar_t { return self * self * self; }
-      //   );
+      } else if (exp == 2) {
+        cpu_kernel(iter,
+          [](scalar_t self) -> scalar_t { return self * self; }
+        );
+      } else if (exp == 3) {
+        cpu_kernel(iter,
+          [](scalar_t self) -> scalar_t { return self * self * self; }
+        );
       } else if (exp == -0.5) {
         cpu_kernel(iter,
           [](scalar_t self) -> scalar_t { return 1.0 / std::sqrt(self); }
@@ -99,13 +99,13 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
         cpu_kernel(iter,
           [](scalar_t self) -> scalar_t { return 1.0 / self; }
         );
-      // } else if (exp == -2) {
-      //   cpu_kernel(iter,
-      //     [](scalar_t self) -> scalar_t { return 1.0 / (self * self); }
-      //   );
+      } else if (exp == -2) {
+        cpu_kernel(iter,
+          [](scalar_t self) -> scalar_t { return 1.0 / (self * self); }
+        );
       } else {
         cpu_kernel(iter,
-          [=](scalar_t self) -> scalar_t { return std::pow((long double)self, exp); } // TODO: long double perf test
+          [=](scalar_t self) -> scalar_t { return std::pow((long double)self, exp); }
         );
       }
     });
