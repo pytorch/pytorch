@@ -1,7 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
+import torch.nn._intrinsic as nni
+import torch.nn._intrinsic.quantized as nniq
+import torch.nn._intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
-import torch.nn.qat as qat
+import torch.nn.qat as nnqat
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
@@ -214,17 +217,25 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
+    # Intrinsic modules:
+    nni.ConvReLU2d: nniq.ConvReLU2d,
+    nni.LinearReLU: nniq.LinearReLU,
     # Generated modules:
     nn.Add: nnq.Add,
     # QAT modules:
-    qat.Linear: nnq.Linear,
-    qat.Conv2d: nnq.Conv2d,
+    nnqat.Linear: nnq.Linear,
+    nnqat.Conv2d: nnq.Conv2d,
 }
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
-    nn.Linear: qat.Linear,
-    nn.Conv2d: qat.Conv2d,
+    nn.Linear: nnqat.Linear,
+    nn.Conv2d: nnqat.Conv2d,
+    # Intrinsic modules:
+    nni.ConvBn2d: nniqat.ConvBn2d,
+    nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
+    nni.ConvReLU2d: nniqat.ConvReLU2d,
+    nni.LinearReLU: nniqat.LinearReLU
 }
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):

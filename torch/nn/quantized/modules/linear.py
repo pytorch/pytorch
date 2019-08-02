@@ -1,8 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from ...modules.module import Module
-from ...modules.linear import Linear as NNLinear
+from torch.nn.modules import Module
+from torch.nn import Linear as NNLinear
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor

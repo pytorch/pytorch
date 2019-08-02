@@ -5,7 +5,7 @@ from torch.nn import init
 from torch.nn._intrinsic import ConvBn2d as NNConvBn2d
 from torch.nn._intrinsic import ConvBnReLU2d as NNConvBnReLU2d
 from torch.nn._intrinsic import ConvReLU2d as NNConvReLU2d
-from ....qat.modules.conv import Conv2d as QATConv2d
+from torch.nn.qat import Conv2d as QATConv2d
 from torch.nn import Parameter
 import torch.nn.functional as F
 

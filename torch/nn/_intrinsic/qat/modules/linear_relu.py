@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn.qat import Linear as QATLinear
 from torch.nn._intrinsic import LinearReLU as NNLinearReLU
-from torch.quantization.QConfig import default_qat_qconfig
 import torch.nn.functional as F
 
 class LinearReLU(QATLinear):
@@ -31,9 +30,8 @@ class LinearReLU(QATLinear):
     __FLOAT_MODULE = NNLinearReLU
 
     def __init__(self, in_features, out_features, bias=True,
-                 activation_fake_quant=default_qat_qconfig.activation,
-                 weight_fake_quant=default_qat_qconfig.weight):
-        super(LinearReLU, self).__init__(in_features, out_features, bias, activation_fake_quant, weight_fake_quant)
+                 qconfig=None):
+        super(LinearReLU, self).__init__(in_features, out_features, bias, qconfig)
 
     def forward(self, input):
         return self.observer(F.relu(F.linear(input, self.weight_fake_quant(self.weight), self.bias)))
