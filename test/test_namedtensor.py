@@ -7,11 +7,8 @@ import torch
 import sys
 
 
-def namedtensor_enabled():
-    return '-DBUILD_NAMEDTENSOR' in torch.__config__.show()
-
 skipIfNamedTensorDisabled = \
-    unittest.skipIf(not namedtensor_enabled(),
+    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
