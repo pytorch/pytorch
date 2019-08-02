@@ -12806,21 +12806,36 @@ a")
 
     def test_nn_GRU(self):
         from torch.nn.utils.rnn import PackedSequence
-        input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+        seq_input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+        tensor_input = torch.randn(5, 5, 5)
 
-        class S(torch.jit.ScriptModule):
+        class SeqLengthGRU(torch.jit.ScriptModule):
             def __init__(self):
-                super(S, self).__init__()
+                super(SeqLengthGRU, self).__init__()
                 self.x = torch.nn.GRU(5, 5)
 
             @torch.jit.script_method
-            def forward(self, input: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:
+            def forward(self, input):
+                # type: (PackedSequence) -> Tuple[PackedSequence, Tensor]
                 return self.x(input)
 
-        eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (input,))[0]
-        script_out = self.runAndSaveRNG(lambda x: S()(x), (input,))[0]
+        class TensorGRU(torch.jit.ScriptModule):
+            def __init__(self):
+                super(TensorGRU, self).__init__()
+                self.x = torch.nn.GRU(5, 5)
 
-        self.assertEqual(eager_out, script_out)
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return self.x(input)
+
+        seq_eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (seq_input,))[0]
+        seq_script_out = self.runAndSaveRNG(lambda x: SeqLengthGRU()(x), (seq_input,))[0]
+        tensor_eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (tensor_input,))[0]
+        tensor_script_out = self.runAndSaveRNG(lambda x: TensorGRU()(x), (tensor_input,))[0]
+
+        self.assertEqual(seq_eager_out, seq_script_out)
+        self.assertEqual(tensor_eager_out, tensor_script_out)
 
     def test_torchscript_multi_head_attn(self):
         @torch.jit.script
