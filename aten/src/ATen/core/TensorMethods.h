@@ -1217,7 +1217,7 @@ inline int64_t Tensor::size(Dimname dim) const {
 }
 #endif
 inline Tensor Tensor::slice(int64_t dim, int64_t start, int64_t end, int64_t step) const {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::slice", ""}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::slice", "Tensor"}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t, int64_t, int64_t>(op, *this, dim, start, end, step);
     } else {
@@ -1245,7 +1245,7 @@ inline Tensor Tensor::softmax(int64_t dim, c10::optional<ScalarType> dtype) cons
     return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
 }
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::split", ""}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::split", "Tensor"}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(op, *this, split_size, dim);
     } else {
@@ -2426,14 +2426,6 @@ inline Tensor Tensor::addbmm(const Tensor & batch1, const Tensor & batch2, Scala
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(*this, batch1, batch2, beta, alpha);
     }
 }
-inline Tensor & Tensor::addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::addcmul_", ""}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(op, *this, tensor1, tensor2, value);
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(*this, tensor1, tensor2, value);
-    }
-}
 inline Tensor & Tensor::addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::addcdiv_", ""}).value();
     if (is_variable()) {
@@ -2668,6 +2660,14 @@ inline Tensor Tensor::addcmul(const Tensor & tensor1, const Tensor & tensor2, Sc
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(op, *this, tensor1, tensor2, value);
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(*this, tensor1, tensor2, value);
+    }
+}
+inline Tensor & Tensor::addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::addcmul_", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(op, *this, tensor1, tensor2, value);
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(*this, tensor1, tensor2, value);
     }
 }
 inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value) const {

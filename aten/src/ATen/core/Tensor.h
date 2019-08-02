@@ -696,7 +696,6 @@ class CAFFE2_API Tensor {
   Tensor & remainder_(const Tensor & other);
   Tensor & addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
   Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
-  Tensor & addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor & addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor & random_(int64_t from, int64_t to, Generator * generator=nullptr);
   Tensor & random_(int64_t to, Generator * generator=nullptr);
@@ -731,6 +730,7 @@ class CAFFE2_API Tensor {
   std::vector<Tensor> nonzero_numpy() const;
   Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
+  Tensor & addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   std::tuple<Tensor,Tensor> lstsq(const Tensor & A) const;
   std::tuple<Tensor,Tensor> triangular_solve(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
