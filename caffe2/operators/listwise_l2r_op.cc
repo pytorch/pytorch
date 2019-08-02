@@ -52,10 +52,7 @@ void LambdaRankNdcgOp<float, CPUContext>::ResizeInvLogITensor(int size) {
     new_size <<= 1;
   }
   if (new_size != old_size) {
-    ReinitializeTensor(
-        &inv_log_i_,
-        {new_size},
-        at::dtype<float>().device(CPU));
+    ReinitializeTensor(&inv_log_i_, {new_size}, at::dtype<float>().device(CPU));
     auto* data = inv_log_i_.template mutable_data<float>();
     EigenVectorArrayMap<float> vec(data, inv_log_i_.numel());
     const float log2f_ = std::log(2.f);
@@ -67,8 +64,7 @@ void LambdaRankNdcgOp<float, CPUContext>::ResizeInvLogITensor(int size) {
 
 template <>
 void LambdaRankNdcgOp<float, CPUContext>::ComputeDiscounts(int* idx, int N) {
-  ReinitializeTensor(
-      &discount_, {N}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&discount_, {N}, at::dtype<float>().device(CPU));
   auto* discount_data = discount_.template mutable_data<float>();
   auto* inv_log_i_data = inv_log_i_.template mutable_data<float>();
   for (int i = 0; i < N; i++) {
@@ -98,10 +94,8 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
     return 0;
   }
 
-  ReinitializeTensor(
-      &ideal_idx_, {N}, at::dtype<int>().device(CPU));
-  ReinitializeTensor(
-      &rank_idx_, {N}, at::dtype<int>().device(CPU));
+  ReinitializeTensor(&ideal_idx_, {N}, at::dtype<int>().device(CPU));
+  ReinitializeTensor(&rank_idx_, {N}, at::dtype<int>().device(CPU));
   auto* rank_idx_data = rank_idx_.template mutable_data<int>();
   auto* ideal_idx_data = ideal_idx_.template mutable_data<int>();
 
@@ -120,8 +114,7 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   }
 
   const double log2f_ = std::log(2.f);
-  ReinitializeTensor(
-      &gain_, {N}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&gain_, {N}, at::dtype<float>().device(CPU));
   auto* gain_data = gain_.template mutable_data<float>();
   EigenVectorArrayMap<float> gain_vec(gain_data, gain_.numel());
 
@@ -148,8 +141,7 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   // similar to ideal but replace with actual discounts
   double dcg = (gain_vec * discount_vec).sum();
 
-  ReinitializeTensor(
-      &lambda_, {N * N}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&lambda_, {N * N}, at::dtype<float>().device(CPU));
   auto* lambda_data = lambda_.template mutable_data<float>();
   EigenArrayMap<float> lambda_mat(lambda_data, N, N);
   // computes lambda weight (i, j) = abs(gain_dff * discount_diff)
