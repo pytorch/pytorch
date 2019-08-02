@@ -854,6 +854,33 @@ if __name__ == '__main__':
                 'python/serialized_test/data/operator_test/*.zip',
             ]
         },
+        url='https://pytorch.org/',
+        download_url='https://github.com/pytorch/pytorch/tags',
+        author='PyTorch Team',
+        author_email='packages@pytorch.org',
+        # PyPI package information.
+        classifiers=[
+            'Development Status :: 5 - Production/Stable',
+            'Intended Audience :: Developers',
+            'Intended Audience :: Education',
+            'Intended Audience :: Science/Research',
+            'License :: OSI Approved :: BSD License',
+            'Programming Language :: C++',
+            'Programming Language :: Python :: 2',
+            'Programming Language :: Python :: 2.7',
+            'Programming Language :: Python :: 3',
+            'Programming Language :: Python :: 3.5',
+            'Programming Language :: Python :: 3.6',
+            'Programming Language :: Python :: 3.7',
+            'Topic :: Scientific/Engineering',
+            'Topic :: Scientific/Engineering :: Mathematics',
+            'Topic :: Scientific/Engineering :: Artificial Intelligence',
+            'Topic :: Software Development',
+            'Topic :: Software Development :: Libraries',
+            'Topic :: Software Development :: Libraries :: Python Modules',
+        ],
+        license='BSD-3',
+        keywords='pytorch machine learning',
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
