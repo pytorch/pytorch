@@ -6838,26 +6838,71 @@ class _TestTorchMixin(object):
         self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k, 'F'), reference)
 
     def test_logical(self):
-        x = torch.rand(100, 100) * 2 - 1
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([1, 2, 3, 4], device=device)
+            self.assertEqual(x.lt(2), torch.tensor([True, False, False, False]))
+            self.assertEqual(x.le(2), torch.tensor([True, True, False, False]))
+            self.assertEqual(x.ge(2), torch.tensor([False, True, True, True]))
+            self.assertEqual(x.gt(2), torch.tensor([False, False, True, True]))
+            self.assertEqual(x.eq(2), torch.tensor([False, True, False, False]))
+            self.assertEqual(x.ne(2), torch.tensor([True, False, True, True]))
 
-        xgt = torch.gt(x, 1)
-        xlt = torch.lt(x, 1)
+            b = torch.tensor([2], device=device)
+            self.assertEqual(x.lt(b), torch.tensor([True, False, False, False]))
+            self.assertEqual(x.le(b), torch.tensor([True, True, False, False]))
+            self.assertEqual(x.ge(b), torch.tensor([False, True, True, True]))
+            self.assertEqual(x.gt(b), torch.tensor([False, False, True, True]))
+            self.assertEqual(x.eq(b), torch.tensor([False, True, False, False]))
+            self.assertEqual(x.ne(b), torch.tensor([True, False, True, True]))
 
-        xeq = torch.eq(x, 1)
-        xne = torch.ne(x, 1)
 
-        neqs = xgt + xlt
-        all = neqs + xeq
-        self.assertEqual(neqs.long().sum(), xne.long().sum(), 0)
-        self.assertEqual(x.nelement(), all.long().sum())
+            with warnings.catch_warnings(record=True) as warningsCount:
+                byteRes = torch.empty_like(x, device=device).byte()
+                boolRes = torch.empty_like(x, device=device).bool()
+
+                torch.lt(x, b, out=byteRes)
+                torch.lt(x, b, out=boolRes)
+                self.assertEqual(byteRes.bool(), boolRes)
+
+                torch.le(x, b, out=byteRes)
+                torch.le(x, b, out=boolRes)
+                self.assertEqual(byteRes.bool(), boolRes)
+
+                torch.ge(x, b, out=byteRes)
+                torch.ge(x, b, out=boolRes)
+                self.assertEqual(byteRes.bool(), boolRes)
+
+                torch.gt(x, b, out=byteRes)
+                torch.gt(x, b, out=boolRes)
+                self.assertEqual(byteRes.bool(), boolRes)
+
+                torch.eq(x, b, out=byteRes)
+                torch.eq(x, b, out=boolRes)
+                self.assertEqual(byteRes.bool(), boolRes)
+
+                torch.ne(x, b, out=byteRes)
+                torch.ne(x, b, out=boolRes)
+                self.assertEqual(byteRes.bool(), boolRes)
+
+                self.assertEquals(len(warningsCount), 6)
+
+            # Bool Tensor
+            x = torch.tensor([True, False, True, False], device=device)
+            self.assertEqual(x.lt(True), torch.tensor([False, True, False, True]))
+            self.assertEqual(x.le(True), torch.tensor([True, True, True, True]))
+            self.assertEqual(x.ge(True), torch.tensor([True, False, True, False]))
+            self.assertEqual(x.gt(True), torch.tensor([False, False, False, False]))
+            self.assertEqual(x.eq(True), torch.tensor([True, False, True, False]))
+            self.assertEqual(x.ne(True), torch.tensor([False, True, False, True]))
+
 
     def test_isfinite(self):
         x = torch.Tensor([1, inf, 2, -inf, nan, -10])
-        self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 0, 1, 0, 0, 1]))
+        self.assertEqual(torch.isfinite(x), torch.BoolTensor([True, False, True, False, False, True]))
 
     def test_isfinite_int(self):
         x = torch.tensor([1, 2, 3])
-        self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 1, 1]))
+        self.assertEqual(torch.isfinite(x), torch.BoolTensor([True, True, True]))
 
     def test_isfinite_type(self):
         with self.assertRaises(TypeError):
@@ -11525,10 +11570,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             else:
                 self.assertFalse(x[idx] ^ y[idx])
 
-        invert_result = ~x
-        for idx in iter_indices(x):
-            self.assertEqual(1 - x[idx], invert_result[idx])
-
         x_clone = x.clone()
         x_clone &= y
         self.assertEqual(x_clone, and_result)
@@ -11541,9 +11582,20 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x_clone ^= y
         self.assertEqual(x_clone, xor_result)
 
-    def test_invert(self):
-        x = torch.ByteTensor([0, 1, 1])
-        self.assertEqual((~x).tolist(), [1, 0, 0])
+    def test_op_invert(self):
+        res = 0xffff - torch.arange(127, dtype=torch.int8)
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.arange(127, dtype=dtype)
+            self.assertEqual(res.to(dtype), ~a)
+
+        self.assertEqual(torch.tensor([True, False]),
+                         ~torch.tensor([False, True]))
+
+        # test exceptions
+        for dtype in(torch.half, torch.float, torch.double):
+            a = torch.zeros(10, dtype=dtype)
+            with self.assertRaises(TypeError):
+                b = ~a
 
     def test_apply(self):
         x = torch.arange(1, 6)

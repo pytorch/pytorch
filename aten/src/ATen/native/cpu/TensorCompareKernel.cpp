@@ -83,7 +83,7 @@ static void max_kernel_impl(
     Tensor& max_indices,
     const Tensor& self,
     c10::optional<int64_t> dim) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "max", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "max", [&] {
     Reduction<scalar_t, int64_t>::apply(max, max_indices, self, dim, true);
   });
 }
@@ -93,7 +93,7 @@ static void min_kernel_impl(
     Tensor& min_indices,
     const Tensor& self,
     c10::optional<int64_t> dim) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "min", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "min", [&] {
     Reduction<scalar_t, int64_t>::apply(min, min_indices, self, dim, false);
   });
 }
