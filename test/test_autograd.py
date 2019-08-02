@@ -45,7 +45,6 @@ else:
     import pickle
 
 PRECISION = 1e-4
-EPSILON = 1e-6
 
 
 @contextlib.contextmanager
