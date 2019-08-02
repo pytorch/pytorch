@@ -27,16 +27,16 @@ const std::vector<int> ints {
   int_min,
   int_min + 1,
   int_min + 2,
-  -sqrt(int_max),
+  static_cast<int>(-sqrt(int_max)),
   -3, -2, -1, 0, 1, 2, 3,
-  sqrt(int_max),
+  static_cast<int>(sqrt(int_max)),
   int_max - 2,
   int_max - 1,
   int_max
 };
 const std::vector<int> non_neg_ints {
   0, 1, 2, 3,
-  sqrt(int_max),
+  static_cast<int>(sqrt(int_max)),
   int_max - 2,
   int_max - 1,
   int_max
@@ -45,16 +45,16 @@ const std::vector<int64_t> longs {
   long_min,
   long_min + 1,
   long_min + 2,
-  -sqrt(long_max),
+  static_cast<int64_t>(-sqrt(long_max)),
   -3, -2, -1, 0, 1, 2, 3,
-  sqrt(long_max),
+  static_cast<int64_t>(sqrt(long_max)),
   long_max - 2,
   long_max - 1,
   long_max
 };
 const std::vector<int64_t> non_neg_longs {
   0, 1, 2, 3,
-  sqrt(long_max),
+  static_cast<int64_t>(sqrt(long_max)),
   long_max - 2,
   long_max - 1,
   long_max
