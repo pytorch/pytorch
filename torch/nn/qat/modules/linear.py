@@ -22,11 +22,12 @@ class Linear(NNLinear):
     __FLOAT_MODULE = NNLinear
 
     def __init__(self, in_features, out_features, bias=True,
-                 activation_fake_quant=None,
-                 weight_fake_quant=None):
+                 qconfig=None):
         super(Linear, self).__init__(in_features, out_features, bias)
-        self.observer = activation_fake_quant()
-        self.weight_fake_quant = weight_fake_quant()
+        assert qconfig, 'qconfig must be provided for QAT module'
+        self.qconfig = qconfig
+        self.observer = qconfig.activation()
+        self.weight_fake_quant = qconfig.weight()
 
     def forward(self, input):
         return self.observer(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
@@ -38,15 +39,13 @@ class Linear(NNLinear):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls.__FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+        assert type(mod) == cls.__FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
             cls.__FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert mod.qconfig, 'Input float module must has valid qconfig'
             qconfig = mod.qconfig
-        qat_linear = cls(mod.in_features, mod.out_features,
-                         activation_fake_quant=qconfig.activation,
-                         weight_fake_quant=qconfig.weight)
+        qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias
         return qat_linear
