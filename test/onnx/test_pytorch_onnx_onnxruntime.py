@@ -498,6 +498,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_pixel_shuffle(self):
+        class PixelShuffle(torch.nn.Module):
+            def forward(self, x):
+                return torch.pixel_shuffle(x, upscale_factor=2)
+
+        x = torch.randn(2, 16, 4, 3, requires_grad=True)
+        self.run_test(PixelShuffle(), x)
+
 
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
@@ -514,6 +523,11 @@ TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
                                (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=10))
+
+# opset 11 tests
+TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=11))
 
 
 if __name__ == '__main__':
