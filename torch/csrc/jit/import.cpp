@@ -288,8 +288,7 @@ void ScriptModuleDeserializer::moduleSetState(
   // Since all Tensors are going to be None before `__setstate__` is run, we
   // can't do any optimizations on them that depend on the module type since the
   // values aren't consistent with their corresponding types.
-  bool old_optimize = getGraphExecutorOptimize();
-  setGraphExecutorOptimize(false);
+  GraphOptimizerEnabledGuard guard(false);
 
   // TODO: once modules are first class in the interpreter and methods are not
   // lowered, change this to `module->run_method("__setstate__", {state});`
@@ -300,7 +299,6 @@ void ScriptModuleDeserializer::moduleSetState(
   } else {
     AT_ERROR("Unexpected schema on '__setstate__'");
   }
-  setGraphExecutorOptimize(old_optimize);
 }
 
 script::Module ScriptModuleDeserializer::convertModule(
