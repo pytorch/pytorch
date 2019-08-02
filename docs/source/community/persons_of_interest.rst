@@ -42,7 +42,7 @@ Autograd Engine
 
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
--  (sunsetting) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
+-  Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
 JIT
 ~~~
@@ -63,7 +63,8 @@ Distributed
 
 -  Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 -  Shen Li (`mrshenli <https://github.com/mrshenli>`__)
--  (proposed) Pritam Damania
+..
+ -  (proposed) Pritam Damania
    (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 
 Multiprocessing and DataLoaders
