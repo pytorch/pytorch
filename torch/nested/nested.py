@@ -18,10 +18,11 @@ def interpolate(*args, **kwargs):
         # inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
         ret_list = []
         input_ = args[0]
+        size = kwargs['size']
         # TODO: Implement size parameter
         for i in range(len(input_)):
             ret = F.interpolate(input_._tensors[i].view((1,) + input_._tensors[i].size()),
-                          size=tuple(input_._tensors[i].shape[-2:]),
+                          size=size[i],
                           mode="nearest")
             ret_list.append(ret.view(ret.size()[1:]))
         return as_nested_tensor(ret_list)
@@ -318,3 +319,6 @@ class NestedTensor(object):
         for tensor in self._tensors:
             all_numel += tensor.numel()
         return all_numel
+
+    def unbind(self):
+        return tuple(self._tensors)

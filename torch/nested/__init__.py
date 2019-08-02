@@ -59,12 +59,4 @@ def monkey_patch(module):
 
     return module
 
-    # for function in dir(nn):
-    #     if not function.startswith("_"):
-    #         setattr(module.nn, function, getattr(nn, function))
-
-    # for function in dir(nn.functional):
-    #     if not function.startswith("_"):
-    #         setattr(module.nn.functional.F, function, getattr(nn.functional, function))
-
 __all__ = ["monkey_patch"]
