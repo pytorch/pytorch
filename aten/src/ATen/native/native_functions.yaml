@@ -1662,15 +1662,12 @@
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _neg__cpu
-    CUDA: _neg__cuda
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: _neg_out_cpu
-    CUDA: _neg_out_cuda
+    CPU: neg_out
+    CUDA: neg_out
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -3433,12 +3430,6 @@
     CPU: legacy::cpu::_th_addbmm
     CUDA: legacy::cuda::_th_addbmm
 
-- func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_addcmul_
-    CUDA: legacy::cuda::_th_addcmul_
-
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
   dispatch:
@@ -3752,14 +3743,20 @@
 
 - func: addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_addcmul_out
+    CPU: addcmul_cpu_out
     CUDA: legacy::cuda::_th_addcmul_out
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_addcmul
+    CPU: addcmul_cpu
     CUDA: legacy::cuda::_th_addcmul
+
+- func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: addcmul_cpu_
+    CUDA: legacy::cuda::_th_addcmul_
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
