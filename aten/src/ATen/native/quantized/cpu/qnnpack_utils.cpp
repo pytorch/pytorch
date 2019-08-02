@@ -1,6 +1,6 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
-#ifdef C10_MOBILE
+#if(defined C10_MOBILE && defined USE_QNNPACK)
 std::unique_ptr<caffe2::ThreadPool> ThreadPoolMobile::thread_pool_ = nullptr;
 std::mutex ThreadPoolMobile::thread_pool_creation_mutex_;
 
