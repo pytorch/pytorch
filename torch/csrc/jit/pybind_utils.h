@@ -518,7 +518,6 @@ inline c10::optional<py::object> tryToConvertToCustomClass(
     auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
     auto classConverter = c10::getClassConverter()[obj->name()];
     py::handle rawPyObj = classConverter(objPtr);
-    py::print(rawPyObj.attr("info")());
     auto o = py::reinterpret_steal<py::object>(rawPyObj);
     return o;
   }
