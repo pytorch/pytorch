@@ -176,4 +176,11 @@ std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
     static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
     return tmap;
 }
+
+std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter() {
+  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
+      classConverter;
+  return classConverter;
+}
 } // namespace c10

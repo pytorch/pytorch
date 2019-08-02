@@ -511,11 +511,19 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
         py::repr(object)));
   }
 }
-TORCH_API std::unordered_map<std::string, std::function<py::object(void*)>>&
-getClassConverter();
-TORCH_API c10::optional<py::object> tryToConvertToCustomClass(
-    const c10::intrusive_ptr<c10::ivalue::Object>& obj);
 
+inline c10::optional<py::object> tryToConvertToCustomClass(
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
+  if (obj->name().find("__torch__.torch.classes") == 0) {
+    auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
+    auto classConverter = c10::getClassConverter()[obj->name()];
+    py::handle rawPyObj = classConverter(objPtr);
+    py::print(rawPyObj.attr("info")());
+    auto o = py::reinterpret_steal<py::object>(rawPyObj);
+    return o;
+  }
+  return c10::nullopt;
+}
 inline py::object toPyObject(IValue&& ivalue) {
   if (ivalue.isNone()) {
     return py::none();

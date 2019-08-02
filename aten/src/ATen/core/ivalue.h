@@ -593,6 +593,9 @@ inline bool isCustomClassRegistered() {
   auto tmap = c10::getCustomClassTypeMap();
   return tmap.find(typeid(T).name()) != tmap.end();
 }
+
+TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter();
 }
 
 #include <ATen/core/ivalue_inl.h>

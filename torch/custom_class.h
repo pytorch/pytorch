@@ -84,9 +84,11 @@ class class_ {
         py::module::import("torch.jit")
             .attr("_add_script_class")(*pyClass, qualClassName.c_str());
 
-    auto castToPython = [](void* objPtr) -> py::object {
+    auto castToPython = [](void* objPtr) -> PyObject* {
       CurClass x = *static_cast<CurClass*>(objPtr);
-      return py::cast(x);
+      auto py_object = py::cast(x);
+      PyObject* rawPyObj = py_object.release().ptr();
+      return rawPyObj;
     };
     getClassConverter()[qualClassName] = castToPython;
 
