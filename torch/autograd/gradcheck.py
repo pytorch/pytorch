@@ -139,13 +139,17 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
                 t2 = outb.view(-1)
                 t3 = diff.view(-1)
                 t4 = r.view(-1)
+                dt1 = outa.type()
+                dt2 = outb.type()
+                dt3 = diff.type()
+                dt4 = r.type()
                 for inx in range(outa.numel()):
                     outa_l.append(t1[inx].item())
                     outb_l.append(t2[inx].item())
                     diff_l.append(t3[inx].item())
                     r_l.append(t4[inx].item())
 
-                debugInfo.append((d_idx, x_idx, orig, eps, orig_minus, outa_l, orig_plus, outb_l, diff_l, r_l))
+                debugInfo.append((d_idx, x_idx, orig, eps, orig_minus, outa_l, dt1, orig_plus, outb_l, dt2, diff_l, dt3, r_l, dt4))
             if printDebug:
                 return debugInfo
 
@@ -312,10 +316,12 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                     close = actual_error <= max_error
 
                     data1 = []
+                    dt1 = tupled_inputs[0].type()
                     t1 = tupled_inputs[0].view(-1)
                     for inx in range(t1.numel()):
                         data1.append(t1[inx].item())
                     data2 = []
+                    dt2 = tupled_inputs[1].type()
                     t2 = tupled_inputs[1].view(-1)
                     for inx in range(t2.numel()):
                         data2.append(t2[inx].item())
@@ -326,8 +332,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                                      'actual_error:%s\nmax_error:%s\nclose:%s\n'
                                      'output:%s\ntupled_inputs:%s\n'
                                      'data1:%s\ndata2:%s\n'
+                                     'type1:%s\ntype2:%s\n'
                                      'numerical:%s\nanalytical:%s\n'
-                                     'debugInfo:%s\n' % (i, j, actual_error, max_error, close, o, tupled_inputs, tuple(data1), tuple(data2), n, a, debugInfo))
+                                     'debugInfo:%s\n' % (i, j, actual_error, max_error, close, o, tupled_inputs, tuple(data1), tuple(data2), dt1, dt2, n, a, debugInfo))
                 #else:
                 #    if printDebug:
                 #        print("=================CDIST=======================")
