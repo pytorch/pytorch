@@ -37,9 +37,13 @@ bool isDecomposableNorm(Node* normalize_op) {
       "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
   };
   Value* input = normalize_op->namedInput(attr::input);
-  auto tensor_type = input->type()->cast<DimensionedTensorType>();
-  // As of now, we do the decomposition for batchnorm/layernorm on GPU device only
-  if (!tensor_type || tensor_type->device().is_cpu()) {
+  if (!input->type()->isSubtypeOf(TensorType::get())) {
+    return false;
+  }
+  auto device = ProfiledTensorType::create(input->type())->device();
+  // As of now, we do the decomposition for batchnorm/layernorm on GPU device
+  // only
+  if (!device || (*device).is_cpu()) {
     return false;
   }
 
