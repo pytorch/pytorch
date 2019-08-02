@@ -72,7 +72,7 @@ void launch(std::function<void()> func) {
   auto fn = [func, debug_info]() {
     auto prev_info = setThreadLocalDebugInfo(std::move(debug_info));
     func();
-    setThreadLocalDebugInfo(prev_info);
+    setThreadLocalDebugInfo(std::move(prev_info));
   };
 #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
   intraop_launch(fn);

@@ -1,13 +1,15 @@
 #pragma once
 
-#include "ATen/Parallel.h"
-#include "ATen/ThreadLocalDebugInfo.h"
+#include <ATen/ATen.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
+#include <ATen/Parallel.h>
+#include <ATen/ThreadLocalDebugInfo.h>
 
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include "ATen/core/interned_strings.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -45,15 +47,12 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
-#include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/profiling_record.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
-
-#include <ATen/ATen.h>
 
 #include <c10/util/Exception.h>
 
@@ -400,9 +399,9 @@ void testCustomFusionNestedBlocks() {
   auto a = SymbolicVariable::asNewInput(*g, type);
   auto b = SymbolicVariable::asNewInput(*g, type);
   auto c = SymbolicVariable::asNewInput(*g, type);
+
   auto r =
       g->appendNode(g->create(prim::If, {c.value()}));
-
   auto then_block = r->addBlock();
   auto else_block = r->addBlock();
   {
