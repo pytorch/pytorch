@@ -498,6 +498,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    @unittest.skip("Enable this once depthToSpace attr 'mode' is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
