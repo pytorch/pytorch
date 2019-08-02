@@ -35,7 +35,6 @@ from torch._jit_internal import ignore, export  # noqa: F401
 if sys.version_info[0] > 2:
     import pathlib
 
-
 def _parse_env(name, default, true_message, false_message):
     value = os.environ.get(name)
     if value is None:
@@ -1132,6 +1131,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     """
     if not _enabled:
         return obj
+
     if optimize is not None:
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
@@ -1862,8 +1862,8 @@ class TracedModule(ScriptModule):
                 self._buffers[name] = buf
                 check_unique(buf)
 
-        if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
-            raise ValueError("Modules that have hooks assigned can't be compiled")
+        if orig._backward_hooks:
+            raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(self))
 
         for name, submodule in orig._modules.items():
             if isinstance(submodule, ScriptModule):

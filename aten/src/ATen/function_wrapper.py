@@ -533,6 +533,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'mode': str,
     'python_module': str,
     'name': str,
+    'overload_name': str,
     'native_actuals': List[str],
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
@@ -559,6 +560,7 @@ FunctionOption = TypedDict('FunctionOption', {
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
+    ('overload_name', str),
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('method_prefix_derived', str),
@@ -602,7 +604,7 @@ def named_guard(option, tensors, tensorlists):
         return ''
     named_conditions = []
     for tensor in tensors:
-        named_conditions.append('{}.is_named()'.format(tensor))
+        named_conditions.append('{}.has_names()'.format(tensor))
     for tensorlist in tensorlists:
         named_conditions.append('at::has_names({})'.format(tensorlist))
     return ("""\
@@ -1195,6 +1197,7 @@ def create_generic(top_env, declarations):
             return None
         return OutputDeclaration(
             name=option['api_name'],
+            overload_name=option['overload_name'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             method_prefix_derived=option['method_prefix_derived'],
