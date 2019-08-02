@@ -397,6 +397,7 @@ inline IValue toIValue(
             return repeated;
           }
         case TypeKind::DimensionedTensorType:
+        case TypeKind::ProfiledTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:

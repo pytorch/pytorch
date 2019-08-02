@@ -1868,16 +1868,13 @@
   exclude_from_c10_dispatcher: True
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _neg__cpu
-    CUDA: _neg__cuda
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   exclude_from_c10_dispatcher: True
   named_guard: False
   dispatch:
-    CPU: _neg_out_cpu
-    CUDA: _neg_out_cuda
+    CPU: neg_out
+    CUDA: neg_out
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -1897,6 +1894,7 @@
 - func: reshape(Tensor self, int[] shape) -> Tensor
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   device_guard: False
@@ -2103,7 +2101,7 @@
   device_guard: False
   named_guard: False
 
-- func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
+- func: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
   device_guard: False
   named_guard: False
@@ -2172,7 +2170,7 @@
     SparseCPU: mul_out_sparse_scalar
     SparseCUDA: mul_out_sparse_scalar
 
-- func: split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
+- func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
   named_guard: False
@@ -3743,12 +3741,6 @@
     CPU: legacy::cpu::_th_addbmm
     CUDA: legacy::cuda::_th_addbmm
 
-- func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_addcmul_
-    CUDA: legacy::cuda::_th_addcmul_
-
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
   dispatch:
@@ -4095,14 +4087,20 @@
 - func: addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   exclude_from_c10_dispatcher: True
   dispatch:
-    CPU: legacy::cpu::_th_addcmul_out
+    CPU: addcmul_cpu_out
     CUDA: legacy::cuda::_th_addcmul_out
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_addcmul
+    CPU: addcmul_cpu
     CUDA: legacy::cuda::_th_addcmul
+
+- func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: addcmul_cpu_
+    CUDA: legacy::cuda::_th_addcmul_
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   exclude_from_c10_dispatcher: True

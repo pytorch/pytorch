@@ -156,7 +156,7 @@ WRAPPER_REGISTRATION = CodeTemplate("""\
 """)
 
 C10_WRAPPER_REGISTRATION = CodeTemplate("""\
-.op("${schema_string}", torch::RegisterOperators::options().impl_unboxedAutogradKernel<${return_type} (${formal_types})>(&VariableType::${api_name}))
+.op("${schema_string}", torch::RegisterOperators::options().impl_unboxedAutogradKernel<${return_type} (${formal_types})>(&VariableType::${api_name}).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -470,8 +470,9 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 declaration, type_definition_body=body))
         wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
             declaration, formal_types=formal_types))
-        c10_wrapper_registrations.append(C10_WRAPPER_REGISTRATION.substitute(
-            declaration, formal_types=formal_types))
+        if not declaration['exclude_from_c10_dispatcher']:
+            c10_wrapper_registrations.append(C10_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,

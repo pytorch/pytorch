@@ -589,6 +589,7 @@ FunctionOption = TypedDict('FunctionOption', {
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
     ('overload_name', str),
+    ('exclude_from_c10_dispatcher', bool),
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('method_prefix_derived', str),
@@ -1249,6 +1250,7 @@ def create_generic(top_env, declarations):
         return OutputDeclaration(
             name=option['api_name'],
             overload_name=option['overload_name'],
+            exclude_from_c10_dispatcher=option['exclude_from_c10_dispatcher'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             method_prefix_derived=option['method_prefix_derived'],

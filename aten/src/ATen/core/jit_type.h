@@ -581,6 +581,7 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return requires_grad_ ? *requires_grad_ : false;
   }
 
+
   bool operator==(const Type& rhs) const override {
     if (rhs.kind() != kind()) {
       return false;
