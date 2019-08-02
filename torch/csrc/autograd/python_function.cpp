@@ -680,6 +680,13 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
     std::vector<c10::IValue>(),
     autograd::Node::peek_at_next_sequence_nr());
 
+  THPObjectPtr _legacy(PyObject_GetAttrString(cls, "_is_legacy"));
+  if (_legacy == Py_True) {
+    TORCH_WARN("Legacy autograd function with non-static forward method is deprecated and will be removed in 1.3. ",
+             "Please use new-style autograd function with static forward method. ",
+             "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)");
+  }
+
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
   THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, nullptr));
