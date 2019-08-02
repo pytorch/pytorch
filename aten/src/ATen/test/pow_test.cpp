@@ -14,8 +14,8 @@ namespace {
 
 const auto int_min = std::numeric_limits<int>::min();
 const auto int_max = std::numeric_limits<int>::max();
-const auto long_min = std::numeric_limits<long>::min();
-const auto long_max = std::numeric_limits<long>::max();
+const auto long_min = std::numeric_limits<int64_t>::min();
+const auto long_max = std::numeric_limits<int64_t>::max();
 const auto float_lowest = std::numeric_limits<float>::lowest();
 const auto float_min = std::numeric_limits<float>::min();
 const auto float_max = std::numeric_limits<float>::max();
@@ -41,7 +41,7 @@ const std::vector<int> non_neg_ints {
   int_max - 1,
   int_max
 };
-const std::vector<long> longs {
+const std::vector<int64_t> longs {
   long_min,
   long_min + 1,
   long_min + 2,
@@ -52,7 +52,7 @@ const std::vector<long> longs {
   long_max - 1,
   long_max
 };
-const std::vector<long> non_neg_longs {
+const std::vector<int64_t> non_neg_longs {
   0, 1, 2, 3,
   sqrt(long_max),
   long_max - 2,
@@ -262,17 +262,17 @@ TEST(PowTest, DoubleTensorPowAllScalars) {
 }
 
 TEST(PowTest, IntScalarPowAllTensors) {
-  scalar_pow_tensor<long>(ints, ints);
-  scalar_pow_tensor<long>(ints, longs);
-  scalar_pow_tensor<long>(ints, floats);
-  scalar_pow_tensor<long>(ints, doubles);
+  scalar_pow_tensor<int64_t>(ints, ints);
+  scalar_pow_tensor<int64_t>(ints, longs);
+  scalar_pow_tensor<int64_t>(ints, floats);
+  scalar_pow_tensor<int64_t>(ints, doubles);
 }
 
 TEST(PowTest, LongScalarPowAllTensors) {
-  scalar_pow_tensor<long>(longs, ints);
-  scalar_pow_tensor<long>(longs, longs);
-  scalar_pow_tensor<long>(longs, floats);
-  scalar_pow_tensor<long>(longs, doubles);
+  scalar_pow_tensor<int64_t>(longs, ints);
+  scalar_pow_tensor<int64_t>(longs, longs);
+  scalar_pow_tensor<int64_t>(longs, floats);
+  scalar_pow_tensor<int64_t>(longs, doubles);
 }
 
 TEST(PowTest, FloatScalarPowAllTensors) {
