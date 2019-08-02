@@ -5,7 +5,7 @@ import numbers
 
 from .module import Module
 from ..parameter import Parameter
-from ..utils.rnn import PackedSequence, get_packed_sequence
+from ..utils.rnn import PackedSequence
 from .. import init
 from .. import _VF
 from ..._jit_internal import _parameter_list
@@ -167,12 +167,14 @@ class RNNBase(Module):
             raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
 
     def check_forward_args(self, input, hidden, batch_sizes):
+        # type: (Tensor, Tensor, Optional[Tensor]) -> None
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
         self.check_hidden_size(hidden, expected_hidden_size)
 
     def permute_hidden(self, hx, permutation):
+        # type: (Tensor, Optional[Tensor]) -> Tensor
         if permutation is None:
             return hx
         return apply_permutation(hx, permutation)
@@ -533,14 +535,14 @@ class LSTM(RNNBase):
 
     @torch._jit_internal.export
     def forward_packed(self, input, hx=None):
-        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+        # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
-        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
     @torch._jit_internal.ignore
@@ -655,9 +657,67 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+    __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
         super(GRU, self).__init__('GRU', *args, **kwargs)
+
+    def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            hx = torch.zeros(self.num_layers * num_directions,
+                             max_batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
+
+        self.check_forward_args(input, hx, batch_sizes)
+        if batch_sizes is None:
+            result = _VF.gru(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
+                             self.dropout, self.training, self.bidirectional, self.batch_first)
+        else:
+            result = _VF.gru(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
+                             self.num_layers, self.dropout, self.training, self.bidirectional)
+        output = result[0]
+
+        output = result[0]
+        hidden = result[1]
+
+        return output, hidden
+
+    @torch._jit_internal.export
+    def forward_tensor(self, input, hx=None):
+        # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        batch_sizes = None
+        max_batch_size = input.size(0) if self.batch_first else input.size(1)
+        sorted_indices = None
+        unsorted_indices = None
+
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @torch._jit_internal.export
+    def forward_packed(self, input, hx=None):
+        # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]
+        input, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = batch_sizes[0]
+        max_batch_size = int(max_batch_size)
+
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @torch._jit_internal.ignore
+    def forward(self, input, hx=None):
+        if isinstance(input, PackedSequence):
+            return self.forward_packed(input, hx)
+        else:
+            return self.forward_tensor(input, hx)
 
 
 class RNNCellBase(Module):
