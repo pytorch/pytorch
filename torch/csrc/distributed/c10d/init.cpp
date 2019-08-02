@@ -35,7 +35,39 @@ namespace {
 
 #ifdef USE_C10D_GLOO
 constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+
+std::shared_ptr<::gloo::transport::Device> createDeviceForDefaultHostname() {
+  ::gloo::transport::tcp::attr attr;
+
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  std::array<char, HOST_NAME_MAX> hostname{};
+  auto rv = gethostname(hostname.data(), hostname.size());
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+  attr.hostname = hostname.data();
+  return ::gloo::transport::tcp::CreateDevice(attr);
+}
+
+std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
+    std::string iface) {
+  ::gloo::transport::tcp::attr attr;
+  attr.iface = std::move(iface);
+  return ::gloo::transport::tcp::CreateDevice(attr);
+}
 #endif
+
+std::vector<std::string> split(char separator, const std::string& string) {
+  std::vector<std::string> pieces;
+  std::stringstream ss(string);
+  std::string item;
+  while (std::getline(ss, item, separator)) {
+    pieces.push_back(std::move(item));
+  }
+  return pieces;
+}
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -427,26 +459,19 @@ They are used in specifying strategies for reduction collectives, e.g.,
                       int size,
                       std::chrono::milliseconds timeout) {
             ::c10d::ProcessGroupGloo::Options options;
-            ::gloo::transport::tcp::attr attr;
-            // First step, check "GLOO_SOCKET_IFNAME" environmental variable
-            // that can be set by the user
+
+            // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
             if (ifnameEnv) {
-              attr.iface = std::string(ifnameEnv);
-            } else {
-              // Use the hostname to resolve the network address to
-              // use. Note: if the hostname does not resolve to an address (e.g.
-              // because of misconfigured /etc/hosts file), this will not work.
-              std::array<char, HOST_NAME_MAX> hostname{};
-              auto rv = gethostname(hostname.data(), hostname.size());
-              if (rv != 0) {
-                throw std::system_error(errno, std::system_category());
+              for (const auto& iface : split(',', ifnameEnv)) {
+                options.devices.push_back(createDeviceForInterface(iface));
               }
-              attr.hostname = hostname.data();
+            } else {
+              options.devices.push_back(createDeviceForDefaultHostname());
             }
-            options.devices.push_back(
-                ::gloo::transport::tcp::CreateDevice(attr));
+
             options.timeout = timeout;
+            options.threads = options.devices.size() * 2;
             return std::make_shared<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
           }),

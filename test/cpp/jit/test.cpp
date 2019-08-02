@@ -88,9 +88,12 @@ namespace jit {
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
+  _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
-  _(DCE)
+  _(InsertConstant)                    \
+  _(DCE)                               \
+  _(CustomFusionNestedBlocks)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

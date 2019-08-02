@@ -746,14 +746,18 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
+  tensor_proto->set_is_quantized(tensor.is_quantized());
+  if (tensor.is_quantized()) {
+    tensor_proto->set_scale(tensor.q_scale());
+    tensor_proto->set_zero_point(tensor.q_zero_point());
+  }
+
   auto* key = tensor.storage().unsafeGetStorageImpl();
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
-    uint64_t record_size;
-    at::Tensor storage_tensor;
-    std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
+    WriteableTensorData data = getWriteableTensorData(tensor);
     std::string name = "tensors/" + std::to_string(tensor_id);
-    writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
+    writer_.writeRecord(name, data.data(), data.sizeInBytes());
     storage_it = storageMap.insert({key, name}).first;
   }
 
@@ -779,13 +783,13 @@ void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
   Pickler pickler(&tensor_table_);
-  pickler.start();
+  pickler.protocol();
   pickler.startTuple();
   for (const IValue& ivalue : ivalues) {
-    pickler.addIValue(ivalue);
+    pickler.pushIValue(ivalue);
   }
   pickler.endTuple();
-  pickler.finish();
+  pickler.stop();
   writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size());
 }
 
@@ -795,7 +799,7 @@ void ScriptModuleSerializer::convertModule(
     const std::string& name,
     torch::ModuleDef* module_def) {
   module_def->set_name(name);
-  module_def->set_optimize(module.is_optimized());
+  module_def->set_optimize(true);
 
   // If __getstate__ and __setstate__ methods are provided, use those for
   // serializing instead of serializing the attributes directly
@@ -875,7 +879,8 @@ void ScriptModuleSerializer::convertModule(
     std::stringstream debug_filename;
     debug_filename << "debug/" << module_name.str() << ".pkl";
     writer_.writeRecord(
-        debug_filename.str(), range_data.data(), range_data.size());
+        debug_filename.str(), range_data.data(), range_data.size(),
+        /*compress=*/true);
     debug_record->set_key(debug_filename.str());
   }
 

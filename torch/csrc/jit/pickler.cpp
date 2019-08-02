@@ -56,7 +56,7 @@ const std::vector<char>& Pickler::stack() {
   return stack_;
 }
 
-void Pickler::start() {
+void Pickler::protocol() {
   push<OpCode>(OpCode::PROTO);
   push<uint8_t>(PROTOCOL_VERSION);
 }
@@ -71,73 +71,61 @@ void Pickler::endTuple() {
   push<OpCode>(OpCode::TUPLE);
 }
 
-void Pickler::finish() {
+void Pickler::stop() {
   push<OpCode>(OpCode::STOP);
+}
 
-
+void Pickler::torchSaveStop() {
   // Add the binary data for all the tensors to be included in the same binary
   // TODO: The pickler should be refactored to stream out to a stream directly
   // instead of staging in the stack_ array
-  if (literal_tensors_.size() > 0) {
-    // As another pickle program in the same binary archive, add a list of
-    // keys for each tensor (see torch/serialization.py)
-    start();
-    push<OpCode>(OpCode::MARK);
-    for (const auto& tensor : literal_tensors_) {
-      std::string key = std::to_string(getStorageKey(tensor));
-      push<OpCode>(OpCode::BINUNICODE);
-      push<uint32_t>(key.size());
-      pushBytes(key);
-    }
-    push<OpCode>(OpCode::TUPLE);
-    push<OpCode>(OpCode::STOP);
+  // As another pickle program in the same binary archive, add a list of
+  // keys for each tensor (see torch/serialization.py)
+  protocol();
+  push<OpCode>(OpCode::MARK);
+  for (size_t i = 0; i < tensor_data_.size(); ++i) {
+    std::string key = std::to_string(i);
+    push<OpCode>(OpCode::BINUNICODE);
+    push<uint32_t>(key.size());
+    pushBytes(key);
+  }
+  push<OpCode>(OpCode::TUPLE);
+  stop();
 
-    // Now dump the tensor binary data
-    for (const auto& tensor : literal_tensors_) {
-      pushTensorData(tensor);
-    }
+  // Now dump the tensor binary data
+  for (const auto& data : tensor_data_) {
+    // first dump size
+    push<size_t>(data.numel());
+    stack_.insert(stack_.end(), data.data(), data.data() + data.sizeInBytes());
   }
 }
 
-void Pickler::pushTensorData(const at::Tensor& tensor) {
-  // first dump size
-  auto numel = tensor.numel();
-  auto numel_ptr = reinterpret_cast<const char*>(&numel);
-  stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
-
-  uint64_t record_size;
-  at::Tensor storage_tensor;
-  std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
-  auto storage_byte_ptr = reinterpret_cast<uint8_t*>(storage_tensor.storage().data());
-  stack_.insert(stack_.end(), storage_byte_ptr, storage_byte_ptr + record_size);
-}
-
-void Pickler::pushMetadata() {
+void Pickler::torchSaveStart() {
   // Output data to match torch.save, see torch/serialization.py for details
   // Magic number (0x1950a86a20f9469cfc6c)
-  start();
+  protocol();
   push<OpCode>(OpCode::LONG1);
   // LONG1 size
   pushBytes("\x0a");
   // LONG1 data
   pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
-  push<OpCode>(OpCode::STOP);
+  stop();
 
   // Protocol Version (1001)
-  start();
+  protocol();
   push<OpCode>(OpCode::BININT2);
   pushBytes("\xe9\x03");
-  push<OpCode>(OpCode::STOP);
+  stop();
 
   // sys_info, this isn't actually used in de-serialization so we can leave this
   // one empty
-  start();
+  protocol();
   push<OpCode>(OpCode::EMPTY_DICT);
-  push<OpCode>(OpCode::STOP);
+  stop();
 }
 
-// unmemoized version called by addIValue
-void Pickler::addIValueImpl(const IValue& ivalue) {
+// unmemoized version called by pushIValue
+void Pickler::pushIValueImpl(const IValue& ivalue) {
   if (ivalue.isTensor()) {
     pushTensor(ivalue);
   } else if (ivalue.isTuple()) {
@@ -164,28 +152,28 @@ void Pickler::addIValueImpl(const IValue& ivalue) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
           for (const int64_t item : ivalue.toIntListRef()) {
-            addIValue(item);
+            pushIValue(item);
           }
         });
   } else if (ivalue.isTensorList()) {
     pushSpecializedList(
         ivalue, PicklerClass::TENSORLIST, [=](const IValue& ivalue) {
           for (const at::Tensor& item : ivalue.toTensorListRef()) {
-            addIValue(item);
+            pushIValue(item);
           }
         });
   } else if (ivalue.isDoubleList()) {
     pushSpecializedList(
         ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
           for (double item : ivalue.toDoubleListRef()) {
-            addIValue(item);
+            pushIValue(item);
           }
         });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(
         ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
           for (bool item : ivalue.toBoolList()) {
-            addIValue(item);
+            pushIValue(item);
           }
         });
   } else if (ivalue.isObject()) {
@@ -196,13 +184,13 @@ void Pickler::addIValueImpl(const IValue& ivalue) {
     push<OpCode>(OpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
       Function* getstate = type->getMethod("__getstate__");
-      addIValue((*getstate)({obj}));
+      pushIValue((*getstate)({obj}));
     } else {
       push<OpCode>(OpCode::EMPTY_DICT);
       push<OpCode>(OpCode::MARK);
       for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
         pushString(type->getAttributeName(i));
-        addIValue(obj->getSlot(i));
+        pushIValue(obj->getSlot(i));
       }
       push<OpCode>(OpCode::SETITEMS);
     }
@@ -212,7 +200,7 @@ void Pickler::addIValueImpl(const IValue& ivalue) {
   }
 }
 
-void Pickler::addIValue(const IValue& ivalue) {
+void Pickler::pushIValue(const IValue& ivalue) {
   // Check if reference ivalue has been saved before
   if (ivalue.isPtrType()) {
     const void* ptr = ivalue.internalToPointer();
@@ -229,7 +217,7 @@ void Pickler::addIValue(const IValue& ivalue) {
       return;
     }
   }
-  addIValueImpl(ivalue);
+  pushIValueImpl(ivalue);
   if (ivalue.isPtrType()) {
     memoized_ivalues_.push_back(ivalue);
     memoized_ivalue_map_[ivalue.internalToPointer()] = pushNextBinPut();
@@ -283,6 +271,38 @@ void Pickler::pushString(const std::string& string) {
   }
 }
 
+void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
+  const at::Storage& storage = tensor.storage();
+  void* addr = storage.unsafeGetStorageImpl();
+  auto it = memoized_storage_map_.find(addr);
+  if (it != memoized_storage_map_.end()) {
+    pushBinGet(it->second);
+    return;
+  }
+
+  // Tuple for persistent_load
+  push<OpCode>(OpCode::MARK);
+  // typename
+  pushString("storage");
+  // data_type
+  std::stringstream data_type;
+  data_type << toString(tensor.scalar_type()) << "Storage";
+  pushGlobal("torch", data_type.str());
+  // root_key
+  pushString(std::to_string(tensor_data_.size()));
+  // location
+  pushString("cpu");
+  // size
+  pushInt(tensor.numel());
+  // view_metadata
+  push<OpCode>(OpCode::NONE);
+  push<OpCode>(OpCode::TUPLE);
+  push<OpCode>(OpCode::BINPERSID);
+
+  memoized_storage_map_[addr] = pushNextBinPut();
+  tensor_data_.push_back(getWriteableTensorData(tensor));
+}
+
 void Pickler::pushBytes(const std::string& string) {
   stack_.insert(stack_.end(), string.begin(), string.end());
 }
@@ -328,24 +348,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   pushGlobal("torch._utils", "_rebuild_tensor_v2");
   push<OpCode>(OpCode::MARK);
 
-  // Tuple for persistent_load
-  push<OpCode>(OpCode::MARK);
-  // typename
-  pushString("storage");
-  // data_type
-  std::stringstream data_type;
-  data_type << toString(tensor.scalar_type()) << "Storage";
-  pushGlobal("torch", data_type.str());
-  // root_key
-  pushString(std::to_string(getStorageKey(tensor)));
-  // location
-  pushString("cpu");
-  // size
-  pushInt(tensor.numel());
-  // view_metadata
-  push<OpCode>(OpCode::NONE);
-  push<OpCode>(OpCode::TUPLE);
-  push<OpCode>(OpCode::BINPERSID);
+  pushStorageOfTensor(tensor);
 
   // storage offset
   int64_t storage_offset = 0;
@@ -366,7 +369,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<OpCode>(OpCode::TUPLE);
 
   // requires_grad
-  addIValue(tensor.requires_grad());
+  pushIValue(tensor.requires_grad());
 
   // backward_hooks
   pushGlobal("collections", "OrderedDict");
@@ -378,9 +381,6 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
 
   // Call torch._utils._rebuild_tensor_v2
   push<OpCode>(OpCode::REDUCE);
-
-  // Store tensor so it can be placed into the binary after the pickle program
-  literal_tensors_.push_back(ivalue.toTensor());
 }
 
 void Pickler::pushClass(PicklerClass cls) {
@@ -394,7 +394,7 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
   push<OpCode>(OpCode::MARK);
-  addIValue(tensor_id);
+  pushIValue(tensor_id);
   push<OpCode>(OpCode::TUPLE);
 
   push<OpCode>(OpCode::REDUCE);
@@ -446,8 +446,8 @@ void Pickler::pushDict(const IValue& ivalue) {
   // Sort the dict for deterministic keys
   auto dict_items = iterationOrder(ivalue.toGenericDict());
   for (const auto& pair : dict_items) {
-    addIValue(pair.first);
-    addIValue(pair.second);
+    pushIValue(pair.first);
+    pushIValue(pair.second);
   }
 
   push<OpCode>(OpCode::SETITEMS);
@@ -474,7 +474,7 @@ void Pickler::pushGenericList(const IValue& ivalue) {
   push<OpCode>(OpCode::MARK);
 
   for (const IValue& item : list) {
-    addIValue(item);
+    pushIValue(item);
   }
 
   push<OpCode>(OpCode::APPENDS);
@@ -486,7 +486,7 @@ void Pickler::pushTuple(const IValue& ivalue) {
   auto tuple = ivalue.toTuple();
 
   for (const IValue& item : tuple->elements()) {
-    addIValue(item);
+    pushIValue(item);
   }
 
   push<OpCode>(OpCode::TUPLE);
@@ -862,15 +862,16 @@ OpCode Unpickler::readOpCode() {
   return static_cast<OpCode>(read<uint8_t>());
 }
 
-std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
-  at::Tensor storage_tensor = tensor;
-  uint64_t record_size = tensor.element_size() * tensor.storage().size();
+WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
+  WriteableTensorData result;
+  result.tensor_ = tensor;
+  result.size_ = tensor.element_size() * tensor.storage().size();
   // TODO HIP support
   if (tensor.storage().device_type() == at::DeviceType::CUDA) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
-    storage_tensor = at::empty({0}, tensor.options())
+    result.tensor_ = at::empty({0}, tensor.options())
                          .set_(
                              tensor.storage(),
                              /* storage_offset = */ 0,
@@ -879,17 +880,11 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
                              /* stride = */ {1})
                          .cpu();
     TORCH_CHECK(
-        storage_tensor.element_size() * storage_tensor.storage().size() ==
-            record_size,
+        result.tensor_.element_size() * result.tensor_.storage().size() ==
+            result.size_,
         "Storage tensor size did not match record size");
   }
-
-  return std::make_pair(storage_tensor, record_size);
-}
-
-uint64_t getStorageKey(const at::Tensor& tensor) {
-  at::StorageImpl* storage_key = tensor.storage().unsafeGetStorageImpl();
-  return reinterpret_cast<intptr_t>(storage_key);
+  return result;
 }
 
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
