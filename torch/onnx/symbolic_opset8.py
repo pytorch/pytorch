@@ -3,7 +3,7 @@ import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset, _try_get_scalar_type
-from torch.onnx.symbolic_opset9 import wrap_logical_op_with_cast_to, _cast_Float
+from torch.onnx.symbolic_opset9 import _cast_Float
 
 import warnings
 

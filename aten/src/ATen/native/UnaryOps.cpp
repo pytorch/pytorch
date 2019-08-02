@@ -56,6 +56,25 @@ Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   return result;
 }
 
+Tensor neg(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::neg_out(result, self);
+}
+
+Tensor& neg_(Tensor& self) {
+  return at::neg_out(self, self);
+}
+
+Tensor& neg_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_internal_overlap=*/true);
+  neg_stub(iter.device_type(), iter);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
+}
+
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
@@ -184,7 +203,6 @@ IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
-IMPLEMENT_UNARY_OP_VEC(neg)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)
