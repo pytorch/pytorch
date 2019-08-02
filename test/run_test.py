@@ -39,7 +39,7 @@ TESTS = [
     'multiprocessing_spawn',
     'nccl',
     'nn',
-    'nn_quantization',
+    'nn_quantized',
     'numba_integration',
     'optim',
     'quantization',
