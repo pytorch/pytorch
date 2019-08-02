@@ -601,7 +601,8 @@ void ScriptModuleSerializer::serialize(
     ss << convert_result;
     AT_ERROR(ss.str());
   }
-  writer_.writeRecord("model.json", output.data(), output.size());
+  writer_.writeRecord("model.json", output.data(), output.size(),
+                      /*compress=*/true);
   writer_.writeEndOfFile();
 }
 
@@ -646,7 +647,8 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
     lib_stream << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     lib_stream << src;
     std::string lib_str = lib_stream.str();
-    writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
+    writer_.writeRecord(filename, lib_str.c_str(), lib_str.size(),
+                        /*compress=*/true);
   }
 }
 
@@ -790,7 +792,8 @@ void ScriptModuleSerializer::writePickleArchive(
   }
   pickler.endTuple();
   pickler.stop();
-  writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size());
+  writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size(),
+                      /*compress=*/true);
 }
 
 void ScriptModuleSerializer::convertModule(
@@ -866,7 +869,8 @@ void ScriptModuleSerializer::convertModule(
     filename << "code/" << module_name.str() << ".py";
     std::string methods_str = methods.str();
     writer_.writeRecord(
-        filename.str(), methods_str.c_str(), methods_str.size());
+        filename.str(), methods_str.c_str(), methods_str.size(),
+        /*compress=*/true);
     record->set_key(filename.str());
 
     // Write out debug records
