@@ -1,13 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-from caffe2.python import core, workspace
-from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+from caffe2.python import core, workspace
+from hypothesis import given
 
 
 class TestListwiseL2rOps(hu.HypothesisTestCase):
@@ -18,7 +15,7 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
             x = np.argsort(v)
             d = [0 for _ in range(n)]
             for i in range(n):
-                d[x[i]] = 1. / np.log2(n - i + 1.)
+                d[x[i]] = 1.0 / np.log2(n - i + 1.0)
             return d
 
         def sigm(x):
@@ -29,16 +26,16 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
 
         dy = np.zeros(n)
         loss = 0
-        if(np.sum(np.abs(r)) < 1e-6):
+        if np.sum(np.abs(r)) < 1e-6:
             return loss, dy
         if use_ndcg_as_loss and (not use_exp_gain):
             g = [r[i] for i in range(n)]
         else:
-            g = [2**r[i] for i in range(n)]
+            g = [2 ** r[i] for i in range(n)]
         d = get_discounts(r)
         idcg = sum([g[i] * d[i] for i in range(n)])
 
-        if (idcg < 1e-5):
+        if idcg < 1e-5:
             idcg = 1e-5
 
         d = get_discounts(y)
@@ -51,11 +48,9 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
                 if i == j:
                     continue
                 lambda_weight = np.abs((g[i] - g[j]) * (d[i] - d[j]))
-                rank_loss = -log_sigm(
-                    y[i] - y[j] if r[i] > r[j] else y[j] - y[i]
-                )
-                rank_dy = (0. if r[i] > r[j] else 1.) - sigm(-y[i] + y[j])
-                if(not use_ndcg_as_loss):
+                rank_loss = -log_sigm(y[i] - y[j] if r[i] > r[j] else y[j] - y[i])
+                rank_dy = (0.0 if r[i] > r[j] else 1.0) - sigm(-y[i] + y[j])
+                if not use_ndcg_as_loss:
                     loss += lambda_weight * rank_loss / idcg
                 dy[i] += lambda_weight * rank_dy / idcg
         return loss, dy
@@ -73,11 +68,14 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
         ref_dy_no_exp = np.empty(0)
         for i in range(m):
             r_loss, r_dy = self.ref_lambda_rank_loss(
-                y[(i) * n:(i + 1) * n], r[(i) * n:(i + 1) * n], False, False)
+                y[(i) * n : (i + 1) * n], r[(i) * n : (i + 1) * n], False, False
+            )
             r_ndcg_loss, _ = self.ref_lambda_rank_loss(
-                y[(i) * n:(i + 1) * n], r[(i) * n:(i + 1) * n], True, True)
+                y[(i) * n : (i + 1) * n], r[(i) * n : (i + 1) * n], True, True
+            )
             r_ndcg_loss_no_exp, r_dy_no_exp = self.ref_lambda_rank_loss(
-                y[(i) * n:(i + 1) * n], r[(i) * n:(i + 1) * n], True, False)
+                y[(i) * n : (i + 1) * n], r[(i) * n : (i + 1) * n], True, False
+            )
             ref_loss = np.append(ref_loss, r_loss)
             ref_dy = np.append(ref_dy, r_dy)
             ref_ndcg_loss = np.append(ref_ndcg_loss, r_ndcg_loss)
@@ -86,61 +84,77 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
 
         dloss = np.random.random(m).astype(np.float32)
 
-        workspace.blobs['y'] = y
-        workspace.blobs['r'] = r
-        workspace.blobs['session_lengths'] = session_lengths
-        workspace.blobs['dloss'] = dloss
+        workspace.blobs["y"] = y
+        workspace.blobs["r"] = r
+        workspace.blobs["session_lengths"] = session_lengths
+        workspace.blobs["dloss"] = dloss
 
         op = core.CreateOperator(
-            'LambdaRankNdcg', ['y', 'r', 'session_lengths'], ['loss', 'dy'],
-            use_ndcg_as_loss=False, use_exp_gain=False)
+            "LambdaRankNdcg",
+            ["y", "r", "session_lengths"],
+            ["loss", "dy"],
+            use_ndcg_as_loss=False,
+            use_exp_gain=False,
+        )
         workspace.RunOperatorOnce(op)
-        loss = workspace.blobs['loss']
-        dy = workspace.blobs['dy']
+        loss = workspace.blobs["loss"]
+        dy = workspace.blobs["dy"]
         np.testing.assert_allclose(loss, ref_loss, rtol=1e-5, atol=1e-6)
         np.testing.assert_allclose(dy, ref_dy, rtol=1e-5, atol=1e-6)
 
         op = core.CreateOperator(
-            'LambdaRankNdcg', ['y', 'r', 'session_lengths'], ['loss', 'dy'],
-            use_ndcg_as_loss=True, use_exp_gain=True)
+            "LambdaRankNdcg",
+            ["y", "r", "session_lengths"],
+            ["loss", "dy"],
+            use_ndcg_as_loss=True,
+            use_exp_gain=True,
+        )
         workspace.RunOperatorOnce(op)
-        loss = workspace.blobs['loss']
-        dy = workspace.blobs['dy']
+        loss = workspace.blobs["loss"]
+        dy = workspace.blobs["dy"]
         np.testing.assert_allclose(loss, ref_ndcg_loss, rtol=1e-5, atol=1e-6)
         np.testing.assert_allclose(dy, ref_dy, rtol=1e-5, atol=1e-6)
 
         op = core.CreateOperator(
-            'LambdaRankNdcgGradient',
-            ['y', 'session_lengths', 'dy', 'dloss'],
-            ['dy_back']
+            "LambdaRankNdcgGradient",
+            ["y", "session_lengths", "dy", "dloss"],
+            ["dy_back"],
         )
         workspace.RunOperatorOnce(op)
-        dy_back = workspace.blobs['dy_back']
+        dy_back = workspace.blobs["dy_back"]
         for i in range(m):
             np.testing.assert_allclose(
-                dy_back[i * n:(i + 1) * n],
-                dloss[i] * ref_dy[i * n:(i + 1) * n],
-                rtol=1e-5, atol=1e-6)
+                dy_back[i * n : (i + 1) * n],
+                dloss[i] * ref_dy[i * n : (i + 1) * n],
+                rtol=1e-5,
+                atol=1e-6,
+            )
 
         op = core.CreateOperator(
-            'LambdaRankNdcg', ['y', 'r', 'session_lengths'], ['loss', 'dy'],
-            use_ndcg_as_loss=True, use_exp_gain=False)
+            "LambdaRankNdcg",
+            ["y", "r", "session_lengths"],
+            ["loss", "dy"],
+            use_ndcg_as_loss=True,
+            use_exp_gain=False,
+        )
         workspace.RunOperatorOnce(op)
-        loss = workspace.blobs['loss']
-        dy = workspace.blobs['dy']
+        loss = workspace.blobs["loss"]
+        dy = workspace.blobs["dy"]
         np.testing.assert_allclose(loss, ref_ndcg_loss_no_exp, rtol=1e-5, atol=1e-6)
         np.testing.assert_allclose(dy, ref_dy_no_exp, rtol=1e-5, atol=1e-6)
 
         op = core.CreateOperator(
-            'LambdaRankNdcgGradient',
-            ['y', 'session_lengths', 'dy', 'dloss'],
-            ['dy_back']
+            "LambdaRankNdcgGradient",
+            ["y", "session_lengths", "dy", "dloss"],
+            ["dy_back"],
         )
 
         workspace.RunOperatorOnce(op)
-        dy_back = workspace.blobs['dy_back']
+        dy_back = workspace.blobs["dy_back"]
         for i in range(m):
             np.testing.assert_allclose(
-                dy_back[i * n:(i + 1) * n],
-                dloss[i] * ref_dy_no_exp[i * n:(i + 1) * n],
-                rtol=1e-5, atol=1e-6)
+                dy_back[i * n : (i + 1) * n],
+                dloss[i] * ref_dy_no_exp[i * n : (i + 1) * n],
+                rtol=1e-5,
+                atol=1e-6,
+            )
