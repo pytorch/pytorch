@@ -122,13 +122,11 @@ class TensorFetcher : public BlobFetcherBase {
     FetchedBlob result;
     CAFFE_ENFORCE_GE(tensor.numel(), 0, "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(tensor.dtype());
-    if (numpy_type == -1) {
-      CAFFE_ENFORCE(
-          numpy_type != -1,
-          "This tensor's data type is not supported: ",
-          tensor.dtype().name(),
-          ".");
-    }
+    CAFFE_ENFORCE(
+        numpy_type != -1,
+        "This tensor's data type is not supported: ",
+        tensor.dtype().name(),
+        ".");
     std::vector<npy_intp> npy_dims;
     for (const auto dim : tensor.sizes()) {
       npy_dims.push_back(dim);
