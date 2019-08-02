@@ -50,7 +50,7 @@ Tensor& addcmul_cpu_out(
   return result;
 }
 
-Tensor addcdiv_cpu(
+Tensor addcdiv(
     const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
@@ -59,7 +59,7 @@ Tensor addcdiv_cpu(
   return at::addcdiv_out(result, self, tensor1, tensor2, value);
 }
 
-Tensor& addcdiv_cpu_(
+Tensor& addcdiv_(
     Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
@@ -67,7 +67,7 @@ Tensor& addcdiv_cpu_(
   return at::addcdiv_out(self, self, tensor1, tensor2, value);
 }
 
-Tensor& addcdiv_cpu_out(
+Tensor& addcdiv_out(
     Tensor& result,
     const Tensor& self,
     const Tensor& tensor1,
