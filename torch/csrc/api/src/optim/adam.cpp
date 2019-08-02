@@ -46,7 +46,7 @@ void Adam::step() {
       max_exp_average_sq = torch::max(max_exp_average_sq, exp_average_sq);
       denom = max_exp_average_sq / bias_correction2;
     } else {
-      denom = exp_average_sq / bias_correction2
+      denom = exp_average_sq / bias_correction2;
     }
 
     const auto step_size =
