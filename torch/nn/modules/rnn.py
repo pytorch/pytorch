@@ -372,11 +372,13 @@ class RNN(RNNBase):
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
 # 1. we want to support nn.LSTM and nn.GRU in TorchScript and TorchScript in
-#    its current state could not support the python Union Type or Any Type.
+#    its current state could not support the python Union Type or Any Type
 # 2. TorchScript static typing does not allow a Function or Callable type in
 #    Dict values, so we have to separately call _VF instead of using _rnn_impls
 # 3. This is temporary only and in the transition state that we want to make it
 #    on time for the release
+#
+# More discussion details in https://github.com/pytorch/pytorch/pull/23266
 #
 # TODO: remove the overriding implementations for LSTM and GRU when TorchScript
 # support expressing these two modules generally.
@@ -560,7 +562,6 @@ class LSTM(RNNBase):
             return self.forward_packed(input, hx)
         else:
             return self.forward_tensor(input, hx)
-
 
 class GRU(RNNBase):
     r"""Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
