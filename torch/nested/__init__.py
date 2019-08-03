@@ -12,13 +12,16 @@ def _nary_gen(out_dtype=None):
         inputs = args[2:]
         out = kwargs.get('out', None)
         # NOTE: We are disabling broadcasting for now. These checks introduce a lot of overhead.
-        for i in range(1, len(inputs)):
-            for j in range(len(inputs[i])):
-                assert inputs[0]._tensors[j].dim() == inputs[i]._tensors[j].dim()
+        # for i in range(1, len(inputs)):
+        #     for j in range(len(inputs[i])):
+        #         assert inputs[0]._tensors[j].dim() == inputs[i]._tensors[j].dim()
         if out is None:
             out_tensors = []
             for i in range(len(inputs[0])):
-                out_tensor = func(*list(map(lambda x: x._tensors[i], inputs)))
+                inp_tensors = []
+                for x in inputs:
+                    inp_tensors.append(x._tensors[i])
+                out_tensor = func(*inp_tensors)
                 if out_dtype is not None:
                     out_tensor = out_tensor.to(out_dtype)
                 out_tensors.append(out_tensor)
@@ -43,9 +46,11 @@ def _nary_gen(out_dtype=None):
 # support for NestedTensor to torch.
 
 def monkey_patch(module):
+    module.is_nested_tensor = nested.is_nested_tensor
     module.nested_tensor = nested.nested_tensor
     module.NestedTensor = nested.NestedTensor
     module.as_nested_tensor = nested.as_nested_tensor
+    module.nested_tensor_from_mask = nested.nested_tensor_from_mask
 
     module, nested.NestedTensor = codegen.add_pointwise_unary_functions(module, nested.NestedTensor, _nary_gen())
     module, nested.NestedTensor = codegen.add_pointwise_binary_functions(module, nested.NestedTensor, _nary_gen())

@@ -112,6 +112,11 @@ def as_nested_tensor(data, dtype=None, device=None):
         ret = ret.to(device)
     return ret
 
+def nested_tensor_from_mask(data, mask):
+    limit = mask.sum(1)
+    tensors = [data[i][:limit[i]] for i in range(len(mask))]
+    return as_nested_tensor(tensors)
+
 def _verify_tensors(tensors):
     for tensor in tensors:
         assert torch.is_tensor(tensor)
@@ -257,9 +262,12 @@ class NestedTensor(object):
         return any(t.any() for t in self._tensors)
 
     # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
-    def sum(self):
+    def sum(self, dim=None):
         # We currently assume len(self._tensors) is always non-zero
-        return torch.stack(tuple(t.sum() for t in self._tensors)).sum()
+        if dim is None:
+            return torch.stack(tuple(t.sum() for t in self._tensors)).sum()
+        else:
+            return torch.as_nested_tensor(tuple(t.sum(dim) for t in self._tensors))
 
     # Tensor ops
     def detach(self):
