@@ -290,9 +290,6 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                     weight = getattr(other, weight_name)
                     bias = getattr(other, bias_name)
 
-                    orig_weights.append(weight_name)
-                    self.register_buffer(weight_name, weight)
-
                     if dtype == torch.int8: 
                         # for each layer, for each direction we need to quantize and pack
                         # weights and pack parameters in this order:
@@ -318,6 +315,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                         packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
                             weight.clone().float())
 
+                        orig_weights.append(weight_name)
+                        self.register_buffer(weight_name, weight)
                         params = [packed_weight, bias]
                         pos_names = ['packed', 'b']
                         ret_name = ['{}_{}_l{}{}'.format(name, ihhh, layer, suffix) for name in pos_names]
@@ -336,7 +335,13 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
 
         self._packed_weights = packed_weights
         self._quantized_weights = quantized_weights
-        self._orig_weights = orig_weights
+        # For int8 quantization, _orig_weights is not needed in the quantization logic, 
+        # however there is a JIT compilation error without it. This is just used to 
+        # workaround that error. 
+        if dtype == torch.int8: 
+            self._orig_weights = self._packed_weights
+        else: 
+            self._orig_weights = orig_weights
 
     @torch.jit.script_method
     def check_input(self, input, batch_sizes):
