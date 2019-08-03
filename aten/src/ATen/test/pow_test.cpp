@@ -212,7 +212,7 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
       const auto act_pow = actual_pow[i].template item<T>();
 
       // An exception: -1.7976931348623157e+308 ^ 1 != -1.7976931348623157e+308 on AVX
-      if (val == double_lowest && pow == 1 && std::isinf(act_pow)) {
+      if (val == double_lowest && pow == 1 && std::isinf(static_cast<double>(act_pow))) {
         i++;
         continue;
       }
