@@ -15,9 +15,9 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
 @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                'Quantization requires FBGEMM. FBGEMM does not play'
-                ' well with UBSAN at the moment, so we skip the test if'
-                ' we are in a UBSAN environment.')
+                 'Quantization requires FBGEMM. FBGEMM does not play'
+                 ' well with UBSAN at the moment, so we skip the test if'
+                 ' we are in a UBSAN environment.')
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -235,9 +235,9 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
 @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                'Quantization requires FBGEMM. FBGEMM does not play'
-                ' well with UBSAN at the moment, so we skip the test if'
-                ' we are in a UBSAN environment.')
+                 'Quantization requires FBGEMM. FBGEMM does not play'
+                 ' well with UBSAN at the moment, so we skip the test if'
+                 ' we are in a UBSAN environment.')
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
