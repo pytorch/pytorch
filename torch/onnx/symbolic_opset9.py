@@ -1408,9 +1408,14 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
 
         extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
         if variant == 'RNN':
+            if bidirectional:
+                activation = [nonlinearity, nonlinearity]
+            else:
+                activation = [nonlinearity]
+
             prev_output, h_out = g.op('RNN', *inputs, outputs=2,
                                       hidden_size_i=hidden_size,
-                                      activations_s=[nonlinearity],
+                                      activations_s=activation,
                                       **extra_kwargs)
         elif variant == 'GRU':
             prev_output, h_out = g.op('GRU', *inputs, outputs=2,
