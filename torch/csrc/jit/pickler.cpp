@@ -222,7 +222,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
 
 void Pickler::pushIValue(const IValue& ivalue) {
   // Check if reference ivalue has been saved before
-  if (ivalue.isPtrType()) {
+  // NOTE: Strings are always memoized by value rather than by pointer.
+  if (ivalue.isPtrType() && !ivalue.isString() && !ivalue.isTuple()) {
     const void* ptr = ivalue.internalToPointer();
     TORCH_CHECK(
         ptr != nullptr,
@@ -238,17 +239,22 @@ void Pickler::pushIValue(const IValue& ivalue) {
     }
   }
   pushIValueImpl(ivalue);
-  if (ivalue.isPtrType()) {
+  if (ivalue.isPtrType() && !ivalue.isString() && !ivalue.isTuple()) {
     memoized_ivalues_.push_back(ivalue);
     memoized_ivalue_map_[ivalue.internalToPointer()] = pushNextBinPut();
   }
 }
 
 void Pickler::pushInt(int64_t n) {
-  if (n >= std::numeric_limits<int8_t>::min() &&
-      n <= std::numeric_limits<int8_t>::max()) {
+  if (n >= std::numeric_limits<uint8_t>::min() &&
+      n <= std::numeric_limits<uint8_t>::max()) {
     push<OpCode>(OpCode::BININT1);
-    push<int8_t>(n);
+    push<uint8_t>(n);
+  } else if (
+      n >= std::numeric_limits<uint16_t>::min() &&
+      n <= std::numeric_limits<uint16_t>::max()) {
+    push<OpCode>(OpCode::BININT2);
+    push<uint16_t>(n);
   } else if (
       n >= std::numeric_limits<int32_t>::min() &&
       n <= std::numeric_limits<int32_t>::max()) {
@@ -507,15 +513,36 @@ void Pickler::pushGenericList(const IValue& ivalue) {
 }
 
 void Pickler::pushTuple(const IValue& ivalue) {
-  // TODO: Small tuple unrolling (e.g. TUPLE3)
-  push<OpCode>(OpCode::MARK);
   auto tuple = ivalue.toTuple();
+  auto tuple_size = tuple->elements().size();
 
-  for (const IValue& item : tuple->elements()) {
-    pushIValue(item);
+  switch (tuple_size) {
+  case 0: {
+    push<OpCode>(OpCode::EMPTY_TUPLE);
+  } break;
+  case 1: {
+    pushIValue(tuple->elements()[0]);
+    push<OpCode>(OpCode::TUPLE1);
+  } break;
+  case 2: {
+    pushIValue(tuple->elements()[0]);
+    pushIValue(tuple->elements()[1]);
+    push<OpCode>(OpCode::TUPLE2);
+  } break;
+  case 3: {
+    pushIValue(tuple->elements()[0]);
+    pushIValue(tuple->elements()[1]);
+    pushIValue(tuple->elements()[2]);
+    push<OpCode>(OpCode::TUPLE3);
+  } break;
+  default: {
+    push<OpCode>(OpCode::MARK);
+    for (const IValue& item : tuple->elements()) {
+      pushIValue(item);
+    }
+    push<OpCode>(OpCode::TUPLE);
+  } break;
   }
-
-  push<OpCode>(OpCode::TUPLE);
 }
 
 IValue Unpickler::parse_ivalue() {
@@ -643,7 +670,11 @@ OpCode Unpickler::readInstruction() {
       stack_.emplace_back(IValue());
     } break;
     case OpCode::BININT1: {
-      int8_t value = read<int8_t>();
+      uint8_t value = read<uint8_t>();
+      stack_.emplace_back(int64_t(value));
+    } break;
+    case OpCode::BININT2: {
+      uint16_t value = read<uint16_t>();
       stack_.emplace_back(int64_t(value));
     } break;
     case OpCode::BININT: {
@@ -674,6 +705,28 @@ OpCode Unpickler::readInstruction() {
       }
       stack_.erase(start_it, stack_.end());
       stack_.emplace_back(tuple);
+    } break;
+    case OpCode::TUPLE1: {
+        auto tuple = c10::ivalue::Tuple::create({stack_.back()});
+        stack_.pop_back();
+        stack_.emplace_back(tuple);
+    } break;
+    case OpCode::TUPLE2: {
+        auto stack_size = stack_.size();
+        auto tuple = c10::ivalue::Tuple::create(
+          {stack_[stack_size-2], stack_[stack_size-1]});
+        stack_.pop_back();
+        stack_.pop_back();
+        stack_.emplace_back(tuple);
+    } break;
+    case OpCode::TUPLE3: {
+        auto stack_size = stack_.size();
+        auto tuple = c10::ivalue::Tuple::create(
+          {stack_[stack_size-3], stack_[stack_size-2], stack_[stack_size-1]});
+        stack_.pop_back();
+        stack_.pop_back();
+        stack_.pop_back();
+        stack_.emplace_back(tuple);
     } break;
     case OpCode::EMPTY_DICT:
       stack_.emplace_back(c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()));
