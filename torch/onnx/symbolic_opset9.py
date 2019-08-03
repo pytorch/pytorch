@@ -65,7 +65,6 @@ def unused(g):
     n.setType(OptionalType.ofTensor())
     return n
 
-
 def _shape_as_tensor(g, input):
     return g.op('Shape', input)
 
@@ -419,14 +418,15 @@ def squeeze(g, self, dim=None):
         # Handle negative dims
         for i, dim in enumerate(dims):
             if dim < 0:
-                if sym_help._is_complete_or_dimensioned_tensor_type(self):
+                rank = self.type().dim()
+                if rank:
                     warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
                                   " might cause the onnx model to be incorrect. " +
                                   "Negative axis is not supported in ONNX. " +
-                                  "Axis is converted to " + str(dim + self.type().dim()) +
+                                  "Axis is converted to " + str(dim + rank) +
                                   " based on input shape at export time. " +
                                   "Passing an tensor of different rank in execution will be incorrect.")
-                    dims[i] += self.type().dim()
+                    dims[i] += rank
                 else:
                     return _unimplemented('squeeze', 'negative axis with unknown input rank')
 
@@ -498,15 +498,17 @@ def softmax(g, input, dim, dtype=None):
     # their semantics are equivalent.
     # So use softmax when dim and axis both equal to ndim - 1
     # otherwise compute softmax using a subgraph with other operators
-    if sym_help._is_complete_or_dimensioned_tensor_type(input):
+    input_dim = input.type().dim()
+    if input_dim:
         if dim < 0:
-            dim = input.type().dim() + dim
-        if input.type().dim() == dim + 1:
+            dim = input_dim + dim
+        if input_dim == dim + 1:
             softmax = g.op('Softmax', input, axis_i=dim)
             if dtype and dtype.node().kind() != 'prim::Constant':
                 parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
                 softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
             return softmax
+
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
     softmax = g.op('Div', exp, sum)
@@ -514,7 +516,6 @@ def softmax(g, input, dim, dtype=None):
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
         softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     return softmax
-
 
 @parse_args('v', 't', 'v')
 def softplus(g, self, beta, threshold):
@@ -977,14 +978,14 @@ def selu(g, input):
 def index_select(g, self, dim, index):
     # In case of a scaler index, index_select returns a tensor with the same rank as the input.
     # To match this bahavior in ONNX, we make index a 1D tensor so that the following gather
-    # also produces a tensor with the same rank as the input. 
+    # also produces a tensor with the same rank as the input.
     index_const = sym_help._maybe_get_scalar(index)
     if not sym_help._is_value(index_const):
         # Index is a constant scalar. Make it a size 1 constant tensor.
         index = g.op("Constant", value_t=torch.LongTensor([index_const]))
     elif sym_help._is_complete_or_dimensioned_tensor_type(index):
         if index.type().dim() == 0:
-            # Index is a scalar. Reshape it to a size 1 tensor. 
+            # Index is a scalar. Reshape it to a size 1 tensor.
             index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -1231,14 +1232,15 @@ def alias(g, self):
 def unsqueeze(g, self, dim):
     # Handle negative dim
     if dim < 0:
-        if sym_help._is_complete_or_dimensioned_tensor_type(self):
+        rank = self.type().dim()
+        if rank:
             warnings.warn("ONNX export unsqueeze with negative axis " + str(dim) +
                           " might cause the onnx model to be incorrect. " +
                           "Negative axis is not supported in ONNX. " +
-                          "Axis is converted to " + str(dim + self.type().dim() + 1) +
+                          "Axis is converted to " + str(dim + rank + 1) +
                           " based on input shape at export time. " +
                           "Passing an tensor of different rank in execution will be incorrect.")
-            dim = dim + self.type().dim() + 1
+            dim = dim + rank + 1
         else:
             return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
 
@@ -1406,9 +1408,14 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
 
         extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
         if variant == 'RNN':
+            if bidirectional:
+                activation = [nonlinearity, nonlinearity]
+            else:
+                activation = [nonlinearity]
+
             prev_output, h_out = g.op('RNN', *inputs, outputs=2,
                                       hidden_size_i=hidden_size,
-                                      activations_s=[nonlinearity],
+                                      activations_s=activation,
                                       **extra_kwargs)
         elif variant == 'GRU':
             prev_output, h_out = g.op('GRU', *inputs, outputs=2,
@@ -1835,3 +1842,16 @@ def index(g, self, index):
                     axis_i=0)
 
             return g.op("Reshape", self, final_shape)
+
+
+@parse_args('v', 'i', 'b', 'v')
+def multinomial(g, input, num_samples, replacement=False, generator=None):
+    if generator is not None and not generator.node().mustBeNone():
+        _unimplemented("Multinomial", "generator is not supported for multinomial")
+    if not replacement and num_samples > 1:
+        _unimplemented("Multinomial", "replacement=False when num_samples > 1 is not supported for multinomial")
+
+    log_input = log(g, input)
+    return g.op("Multinomial", log_input,
+                dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
+                sample_size_i=num_samples)
