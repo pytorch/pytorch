@@ -233,6 +233,7 @@ DEFAULT_MODULE_MAPPING = {
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,
+    nnq.WrapperModule: nnq.QuantizedWrapperModule
 }
 
 # Map for swapping float module to qat modules
