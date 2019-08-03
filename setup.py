@@ -372,6 +372,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
+            global install_requires
             install_requires += ['numpy']
         else:
             report('-- NumPy not found')
