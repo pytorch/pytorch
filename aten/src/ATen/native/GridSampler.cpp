@@ -545,7 +545,8 @@ grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
 }
 
 Tensor grid_sampler(const Tensor& input, const Tensor& grid,
-                    int64_t interpolation_mode, int64_t padding_mode) {
+                    int64_t interpolation_mode, int64_t padding_mode,
+                    bool align_corners) {
   TORCH_CHECK(
     input.defined() && grid.defined(),
     "grid_sampler(): expected input and grid to not be undefined, but input "
@@ -588,14 +589,15 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
       at::native::cudnn_is_acceptable(grid) &&
       static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bilinear &&
       static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Zeros &&
+      align_corners &&
       input.dim() == 4 &&
       input.size(1) <= 1024) {
     return cudnn_grid_sampler(input, grid);
   }
   if (input.dim() == 4) {
-    return at::grid_sampler_2d(input, grid, interpolation_mode, padding_mode);
+    return at::grid_sampler_2d(input, grid, interpolation_mode, padding_mode, align_corners);
   } else {
-    return at::grid_sampler_3d(input, grid, interpolation_mode, padding_mode);
+    return at::grid_sampler_3d(input, grid, interpolation_mode, padding_mode, align_corners);
   }
 }
 
