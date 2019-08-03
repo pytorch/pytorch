@@ -13,6 +13,7 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
+@unittest.skipIf(not torch.fbgemm_is_cpu_supported(), 'Needs FBGEMM')
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
