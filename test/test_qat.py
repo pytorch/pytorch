@@ -86,8 +86,7 @@ class IntrinsicQATModuleTest(TestCase):
             eps,
             momentum,
             freeze_bn,
-            default_qat_qconfig.activation,
-            default_qat_qconfig.weight
+            default_qat_qconfig
         ).to(dtype=torch.float).disable_fake_quant()
 
         # align inputs and internal parameters
