@@ -1687,6 +1687,7 @@
 - func: reshape(Tensor self, int[] shape) -> Tensor
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   device_guard: False

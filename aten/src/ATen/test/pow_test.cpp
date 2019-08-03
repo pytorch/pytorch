@@ -65,7 +65,7 @@ const std::vector<float> floats {
   -float_min,
   0.0,
   float_min,
-  1.0/3.0f, 1.0/2.0f, 1.0f, 2.0f, 3.0f,
+  1.0f/3.0f, 1.0f/2.0f, 1.0f, 2.0f, 3.0f,
   float_max,
 };
 const std::vector<double> doubles {
