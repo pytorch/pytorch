@@ -121,11 +121,11 @@ void pow_scalar_tensor_kernel(TensorIterator& iter, Scalar self_scalar) {
       );
     });
   } else {
-    const auto self = self_scalar.to<long>();
+    const auto self = self_scalar.to<int64_t>();
     AT_DISPATCH_ALL_TYPES(iter.input(0).scalar_type(), "pow", [&]() {
       cpu_kernel(iter,
-        [=](scalar_t exp) -> long {
-          return (long)std::pow((long double)self, (long double)exp);
+        [=](scalar_t exp) -> int64_t {
+          return (int64_t)std::pow((long double)self, (long double)exp);
         }
       );
     });

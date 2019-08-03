@@ -5856,6 +5856,42 @@ Example::
             [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
 """.format(**factory_like_common_args))
 
+add_docstr(torch.empty_strided,
+           r"""
+empty_strided(size, stride, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
+
+Returns a tensor filled with uninitialized data. The shape and strides of the tensor is
+defined by the variable argument :attr:`size` and :attr:`stride` respectively.
+``torch.empty_strided(size, stride)`` is equivalent to
+``torch.empty(size).as_strided(size, stride)``.
+
+.. warning::
+    More than one element of the created tensor may refer to a single memory
+    location. As a result, in-place operations (especially ones that are
+    vectorized) may result in incorrect behavior. If you need to write to
+    the tensors, please clone them first.
+
+Args:
+    size (tuple of ints): the shape of the output tensor
+    stride (tuple of ints): the strides of the output tensor
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+    {pin_memory}
+
+Example::
+
+    >>> a = torch.empty_strided((2, 3), (1, 2))
+    >>> a
+    tensor([[8.9683e-44, 4.4842e-44, 5.1239e+07],
+            [0.0000e+00, 0.0000e+00, 3.0705e-41]])
+    >>> a.stride()
+    (1, 2)
+    >>> a.size()
+    torch.Size([2, 3])
+""".format(**factory_common_args))
+
 add_docstr(torch.full,
            r"""
 full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
