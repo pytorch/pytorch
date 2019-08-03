@@ -6,7 +6,7 @@ import torch.nn.quantized as nnq
 from torch.quantization import \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
 
-from common_utils import run_tests
+from common_utils import run_tests, TEST_WITH_UBSAN
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
