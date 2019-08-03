@@ -9,14 +9,17 @@ import torch
 
 import numpy as np
 import io
+import itertools
 
+from torch.nn.utils import rnn as rnn_utils
+from model_defs.lstm_flattening_result import LstmFlatteningResult
+from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
-
-
+from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
 
 
-def run_model_test(self, model, train, batch_size=2, state_dict=None,
+def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                    example_outputs=None, do_constant_folding=True):
     model.eval()
@@ -35,7 +38,8 @@ def run_model_test(self, model, train, batch_size=2, state_dict=None,
         f = io.BytesIO()
         torch.onnx.export(model, input, f,
                           opset_version=self.opset_version,
-                          example_outputs=output)
+                          example_outputs=output,
+                          do_constant_folding=do_constant_folding)
         input, _ = torch.jit._flatten(input)
         output, _ = torch.jit._flatten(output)
 
@@ -65,9 +69,10 @@ class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7):
-        run_model_test(self, model, False, None,
-                       input=input, rtol=rtol, atol=atol)
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True, batch_size=2, use_gpu=True):
+        run_model_test(self, model, batch_size=batch_size,
+                       input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
+                       do_constant_folding=do_constant_folding)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
@@ -96,6 +101,18 @@ class TestONNXRuntime(unittest.TestCase):
     def test_word_language_model_GRU(self):
         self.run_word_language_model("GRU")
 
+    def test_index_1d(self):
+        self._test_index_generic(lambda input: input[0])
+
+    def test_index_2d_1dimslice(self):
+        self._test_index_generic(lambda input: input[0:1, :])
+
+    def test_index_2d_sliceint(self):
+        self._test_index_generic(lambda input: input[1, :])
+
+    def test_index_2d_neg_slice(self):
+        self._test_index_generic(lambda input: input[0:-1, :])
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_trace(self):
         class FullModel(torch.nn.Module):
@@ -121,6 +138,32 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_adaptive(self):
+        model = torch.nn.AdaptiveMaxPool1d((5), return_indices=False)
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_test(model, x)
+
+    def test_maxpool_2d(self):
+        model = torch.nn.MaxPool2d(5, padding=(1, 2))
+        x = torch.randn(1, 20, 16, 50, requires_grad=True)
+        self.run_test(model, x)
+
+    def test_maxpool_1d_ceil(self):
+        model = torch.nn.MaxPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50)
+        self.run_test(model, x)
+
+    def test_maxpool_2d_ceil(self):
+        model = torch.nn.MaxPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32)
+        self.run_test(model, x)
+
+    def test_maxpool_3d_ceil(self):
+        model = torch.nn.MaxPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_with_indices(self):
         model = torch.nn.MaxPool1d(2, stride=1, return_indices=True)
         x = torch.randn(20, 16, 50)
@@ -137,6 +180,21 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    def test_avgpool_1d_ceil(self):
+        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(1, 1, 7)
+        self.run_test(model, x)
+
+    def test_avgpool_2d_ceil(self):
+        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32)
+        self.run_test(model, x)
+
+    def test_avgpool_3d_ceil(self):
+        model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31)
+        self.run_test(model, x)
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -145,14 +203,61 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3)
         self.run_test(MyModule(), x)
 
-    def test_slice_script(self):
+    def test_slice_neg(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[-1:]
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(NegSlice(), x)
+
+    def test_slice_neg_large(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -3]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_test(NegSlice(), x)
+
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
+    def test_slice_neg_large_negone(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -1]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_test(NegSlice(), x)
+
+    def test_slice_dynamic(self):
+        class DynamicSliceExportMod(torch.nn.Module):
+            def forward(self, x):
+                results = []
+                for i in range(4):
+                    results.append(x[:x.size(0) - i, i:x.size(2), i:3])
+                return tuple(results)
+
+        x = torch.rand(5, 5, 5)
+        self.run_test(DynamicSliceExportMod(), x)
+
+    def test_slice_dynamic_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                return x[1:x.size(0)] 
+                return x[1:x.size(0)]
 
         x = torch.rand(1, 2)
         self.run_test(DynamicSliceModel(), x)
+
+    def test_slice_dynamic_to_end(self):
+        class DynamicSliceExportMod(torch.nn.Module):
+            def forward(self, x):
+                results = []
+                for i in range(4):
+                    results.append(x[:, i:, x.size(2) - 5])
+                return tuple(results)
+
+        x = torch.rand(5, 5, 5)
+        self.run_test(DynamicSliceExportMod(), x)
 
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
@@ -201,7 +306,20 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(10)
+    # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_interpolate_upsample(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                # work around for now: turn the dynamic sizes into constant
+                size = [int(i) for i in size]
+                return torch.nn.functional.interpolate(x, mode="nearest", size=size)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_test(MyModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_interpolate_downsample(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
@@ -209,6 +327,25 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
+    @skipIfUnsupportedOpsetVersion([7, 8])
+    def test_interpolate_upsample_dynamic_sizes(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                return torch.nn.functional.interpolate(x, mode="nearest", size=size)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_test(MyModel(), x)
+
+    def test_narrow(self):
+        class NarrowModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.narrow(input, 0, 0, 2)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.run_test(NarrowModel(), x)
+
+    # TODO: enable for opset 10 when ONNXRuntime version will be updated
     def test_index_select_constant_scaler_index(self):
         class IndexSelectScalerIndexModel(torch.nn.Module):
             def forward(self, x):
@@ -232,7 +369,7 @@ class TestONNXRuntime(unittest.TestCase):
         base = 1
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
 
-    # TODO: enable for opset 10 when ONNXRuntime version will be updated 
+    # TODO: enable for opset 10 when ONNXRuntime version will be updated
     @skipIfUnsupportedOpsetVersion([10])
     def test_topk(self):
         class MyModule(torch.nn.Module):
@@ -281,16 +418,57 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(8)
-    def test_adaptive_max_pool(self):
-        model = torch.nn.AdaptiveMaxPool1d((5), return_indices=False)
-        x = torch.randn(20, 16, 50, requires_grad=True)
-        self.run_test(model, x)
+    def test_lstm_constant_folding(self):
+        class LstmNet(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(LstmNet, self).__init__()
+                self.lstm = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional)
 
-    def test_maxpool_2d(self):
-        model = torch.nn.MaxPool2d(5, padding=(1, 2))
-        x = torch.randn(1, 20, 16, 50, requires_grad=True)
-        self.run_test(model, x)
+            def forward(self, input, initial_state):
+                return self.lstm(input, initial_state)
+
+        def get_LstmNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                         seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = LstmNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            c0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            return model, (input, (h0, c0))
+
+        batch_size1 = 3
+        model1, input1 = get_LstmNet_model_and_inputs(7, 3, 2, batch_size1, 5, True)
+        self.run_test(model1, input1, do_constant_folding=True)
+
+        batch_size2 = 4
+        model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
+        self.run_test(model2, input2, do_constant_folding=True)
+
+    def test_gru_constant_folding(self):
+        class GruNet(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(GruNet, self).__init__()
+                self.mygru = torch.nn.GRU(input_size, hidden_size, num_layers, bidirectional=bidirectional)
+
+            def forward(self, input, initial_state):
+                out = self.mygru(input, initial_state)
+                return out
+
+        def get_GruNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                        seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = GruNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            return model, (input, h0)
+
+        batch_size1 = 3
+        model1, input1 = get_GruNet_model_and_inputs(7, 3, 2, batch_size1, 5, True)
+        self.run_test(model1, input1, do_constant_folding=True)
+
+        batch_size2 = 4
+        model2, input2 = get_GruNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
+        self.run_test(model2, input2, do_constant_folding=True)
 
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_max_tensors(self):
@@ -511,6 +689,214 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    def _dispatch_rnn_test(self, name, *args, **kwargs):
+        if name == 'elman':
+            self._elman_rnn_test(*args, **kwargs)
+        if name == 'lstm':
+            self._lstm_test(*args, **kwargs)
+        if name == 'gru':
+            self._gru_test(*args, **kwargs)
+
+    def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
+                        initial_state, packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
+        model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
+                             bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
+
+        if packed_sequence == 1:
+            model = RnnModelWithPackedSequence(model, False)
+        if packed_sequence == 2:
+            model = RnnModelWithPackedSequence(model, True)
+
+        def make_input(batch_size):
+            seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
+            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
+            inputs = [inputs]
+
+            directions = 2 if bidirectional else 1
+
+            if initial_state:
+                h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
+                inputs.append(h0)
+            if packed_sequence != 0:
+                inputs.append(torch.IntTensor(seq_lengths))
+            if len(inputs) == 1:
+                input = inputs[0]
+            else:
+                input = tuple(inputs)
+            return input
+
+        input = make_input(RNN_BATCH_SIZE)
+        self.run_test(model, input, batch_size=RNN_BATCH_SIZE, atol=1e-7)
+
+        # test that the model still runs with a different batch size
+        other_input = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
+
+    def _lstm_test(self, layers, bidirectional, initial_state,
+                   packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
+        model = LstmFlatteningResult(
+            RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
+            bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
+        if packed_sequence == 1:
+            model = RnnModelWithPackedSequence(model, False)
+        if packed_sequence == 2:
+            model = RnnModelWithPackedSequence(model, True)
+
+        def make_input(batch_size):
+            seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
+            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
+            inputs = [inputs]
+
+            directions = 2 if bidirectional else 1
+
+            if initial_state:
+                h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
+                c0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
+                inputs.append((h0, c0))
+            if packed_sequence != 0:
+                inputs.append(torch.IntTensor(seq_lengths))
+            if len(inputs) == 1:
+                input = inputs[0]
+            else:
+                input = tuple(inputs)
+            return input
+
+        input = make_input(RNN_BATCH_SIZE)
+        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
+
+        # test that the model still runs with a different batch size
+        other_input = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
+
+    def _gru_test(self, layers, bidirectional, initial_state,
+                  packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
+        model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, bidirectional=bidirectional, dropout=dropout,
+                             batch_first=batch_first)
+        if packed_sequence == 1:
+            model = RnnModelWithPackedSequence(model, False)
+        if packed_sequence == 2:
+            model = RnnModelWithPackedSequence(model, True)
+
+        def make_input(batch_size):
+            seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
+            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
+            inputs = [inputs]
+
+            directions = 2 if bidirectional else 1
+
+            if initial_state:
+                h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
+                inputs.append(h0)
+            if packed_sequence != 0:
+                inputs.append(torch.IntTensor(seq_lengths))
+            if len(inputs) == 1:
+                input = inputs[0]
+            else:
+                input = tuple(inputs)
+            return input
+
+        input = make_input(RNN_BATCH_SIZE)
+        self.run_test(model, input, batch_size=RNN_BATCH_SIZE,)
+
+        # test that the model still runs with a different batch size
+        other_input = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
+
+
+def make_test(name, base, layer, bidirectional, initial_state,
+              variable_length, dropout,
+              **extra_kwargs):
+    test_name = str('_'.join([
+        'test', name, layer[1],
+        bidirectional[1], initial_state[1],
+        variable_length[1], dropout[1]
+    ]))
+
+    # Cannot export with older opsets because of 'ConstantFill' op
+    # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def f(self):
+        self._dispatch_rnn_test(
+            base,
+            layers=layer[0],
+            bidirectional=bidirectional[0],
+            initial_state=initial_state[0],
+            packed_sequence=variable_length[0],
+            dropout=dropout[0],
+            **extra_kwargs)
+
+    f.__name__ = test_name
+    setattr(TestONNXRuntime, f.__name__, f)
+
+
+def setup_rnn_tests():
+    layers_opts = [
+        (1, 'unilayer'),
+        (3, 'trilayer')
+    ]
+    bidirectional_opts = [
+        (False, 'forward'),
+        (True, 'bidirectional')
+    ]
+    initial_state_opts = [
+        (True, 'with_initial_state'),
+        (False, 'no_initial_state')
+    ]
+    variable_length_opts = [
+        (0, 'without_sequence_lengths'),
+        (1, 'with_variable_length_sequences'),
+        (2, 'with_batch_first_sequence_lengths')
+    ]
+    dropout_opts = [
+        (0.2, 'with_dropout'),
+        (0.0, 'without_dropout')
+    ]
+    test_count = 0
+    for (layer, bidirectional, initial_state, variable_length, dropout) in \
+        itertools.product(
+            layers_opts,
+            bidirectional_opts,
+            initial_state_opts,
+            variable_length_opts,
+            dropout_opts,
+    ):
+
+        for base, name, extra_kwargs in (
+                ('elman', 'elman_relu', {'nonlinearity': u'relu'}),
+                ('elman', 'elman_tanh', {'nonlinearity': u'tanh'}),
+                ('lstm', 'lstm', {}),
+                ('gru', 'gru', {})
+        ):
+            # This is a hack to skip elman_rnn bidirectional tests for now
+            # TODO: Revert this once elman_rnn bidirectional issue is fixed
+            if base == 'elman' and bidirectional[1] == 'bidirectional':
+                continue
+            make_test(name, base, layer, bidirectional, initial_state,
+                      variable_length, dropout,
+                      **extra_kwargs)
+            test_count += 1
+
+    # sanity check that a representative example does exist
+    TestONNXRuntime.test_gru_trilayer_forward_with_initial_state_without_sequence_lengths_with_dropout
+
+    # make sure no one accidentally disables all the tests without
+    # noticing
+    # assert test_count == 192, test_count
+    # TODO: Revert this once elman_rnn bidirectional issue is fixed
+    if test_count != 144:
+        raise ValueError('Expected 144 tests but found {}'.format(test_count))
+
+
+setup_rnn_tests()
 
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
