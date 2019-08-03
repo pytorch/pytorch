@@ -231,6 +231,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
+@unittest.skipIf(not torch.fbgemm_is_cpu_supported(), 'Needs FBGEMM')
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
