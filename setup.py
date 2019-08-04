@@ -349,7 +349,7 @@ def build_deps():
 # the list of runtime dependencies required by this built package
 install_requires = []
 
-if sys.version_info <= (2,7):
+if sys.version_info <= (2, 7):
     install_requires += ['future']
 
 missing_pydep = '''
