@@ -258,21 +258,7 @@ Tensor fbgemm_pack_quantized_matrix(
       "fbgemm_pack_quantized_matrix(weight, K, N) will be deprecated soon."
       "Please use fbgemm_pack_quantized_matrix(weight) instead.");
 
-  // We make a strong guarantee that models using these operators will have the
-  // same numerics across different machines. Therefore, we do not provide a
-  // fallback path and rather fail loudly if we cannot run FBGEMM.
-  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
-  auto weight_contig = weight.contiguous();
-  auto contiguous_ptr = weight_contig.data<int8_t>();
-  auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
-      /*trans=*/fbgemm::matrix_op_t::Transpose,
-      /*nRow=*/K,
-      /*nCol=*/N,
-      /*smat=*/contiguous_ptr,
-      /*ld=*/K,
-      /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
-      /*groups=*/1);
-  return cpp_custom_type_hack::create(std::move(ptr), weight.options());
+  return at::native::fbgemm_pack_quantized_matrix(weight);
 }
 
 float raw_uint16_to_fp16(unsigned short value) {
