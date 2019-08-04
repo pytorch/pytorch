@@ -29,6 +29,14 @@ NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
 class TestFakeQuantizePerTensorAffine(unittest.TestCase):
+    # This ensures that the CUDA subsytem is intialized by the time we run
+    # any test case. Otherwise, we can spend significant time blocked waiting
+    # for device initialization, which will cause Hypothesis to deem the test
+    # to miss the deadline.
+    def setUpClass():
+        if torch.cuda.is_available():
+            torch.rand([1], dtype=torch.float, device='cuda')
+
     def to_tensor(self, X, device):
         return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
 
