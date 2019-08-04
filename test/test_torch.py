@@ -2489,6 +2489,48 @@ class _TestTorchMixin(object):
             self.assertEqual(expected, actual.numpy())
             self.assertEqual(expected, actual2.numpy())
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_int_scalar_pow_non_neg_ints_tensor(self):
+        ints = [torch.iinfo(torch.int).min,
+                -3, -2, -1, 0, 1, 2, 3,
+                torch.iinfo(torch.int).max]
+        neg_ints = [torch.iinfo(torch.int).min, -3, -2, -1]
+
+        tensor = torch.tensor(ints, dtype=torch.int)
+        nparr = np.array(ints, dtype=np.int32)
+        out = torch.empty_like(tensor)
+        for base in neg_ints:
+            self.assertRaisesRegex(
+                ValueError,
+                "Integers to negative integer powers are not allowed.",
+                lambda: np.power(base, nparr))
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Integers to negative integer powers are not allowed.",
+                lambda: torch.pow(base, tensor))
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Integers to negative integer powers are not allowed.",
+                lambda: torch.pow(base, tensor, out=out))
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_int_scalar_pow_non_neg_ints_tensor(self):
+        ints = [-3, -2, -1, 0, 1, 2, 3]
+        non_neg_ints = [0, 1, 2, 3]
+
+        tensor = torch.tensor(non_neg_ints, dtype=torch.int)
+        nparr = np.array(non_neg_ints, dtype=np.int32)
+        out = torch.empty_like(tensor)
+        for base in ints:
+            expected = np.power(base, nparr)
+
+            actual = torch.pow(base, tensor)
+            self.assertEqual(expected, actual.numpy())
+
+            actual2 = torch.pow(base, tensor, out=actual)
+            self.assertEqual(expected, actual.numpy())
+            self.assertEqual(expected, actual2.numpy())
+
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):

@@ -79,25 +79,17 @@ const std::vector<double> doubles {
   double_max,
 };
 
-template <class T, typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+template <class T,
+  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (std::isnan(act) || std::isnan(exp)) {
-    return;
-  }
-  if (val != 0 && act == 0) {
-    return;
-  }
-  if (val != 0 && exp == 0) {
-    return;
-  }
-  const auto min = std::numeric_limits<T>::min();
-  if (exp == min && val != min) {
     return;
   }
   ASSERT_FLOAT_EQ(act, exp);
 }
 
-template <class T, typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
+template <class T,
+  typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (val != 0 && act == 0) {
     return;
@@ -118,9 +110,6 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
 
   const auto tensor = torch::tensor(vals);
 
-  // typedef std::numeric_limits< double > dbl;
-  // std::cout.precision(dbl::max_digits10);
-
   for (const auto pow : pows) {
     auto actual_pow = tensor.pow(pow);
 
@@ -134,46 +123,19 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
 
     int i = 0;
     for (const auto val : vals) {
-      const auto exp = static_cast<T>(std::pow(static_cast<long double>(val), static_cast<double>(pow)));
+      const auto exp = static_cast<T>(
+        std::pow(static_cast<long double>(val), static_cast<double>(pow)));
 
       const auto act_pow = actual_pow[i].template item<T>();
-      // if ((!std::isnan(act_pow) || !std::isnan(exp)) && act_pow != exp) {
-      //   std::cout << val << " pow " << pow << " = exp " << exp << " act " << act_pow << std::endl;
-      // }
-      // if (!(std::isnan(act_pow) && std::isnan(exp)) &&
-      //     !(act_pow == 0 && val != 0) &&
-      //     !(exp == int_min && val != int_min) &&
-      //     !(exp == long_min && val != long_min) &&
-      //     !(val != 0 && exp == 0)) {
-      //   ASSERT_FLOAT_EQ(act_pow, exp);
-      // }
       assert_eq(val, act_pow, exp);
 
       const auto act_pow_ = actual_pow_[i].template item<T>();
-      // if ((!std::isnan(act_pow_) || !std::isnan(exp)) && act_pow_ != exp) {
-      //   std::cout << val << " pow_ " << pow << " = exp " << exp << " act " << act_pow_ << std::endl;
-      // }
-      // if (!(std::isnan(act_pow_) && std::isnan(exp)) && !(act_pow_ == 0 && val != 0) && !(exp == int_min && val != int_min)) {
-      //   ASSERT_FLOAT_EQ(act_pow_, exp);
-      // }
       assert_eq(val, act_pow_, exp);
 
       const auto act_pow_out = actual_pow_out[i].template item<T>();
-      // if ((!std::isnan(act_pow_out) || !std::isnan(exp)) && act_pow_out != exp) {
-      //   std::cout << val << " pow_out " << pow << " = exp " << exp << " act " << act_pow_out << std::endl;
-      // }
-      // if (!(std::isnan(act_pow_out) && std::isnan(exp)) && !(act_pow_out == 0 && val != 0) && !(exp == int_min && val != int_min)) {
-      //   ASSERT_FLOAT_EQ(act_pow_out, exp);
-      // }
       assert_eq(val, act_pow_out, exp);
 
       const auto act_torch_pow = actual_torch_pow[i].template item<T>();
-      // if ((!std::isnan(act_torch_pow) || !std::isnan(exp)) && act_torch_pow != exp) {
-      //   std::cout << val << " pow_out " << pow << " = exp " << exp << " act " << act_torch_pow << std::endl;
-      // }
-      // if (!(std::isnan(act_torch_pow) && std::isnan(exp)) && !(act_torch_pow == 0 && val != 0) && !(exp == int_min && val != int_min)) {
-      //   ASSERT_FLOAT_EQ(act_torch_pow, exp);
-      // }
       assert_eq(val, act_torch_pow, exp);
 
       i++;
@@ -187,21 +149,24 @@ void scalar_pow_tensor(const Vals vals, const Pows pows) {
   const auto pow_tensor = torch::tensor(pows);
 
   for (const auto val : vals) {
-    auto actual_pow = torch::pow(val, pow_tensor);
+    const auto actual_pow = torch::pow(val, pow_tensor);
+    auto actual_pow_out1 = torch::empty_like(pow_tensor);
+    const auto actual_pow_out2 =
+      torch::pow_out(actual_pow_out1, val, pow_tensor);
 
     int i = 0;
     for (const auto pow : pows) {
-      const auto exp = static_cast<T>(std::pow(static_cast<long double>(val), pow));
+      const auto exp = static_cast<T>(
+        std::pow(static_cast<long double>(val), pow));
 
       const auto act_pow = actual_pow[i].template item<T>();
-
-      // if ((!std::isnan(act_pow) || !std::isnan(exp)) && act_pow != exp) {
-      //   std::cout << val << " pow " << pow << " = exp " << exp << " act " << act_pow << std::endl;
-      // }
-      // if (!std::isnan(act_pow) || !std::isnan(exp)) {
-      //   ASSERT_EQ(act_pow, exp);
-      // }
       assert_eq<T>(val, act_pow, exp);
+
+      const auto act_pow_out1 = actual_pow_out1[i].template item<T>();
+      assert_eq<T>(val, act_pow_out1, exp);
+
+      const auto act_pow_out2 = actual_pow_out2[i].template item<T>();
+      assert_eq<T>(val, act_pow_out2, exp);
 
       i++;
     }
@@ -219,7 +184,15 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
   for (size_t shift = 0; shift < pows.size(); shift++) {
     const auto pows_tensor = torch::tensor(pows);
 
-    auto actual_pow = vals_tensor.pow(pows_tensor);
+    const auto actual_pow = vals_tensor.pow(pows_tensor);
+
+    auto actual_pow_ = vals_tensor.clone();
+    actual_pow_.pow_(pows_tensor);
+
+    auto actual_pow_out = torch::empty_like(vals_tensor);
+    torch::pow_out(actual_pow_out, vals_tensor, pows_tensor);
+
+    auto actual_torch_pow = torch::pow(vals_tensor, pows_tensor);
 
     int i = 0;
     for (const auto val : vals) {
@@ -227,19 +200,16 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
       const auto exp = static_cast<T>(std::pow(val, pow));
 
       const auto act_pow = actual_pow[i].template item<T>();
-
-      // An exception: -1.7976931348623157e+308 ^ 1 != -1.7976931348623157e+308 on AVX
-      if (val == double_lowest && pow == 1) {
-        i++;
-        continue;
-      }
-      // if ((!std::isnan(act_pow) || !std::isnan(exp)) && act_pow != exp) {
-      //   std::cout << val << " pow " << pow << " = exp " << exp << " act " << act_pow << std::endl;
-      // }
-      // if (!std::isnan(act_pow) || !std::isnan(exp)) {
-      //   ASSERT_EQ(act_pow, exp);
-      // }
       assert_eq(val, act_pow, exp);
+
+      const auto act_pow_ = actual_pow_[i].template item<T>();
+      assert_eq(val, act_pow_, exp);
+
+      const auto act_pow_out = actual_pow_out[i].template item<T>();
+      assert_eq(val, act_pow_out, exp);
+
+      const auto act_torch_pow = actual_torch_pow[i].template item<T>();
+      assert_eq(val, act_torch_pow, exp);
 
       i++;
     }
