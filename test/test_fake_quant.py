@@ -33,6 +33,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
     # any test case. Otherwise, we can spend significant time blocked waiting
     # for device initialization, which will cause Hypothesis to deem the test
     # to miss the deadline.
+    @staticmethod
     def setUpClass():
         if torch.cuda.is_available():
             torch.rand([1], dtype=torch.float, device='cuda')
