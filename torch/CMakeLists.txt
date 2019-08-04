@@ -244,7 +244,7 @@ if (USE_NCCL)
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
-# of type stub files to be omitted. 
+# of type stub files to be omitted.
 # For comptability with older CMake versions, we omit it for now, but leave it as a comment in case comptability with the older
 # CMake versions is eventually dropped.
 # set(Modules
