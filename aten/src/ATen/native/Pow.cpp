@@ -36,12 +36,6 @@ Tensor& pow_out(Tensor& result, Scalar self, const Tensor& exp) {
   if (self.toDouble() == 1.0) {
     result.copy_(ones(exp.sizes(), exp.options()));
   } else {
-    // auto iter = TensorIterator();
-    // iter.add_output(result);
-    // iter.add_input(exp);
-    // iter.dont_compute_common_dtype();
-    // iter.build();
-    // pow_scalar_tensor_stub(iter.device_type(), iter, self);
     auto iter = TensorIterator::unary_op(result, exp);
     pow_scalar_tensor_stub(iter.device_type(), iter, self);
   }
@@ -67,8 +61,6 @@ Tensor pow(const Tensor& self, Scalar exp) {
 }
 
 Tensor pow(Scalar self, const Tensor& exp) {
-  // Tensor result = at::empty_like(exp,
-  //   self.isFloatingPoint() ? ScalarType::Double : ScalarType::Long);
   Tensor result = at::empty_like(exp);
   return native::pow_out(result, self, exp);
 }

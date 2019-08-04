@@ -113,29 +113,21 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
 }
 
 void pow_scalar_tensor_kernel(TensorIterator& iter, Scalar self_scalar) {
-  // if (self_scalar.isFloatingPoint()) {
-  //   const auto self = self_scalar.to<double>();
-  //   AT_DISPATCH_ALL_TYPES(iter.input(0).scalar_type(), "pow", [&]() {
-  //     cpu_kernel(iter,
-  //       [=](scalar_t exp) -> double { return std::pow((long double)self, exp); }
-  //     );
-  //   });
-  // } else {
-  //   const auto self = self_scalar.to<int64_t>();
-  //   AT_DISPATCH_ALL_TYPES(iter.input(0).scalar_type(), "pow", [&]() {
-  //     cpu_kernel(iter,
-  //       [=](scalar_t exp) -> int64_t {
-  //         return (int64_t)std::pow((long double)self, (long double)exp);
-  //       }
-  //     );
-  //   });
-  // }
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
-    const auto self = self_scalar.to<scalar_t>();
-    cpu_kernel(iter,
-      [=](scalar_t exp) -> scalar_t { return std::pow((long double)self, exp); }
-    );
-  });
+  if (self_scalar.isFloatingPoint()) {
+    const auto self = self_scalar.to<double>();
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
+      cpu_kernel(iter,
+        [=](scalar_t exp) -> scalar_t { return std::pow((long double)self, exp); }
+      );
+    });
+  } else {
+    const auto self = self_scalar.to<int64_t>();
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
+      cpu_kernel(iter,
+        [=](scalar_t exp) -> scalar_t { return std::pow((long double)self, exp); }
+      );
+    });
+  }
 }
 
 } // anonymous namespace
