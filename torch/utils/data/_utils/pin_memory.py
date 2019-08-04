@@ -22,7 +22,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
         except queue.Empty:
             continue
         idx, data = r
-        if not isinstance(data, ExceptionWrapper):
+        if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
             try:
                 data = pin_memory(data)
             except Exception:
