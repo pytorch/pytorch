@@ -2365,12 +2365,12 @@ class _TestTorchMixin(object):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_tensor_pow_neg_ints(self):
-        ints = [torch.iinfo(torch.int).min,
+        ints = [torch.iinfo(torch.int32).min,
                 -3, -2, -1, 0, 1, 2, 3,
-                torch.iinfo(torch.int).max]
-        neg_ints = [torch.iinfo(torch.int).min, -3, -2, -1]
+                torch.iinfo(torch.int32).max]
+        neg_ints = [torch.iinfo(torch.int32).min, -3, -2, -1]
 
-        tensor = torch.tensor(ints, dtype=torch.int)
+        tensor = torch.tensor(ints, dtype=torch.int32)
         nparr = np.array(ints, dtype=np.int32)
         out = torch.empty_like(tensor)
         for pow in neg_ints:
@@ -2400,7 +2400,7 @@ class _TestTorchMixin(object):
         ints = [-3, -2, -1, 0, 1, 2, 3]
         non_neg_ints = [0, 1, 2, 3]
 
-        tensor = torch.tensor(ints, dtype=torch.int)
+        tensor = torch.tensor(ints, dtype=torch.int32)
         nparr = np.array(ints, dtype=np.int32)
         out = torch.empty_like(tensor)
         for pow in non_neg_ints:
@@ -2423,10 +2423,11 @@ class _TestTorchMixin(object):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_extreme_int_tensor_pow_0_and_1(self):
-        extreme_ints = [torch.iinfo(torch.int).min, torch.iinfo(torch.int).max]
+        extreme_ints = [torch.iinfo(torch.int32).min,
+                        torch.iinfo(torch.int32).max]
         non_neg_ints = [0, 1]
 
-        tensor = torch.tensor(extreme_ints, dtype=torch.int)
+        tensor = torch.tensor(extreme_ints, dtype=torch.int32)
         nparr = np.array(extreme_ints, dtype=np.int32)
 
         for pow in non_neg_ints:
@@ -2447,28 +2448,12 @@ class _TestTorchMixin(object):
             self.assertEqual(expected, actual.numpy())
             self.assertEqual(expected, actual2.numpy())
 
-    # @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    # def test_int_tensor_pow_ints_overflow(self):
-    #     ints = [torch.iinfo(torch.int).min,
-    #             -123456, 123456,
-    #             torch.iinfo(torch.int).max]
-    #     pows = [2, torch.iinfo(torch.int).max]
-    #
-    #     tensor = torch.tensor(ints, dtype=torch.int)
-    #     nparr = np.array(ints, dtype=np.int32)
-    #
-    #     for pow in pows:
-    #         actual = tensor.pow(pow)
-    #         expected = np.power(nparr, pow)
-    #         print('actual = ' + str(actual))
-    #         print('expected = ' + str(expected))
-
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_non_neg_int_tensor_pow_non_neg_floats(self):
         ints = [0, 1, 23, 4567]
         floats = [0.0, 1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
 
-        tensor = torch.tensor(ints, dtype=torch.int)
+        tensor = torch.tensor(ints, dtype=torch.int32)
         nparr = np.array(ints, dtype=np.int32)
 
         for pow in floats:
@@ -2490,13 +2475,13 @@ class _TestTorchMixin(object):
             self.assertEqual(expected, actual2.numpy())
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_int_scalar_pow_non_neg_ints_tensor(self):
+    def test_int_scalar_pow_neg_ints_tensor(self):
         ints = [torch.iinfo(torch.int).min,
                 -3, -2, -1, 0, 1, 2, 3,
                 torch.iinfo(torch.int).max]
         neg_ints = [torch.iinfo(torch.int).min, -3, -2, -1]
 
-        tensor = torch.tensor(ints, dtype=torch.int)
+        tensor = torch.tensor(ints, dtype=torch.int32)
         nparr = np.array(ints, dtype=np.int32)
         out = torch.empty_like(tensor)
         for base in neg_ints:
@@ -2504,25 +2489,23 @@ class _TestTorchMixin(object):
                 ValueError,
                 "Integers to negative integer powers are not allowed.",
                 lambda: np.power(base, nparr))
-            self.assertRaisesRegex(
-                RuntimeError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: torch.pow(base, tensor))
-            self.assertRaisesRegex(
-                RuntimeError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: torch.pow(base, tensor, out=out))
+            # Despite that Numpy raises error, we are not able
+            # to check all tensor values' signs.
+            torch.pow(base, tensor)
+            torch.pow(base, tensor, out=out)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_int_scalar_pow_non_neg_ints_tensor(self):
-        ints = [-3, -2, -1, 0, 1, 2, 3]
-        non_neg_ints = [0, 1, 2, 3]
+    def test_float_scalar_pow_int_tensor(self):
+        ints = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
+        floats = [2.0, -3 / 2, -1.0, -1 / 2, -1 / 3, 0.0,
+                  1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
 
-        tensor = torch.tensor(non_neg_ints, dtype=torch.int)
-        nparr = np.array(non_neg_ints, dtype=np.int32)
+        tensor = torch.tensor(ints, dtype=torch.int32)
+        nparr = np.array(ints, dtype=np.int32)
         out = torch.empty_like(tensor)
-        for base in ints:
-            expected = np.power(base, nparr)
+        for base in floats:
+            # Numpy propagates int to float, so we need to cast to np.int32
+            expected = np.power(base, nparr).astype(np.int32)
 
             actual = torch.pow(base, tensor)
             self.assertEqual(expected, actual.numpy())
@@ -2530,6 +2513,77 @@ class _TestTorchMixin(object):
             actual2 = torch.pow(base, tensor, out=actual)
             self.assertEqual(expected, actual.numpy())
             self.assertEqual(expected, actual2.numpy())
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_float_scalar_pow_float_tensor(self):
+        def assertEqual(x, y):
+            self.assertEqual(np.nan_to_num(x), np.nan_to_num(y), allow_inf=True)
+        floats = [2.0, -3 / 2, -1.0, -1 / 2, -1 / 3, 0.0,
+                  1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
+
+        tensor = torch.tensor(floats, dtype=torch.float32)
+        nparr = np.array(floats, dtype=np.float32)
+        out = torch.empty_like(tensor)
+        for base in floats:
+            # Numpy propagates int to float, so we need to cast to np.int32
+            expected = np.power(base, nparr).astype(np.float32)
+
+            actual = torch.pow(base, tensor)
+            assertEqual(expected, actual.numpy())
+
+            actual2 = torch.pow(base, tensor, out=actual)
+            assertEqual(expected, actual.numpy())
+            assertEqual(expected, actual2.numpy())
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_tensor_pow_tensor(self):
+        def assertEqual(x, y):
+            z = (y - x) / y
+            self.assertEqual(np.nan_to_num(z), np.zeros_like(z), allow_inf=True)
+
+        def rotate(l, n):
+            return l[-n:] + l[:-n]
+
+        def test_tensor_pow_tensor(values, torch_type, numpy_type):
+            vals_tensor = torch.tensor(values, dtype=torch_type)
+            vals_nparr = np.array(values, dtype=numpy_type)
+            out = torch.empty_like(vals_tensor)
+            for i in range(len(values)):
+                pows = rotate(values, i)
+                pows_tensor = torch.tensor(pows, dtype=torch_type)
+                pows_nparr = np.array(pows, dtype=numpy_type)
+                expected = np.power(vals_nparr, pows_nparr)
+
+                actual = torch.pow(vals_tensor, pows_tensor)
+                assertEqual(expected, actual.numpy())
+
+                actual2 = torch.pow(vals_tensor, pows_tensor, out=actual)
+                assertEqual(expected, actual.numpy())
+                assertEqual(expected, actual2.numpy())
+
+        ints = [0, 1, 2, 3]
+        test_tensor_pow_tensor(ints, torch.int32, np.int32)
+
+        longs = [0, 1, 2, 3]
+        test_tensor_pow_tensor(longs, torch.int64, np.int64)
+
+        floats = [-torch.finfo(torch.float32).max,
+                  -3.0, -2.0, -1.0, -1 / 2, -1 / 3,
+                  -torch.finfo(torch.float32).min,
+                  0.0,
+                  torch.finfo(torch.float32).min,
+                  1 / 3, 1 / 2, 1.0, 2.0, 3.0,
+                  torch.finfo(torch.float32).max]
+        test_tensor_pow_tensor(floats, torch.float32, np.float32)
+
+        doubles = [-torch.finfo(torch.float64).max,
+                   -3.0, -2.0, -1.0, -1 / 2, -1 / 3,
+                   -torch.finfo(torch.float64).min,
+                   0.0,
+                   torch.finfo(torch.float64).min,
+                   1 / 3, 1 / 2, 1.0, 2.0, 3.0,
+                   torch.finfo(torch.float64).max]
+        test_tensor_pow_tensor(doubles, torch.float64, np.float64)
 
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):

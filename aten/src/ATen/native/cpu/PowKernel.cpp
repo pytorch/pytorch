@@ -15,19 +15,19 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
       cpu_kernel_vec(iter,
-        [=](scalar_t self, scalar_t exp) -> scalar_t {
-          return std::pow(self, exp);
+        [=](scalar_t base, scalar_t exp) -> scalar_t {
+          return std::pow(base, exp);
         },
-        [&](Vec self, Vec exp) -> Vec {
-          return self.pow(exp);
+        [&](Vec base, Vec exp) -> Vec {
+          return base.pow(exp);
         }
       );
     });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
       cpu_kernel(iter,
-        [=](scalar_t self, scalar_t exp) -> scalar_t {
-          return std::pow(self, exp);
+        [=](scalar_t base, scalar_t exp) -> scalar_t {
+          return std::pow(base, exp);
         }
       );
     });
@@ -41,38 +41,44 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       auto exp = exp_scalar.to<double>();
       if (exp == 0.5) {
         cpu_kernel_vec(iter,
-          [](scalar_t self) -> scalar_t { return std::sqrt((long double)self); },
-          [](Vec self) -> Vec { return self.sqrt(); }
+          [](scalar_t base) -> scalar_t {
+            return std::sqrt((long double)base);
+          },
+          [](Vec base) -> Vec { return base.sqrt(); }
         );
       } else if (exp == 2) {
         cpu_kernel_vec(iter,
-          [](scalar_t self) -> scalar_t { return self * self; },
-          [](Vec self) -> Vec { return self * self; }
+          [](scalar_t base) -> scalar_t { return base * base; },
+          [](Vec base) -> Vec { return base * base; }
         );
       } else if (exp == 3) {
         cpu_kernel_vec(iter,
-          [](scalar_t self) -> scalar_t { return self * self * self; },
-          [](Vec self) -> Vec { return self * self * self; }
+          [](scalar_t base) -> scalar_t { return base * base * base; },
+          [](Vec base) -> Vec { return base * base * base; }
         );
       } else if (exp == -0.5) {
         cpu_kernel_vec(iter,
-          [](scalar_t self) -> scalar_t { return 1.0 / std::sqrt((long double)self); },
-          [](Vec self) -> Vec { return self.sqrt().reciprocal(); }
+          [](scalar_t base) -> scalar_t {
+            return 1.0 / std::sqrt((long double)base);
+          },
+          [](Vec base) -> Vec { return base.sqrt().reciprocal(); }
         );
       } else if (exp == -1) {
         cpu_kernel_vec(iter,
-          [](scalar_t self) -> scalar_t { return 1.0 / self; },
-          [](Vec self) -> Vec { return self.reciprocal(); }
+          [](scalar_t base) -> scalar_t { return 1.0 / base; },
+          [](Vec base) -> Vec { return base.reciprocal(); }
         );
       } else if (exp == -2) {
         cpu_kernel_vec(iter,
-          [](scalar_t self) -> scalar_t { return 1.0 / (self * self); },
-          [](Vec self) -> Vec { return (self * self).reciprocal(); }
+          [](scalar_t base) -> scalar_t { return 1.0 / (base * base); },
+          [](Vec base) -> Vec { return (base * base).reciprocal(); }
         );
       } else {
         cpu_kernel_vec(iter,
-          [=](scalar_t self) -> scalar_t { return std::pow((long double)self, exp); },
-          [=](Vec self) -> Vec { return self.pow(exp); }
+          [=](scalar_t base) -> scalar_t {
+            return std::pow((long double)base, exp);
+          },
+          [=](Vec base) -> Vec { return base.pow(exp); }
         );
       }
     });
@@ -81,50 +87,56 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       auto exp = exp_scalar.to<double>();
       if (exp == 0.5) {
         cpu_kernel(iter,
-          [](scalar_t self) -> scalar_t { return std::sqrt(self); }
+          [](scalar_t base) -> scalar_t { return std::sqrt(base); }
         );
       } else if (exp == 2) {
         cpu_kernel(iter,
-          [](scalar_t self) -> scalar_t { return self * self; }
+          [](scalar_t base) -> scalar_t { return base * base; }
         );
       } else if (exp == 3) {
         cpu_kernel(iter,
-          [](scalar_t self) -> scalar_t { return self * self * self; }
+          [](scalar_t base) -> scalar_t { return base * base * base; }
         );
       } else if (exp == -0.5) {
         cpu_kernel(iter,
-          [](scalar_t self) -> scalar_t { return 1.0 / std::sqrt(self); }
+          [](scalar_t base) -> scalar_t { return 1.0 / std::sqrt(base); }
         );
       } else if (exp == -1) {
         cpu_kernel(iter,
-          [](scalar_t self) -> scalar_t { return 1.0 / self; }
+          [](scalar_t base) -> scalar_t { return 1.0 / base; }
         );
       } else if (exp == -2) {
         cpu_kernel(iter,
-          [](scalar_t self) -> scalar_t { return 1.0 / (self * self); }
+          [](scalar_t base) -> scalar_t { return 1.0 / (base * base); }
         );
       } else {
         cpu_kernel(iter,
-          [=](scalar_t self) -> scalar_t { return std::pow((long double)self, exp); }
+          [=](scalar_t base) -> scalar_t {
+            return std::pow((long double)base, exp);
+          }
         );
       }
     });
   }
 }
 
-void pow_scalar_tensor_kernel(TensorIterator& iter, Scalar self_scalar) {
-  if (self_scalar.isFloatingPoint()) {
-    const auto self = self_scalar.to<double>();
+void pow_scalar_tensor_kernel(TensorIterator& iter, Scalar base_scalar) {
+  if (base_scalar.isFloatingPoint()) {
+    const auto base = base_scalar.to<double>();
     AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
       cpu_kernel(iter,
-        [=](scalar_t exp) -> scalar_t { return std::pow((long double)self, exp); }
+        [=](scalar_t exp) -> scalar_t {
+          return std::pow((long double)base, exp);
+        }
       );
     });
   } else {
-    const auto self = self_scalar.to<int64_t>();
+    const auto base = base_scalar.to<int64_t>();
     AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
       cpu_kernel(iter,
-        [=](scalar_t exp) -> scalar_t { return std::pow((long double)self, exp); }
+        [=](scalar_t exp) -> scalar_t {
+          return std::pow((long double)base, exp);
+        }
       );
     });
   }
