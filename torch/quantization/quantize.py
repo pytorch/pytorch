@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch
+import torch.nn.qat as qat
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
@@ -51,10 +51,11 @@ def propagate_qconfig(module, qconfig_dict=None):
 def _observer_forward_hook(self, input, output):
     r"""Forward hook that calls observer on the output
     """
-    self.observer(output)
+    return self.observer(output)
 
-# TODO(jerryzh): remove_observer?
-def add_observer(module):
+DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
+
+def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -73,7 +74,8 @@ def add_observer(module):
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
-    if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
+    if hasattr(module, 'qconfig') and module.qconfig is not None and \
+       len(module._modules) == 0 and type(module) not in skip_list:
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
@@ -92,9 +94,10 @@ class QuantWrapper(nn.Module):
     def __init__(self, module):
         super(QuantWrapper, self).__init__()
         qconfig = module.qconfig if hasattr(module, 'qconfig') else None
-        self.quant = QuantStub(qconfig)
-        self.dequant = DeQuantStub()
-        self.module = module
+        self.add_module('quant', QuantStub(qconfig))
+        self.add_module('dequant', DeQuantStub(qconfig))
+        self.add_module('module', module)
+        self.train(module.training)
 
     def forward(self, X):
         X = self.quant(X)
@@ -123,25 +126,26 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(module, qconfig_dict=None):
-    r"""Prepares the module for calibration or training given a qconfig_dict.
-    Note that the module will be modified inplace but in case the input module
-    is a leaf module, a wrapped module will be returned.
+def prepare(model):
+    r"""Prepares the model for calibration or training.
+    Note that the model will be modified inplace but in case the input model
+    is a leaf model, a wrapped model will be returned.
 
     Args:
-        mod: input module
-        qconfig_dict: dictionary that maps from name of submodule to quantization
-                      configuration
+        mod: input model
     Return:
-        A module with qconfig propogated, observer and quant dequant or fake
-        quant modules attached, a module that is ready for calibration or
+        A model with qconfig propogated, observer and quant dequant or fake
+        quant modules attached, a model that is ready for calibration or
         training
     """
-    propagate_qconfig(module, qconfig_dict)
-    if qconfig_dict:
-        module = add_quant_dequant(module)
-    add_observer(module)
-    return module
+    propagate_qconfig(model)
+    add_observer(model)
+    return model
+
+def prepare_qat(model):
+    model = prepare(model)
+    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
+    return model
 
 class QuantStub(nn.Module):
     r"""Quantize stub module, before calibration, this is same as an observer,
@@ -163,49 +167,64 @@ class DeQuantStub(nn.Module):
     r"""Dequantize stub module, before calibration, this is same as identity,
     this will be swapped as `nnq.DeQuantize` in `convert`.
     """
-    def __init__(self):
+    def __init__(self, qconfig=None):
         super(DeQuantStub, self).__init__()
+        if qconfig:
+            self.qconfig = qconfig
 
     def forward(self, x):
         return x
 
-def quantize(module, eval_fn, eval_args, qconfig_dict=None):
-    r"""Converts a float module to quantized module.
+def quantize(model, run_fn, run_args):
+    r"""Converts a float model to quantized model.
 
-    First it will prepare the module for calibration or training, then it calls
-    `eval_fn` which will run the calibration step or training step,
-    after that we will call `convert` which will convert the module to a
-    quantized module.
-
-    When `qconfig_dict` is None or empty dictionary, we will assume user will
-    insert quant/dequant stubs and add qconfig in approporiate places.
-    When `qconfig_dict` is not None or empty dictionary, we will add quant/dequant
-    stubs using QuantWrapper for all the leaf modules.
+    First it will prepare the model for calibration or training, then it calls
+    `run_fn` which will run the calibration step or training step,
+    after that we will call `convert` which will convert the model to a
+    quantized model.
 
     Args:
-        module: input module
-        eval_fn: a function for evaluating the prepared module, can be a
-            function that simply runs the prepared module or a training loop
-        eval_args: positional arguments for `eval_fn`
-        qconfig_dict: dictionary that maps from name of submodule to quantization
-            configuration, qconfig applies to all submodules of a given
-            module unless qconfig for the submodules are specified(when the
-            submodule already has qconfig attribute)
-
+        model: input model
+        run_fn: a function for evaluating the prepared model, can be a
+            function that simply runs the prepared model or a training loop
+        run_args: positional arguments for `run_fn`
 
     Return:
-        A quantized module
+        A quantized model
     """
-    module = prepare(module, qconfig_dict)
-    eval_fn(module, eval_args)
-    convert(module)
-    return module
+    model.eval()
+    model = prepare(model)
+    run_fn(model, run_args)
+    convert(model)
+    return model
+
+def quantize_qat(model, run_fn, run_args):
+    r"""Do quantization aware training and output a quantized model
+    """
+    model.train()
+    model = prepare_qat(model)
+    run_fn(model, run_args)
+    convert(model)
+    return model
 
 # Map for swapping float module to quantized ones
 DEFAULT_MODULE_MAPPING = {
-    torch.nn.Linear: nnq.Linear,
-    torch.nn.ReLU: nnq.ReLU,
+    nn.Linear: nnq.Linear,
+    nn.ReLU: nnq.ReLU,
+    nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize,
+    # Generated modules:
+    nn.Add: nnq.Add,
+    # QAT modules:
+    qat.Linear: nnq.Linear,
+    qat.Conv2d: nnq.Conv2d,
+}
+
+# Map for swapping float module to qat modules
+DEFAULT_QAT_MODULE_MAPPING = {
+    nn.Linear: qat.Linear,
+    nn.Conv2d: qat.Conv2d,
 }
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
@@ -243,11 +262,8 @@ def swap_module(mod, mapping):
         The corresponding quantized module of `mod`
     """
     new_mod = mod
-    if hasattr(mod, 'observer'):
+    if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
-
-    if type(mod) == DeQuantStub:
-        new_mod = nnq.DeQuantize.from_float(mod)
 
     return new_mod

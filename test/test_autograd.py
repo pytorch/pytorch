@@ -16,7 +16,8 @@ from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent, emit_nvtx
+from torch.autograd.profiler import (profile, format_time, EventList,
+                                     FunctionEvent, record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
@@ -166,6 +167,26 @@ class TestAutograd(TestCase):
         y = v[0, 0].expand(3, 5).t().sum()
         MyFunction()(y).sum().backward()
         self.assertEqual(v.grad.data, torch.zeros(shape))
+
+    def test_legacy_function_deprecation_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+
+            # Trigger Warning
+            class MyFunction(Function):
+                def forward(self, x):
+                    return x
+
+                def backward(self, grad_output):
+                    return grad_output
+
+            MyFunction()(torch.randn(3, 4))
+
+            # Check warning occurs
+            self.assertIn(
+                'Legacy autograd function with non-static forward method is deprecated',
+                str(w[0]))
 
     def test_invalid_gradients(self):
         class MyFunction(Function):
@@ -1589,16 +1610,26 @@ class TestAutograd(TestCase):
         target_length = 15
         gradcheck_input_size = 10
 
-        # device, input_length
-        tests = [('cpu', 150, False),
-                 ('cpu', 150, True)]
-        if torch.cuda.is_available():
-            tests += [('cuda', 50, False),
-                      ('cuda', 150, False),
-                      ('cuda', 50, True),
-                      ('cuda', 150, True)]
+        ZERO_NONE = 0
+        ZERO_SOME = 1
+        ZERO_ALL = 2
 
-        for device, input_length, vary_lengths in tests:
+        # device, input_length, vary_lengths, zero_lengths
+        tests = [('cpu', 150, False, ZERO_NONE),
+                 ('cpu', 150, True, ZERO_NONE),
+                 ('cpu', 50, True, ZERO_SOME),
+                 ('cpu', 50, True, ZERO_ALL)]
+        if torch.cuda.is_available():
+            tests += [('cuda', 50, False, ZERO_NONE),
+                      ('cuda', 150, False, ZERO_NONE),
+                      ('cuda', 50, True, ZERO_NONE),
+                      ('cuda', 150, True, ZERO_NONE),
+                      ('cuda', 50, True, ZERO_SOME),
+                      ('cuda', 150, True, ZERO_SOME),
+                      ('cuda', 50, True, ZERO_ALL),
+                      ('cuda', 150, True, ZERO_ALL)]
+
+        for device, input_length, vary_lengths, zero_mode in tests:
             targets = torch.randint(1, num_labels, (batch_size, target_length),
                                     device=device, dtype=torch.long)
             x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
@@ -1606,8 +1637,15 @@ class TestAutograd(TestCase):
                                        device=device)
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
                               if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
-            target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
-                               if vary_lengths else target_length) for i in range(batch_size)]
+            if zero_mode == ZERO_ALL:
+                target_lengths = [0 for _ in range(batch_size)]
+            else:
+                target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
+                                   if vary_lengths else target_length) for _ in range(batch_size)]
+                if zero_mode == ZERO_SOME:
+                    idxes = torch.randint(0, batch_size, (10,))
+                    for i in idxes:
+                        target_lengths[i] = 0
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
@@ -1670,12 +1708,196 @@ class TestAutograd(TestCase):
         segfault.
         """
         class CollectOnDelete(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_output):
+                return grad_output
 
             def __del__(self):
                 gc.collect()
 
         for _ in range(10):
-            Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
+            CollectOnDelete()(torch.randn(1, requires_grad=True)).backward()
+
+    def test_call_legacy_twice(self):
+        class Id(Function):
+            def forward(self, x):
+                self.save_for_backward(x)
+                return x
+
+            def backward(self, grad_x):
+                x = self.saved_tensors
+                return x
+
+        f = Id()
+        x1 = torch.zeros(1, requires_grad=True)
+        x2 = torch.ones(1, requires_grad=True)
+        y = f(x1)
+        with warnings.catch_warnings(record=True) as w:
+            z = f(x2)
+        self.assertIn('extending-torch-autograd', str(w[1].message))
+        # I don't really care about the functional correctness of this
+        # part of the test: if you make a change that causes this test
+        # to fail, it's probably OK to just fix this test case to follow
+        # it.  I'm mostly making sure we don't segfault here.
+        y.backward()
+        self.assertEqual(x2.grad, x2)
+
+    # Delete this test when legacy custom autograd functions are deleted.
+    def test_naughty_legacy_variable_grad_fn(self):
+        class Id(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_x):
+                return grad_x
+
+        self.assertRaises(RuntimeError, lambda: Variable(torch.zeros(1), _grad_fn=Id()))
+
+    # Delete this test when legacy custom autograd functions are deleted.
+    def test_naughty_legacy_function_backward_before_forward(self):
+        class Id(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_x):
+                return grad_x
+
+        f = Id()
+        self.assertRaises(RuntimeError, lambda: f._do_backward((torch.zeros(0), ), False))
+
+    # Delete this test when legacy custom autograd functions are deleted.
+    def test_naughty_legacy_function_early_access(self):
+        class Id(Function):
+            def forward(self, x):
+                return x
+
+            def backward(self, grad_x):
+                return grad_x
+
+        f = Id()
+        # A legacy autograd function is not fully initialized until you actually
+        # apply it.  That means a lot of accessors on them don't actually work.
+        # Test that we properly error in this case.
+        self.assertRaises(RuntimeError, lambda: f.register_hook(lambda x, y: None))
+        self.assertRaises(RuntimeError, lambda: f.next_functions)
+        self.assertRaises(RuntimeError, lambda: f.metadata)
+
+    @unittest.expectedFailure
+    def test_naughty_anomaly_access(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        x = torch.zeros(1, requires_grad=True)
+        y = MyFunction.apply(x)
+        y.backward()
+        y.grad_fn.metadata
+        g = y.grad_fn
+        del y
+        g.metadata  # this currently fails, but shouldn't
+
+    def test_naughty_autograd_function_stashing_ctx(self):
+        saved_ctx = []
+
+        class Id(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_x):
+                saved_ctx.append(ctx)
+                return ctx.saved_tensors
+
+        p = torch.zeros(1, requires_grad=True)
+        loss = Id.apply(p)
+        loss.backward(retain_graph=True)
+        del loss
+        # At this point in time, it complains that the graph has been freed
+        # (which indeed true, although a somewhat indirect way of stating the
+        # problem).
+        self.assertRaises(RuntimeError, lambda: saved_ctx[0].saved_tensors)
+
+    def test_custom_autograd_repeated_grad_grad(self):
+        # This test failed the equality check in PR #22983; it's an interesting
+        # and different test case worth enshrining.  mult1 is not testing
+        # anything that interesting, but mult2 is the interesting case.
+
+        def mult1(x):
+            return x.prod(dim=-1).prod(dim=-1)
+
+        class Mult(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = mult1(x)
+                ctx.save_for_backward(x, y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return (grad_output * y)[:, None, None] / x
+
+        mult2 = Mult.apply
+
+        def check_gradgrad_repeated(x, y):
+            gy, = torch.autograd.grad(y[0], x, create_graph=True)
+            ggy_1, = torch.autograd.grad(gy[0, 0, 0], x, retain_graph=True)
+            gy, = torch.autograd.grad(y[0], x, create_graph=True)
+            ggy_2, = torch.autograd.grad(gy[0, 0, 0], x, retain_graph=True)
+            self.assertEqual(ggy_1[0, 0, 1], ggy_2[0, 0, 1])
+
+        x = torch.ones(2, 4, 4).requires_grad_()
+        check_gradgrad_repeated(x, mult1(x))
+        check_gradgrad_repeated(x, mult2(x))
+
+    def test_custom_autograd_no_early_free(self):
+        # This test failed complaining that buffers had already been freed
+        # prior to #22983.  Also pretty interesting test case.
+        class Double(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x ** 2
+                ctx.save_for_backward(x, y)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, _ = ctx.saved_tensors
+                return grad_output * 2 * x
+
+        # this is equivalent, but uses the output of .forward() in .backward()
+        class Double2(Double):
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return grad_output * 2 * y / x
+
+        double = Double.apply
+        double2 = Double2.apply
+
+        x = torch.tensor(2).double().requires_grad_()
+
+        self.assertTrue(torch.autograd.gradcheck(double, x))
+        self.assertTrue(torch.autograd.gradgradcheck(double, x))
+        self.assertTrue(torch.autograd.gradcheck(double2, x))
+        self.assertTrue(torch.autograd.gradgradcheck(double2, x))
+
+        y = double(x)
+        torch.autograd.grad(y, x, create_graph=True)
+        torch.autograd.grad(y, x)
+
+        y = double2(x)
+        torch.autograd.grad(y, x, create_graph=True)
+        torch.autograd.grad(y, x)  # should not error!
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
     @skipIfRocm
@@ -2604,6 +2826,22 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
+    def test_record_function(self):
+        x = torch.randn(10, 10)
+
+        with profile() as p:
+            with record_function("label"):
+                y = x * 2 + 4
+
+        last_end = 0
+        names = ['mul', 'add']
+        labels = ['label']
+        self.assertEqual(len(p.function_events), len(names) + len(labels))
+        for info, expected_name in zip(p.function_events, labels):
+            self.assertGreater(info.cpu_interval.start, last_end)
+            self.assertEqual(info.name, expected_name)
+            last_end = info.cpu_interval.end
+
     @skipIfRocm
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_profiler_emit_nvtx(self):
@@ -3125,14 +3363,14 @@ class TestAutograd(TestCase):
             branch1 = branch1 / branch1
             # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
             # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
-            # So the cpu thread will notify the gpu thread with an empty FunctionTask.
+            # So the cpu thread will notify the gpu thread with an empty NodeTask.
             branch2 = checkpoint(fn_on_gpu, inp)
             out = branch2 + branch1
             return out
 
         inp = torch.rand(2, requires_grad=True)
         out = parent_on_cpu(inp)
-        # This will segfault if the empty FunctionTask is not handled properly in the
+        # This will segfault if the empty NodeTask is not handled properly in the
         # gpu thread ReadyQueue
         out.sum().backward()
 
@@ -3221,6 +3459,15 @@ for shape in [(1,), ()]:
         # This will cause stack overflow if reentrant calls are handled
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_advanced_indexing_backwards_large(self):
+        # See https://github.com/pytorch/pytorch/issues/22843
+        n = (1 << 16)
+        x = torch.rand(n, 1, device='cuda', requires_grad=True)
+        a = x[:, [0]]
+        a.sum().backward()
+        self.assertEqual(x.grad, torch.ones(n, 1, device='cuda'))
 
     def test_reentrant_priority(self):
         order = []
