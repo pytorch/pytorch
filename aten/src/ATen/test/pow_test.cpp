@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <vector>
+#include <type_traits>
 
 using namespace at;
 
@@ -78,8 +79,8 @@ const std::vector<double> doubles {
   double_max,
 };
 
-template<typename V>
-void assert_float_eq(V val, V act, V exp) {
+template <class T, typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+void assert_eq(T val, T act, T exp) {
   if (std::isnan(act) || std::isnan(exp)) {
     return;
   }
@@ -89,11 +90,26 @@ void assert_float_eq(V val, V act, V exp) {
   if (val != 0 && exp == 0) {
     return;
   }
-  const auto min = std::numeric_limits<V>::min();
+  const auto min = std::numeric_limits<T>::min();
   if (exp == min && val != min) {
     return;
   }
   ASSERT_FLOAT_EQ(act, exp);
+}
+
+template <class T, typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
+void assert_eq(T val, T act, T exp) {
+  if (val != 0 && act == 0) {
+    return;
+  }
+  if (val != 0 && exp == 0) {
+    return;
+  }
+  const auto min = std::numeric_limits<T>::min();
+  if (exp == min && val != min) {
+    return;
+  }
+  ASSERT_EQ(act, exp);
 }
 
 template<typename Vals, typename Pows>
@@ -131,7 +147,7 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
       //     !(val != 0 && exp == 0)) {
       //   ASSERT_FLOAT_EQ(act_pow, exp);
       // }
-      assert_float_eq(val, act_pow, exp);
+      assert_eq(val, act_pow, exp);
 
       const auto act_pow_ = actual_pow_[i].template item<T>();
       // if ((!std::isnan(act_pow_) || !std::isnan(exp)) && act_pow_ != exp) {
@@ -140,7 +156,7 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
       // if (!(std::isnan(act_pow_) && std::isnan(exp)) && !(act_pow_ == 0 && val != 0) && !(exp == int_min && val != int_min)) {
       //   ASSERT_FLOAT_EQ(act_pow_, exp);
       // }
-      assert_float_eq(val, act_pow_, exp);
+      assert_eq(val, act_pow_, exp);
 
       const auto act_pow_out = actual_pow_out[i].template item<T>();
       // if ((!std::isnan(act_pow_out) || !std::isnan(exp)) && act_pow_out != exp) {
@@ -149,7 +165,7 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
       // if (!(std::isnan(act_pow_out) && std::isnan(exp)) && !(act_pow_out == 0 && val != 0) && !(exp == int_min && val != int_min)) {
       //   ASSERT_FLOAT_EQ(act_pow_out, exp);
       // }
-      assert_float_eq(val, act_pow_out, exp);
+      assert_eq(val, act_pow_out, exp);
 
       const auto act_torch_pow = actual_torch_pow[i].template item<T>();
       // if ((!std::isnan(act_torch_pow) || !std::isnan(exp)) && act_torch_pow != exp) {
@@ -158,15 +174,16 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
       // if (!(std::isnan(act_torch_pow) && std::isnan(exp)) && !(act_torch_pow == 0 && val != 0) && !(exp == int_min && val != int_min)) {
       //   ASSERT_FLOAT_EQ(act_torch_pow, exp);
       // }
-      assert_float_eq(val, act_torch_pow, exp);
+      assert_eq(val, act_torch_pow, exp);
 
       i++;
     }
   }
 }
 
-template<typename T, typename Vals, typename Pows>
+template<typename Vals, typename Pows>
 void scalar_pow_tensor(const Vals vals, const Pows pows) {
+  using T = typename Pows::value_type;
   const auto pow_tensor = torch::tensor(pows);
 
   for (const auto val : vals) {
@@ -184,7 +201,7 @@ void scalar_pow_tensor(const Vals vals, const Pows pows) {
       // if (!std::isnan(act_pow) || !std::isnan(exp)) {
       //   ASSERT_EQ(act_pow, exp);
       // }
-      assert_float_eq<T>(val, act_pow, exp);
+      assert_eq<T>(val, act_pow, exp);
 
       i++;
     }
@@ -222,7 +239,7 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
       // if (!std::isnan(act_pow) || !std::isnan(exp)) {
       //   ASSERT_EQ(act_pow, exp);
       // }
-      assert_float_eq(val, act_pow, exp);
+      assert_eq(val, act_pow, exp);
 
       i++;
     }
@@ -261,33 +278,33 @@ TEST(PowTest, DoubleTensorPowAllScalars) {
   tensor_pow_scalar(doubles, doubles);
 }
 
-// TEST(PowTest, IntScalarPowAllTensors) {
-//   scalar_pow_tensor<int64_t>(ints, ints);
-//   scalar_pow_tensor<int64_t>(ints, longs);
-//   scalar_pow_tensor<int64_t>(ints, floats);
-//   scalar_pow_tensor<int64_t>(ints, doubles);
-// }
-//
-// TEST(PowTest, LongScalarPowAllTensors) {
-//   scalar_pow_tensor<int64_t>(longs, ints);
-//   scalar_pow_tensor<int64_t>(longs, longs);
-//   scalar_pow_tensor<int64_t>(longs, floats);
-//   scalar_pow_tensor<int64_t>(longs, doubles);
-// }
-//
-// TEST(PowTest, FloatScalarPowAllTensors) {
-//   scalar_pow_tensor<double>(floats, ints);
-//   scalar_pow_tensor<double>(floats, longs);
-//   scalar_pow_tensor<double>(floats, floats);
-//   scalar_pow_tensor<double>(floats, doubles);
-// }
-//
-// TEST(PowTest, DoubleScalarPowAllTensors) {
-//   scalar_pow_tensor<double>(doubles, ints);
-//   scalar_pow_tensor<double>(doubles, longs);
-//   scalar_pow_tensor<double>(doubles, floats);
-//   scalar_pow_tensor<double>(doubles, doubles);
-// }
+TEST(PowTest, IntScalarPowAllTensors) {
+  scalar_pow_tensor(ints, ints);
+  scalar_pow_tensor(ints, longs);
+  scalar_pow_tensor(ints, floats);
+  scalar_pow_tensor(ints, doubles);
+}
+
+TEST(PowTest, LongScalarPowAllTensors) {
+  // scalar_pow_tensor(longs, ints);
+  scalar_pow_tensor(longs, longs);
+  scalar_pow_tensor(longs, floats);
+  scalar_pow_tensor(longs, doubles);
+}
+
+TEST(PowTest, FloatScalarPowAllTensors) {
+  // scalar_pow_tensor(floats, ints);
+  // scalar_pow_tensor(floats, longs);
+  scalar_pow_tensor(floats, floats);
+  scalar_pow_tensor(floats, doubles);
+}
+
+TEST(PowTest, DoubleScalarPowAllTensors) {
+  // scalar_pow_tensor(doubles, ints);
+  // scalar_pow_tensor(doubles, longs);
+  // scalar_pow_tensor(doubles, floats);
+  scalar_pow_tensor(doubles, doubles);
+}
 
 TEST(PowTest, IntTensorPowIntTensor) {
   tensor_pow_tensor(ints, ints);
