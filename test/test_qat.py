@@ -8,25 +8,11 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn._intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.QConfig import default_qat_qconfig
 from torch.nn import Parameter
+from torch.utils.mkldnn import disable_mkldnn_conv
 from common_utils import TestCase, run_tests
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from functools import reduce
-
-# **** WARNING: This is used to temporarily disable MKL-DNN convolution due
-# to a bug: https://github.com/pytorch/pytorch/issues/23825
-# Once this bug is fixed, this context manager as well as its callsites
-# should be removed!
-
-from contextlib import contextmanager
-
-@contextmanager
-def disable_mkldnn_conv():
-    torch._C._disable_mkldnn_conv()
-    try:
-        yield
-    finally:
-        torch._C._enable_mkldnn_conv()
 
 
 class IntrinsicQATModuleTest(TestCase):
