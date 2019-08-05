@@ -213,7 +213,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 
   scalar_t agg = 0.0;
   for (; a < end; a += stride, b += stride) {
-    scalar_t d = std::abs(*a - *b)
+    scalar_t d = std::abs(*a - *b);
     F::inc(agg, d, p);
     printf("---> cdist: a = %f b = %f diff = %f agg = %f p = %f\n", *a, *b, d, agg, p);
   }
