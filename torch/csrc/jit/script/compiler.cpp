@@ -1666,6 +1666,38 @@ struct to_ir {
     }
   }
 
+  void emitAugAssignToContainer(
+      const std::string& containerType,
+      const TypePtr& elemType,
+      const AugAssign& stmt,
+      const Subscript& lhs,
+      Value* sliceable) {
+    // Get the idx to augment
+    const auto subscriptExprs = lhs.subscript_exprs();
+    if (subscriptExprs.size() != 1) {
+      throw ErrorReport(subscriptExprs)
+          << "Sliced expression not yet supported for"
+          << " subscripted " << containerType << " augmented assignment. "
+          << "File a bug if you want this";
+    }
+    const auto idxValue = emitExpr(subscriptExprs[0]);
+    const auto containerArg =
+        NamedValue(lhs.value().range(), containerType, sliceable);
+    const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
+    const auto valueArg =
+        NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
+
+    const auto getItem = graph->insert(
+        aten::__getitem__, {containerArg, idxArg}, {}, stmt.range());
+    const auto augmentedItem = graph->insert(
+        getAugOp(stmt, elemType), {getItem, valueArg}, {}, stmt.range());
+    graph->insert(
+        aten::_set_item,
+        {containerArg, idxArg, augmentedItem},
+        {},
+        stmt.range());
+  }
+
   void emitAugAssignmentToSubscript(const AugAssign& stmt) {
     // Process the base list value
     const auto lhs = Subscript(stmt.lhs());
@@ -1717,58 +1749,16 @@ struct to_ir {
       }
     } else if (
         const ListTypePtr listType = sliceable->type()->cast<ListType>()) {
-      // Otherwise, it should be a list.  Lower this expression into:
+      // If it's a list.  Lower this expression into:
       //     list.set_item(get_item(idx).add_(value))
       // similar to how Python handles things.
       auto elementType = listType->getElementType();
-
-      // Get the idx to augment
-      const auto subscriptExprs = lhs.subscript_exprs();
-      if (subscriptExprs.size() != 1) {
-        throw ErrorReport(subscriptExprs)
-            << "Sliced expression not yet supported for"
-            << " subscripted list augmented assignment. "
-            << "File a bug if you want this";
-      }
-      const auto idxValue = emitExpr(subscriptExprs[0]);
-
-      const auto listArg = NamedValue(lhs.value().range(), "list", sliceable);
-      const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
-      const auto valueArg =
-          NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
-
-      const auto getItem =
-          graph->insert(aten::__getitem__, {listArg, idxArg}, {}, stmt.range());
-      const auto augmentedItem = graph->insert(
-          getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
-      graph->insert(
-          aten::_set_item, {listArg, idxArg, augmentedItem}, {}, stmt.range());
+      emitAugAssignToContainer("list", elementType, stmt, lhs, sliceable);
     } else if (
+        // Otherwise it should be a dict, do the same thing as list
         const DictTypePtr dictType = sliceable->type()->cast<DictType>()) {
       auto keyType = dictType->getKeyType();
-
-      // Get the idx to augment
-      const auto subscriptExprs = lhs.subscript_exprs();
-      if (subscriptExprs.size() != 1) {
-        throw ErrorReport(subscriptExprs)
-            << "Sliced expression not yet supported for"
-            << " subscripted list augmented assignment. "
-            << "File a bug if you want this";
-      }
-      const auto idxValue = emitExpr(subscriptExprs[0]);
-
-      const auto dictArg = NamedValue(lhs.value().range(), "dict", sliceable);
-      const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
-      const auto valueArg =
-          NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
-
-      const auto getItem =
-          graph->insert(aten::__getitem__, {dictArg, idxArg}, {}, stmt.range());
-      const auto augmentedItem = graph->insert(
-          getAugOp(stmt, keyType), {getItem, valueArg}, {}, stmt.range());
-      graph->insert(
-          aten::_set_item, {dictArg, idxArg, augmentedItem}, {}, stmt.range());
-
+      emitAugAssignToContainer("dict", keyType, stmt, lhs, sliceable);
     } else {
       throw ErrorReport(lhs) << "Sliced expression not yet supported for"
                              << " subscripted list assignment. "
