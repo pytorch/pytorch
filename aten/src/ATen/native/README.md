@@ -35,7 +35,7 @@ Each component is described in more detail below:
 ### `func`
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
+- func: func_name[.overload_name](ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
 ```
 
 The `func` entry is a string describing the name of the function and its type
@@ -172,11 +172,7 @@ The declarations also support the following attributes:
 
 **Overloads.** You can register multiple functions with the same name and different
 function signatures if you give them unique overload names. An overload name
-is specified after the function name, separated by a dot:
-
-```
-- func: func_name.overload_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
-```
+is specified after the function name, separated by a dot.
 
 ### `variants`
 
