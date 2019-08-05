@@ -151,7 +151,7 @@ Tensor& sign_out(Tensor& result, const Tensor& self) {
     checkBackend("sign", result, self.type().backend());
     assert_no_internal_overlap(result, "sign");
     auto iter = TensorIterator::unary_op(result, self);
-    sign_stub(iter.device_type(), *iter);
+    sign_stub(iter.device_type(), iter);
 
 #ifdef BUILD_NAMEDTENSOR
     at::namedinference::propagate_names(result, self);
