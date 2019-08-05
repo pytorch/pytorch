@@ -100,9 +100,9 @@ class L1NormTrimmed(Regularizer):
 
     def _run_on_loss(self, net, param_init_net, param, grad=None):
         output_blob = net.NextScopedBlob(param + "_l1_trimmed_regularization")
-        abs = net.Abs(param, [net.NextScopedBlob("abs")])
+        abs = net.Abs([param], [net.NextScopedBlob("abs")])
         sum_abs = net.SumElements([abs], [net.NextScopedBlob("sum_abs")], average=False)
-        topk, _, _ = net.TopK(abs, [net.NextScopedBlob("topk"), 'id', 'flat_id'], k=self.k)
+        topk, _, _ = net.TopK([abs], [net.NextScopedBlob("topk"), net.NextScopedBlob("id"), net.NextScopedBlob("flat_id")], k=self.k)
         topk_sum = net.SumElements([topk], [net.NextScopedBlob("topk_sum")], average=False)
         net.Sub([sum_abs, topk_sum], [output_blob])
         net.Scale([output_blob], [output_blob], scale=self.reg_lambda)
@@ -155,9 +155,9 @@ class ElasticNetL1NormTrimmed(Regularizer):
         net.Scale([l2_blob], [l2_blob], scale=self.l2)
 
         l1_blob = net.NextScopedBlob(param + "_l1_blob")
-        abs = net.Abs(param, [net.NextScopedBlob("abs")])
+        abs = net.Abs([param], [net.NextScopedBlob("abs")])
         sum_abs = net.SumElements([abs], [net.NextScopedBlob("sum_abs")], average=False)
-        topk, _, _ = net.TopK(abs, [net.NextScopedBlob("topk"), 'id', 'flat_id'], k=self.k)
+        topk, _, _ = net.TopK([abs], [net.NextScopedBlob("topk"), net.NextScopedBlob("id"), net.NextScopedBlob("flat_id")], k=self.k)
         topk_sum = net.SumElements([topk], [net.NextScopedBlob("topk_sum")], average=False)
         net.Sub([sum_abs, topk_sum], [l1_blob])
         net.Scale([l1_blob], [l1_blob], scale=self.l1)
