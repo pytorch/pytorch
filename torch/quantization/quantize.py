@@ -4,6 +4,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as qat
 
+
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
 
@@ -127,29 +128,20 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, qconfig_dict=None):
-    r"""Prepares the model for calibration or training given a qconfig_dict.
+def prepare(model):
+    r"""Prepares the model for calibration or training.
     Note that the model will be modified inplace but in case the input model
     is a leaf model, a wrapped model will be returned.
 
     Args:
         mod: input model
-        qconfig_dict: dictionary that maps from name of submodule to quantization
-                      configuration
     Return:
         A model with qconfig propogated, observer and quant dequant or fake
         quant modules attached, a model that is ready for calibration or
         training
     """
-    propagate_qconfig(model, qconfig_dict)
-    if qconfig_dict:
-        model = add_quant_dequant(model)
+    propagate_qconfig(model)
     add_observer(model)
-    return model
-
-def prepare_qat(model, qconfig_dict=None):
-    model = prepare(model, qconfig_dict)
-    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
     return model
 
 class QuantStub(nn.Module):
@@ -180,57 +172,6 @@ class DeQuantStub(nn.Module):
     def forward(self, x):
         return x
 
-def quantize(model, run_fn, run_args, qconfig_dict=None):
-    r"""Converts a float model to quantized model.
-
-    First it will prepare the model for calibration or training, then it calls
-    `run_fn` which will run the calibration step or training step,
-    after that we will call `convert` which will convert the model to a
-    quantized model.
-
-    When `qconfig_dict` is None or empty dictionary, we will assume user will
-    insert quant/dequant stubs and add qconfig in approporiate places.
-    When `qconfig_dict` is not None or empty dictionary, we will add quant/dequant
-    stubs using QuantWrapper for all the leaf modules.
-
-    Args:
-        model: input model
-        run_fn: a function for evaluating the prepared model, can be a
-            function that simply runs the prepared model or a training loop
-        run_args: positional arguments for `run_fn`
-        qconfig_dict: dictionary that maps from name of submodule to quantization
-            configuration, qconfig applies to all submodules of a given
-            model unless qconfig for the submodules are specified(when the
-            submodule already has qconfig attribute)
-
-
-    Return:
-        A quantized model
-    """
-    model.eval()
-    model = prepare(model, qconfig_dict)
-    run_fn(model, run_args)
-    convert(model)
-    return model
-
-def quantize_qat(model, run_fn, run_args, qconfig_dict=None):
-    r"""Do quantization aware training and output a quantized model
-    """
-    model.train()
-    model = prepare_qat(model, qconfig_dict)
-    run_fn(model, run_args)
-    convert(model)
-    return model
-
-def quantize_dynamic(model, qconfig_dict=None):
-    r"""Converts a float model to dynamic quantized model. Do dynamic training and output a quantized model.
-    """
-    model.eval()
-    propagate_qconfig(model, qconfig_dict)
-    add_observer(model)
-    convert(model, DEFAULT_DYNAMIC_MODULE_MAPPING)
-    return model
-
 # Map for swapping float module to quantized ones
 DEFAULT_MODULE_MAPPING = {
     nn.Linear: nnq.Linear,
@@ -245,15 +186,61 @@ DEFAULT_MODULE_MAPPING = {
     qat.Conv2d: nnq.Conv2d,
 }
 
+DEFAULT_DYNAMIC_MODULE_MAPPING = {
+    nn.Linear: nnqd.Linear
+}
+
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
     nn.Linear: qat.Linear,
     nn.Conv2d: qat.Conv2d,
 }
 
-DEFAULT_DYNAMIC_MODULE_MAPPING = {
-    torch.nn.Linear: nnqd.Linear
-}
+def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
+    r"""Converts a float model to quantized model.
+
+    First it will prepare the model for calibration or training, then it calls
+    `run_fn` which will run the calibration step or training step,
+    after that we will call `convert` which will convert the model to a
+    quantized model.
+
+    Args:
+        model: input model
+        run_fn: a function for evaluating the prepared model, can be a
+            function that simply runs the prepared model or a training loop
+        run_args: positional arguments for `run_fn`
+
+    Return:
+        A quantized model
+    """
+    model.eval()
+    model = prepare(model)
+    run_fn(model, run_args)
+    convert(model, mapping)
+    return model
+
+def quantize_dynamic(model, qconfig_dict=None, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
+    r"""Converts a float model to dynamic quantized model. Do dynamic training and output a quantized model.
+    """
+    model.eval()
+    propagate_qconfig(model, qconfig_dict)
+    # add_observer(model)
+    convert(model, mapping)
+    return model
+
+def prepare_qat(model, mapping=DEFAULT_QAT_MODULE_MAPPING):
+    model = prepare(model)
+    model = convert(model, mapping)
+    return model
+
+def quantize_qat(model, run_fn, run_args, mapping=DEFAULT_QAT_MODULE_MAPPING):
+    r"""Do quantization aware training and output a quantized model
+    """
+    model.train()
+    model = prepare_qat(model, mapping)
+    run_fn(model, run_args)
+    convert(model)
+    return model
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
