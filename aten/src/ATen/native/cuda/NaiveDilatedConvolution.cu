@@ -135,7 +135,7 @@ void col2hvol(
 /*
    check tensor data locations
 */
-void conv_dilated_location_check(
+void naive_conv_dilated_location_check(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
@@ -143,13 +143,13 @@ void conv_dilated_location_check(
   // checking data locations of user-provided tensor arguments
   TensorArg input_arg{input, "input", 2}, weight_arg{weight, "weight", 3},
       bias_arg{bias, "bias", 4}, grad_output_arg{grad_output, "grad_output", 5};
-  checkAllSameGPU("conv_dilated_all_cuda_template", {input_arg, weight_arg});
+  checkAllSameGPU("naive_conv_dilated_all_cuda_template", {input_arg, weight_arg});
   if (bias.defined()) {
-    checkAllSameGPU("conv_dilated_all_cuda_template", {input_arg, bias_arg});
+    checkAllSameGPU("naive_conv_dilated_all_cuda_template", {input_arg, bias_arg});
   }
   if (grad_output.defined()) {
     checkAllSameGPU(
-        "conv_dilated_all_cuda_template", {input_arg, grad_output_arg});
+        "naive_conv_dilated_all_cuda_template", {input_arg, grad_output_arg});
   }
   // we are not checking the data locations of other tensor
   // arguments such as output, grad_input, etc because of these are
@@ -158,14 +158,14 @@ void conv_dilated_location_check(
 }
 
 /*
-  conv_dilated_all_cuda_template
+  naive_conv_dilated_all_cuda_template
 
   Main worker. Computes tensors output, grad_input, grad_weight,
   and/or grad_bias if defined, respectively.
  */
 
 template <int64_t dim>
-void conv_dilated_all_cuda_template(
+void naive_conv_dilated_all_cuda_template(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -178,7 +178,7 @@ void conv_dilated_all_cuda_template(
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
-  conv_dilated_location_check(input, weight, bias, grad_output);
+  naive_conv_dilated_location_check(input, weight, bias, grad_output);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto options = input.options();
   // The rear part of input tensor sizes:
@@ -246,7 +246,7 @@ void conv_dilated_all_cuda_template(
   std::iota(dims.begin(), dims.end(), 1);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "conv_dilated<>", [&] {
+      input.scalar_type(), "naive_conv_dilated<>", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batchSize; elt++) {
           // Matrix multiply per output:
@@ -257,7 +257,7 @@ void conv_dilated_all_cuda_template(
             Tensor output_n = output.select(0, elt);
             if (bias.defined()) {
               /* For gemm argument derivation, see
-                 conv_dilated_all_cuda_template in
+                 naive_conv_dilated_all_cuda_template in
                  ATen/native/DilatedConvolution.cpp */
               for (int n = 0; n < nOutputPlane; n++) {
                 output_n.select(0, n).fill_(bias[n]);
@@ -276,7 +276,7 @@ void conv_dilated_all_cuda_template(
                 dilation_size,
                 columns.data<scalar_t>());
             /* For gemm argument derivation, see
-               conv_dilated_all_cuda_template in
+               naive_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
             at::cuda::blas::gemm<scalar_t>(
                 stream,
@@ -302,7 +302,7 @@ void conv_dilated_all_cuda_template(
           // Gradient of input:
           if (grad_input.defined()) {
             /* For gemm argument derivation, see
-               conv_dilated_all_cuda_template in
+               naive_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
             at::cuda::blas::gemm<scalar_t>(
                 stream,
@@ -352,7 +352,7 @@ void conv_dilated_all_cuda_template(
             scalar_t scale = ScalarConvert<int, scalar_t>::to(
                 1); // TODO: expose as argument?
             /* For gemm argument derivation, see
-               conv_dilated_all_cuda_template in
+               naive_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
             at::cuda::blas::gemm<scalar_t>(
                 stream,
@@ -374,7 +374,7 @@ void conv_dilated_all_cuda_template(
           // Gradient of bias:
           if (grad_bias.defined()) {
             /* For gemv argument derivation, see
-               conv_dilated_all_cpu_template in
+               naive_conv_dilated_all_cpu_template in
                ATen/native/DilatedConvolution.cpp */
             CALCULATE_GRAD_BIAS; /* MSVC does not like #ifdef-s
                                     inside the CPP macros, see above. */
@@ -386,11 +386,11 @@ void conv_dilated_all_cuda_template(
         }
       });
 
-} // conv_dilated_all_cuda_template
+} // naive_conv_dilated_all_cuda_template
 
 } // namespace
 
-Tensor conv_dilated2d_cuda(
+Tensor naive_conv_dilated2d_cuda(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -399,7 +399,7 @@ Tensor conv_dilated2d_cuda(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<2>(
+  internal::naive_conv_dilated_shape_check<2>(
       input,
       weight,
       bias,
@@ -422,7 +422,7 @@ Tensor conv_dilated2d_cuda(
   Tensor output = at::empty(output_size, options);
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
-  conv_dilated_all_cuda_template<2>(
+  naive_conv_dilated_all_cuda_template<2>(
       output_,
       input_,
       weight_,
@@ -438,7 +438,7 @@ Tensor conv_dilated2d_cuda(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> naive_conv_dilated2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -448,7 +448,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cuda(
     IntArrayRef dilation_size,
     const std::array<bool, 3ul> output_mask) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<2>(
+  internal::naive_conv_dilated_shape_check<2>(
       input,
       weight,
       undefined,
@@ -477,7 +477,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cuda(
   Tensor grad_input_ =
       (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
                       : undefined);
-  conv_dilated_all_cuda_template<2>(
+  naive_conv_dilated_all_cuda_template<2>(
       undefined,
       input_,
       weight_,
@@ -493,7 +493,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cuda(
   return std::tie(grad_input, grad_weight, grad_bias);
 }
 
-Tensor conv_dilated3d_cuda(
+Tensor naive_conv_dilated3d_cuda(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -502,7 +502,7 @@ Tensor conv_dilated3d_cuda(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<3>(
+  internal::naive_conv_dilated_shape_check<3>(
       input,
       weight,
       bias,
@@ -525,7 +525,7 @@ Tensor conv_dilated3d_cuda(
   Tensor output = at::empty(output_size, options);
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
-  conv_dilated_all_cuda_template<3>(
+  naive_conv_dilated_all_cuda_template<3>(
       output,
       input_,
       weight_,
@@ -541,7 +541,7 @@ Tensor conv_dilated3d_cuda(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> naive_conv_dilated3d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -551,7 +551,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cuda(
     IntArrayRef dilation_size,
     const std::array<bool, 3ul> output_mask) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<3>(
+  internal::naive_conv_dilated_shape_check<3>(
       input,
       weight,
       undefined,
@@ -580,7 +580,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cuda(
   Tensor grad_input_ =
       (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
                       : undefined);
-  conv_dilated_all_cuda_template<3>(
+  naive_conv_dilated_all_cuda_template<3>(
       undefined,
       input_,
       weight_,

@@ -128,18 +128,18 @@ void col2hvol(
 /*
    check tensor data locations
 */
-void conv_dilated_location_check(
+void naive_conv_dilated_location_check(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
     const Tensor& grad_output) {
   // checking data locations of user-provided tensor arguments
-  checkBackend("conv_dilated_location_check", {input, weight}, Backend::CPU);
+  checkBackend("naive_conv_dilated_location_check", {input, weight}, Backend::CPU);
   if (bias.defined()) {
-    checkBackend("conv_dilated_location_check", {bias}, Backend::CPU);
+    checkBackend("naive_conv_dilated_location_check", {bias}, Backend::CPU);
   }
   if (grad_output.defined()) {
-    checkBackend("conv_dilated_location_check", {grad_output}, Backend::CPU);
+    checkBackend("naive_conv_dilated_location_check", {grad_output}, Backend::CPU);
   }
   // we are not checking the data locations of other tensor
   // arguments such as output, grad_input, etc because of these are
@@ -148,14 +148,14 @@ void conv_dilated_location_check(
 }
 
 /*
-  conv_dilated_all_cpu_template
+  naive_conv_dilated_all_cpu_template
 
   Main worker. Computes tensors output, grad_input, grad_weight,
   and/or grad_bias if defined, respectively.
  */
 
 template <int64_t dim>
-void conv_dilated_all_cpu_template(
+void naive_conv_dilated_all_cpu_template(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -168,7 +168,7 @@ void conv_dilated_all_cpu_template(
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
-  conv_dilated_location_check(input, weight, bias, grad_output);
+  naive_conv_dilated_location_check(input, weight, bias, grad_output);
   auto options = input.options();
   // The rear part of input tensor sizes:
   auto input_size = input.sizes().slice(2);
@@ -202,7 +202,7 @@ void conv_dilated_all_cpu_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "conv_dilated<>", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "naive_conv_dilated<>", [&] {
     // For each elt in batch, do:
     for (int elt = 0; elt < batchSize; elt++) {
       // Matrix multiply per output:
@@ -428,11 +428,11 @@ void conv_dilated_all_cpu_template(
     }
   });
 
-} // conv_dilated_all_cpu_template
+} // naive_conv_dilated_all_cpu_template
 
 } // namespace
 
-Tensor conv_dilated2d_cpu(
+Tensor naive_conv_dilated2d_cpu(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -441,7 +441,7 @@ Tensor conv_dilated2d_cpu(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<2>(
+  internal::naive_conv_dilated_shape_check<2>(
       input,
       weight,
       bias,
@@ -464,7 +464,7 @@ Tensor conv_dilated2d_cpu(
   Tensor output = at::empty(output_size, options);
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
-  conv_dilated_all_cpu_template<2>(
+  naive_conv_dilated_all_cpu_template<2>(
       output_,
       input_,
       weight_,
@@ -480,7 +480,7 @@ Tensor conv_dilated2d_cpu(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cpu(
+std::tuple<Tensor, Tensor, Tensor> naive_conv_dilated2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -490,7 +490,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cpu(
     IntArrayRef dilation_size,
     const std::array<bool, 3ul> output_mask) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<2>(
+  internal::naive_conv_dilated_shape_check<2>(
       input,
       weight,
       undefined,
@@ -519,7 +519,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cpu(
   Tensor grad_input_ =
       (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
                       : undefined);
-  conv_dilated_all_cpu_template<2>(
+  naive_conv_dilated_all_cpu_template<2>(
       undefined,
       input_,
       weight_,
@@ -535,7 +535,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cpu(
   return std::tie(grad_input, grad_weight, grad_bias);
 }
 
-Tensor conv_dilated3d_cpu(
+Tensor naive_conv_dilated3d_cpu(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -544,7 +544,7 @@ Tensor conv_dilated3d_cpu(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<3>(
+  internal::naive_conv_dilated_shape_check<3>(
       input,
       weight,
       bias,
@@ -567,7 +567,7 @@ Tensor conv_dilated3d_cpu(
   Tensor output = at::empty(output_size, options);
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
-  conv_dilated_all_cpu_template<3>(
+  naive_conv_dilated_all_cpu_template<3>(
       output,
       input_,
       weight_,
@@ -583,7 +583,7 @@ Tensor conv_dilated3d_cpu(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cpu(
+std::tuple<Tensor, Tensor, Tensor> naive_conv_dilated3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -593,7 +593,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cpu(
     IntArrayRef dilation_size,
     const std::array<bool, 3ul> output_mask) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<3>(
+  internal::naive_conv_dilated_shape_check<3>(
       input,
       weight,
       undefined,
@@ -622,7 +622,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cpu(
   Tensor grad_input_ =
       (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
                       : undefined);
-  conv_dilated_all_cpu_template<3>(
+  naive_conv_dilated_all_cpu_template<3>(
       undefined,
       input_,
       weight_,
