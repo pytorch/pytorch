@@ -689,6 +689,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    def test_frobenius_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p="fro", dim=0, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
+    def test_frobenius_norm_keepdim(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p="fro", dim=(0, 1), keepdim=True)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
