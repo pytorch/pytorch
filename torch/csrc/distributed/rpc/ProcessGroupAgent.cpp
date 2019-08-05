@@ -63,8 +63,8 @@ ProcessGroupAgent::ProcessGroupAgent(
   TORCH_CHECK(nameMap_.size() > 1, "ProcessGroupAgent requires world_size to "
       "be at least 2, but got ", nameMap_.size());
   auto workerRankIter = nameMap_.find(workerName_);
-  TORCH_CHECK(workerRankIter != nameMap_.end(),
-      "Failed to resolve worker name ", workerName_, " to a ProcessGroup rank.");
+  TORCH_CHECK(workerRankIter != nameMap_.end(), "Failed to resolve worker "
+      "name ", workerName_, " to a ProcessGroup rank.");
   TORCH_CHECK(pg_->getRank() == workerRankIter -> second,
       "Resolved worker rank ", workerRankIter -> second,
       " does not match ProcessGroup rank ", pg_->getRank());
@@ -84,7 +84,7 @@ ProcessGroupAgent::~ProcessGroupAgent() {
 }
 
 
-void ProcessGroupAgent::shutdown() {
+void ProcessGroupAgent::join() {
   // Every process i sends a SHUTDOWN message to process i + 1. This is
   // necessary for now because:
   // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
@@ -102,7 +102,6 @@ void ProcessGroupAgent::shutdown() {
   workProduceCV_.notify_all();
   sendThread_.join();
   listenerThread_.join();
-  pg_->barrier()->wait();
 }
 
 

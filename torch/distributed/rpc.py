@@ -32,13 +32,14 @@ def _collect_worker_names(name, group):
     return names
 
 
-def destroy_rpc():
+def join_rpc():
     r"""
-    Destroy the local RPC agent. This is blocking until globally all RPC agents
-    are destroyed.
+    Block until all local and remote RPC processes reach this method, process
+    (send and receive) all pending messages, and then destroy local RPC agent.
+    Every RPC process must call this method before exit.
     """
     global _agent
-    _agent.shutdown()
+    _agent.join()
     _agent = None
 
 
@@ -76,7 +77,7 @@ def init_rpc(name, backend='pg'):
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
 
-def rpc_async(to, func, args=(), kwargs={}):
+def rpc_async(to, func, args=None, kwargs=None):
     r"""
     Asynchronous RPC. Make an RPC call to run function ``func`` on worker
     ``to``, and immediately returns a future object of the return value.
@@ -96,9 +97,12 @@ def rpc_async(to, func, args=(), kwargs={}):
     qualified_name = torch.jit._find_builtin(func)
     if qualified_name is None:
         raise RuntimeError("unknown builtin function %s." % func)
+
+    args = args if args else ()
+    kwargs = kwargs if kwargs else {}
     return invoke_rpc(_agent, to, qualified_name, *args, **kwargs)
 
-def rpc_sync(to, func, args=(), kwargs={}):
+def rpc_sync(to, func, args=None, kwargs=None):
     r"""
     Synchronous RPC. Make an RPC call to run function ``func`` on worker ``to``,
     and block until the return value is locally available.
@@ -120,13 +124,13 @@ def rpc_sync(to, func, args=(), kwargs={}):
         >>> dist.init_process_group(backend='gloo', ...)
         >>> dist.init_rpc("worker0")
         >>> ret = dist.rpc_sync("worker1", torch.add, torch.ones(2, 2), 3)
-        >>> dist.barrier()
+        >>> dist.join_rpc()
 
         One worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', ...)
         >>> dist.init_rpc("worker1")
-        >>> dist.barrier()
+        >>> dist.join_rpc()
     """
     future = rpc_async(to, func, args=args, kwargs=kwargs)
     return future.wait()

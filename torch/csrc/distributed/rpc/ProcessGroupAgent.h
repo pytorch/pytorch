@@ -38,7 +38,7 @@ class ProcessGroupAgent : public RpcAgent {
   std::shared_ptr<FutureMessage> send(
       const std::string& to, Message&& message) override;
 
-  void shutdown() override;
+  void join() override;
 
  private:
   // put SendWork into a queue and notify the sendLoop thread

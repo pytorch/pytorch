@@ -13,8 +13,8 @@ void processRequestBlocking(
       auto stack = op.stack();
       op.op()->getOperation()(stack);
       AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of size ",
-          stack.size());
+          "TorchScript function should be a single IValue, got a vector of "
+          "size ", stack.size());
 
       auto response = ScriptRet(std::move(stack.front())).toMessage();
       response.setId(request.id());

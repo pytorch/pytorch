@@ -24,8 +24,7 @@ def _wrap_with_rpc(func):
                                 world_size=self.world_size, store=store)
         dist.init_rpc('worker%d' % self.rank)
         func(self)
-        dist.destroy_rpc()
-        dist.destroy_process_group(dist.group.WORLD)
+        dist.join_rpc()
 
     return wrapper
 

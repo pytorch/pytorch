@@ -26,7 +26,10 @@ Message::Message(Message&& other) noexcept = default;
 Message& Message::operator=(Message const& rhs) & {
   auto payload = rhs.payload_;
   auto tensors = rhs.tensors_;
-  Message(std::move(payload), std::move(tensors), rhs.type_, rhs.id_).swap(*this);
+  Message(std::move(payload),
+          std::move(tensors),
+          rhs.type_,
+          rhs.id_).swap(*this);
   return *this;
 }
 
