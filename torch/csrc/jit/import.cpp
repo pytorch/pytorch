@@ -294,8 +294,8 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   size_t debug_size;
   std::tie(debug_data, debug_size) = reader_->getRecord(path + ".debug_pkl");
 
-  auto gen_ranges =
-      std::make_shared<ConcreteSourceRangeUnpickler>(std::move(debug_data), debug_size);
+  auto gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
+      std::move(debug_data), debug_size);
 
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size),
@@ -406,7 +406,8 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
 
   if (module_def.has_get_state_attribute_id()) {
     moduleSetState(
-        module, LEGACY_pickled_ivalues_.at(module_def.get_state_attribute_id()));
+        module,
+        LEGACY_pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
 
   for (const auto& slot : module.get_attributes()) {

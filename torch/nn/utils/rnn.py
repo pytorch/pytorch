@@ -387,6 +387,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 
 
 def pack_sequence(sequences, enforce_sorted=True):
+    # type: (List[Tensor], bool) -> PackedSequence
     r"""Packs a list of variable length Tensors
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is

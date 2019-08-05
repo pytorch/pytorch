@@ -11,7 +11,9 @@ static const std::string exportPrefix = "code/";
 static const std::string LEGACY_exportPrefix = "libs/";
 static const std::string kExportSuffix = "py";
 
-std::string qualifierToPath(const std::string& qualifier, size_t proto_version) {
+std::string qualifierToPath(
+    const std::string& qualifier,
+    size_t proto_version) {
   const auto kExportPrefix =
       proto_version >= 6 ? exportPrefix : LEGACY_exportPrefix;
   std::string path = qualifier;
@@ -20,7 +22,9 @@ std::string qualifierToPath(const std::string& qualifier, size_t proto_version) 
   return kExportPrefix + path + "." + kExportSuffix;
 }
 
-std::string pathToQualifier(const std::string& classPath, size_t proto_version) {
+std::string pathToQualifier(
+    const std::string& classPath,
+    size_t proto_version) {
   const auto kExportPrefix =
       proto_version >= 6 ? exportPrefix : LEGACY_exportPrefix;
   // strip input suffix

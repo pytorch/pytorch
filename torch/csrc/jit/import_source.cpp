@@ -195,7 +195,8 @@ struct SourceImporter {
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
         bool is_module = class_def.superclass().present();
-        if (is_module && Var(class_def.superclass().get()).name().name() != "Module") {
+        if (is_module &&
+            Var(class_def.superclass().get()).name().name() != "Module") {
           throw ErrorReport(class_def.range())
               << "Torchscript does not support class inheritance.";
         }
@@ -247,7 +248,8 @@ struct SourceImporter {
                   // is not a valid python, identifier. Looks like:
                   //    __annotations__["0"] = Tensor
                   const auto lhs = Subscript(assign.lhs());
-                  TORCH_INTERNAL_ASSERT(Var(lhs.value()).name().name() == "__annotations__");
+                  TORCH_INTERNAL_ASSERT(
+                      Var(lhs.value()).name().name() == "__annotations__");
                   TORCH_INTERNAL_ASSERT(lhs.subscript_exprs().size() == 1);
                   attributes.push_back(assign);
                 } break;
@@ -296,7 +298,7 @@ struct SourceImporter {
           }
         }
 
-        owner->register_class(class_type);
+        owner->register_type(class_type);
         const auto self = SimpleSelf(class_type);
         owner->define(qualified_classname, methods, resolvers, &self);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
@@ -327,7 +329,7 @@ struct SourceImporter {
             qualified_name,
             TupleType::namedTupleSchemaFromNamesAndTypes(
                 qualified_name, field_names, field_types));
-        owner->register_class(tt);
+        owner->register_type(tt);
       } else {
         TORCH_INTERNAL_ASSERT(
             false,
@@ -385,7 +387,7 @@ struct SourceImporter {
       imports.push_back(str);
     }
 
-    // Call the callback to actually compile them
+    // Call theregister_typectually compile them
     for (const auto& import : imports) {
       if (import_callback_) {
         import_callback_(import);

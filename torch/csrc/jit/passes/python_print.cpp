@@ -1259,7 +1259,6 @@ struct PythonPrintPass {
         // Otherwise: just emit a python 3 attribute annotation, like:
         //   foo : SomeType
         body_ << name << " : " << type->python_str() << "\n";
-
       }
     }
   }
@@ -1355,7 +1354,6 @@ void LEGACY_PythonPrint(
   pp.LEGACY_printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }
-
 
 bool printerHasSpecialCaseFor(Symbol sym) {
   // WARNING: by adding a value to this set, you are asserting

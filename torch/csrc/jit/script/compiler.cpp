@@ -730,8 +730,7 @@ struct to_ir {
         schema.arguments().end(),
         [](const Argument& arg) { return arg.is_inferred_type(); });
 
-    bool shouldInfer =
-        def.name().name() == "__setstate__" && noTypeAnnotations;
+    bool shouldInfer = def.name().name() == "__setstate__" && noTypeAnnotations;
     if (!shouldInfer) {
       return false;
     }
