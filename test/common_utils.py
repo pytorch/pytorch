@@ -207,6 +207,24 @@ def skipIfRocm(fn):
     return wrapper
 
 
+class pytorchtest():
+    @classmethod
+    def test_all_device_types(cls):
+        def wrapper(fn):
+            for device in torch.testing.get_all_device_types():
+                test_name = fn.__name__ + '_' + device
+                assert not hasattr(cls, test_name), "Duplicated test name: " + test_name
+                setattr(cls, test_name, lambda self: fn(self, device=device))
+
+
+            @wraps(fn)
+            def empty_test(*args, **kwargs):
+                pass
+            return empty_test
+
+        return wrapper
+
+
 def skipIfNoLapack(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):

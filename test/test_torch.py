@@ -2819,15 +2819,9 @@ class _TestTorchMixin(object):
                             self.assertEqual(var1, var2)
                             self.assertEqual(mean1, mean2)
 
-    def test_zeros_like(self):
-        expected = torch.zeros(100, 100)
-
-        res1 = torch.zeros_like(expected)
-        self.assertEqual(res1, expected)
-
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_zeros_like_cuda(self):
-        expected = torch.zeros(100, 100).cuda()
+    @pytorchtest.test_all_device_types()
+    def test_zeros_like(self, device):
+        expected = torch.zeros((100, 100,), device=device)
 
         res1 = torch.zeros_like(expected)
         self.assertEqual(res1, expected)
