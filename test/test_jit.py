@@ -2093,21 +2093,28 @@ graph(%Ra, %Rb):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
-    def test_sparse_tensors_error(self):
+    @suppress_warnings
+    def test_sparse_tensors(self):
         @torch.jit.ignore
         def get_sparse():
             return torch.sparse.FloatTensor(2, 3)
 
         @torch.jit.script
-        def sparse(input):
+        def test_is_sparse(input):
+            # type: (Tensor) -> bool
+            return input.is_sparse
+
+        script_out_is_sparse = test_is_sparse(get_sparse())
+        script_out_is_dense = test_is_sparse(torch.randn(2, 3))
+        self.assertEqual(script_out_is_sparse, True)
+        self.assertEqual(script_out_is_dense, False)
+
+        def test_basic_sparse(input):
             output = get_sparse()
             return output, input
 
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(get_sparse())
-
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(torch.tensor([1]))
+        self.checkScript(test_basic_sparse, (get_sparse(),))
+        self.checkScript(test_basic_sparse, (torch.tensor([1]),))
 
     def test_tuple_specialization(self):
         @torch.jit.script
@@ -13546,13 +13553,12 @@ a")
         self.checkScript(fn, ("abcdefgh",))
 
     def test_dict_in_not_in(self):
-        def test_in_dict(x):
+        def fn(x):
             # type: (Dict[str, int]) -> bool
             return 'hi' in x
 
-        self.checkScript(test_in_dict, ({'hi': 2, 'bye': 3},))
-        self.checkScript(test_in_dict, ({'bye': 3},))
-
+        self.checkScript(fn, ({'hi': 2, 'bye': 3},))
+        self.checkScript(fn, ({'bye': 3},))
 
         # Check evaluation order
         @torch.jit.script
@@ -17109,16 +17115,6 @@ class TestDict(JitTestCase):
 
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
-
-    def test_aug_assign(self):
-        def aug_assign_dict(a):
-            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
-            a['a'] += 1
-            a['b'] += 12
-            a['c'] += 123
-            return a
-
-        self.checkScript(aug_assign_dict, (self.dict(),))
 
     def test_popitem(self):
         @torch.jit.script

@@ -577,6 +577,15 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_sparse(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
