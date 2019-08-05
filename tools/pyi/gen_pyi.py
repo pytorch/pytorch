@@ -39,7 +39,7 @@ read gen_pyi for the gory details.
 
 needed_modules = set()
 
-FACTORY_PARAMS = "dtype: Optional[_dtype]=None, device: Union[_device, str, None]=None, requires_grad: bool=False"
+FACTORY_PARAMS = "dtype: Optional[_dtype]=None, device: Union[_device, str, None]=None, requires_grad: _bool=False"
 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
@@ -120,7 +120,7 @@ def type_to_python(typename, size=None):
         'IntArrayRef[]': 'Union[_int, _size]',
         'TensorList': 'Union[Tuple[Tensor, ...], List[Tensor]]',
         'TensorList[]': 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]',
-        'bool': 'bool',
+        'bool': '_bool',
         'double': '_float',
         'int64_t': '_int',
         'accreal': 'Number',
@@ -208,7 +208,7 @@ def sig_for_ops(opname):
             tname = 'bool'
         else:
             tname = 'int'
-        if tname in {'float', 'int'}:
+        if tname in {'float', 'int', 'bool'}:
             tname = 'builtins.' + tname
         return ['def {}(self) -> {}: ...'.format(opname, tname)]
     else:
@@ -275,7 +275,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
             python_args += ["dtype: _dtype=None",
                             "layout: layout=strided",
                             "device: Union[_device, str, None]=None",
-                            "requires_grad:bool=False"]
+                            "requires_grad:_bool=False"]
 
         python_args_s = ', '.join(python_args)
         python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]
@@ -317,9 +317,9 @@ def generate_type_hints(fname, decls, is_tensor=False):
 def gen_nn_modules(out):
     def replace_forward(m):
         # We instruct mypy to not emit errors for the `forward` and `__call__` declarations since mypy
-        # would otherwise correctly point out that Module's descendants' `forward` declarations 
-        # conflict with `Module`s. Specificlaly, `Module` defines `forward(self, *args)` while the 
-        # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which 
+        # would otherwise correctly point out that Module's descendants' `forward` declarations
+        # conflict with `Module`s. Specificlaly, `Module` defines `forward(self, *args)` while the
+        # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which
         # violates Liskov substitutability. The 'mypy' team recommended this solution for now.
         forward_def = m.group(0) + "  # type: ignore"
         call_def = re.sub(r'def forward', 'def __call__', forward_def)
@@ -412,7 +412,7 @@ def gen_pyi(declarations_path, out):
 
     unsorted_function_hints = collections.defaultdict(list)
     unsorted_function_hints.update({
-        'set_flush_denormal': ['def set_flush_denormal(mode: bool) -> bool: ...'],
+        'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
@@ -428,7 +428,7 @@ def gen_pyi(declarations_path, out):
         'tensor': ["def tensor(data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
-                              ' device: Union[_device, str, None]=None, requires_grad:bool=False) -> Tensor: ...'],
+                              ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
         'range': ['def range(start: Number, end: Number,'
                   ' step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                   .format(FACTORY_PARAMS)],
@@ -503,28 +503,28 @@ def gen_pyi(declarations_path, out):
         '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, Number])"
                         " -> None: ...".format(INDICES)],
         'tolist': ['def tolist(self) -> List: ...'],
-        'requires_grad_': ['def requires_grad_(self, mode: bool=True) -> Tensor: ...'],
+        'requires_grad_': ['def requires_grad_(self, mode: _bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
-        'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: bool=False) -> Tensor: ...'],
+        'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: _bool=False) -> Tensor: ...'],
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(tensor: Tensor, callable: Callable) -> Tensor: ...'],
         'storage': ['def storage(self) -> Storage: ...'],
-        'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: bool=False)'
+        'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: _bool=False)'
                  ' -> Union[str, Tensor]: ...'],
         'get_device': ['def get_device(self) -> _int: ...'],
         'contiguous': ['def contiguous(self) -> Tensor: ...'],
-        'is_contiguous': ['def is_contiguous(self) -> bool: ...'],
-        'is_cuda': ['is_cuda: bool'],
-        'is_leaf': ['is_leaf: bool'],
+        'is_contiguous': ['def is_contiguous(self) -> _bool: ...'],
+        'is_cuda': ['is_cuda: _bool'],
+        'is_leaf': ['is_leaf: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
-        'to': ['def to(self, dtype: _dtype, non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
+        'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '
-               'non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
-               'def to(self, other: Tensor, non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
+               'non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
+               'def to(self, other: Tensor, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                ],
         'item': ["def item(self) -> Number: ..."],
     })
@@ -541,7 +541,8 @@ def gen_pyi(declarations_path, out):
                 'def {}(self, value: Number,'
                 ' other: Union[Tensor, Number]{})'
                 ' -> Tensor: ...'.format(name, out_suffix))
-    simple_conversions = ['byte', 'char', 'cpu', 'double', 'float', 'half', 'int', 'long', 'short']
+    simple_conversions = ['byte', 'char', 'cpu', 'double', 'float',
+                          'half', 'int', 'long', 'short', 'bool']
     for name in simple_conversions:
         unsorted_tensor_method_hints[name].append('def {}(self) -> Tensor: ...'.format(name))
 
@@ -568,11 +569,11 @@ def gen_pyi(declarations_path, out):
     # TODO: These are deprecated, maybe we shouldn't type hint them
     legacy_class_hints = []
     for c in ('DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-              'ShortStorage', 'CharStorage', 'ByteStorage'):
+              'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage'):
         legacy_class_hints.append('class {}(Storage): ...'.format(c))
 
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-              'ShortTensor', 'CharTensor', 'ByteTensor'):
+              'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor'):
         legacy_class_hints.append('class {}(Tensor): ...'.format(c))
 
     # Generate type signatures for dtype classes
@@ -584,7 +585,7 @@ def gen_pyi(declarations_path, out):
                          for n in
                          ['float32', 'float', 'float64', 'double', 'float16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
-                          'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32']]
+                          'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32', 'bool']]
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
