@@ -817,7 +817,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
   m.def("_assign_output_shapes", _assign_output_shapes);
-  m.def("_jit_python_print", [](py::object obj) {
+  m.def("_jit_python_print", [](const py::object& obj) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
     std::vector<c10::NamedTypePtr> classes;
