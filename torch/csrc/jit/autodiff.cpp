@@ -59,8 +59,7 @@ bool isDifferentiable(Node* n) {
   // Tensor", "aten::min(Tensor self) -> Tensor"
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
-      //n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
-      || n->kind() == prim::ConstantChunk)
+      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
     return true;
 
   if (differentiable_ops.find(n))
