@@ -12,7 +12,7 @@ void addcdiv_cuda_kernel(TensorIterator& iter, Scalar value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "addcdiv_cuda", [&]() {
     auto alpha = value.to<scalar_t>();
     gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-      return THCNumerics<scalar_t>::add(a, THCNumerics<scalar_t>::mul(alpha,THCNumerics<scalar_t>::div(b, c)));
+      return a + alpha * (b / c)
     });
   });
 }
